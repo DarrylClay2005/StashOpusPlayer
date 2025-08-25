@@ -73,6 +73,7 @@ installSplashScreen()
         
         setupBottomNavigation()
         checkPermissionsAndSetup()
+        requestNotificationPermissionIfNeeded()
 
         // Observe image download tracker to show top banner
 lifecycleScope.launch {
@@ -110,6 +111,15 @@ lifecycleScope.launch {
                 }
             }
         })
+    }
+    
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permission = android.Manifest.permission.POST_NOTIFICATIONS
+            if (checkSelfPermission(permission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(permission), 1001)
+            }
+        }
     }
     
     private fun setupToolbar() {
@@ -286,19 +296,19 @@ lifecycleScope.launch {
     
     private fun showAboutDialog() {
         AlertDialog.Builder(this)
-            .setTitle("About Stash Opus Player")
-            .setMessage("""Stash Opus Player v${BuildConfig.VERSION_NAME}
+            .setTitle("About Stash Audio")
+            .setMessage("""Stash Audio v${BuildConfig.VERSION_NAME}
                 
-A modern music player with AI-powered features.
+A modern music player with precision pitch & speed, EQ, and beautiful artwork.
                 
 Features:
 • Multi-format audio support
 • Custom background images
-• AI-powered update notifications
+• Smart update notifications
 • Material Design 3 UI
 • Intelligent user experience
                 
-© 2025 Stash Opus Player
+© 2025 Stash Audio
                 
 Check for updates anytime from Settings.""")
             .setPositiveButton("Check for Updates") { _, _ ->

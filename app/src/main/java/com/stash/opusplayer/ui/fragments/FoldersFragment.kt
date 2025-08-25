@@ -62,7 +62,7 @@ setupRecyclerView()
     private fun loadFolders() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val songs = repository.getAllSongsFromAllSources()
+                val songs = repository.getAllSongsFromAllSourcesFast()
                 val folders = songs
                     .groupBy { song ->
                         if (song.path.startsWith("content://")) {

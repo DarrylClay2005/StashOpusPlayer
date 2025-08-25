@@ -22,7 +22,7 @@ object NetworkClient {
             val original = chain.request()
             val request = original.newBuilder()
                 .header("Accept", "application/vnd.github.v3+json")
-                .header("User-Agent", "StashOpusPlayer-UpdateChecker/2.0")
+                .header("User-Agent", "StashAudio-UpdateChecker/2.0")
                 .method(original.method, original.body)
                 .build()
             chain.proceed(request)
