@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.0.3 - 2025-08-25
+
+- Persist read+write permissions for SAF trees; guidance to refresh after adding
+- Folders: further tuning for SAF subfolders grouping (e.g., Internal Storage/Music/MLP)
+- Songs: OPUS/content URI listing retained after rescans
+
 ## 6.0.2 - 2025-08-25
 
 - Folders: improved SAF grouping and subfolder detection for added primary folders
