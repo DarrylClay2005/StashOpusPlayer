@@ -65,6 +65,16 @@ class MusicService : MediaSessionService() {
             )
             .setHandleAudioBecomingNoisy(true)
             .build()
+
+        // Apply persisted playback parameters (speed/pitch) if available
+        try {
+            val prefs = getSharedPreferences("settings", 0)
+            val savedSemitones = prefs.getInt("pitch_semitones", 0)
+            currentPitch = kotlin.math.pow(2f, savedSemitones / 12f)
+            val savedSpeed = prefs.getFloat("playback_speed", 1.0f)
+            if (savedSpeed in 0.25f..2.5f) currentSpeed = savedSpeed
+            player.playbackParameters = PlaybackParameters(currentSpeed, currentPitch)
+        } catch (_: Exception) { /* ignore */ }
     }
     
     private fun initializeMediaSession() {

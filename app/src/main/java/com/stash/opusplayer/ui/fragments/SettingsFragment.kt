@@ -18,31 +18,95 @@ class SettingsFragment : Fragment() {
         if (uri != null) {
             try {
                 // Persist permission to read
-val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 requireContext().contentResolver.takePersistableUriPermission(
                     uri, flags
                 )
                 // Save to repository prefs
                 val repo = com.stash.opusplayer.data.MusicRepository(requireContext())
                 repo.addCustomMusicFolderTreeUri(uri.toString())
-Toast.makeText(requireContext(), "Folder added. Pull-to-refresh Folders tab to rescan.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "Folder added. Pull-to-refresh Folders tab to rescan.", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(requireContext(), "Failed to add folder", Toast.LENGTH_SHORT).show()
             }
         }
     }
-    
+
+    // MediaController for applying pitch changes from Settings
+    private var mediaController: androidx.media3.session.MediaController? = null
+    private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<androidx.media3.session.MediaController>? = null
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
+        // Root layout with tabs and a content container
+        val root = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 0)
+        }
+
+        val tabs = com.google.android.material.tabs.TabLayout(requireContext()).apply {
+            addTab(newTab().setText("General"))
+            addTab(newTab().setText("Pitch"))
+            tabGravity = com.google.android.material.tabs.TabLayout.GRAVITY_FILL
+        }
+        root.addView(tabs, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        val contentContainer = FrameLayout(requireContext()).apply { id = View.generateViewId() }
+        root.addView(contentContainer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT))
+
+        // Build the two pages as Views
+        val generalView = buildGeneralContent()
+        val pitchView = buildPitchContent()
+
+        // Default to General tab
+        contentContainer.addView(generalView)
+
+        tabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab) {
+                contentContainer.removeAllViews()
+                when (tab.position) {
+                    0 -> contentContainer.addView(generalView)
+                    1 -> contentContainer.addView(pitchView)
+                }
+            }
+            override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab) {}
+            override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab) {}
+        })
+
+        // Connect controller so pitch can be applied live
+        connectController()
+
+        return root
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        try { mediaController?.release() } catch (_: Exception) {}
+        mediaController = null
+        controllerFuture?.let { androidx.media3.session.MediaController.releaseFuture(it) }
+        controllerFuture = null
+    }
+
+    private fun connectController() {
+        try {
+            val token = androidx.media3.session.SessionToken(requireContext(), android.content.ComponentName(requireContext(), com.stash.opusplayer.service.MusicService::class.java))
+            controllerFuture = androidx.media3.session.MediaController.Builder(requireContext(), token).buildAsync()
+            controllerFuture?.addListener({
+                try { mediaController = controllerFuture?.get() } catch (_: Exception) {}
+            }, com.google.common.util.concurrent.MoreExecutors.directExecutor())
+        } catch (_: Exception) {}
+    }
+
+    private fun buildGeneralContent(): View {
         val scrollView = ScrollView(requireContext())
         val layout = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(32, 32, 32, 32)
         }
-        
+
         // Title
         val titleText = TextView(requireContext()).apply {
             text = "Settings"
@@ -50,24 +114,22 @@ Toast.makeText(requireContext(), "Folder added. Pull-to-refresh Folders tab to r
             setPadding(0, 0, 0, 32)
         }
         layout.addView(titleText)
-        
+
         // Background Settings Section
         addSectionHeader(layout, "Appearance")
-        
+
         val backgroundButton = Button(requireContext()).apply {
             text = "Change Background Image"
-            setOnClickListener {
-                (activity as? MainActivity)?.pickBackgroundImage()
-            }
+            setOnClickListener { (activity as? MainActivity)?.pickBackgroundImage() }
         }
         layout.addView(backgroundButton)
-        
+
         // Update Settings Section
         addSectionHeader(layout, "Updates")
-        
+
         val updateManager = (activity as? MainActivity)?.getUpdateManager()
         val updatePrefs = updateManager?.getUpdatePreferences()
-        
+
         // Auto-check updates toggle
         val autoCheckToggle = CheckBox(requireContext()).apply {
             text = "Automatically check for updates"
@@ -83,7 +145,7 @@ Toast.makeText(requireContext(), "Folder added. Pull-to-refresh Folders tab to r
         }
         layout.addView(autoCheckToggle)
 
-        // Online Artwork Section
+        // Album Artwork Section
         addSectionHeader(layout, "Album Artwork")
         val artworkToggle = CheckBox(requireContext()).apply {
             text = "Fetch album art online when missing"
@@ -114,16 +176,14 @@ Toast.makeText(requireContext(), "Folder added. Pull-to-refresh Folders tab to r
             }
         }
         layout.addView(genreToggle)
-        
+
         val providerHint = TextView(requireContext()).apply {
             text = "Album: MusicBrainz + CAA + iTunes. Artist/Genre: Last.fm (if key) and Wikipedia fallback."
             textSize = 12f
         }
         layout.addView(providerHint)
 
-        val apiKeyLabel = TextView(requireContext()).apply {
-            text = "Last.fm API key (optional):"
-        }
+        val apiKeyLabel = TextView(requireContext()).apply { text = "Last.fm API key (optional):" }
         layout.addView(apiKeyLabel)
         val apiKeyInput = EditText(requireContext()).apply {
             val prefs = requireContext().getSharedPreferences("settings", 0)
@@ -177,30 +237,33 @@ Toast.makeText(requireContext(), "Folder added. Pull-to-refresh Folders tab to r
             }
         }
         layout.addView(bgRescanToggle)
-        
+
         // Check frequency
         val frequencyLabel = TextView(requireContext()).apply {
             text = "Check frequency:"
             setPadding(0, 20, 0, 8)
         }
         layout.addView(frequencyLabel)
-        
+
+        val updateManager2 = (activity as? MainActivity)?.getUpdateManager()
+        val updatePrefs2 = updateManager2?.getUpdatePreferences()
+
         val frequencySpinner = Spinner(requireContext()).apply {
             val frequencies = arrayOf("Daily", "Weekly", "Monthly", "Never")
             val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, frequencies)
             adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
             this.adapter = adapter
-            
-            val currentFreq = updatePrefs?.checkFrequency ?: 24L
+
+            val currentFreq = updatePrefs2?.checkFrequency ?: 24L
             val selectedIndex = when (currentFreq) {
                 24L -> 0  // Daily
-                168L -> 1 // Weekly  
+                168L -> 1 // Weekly
                 720L -> 2 // Monthly
                 -1L -> 3  // Never
                 else -> 0
             }
             setSelection(selectedIndex)
-            
+
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                     val frequency = when (position) {
@@ -210,9 +273,9 @@ Toast.makeText(requireContext(), "Folder added. Pull-to-refresh Folders tab to r
                         3 -> -1L   // Never
                         else -> 24L
                     }
-                    val prefs = updateManager?.getUpdatePreferences()
+                    val prefs = updateManager2?.getUpdatePreferences()
                     if (prefs != null) {
-                        updateManager.updatePreferences(
+                        (activity as? MainActivity)?.getUpdateManager()?.updatePreferences(
                             prefs.copy(checkFrequency = frequency)
                         )
                     }
@@ -221,20 +284,117 @@ Toast.makeText(requireContext(), "Folder added. Pull-to-refresh Folders tab to r
             }
         }
         layout.addView(frequencySpinner)
-        
+
         // Manual check button
         val checkUpdateButton = Button(requireContext()).apply {
             text = "Check for Updates Now"
             setPadding(0, 20, 0, 0)
             setOnClickListener {
                 (activity as? MainActivity)?.getUpdateManager()?.checkForUpdates(
-                    requireActivity(), 
+                    requireActivity(),
                     forceCheck = true
                 )
             }
         }
         layout.addView(checkUpdateButton)
-        
+
+        scrollView.addView(layout)
+        return scrollView
+    }
+
+    private fun buildPitchContent(): View {
+        val scrollView = ScrollView(requireContext())
+        val layout = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 32, 32, 32)
+        }
+
+        val title = TextView(requireContext()).apply {
+            text = "Pitch / Semitones"
+            textSize = 22f
+            setPadding(0, 0, 0, 16)
+        }
+        layout.addView(title)
+
+        val desc = TextView(requireContext()).apply {
+            text = "Adjust global pitch in semitones. This applies to playback and persists across sessions."
+            textSize = 14f
+        }
+        layout.addView(desc)
+
+        val prefs = requireContext().getSharedPreferences("settings", 0)
+        val savedSemitones = prefs.getInt("pitch_semitones", 0)
+
+        val valueLabel = TextView(requireContext()).apply {
+            textSize = 16f
+        }
+
+        fun semitonesToPitch(semi: Int): Float {
+            return kotlin.math.pow(2f, semi / 12f)
+        }
+
+        fun updateLabel(semi: Int) {
+            val pitch = semitonesToPitch(semi)
+            valueLabel.text = "Current: ${semi} st  (×${"" + String.format("%.3f", pitch)})"
+        }
+
+        updateLabel(savedSemitones)
+        layout.addView(valueLabel)
+
+        val seek = SeekBar(requireContext()).apply {
+            max = 24 // -12..+12
+            progress = savedSemitones + 12
+        }
+        layout.addView(seek)
+
+        val reset = Button(requireContext()).apply {
+            text = "Reset to 0 st"
+        }
+        layout.addView(reset)
+
+        fun applyPitch(semi: Int) {
+            val pitch = semitonesToPitch(semi)
+            // Persist
+            prefs.edit().putInt("pitch_semitones", semi).putFloat("pitch_factor", pitch).apply()
+            // Apply to running session if available
+            mediaController?.let { controller ->
+                try {
+                    // Update controller params locally
+                    val current = controller.playbackParameters
+                    controller.playbackParameters = androidx.media3.common.PlaybackParameters(current.speed, pitch)
+                } catch (_: Exception) {}
+                try {
+                    controller.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_PITCH", android.os.Bundle.EMPTY),
+                        androidx.core.os.bundleOf("pitch" to pitch)
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val semi = progress - 12
+                updateLabel(semi)
+                if (fromUser) applyPitch(semi)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        reset.setOnClickListener {
+            seek.progress = 12
+            applyPitch(0)
+            updateLabel(0)
+        }
+
+        // Info note
+        val note = TextView(requireContext()).apply {
+            text = "Note: Pitch adjustment is independent of speed. Some devices may exhibit minor artifacts at extreme values."
+            textSize = 12f
+        }
+        layout.addView(note)
+
         scrollView.addView(layout)
         return scrollView
     }

@@ -1,0 +1,4 @@
+Stash Audio 7.1.1
+- Added library scanning banner with live progress
+- Equalizer/Reverb stability: re-init only on audio session change; release reverb on shutdown
+- Now Playing stability: progress timer bound to lifecycle; guarded speed/pitch updates
