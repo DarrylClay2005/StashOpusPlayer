@@ -62,4 +62,11 @@
         <item name="android:layout_margin">8dp</item>
     </style>
 
+    <!-- Update Dialog Theme -->
+    <style name="UpdateDialogTheme" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.6</item>
+    </style>
+
 </resources>

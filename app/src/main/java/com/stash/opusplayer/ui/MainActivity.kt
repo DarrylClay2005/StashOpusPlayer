@@ -16,7 +16,9 @@ import androidx.core.view.GravityCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.preference.PreferenceManager
+import androidx.appcompat.app.AlertDialog
 import com.bumptech.glide.Glide
+import com.stash.opusplayer.BuildConfig
 import com.google.android.material.navigation.NavigationView
 import com.karumi.dexter.Dexter
 import com.karumi.dexter.MultiplePermissionsReport
@@ -30,12 +32,14 @@ import com.stash.opusplayer.ui.fragments.EqualizerFragment
 import com.stash.opusplayer.ui.fragments.SettingsFragment
 import com.stash.opusplayer.ui.fragments.PlaylistsFragment
 import com.stash.opusplayer.utils.PermissionUtils
+import com.stash.opusplayer.updates.UpdateManager
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
     
     private lateinit var binding: ActivityMainBinding
     private lateinit var toggle: ActionBarDrawerToggle
     private lateinit var sharedPreferences: SharedPreferences
+    private lateinit var updateManager: UpdateManager
     
     private val imagePickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -49,12 +53,16 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         setContentView(binding.root)
         
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this)
+        updateManager = UpdateManager(this)
         
         setupToolbar()
         setupNavigationDrawer()
         setupBackgroundImage()
         
         checkPermissionsAndSetup()
+        
+        // Check for updates on app start (AI will decide if/when to show)
+        updateManager.checkForUpdates(this)
         
         // Load default fragment
         if (savedInstanceState == null) {
@@ -179,8 +187,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 supportActionBar?.title = getString(R.string.menu_settings)
             }
             R.id.nav_about -> {
-                // Show about dialog or fragment
-                Toast.makeText(this, "About - Stash Opus Player v2.0", Toast.LENGTH_LONG).show()
+                showAboutDialog()
             }
         }
         
@@ -193,5 +200,31 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             .replace(R.id.main_content, fragment)
             .commit()
     }
+    
+    private fun showAboutDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("About Stash Opus Player")
+            .setMessage("""Stash Opus Player v${BuildConfig.VERSION_NAME}
+                
+A modern music player with AI-powered features.
+                
+Features:
+• Multi-format audio support
+• Custom background images
+• AI-powered update notifications
+• Material Design 3 UI
+• Intelligent user experience
+                
+© 2025 Stash Opus Player
+                
+Check for updates anytime from Settings.""")
+            .setPositiveButton("Check for Updates") { _, _ ->
+                updateManager.checkForUpdates(this, forceCheck = true)
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+    
+    fun getUpdateManager() = updateManager
     
 }
