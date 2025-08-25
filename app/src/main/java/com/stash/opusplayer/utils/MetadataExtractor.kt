@@ -150,7 +150,7 @@ inPreferredConfig = Bitmap.Config.RGB_565 // smaller than ARGB_8888
             }
             
             val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) 
-                ?: (if (!isContent) file!!.nameWithoutExtension else "Unknown Title")
+                ?: (if (!isContent) file!!.nameWithoutExtension else Uri.parse(filePath).lastPathSegment?.substringBeforeLast('.') ?: "Unknown Title")
             val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST) 
                 ?: "Unknown Artist"
             val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM) 
@@ -169,8 +169,29 @@ inPreferredConfig = Bitmap.Config.RGB_565 // smaller than ARGB_8888
                 dateAdded = if (!isContent) file!!.lastModified() else 0L
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Error extracting basic info for $filePath", e)
-            null
+            // Fallback: build minimal Song so we still list files like .opus when retriever fails
+            Log.w(TAG, "Retriever failed for $filePath, building minimal info", e)
+            try {
+                val title = if (isContent) {
+                    Uri.parse(filePath).lastPathSegment?.substringBeforeLast('.') ?: "Unknown Title"
+                } else {
+                    file!!.nameWithoutExtension
+                }
+                return Song(
+                    id = filePath.hashCode().toLong(),
+                    title = title,
+                    artist = "Unknown Artist",
+                    album = "Unknown Album",
+                    duration = 0L,
+                    path = filePath,
+                    size = if (!isContent) file!!.length() else 0L,
+                    mimeType = if (!isContent) getMimeType(filePath) else "audio/*",
+                    dateAdded = if (!isContent) file!!.lastModified() else 0L
+                )
+            } catch (ee: Exception) {
+                Log.e(TAG, "Fallback failed for $filePath", ee)
+                null
+            }
         } finally {
             try {
                 retriever.release()
