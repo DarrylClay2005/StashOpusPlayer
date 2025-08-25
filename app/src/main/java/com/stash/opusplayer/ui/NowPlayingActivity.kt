@@ -150,12 +150,16 @@ class NowPlayingActivity : AppCompatActivity() {
                 binding.speedLabel.text = String.format("%.2fx", speed)
                 mediaController?.let { controller ->
                     val current = controller.playbackParameters
-                    controller.playbackParameters = PlaybackParameters(speed, current.pitch)
+                    try {
+                        controller.playbackParameters = PlaybackParameters(speed, current.pitch)
+                    } catch (_: Exception) { /* ignore */ }
                     // Send to service to keep ExoPlayer parameters in sync
-controller.sendCustomCommand(
-                        androidx.media3.session.SessionCommand("SET_SPEED", android.os.Bundle.EMPTY),
-                        bundleOf("speed" to speed)
-                    )
+                    try {
+                        controller.sendCustomCommand(
+                            androidx.media3.session.SessionCommand("SET_SPEED", android.os.Bundle.EMPTY),
+                            bundleOf("speed" to speed)
+                        )
+                    } catch (_: Exception) { /* ignore */ }
                 }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -173,11 +177,15 @@ controller.sendCustomCommand(
                 val pitch = Math.pow(2.0, semitones / 12.0).toFloat()
                 mediaController?.let { controller ->
                     val current = controller.playbackParameters
-                    controller.playbackParameters = PlaybackParameters(current.speed, pitch)
-controller.sendCustomCommand(
-                        androidx.media3.session.SessionCommand("SET_PITCH", android.os.Bundle.EMPTY),
-                        bundleOf("pitch" to pitch)
-                    )
+                    try {
+                        controller.playbackParameters = PlaybackParameters(current.speed, pitch)
+                    } catch (_: Exception) { /* ignore */ }
+                    try {
+                        controller.sendCustomCommand(
+                            androidx.media3.session.SessionCommand("SET_PITCH", android.os.Bundle.EMPTY),
+                            bundleOf("pitch" to pitch)
+                        )
+                    } catch (_: Exception) { /* ignore */ }
                 }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -423,6 +431,16 @@ mediaController?.sendCustomCommand(
         return String.format("%d:%02d", minutes, seconds)
     }
     
+    override fun onStop() {
+        super.onStop()
+        stopProgressUpdates()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        mediaController?.let { if (it.isPlaying) startProgressUpdates() }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         stopProgressUpdates()
