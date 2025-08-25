@@ -60,12 +60,11 @@ class SongAdapter(
         }
         
         private fun loadAlbumArt(song: Song) {
+            // Try embedded bytes first
             if (!song.albumArt.isNullOrEmpty()) {
-                // Prefer letting Glide decode + cache from bytes to reduce memory churn
                 val artBytes = try {
                     Base64.decode(song.albumArt, Base64.DEFAULT)
                 } catch (_: IllegalArgumentException) { null }
-
                 if (artBytes != null && artBytes.isNotEmpty()) {
                     Glide.with(binding.root.context)
                         .load(artBytes)
@@ -75,12 +74,24 @@ class SongAdapter(
                         .override(256, 256)
                         .centerCrop()
                         .into(binding.songArtwork)
-                } else {
-                    setDefaultArtwork()
+                    return
                 }
-            } else {
-                setDefaultArtwork()
             }
+
+            // Next try cached artwork (synchronous)
+            val cached = try {
+                metadataExtractor?.loadCachedArtwork(binding.root.context, song, 256)
+            } catch (_: Exception) { null }
+            if (cached != null) {
+                Glide.with(binding.root.context)
+                    .load(cached)
+                    .centerCrop()
+                    .into(binding.songArtwork)
+                return
+            }
+
+            // Finally, default artwork (the screen’s async background fetch will replace it if enabled)
+            setDefaultArtwork()
         }
         
         private fun setDefaultArtwork() {

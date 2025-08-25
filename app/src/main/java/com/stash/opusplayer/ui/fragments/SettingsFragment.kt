@@ -8,9 +8,28 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
 import com.stash.opusplayer.ui.MainActivity
+import android.content.Intent
 import com.stash.opusplayer.updates.UpdatePreferences
 
 class SettingsFragment : Fragment() {
+    private val folderPickerLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                // Persist permission to read
+                requireContext().contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+                // Save to repository prefs
+                val repo = com.stash.opusplayer.data.MusicRepository(requireContext())
+                repo.addCustomMusicFolderTreeUri(uri.toString())
+                Toast.makeText(requireContext(), "Folder added", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "Failed to add folder", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -81,6 +100,20 @@ class SettingsFragment : Fragment() {
             textSize = 12f
         }
         layout.addView(providerHint)
+
+        // Music Folders Section
+        addSectionHeader(layout, "Music Folders")
+        val addFolderButton = Button(requireContext()).apply {
+            text = "Add Folder (tree)"
+            setOnClickListener { pickMusicFolder() }
+        }
+        layout.addView(addFolderButton)
+
+        val currentFoldersLabel = TextView(requireContext()).apply {
+            text = "Selected folders are used in Folders tab and library scans."
+            textSize = 12f
+        }
+        layout.addView(currentFoldersLabel)
         
         // Check frequency
         val frequencyLabel = TextView(requireContext()).apply {
@@ -151,5 +184,12 @@ class SettingsFragment : Fragment() {
             setTextColor(ContextCompat.getColor(requireContext(), android.R.color.holo_blue_bright))
         }
         parent.addView(header)
+    }
+    private fun pickMusicFolder() {
+        try {
+            folderPickerLauncher.launch(null)
+        } catch (_: Exception) {
+            Toast.makeText(requireContext(), "Unable to open folder picker", Toast.LENGTH_SHORT).show()
+        }
     }
 }

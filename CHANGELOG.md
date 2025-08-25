@@ -1,5 +1,16 @@
 # Changelog
 
+## Version 5.0.2 (2025-08-25)
+
+### Added
+- Music folder picker (Storage Access Framework). Selected folders are scanned recursively, including subfolders, and appear in the Folders tab.
+- Improved artwork display in lists: uses cached/online album art when embedded art is missing.
+
+### Notes
+- You can add folders from Settings -> Music Folders -> Add Folder (tree).
+
+---
+
 ## Version 5.0.1 (2025-08-25)
 
 ### Added

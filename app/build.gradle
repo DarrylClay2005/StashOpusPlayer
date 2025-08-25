@@ -13,8 +13,8 @@ android {
         applicationId "com.stash.opusplayer"
         minSdk 21
         targetSdk 34
-        versionCode 12
-        versionName "5.0.1"
+        versionCode 13
+        versionName "5.0.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -97,6 +97,9 @@ dependencies {
     
     // Preferences
     implementation 'androidx.preference:preference-ktx:1.2.1'
+
+    // SAF DocumentFile for folder scanning via content URIs
+    implementation 'androidx.documentfile:documentfile:1.0.1'
     
     // RecyclerView
     implementation 'androidx.recyclerview:recyclerview:1.3.2'
