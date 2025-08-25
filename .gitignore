@@ -34,3 +34,7 @@ gradle/wrapper/gradle-wrapper.jar
 
 # Other
 tmp/
+
+# Keystore files (security sensitive)
+*.keystore
+*.jks

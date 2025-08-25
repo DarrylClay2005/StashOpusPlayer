@@ -18,11 +18,21 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        release {
+            keyAlias 'release-key'
+            keyPassword 'stash123'
+            storeFile file('../release-key.keystore')
+            storePassword 'stash123'
+        }
+    }
+    
     buildTypes {
         release {
             minifyEnabled false
             shrinkResources false
             debuggable false
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
