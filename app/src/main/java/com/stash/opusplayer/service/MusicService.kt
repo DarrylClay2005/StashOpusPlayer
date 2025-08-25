@@ -181,16 +181,13 @@ class MusicService : MediaSessionService() {
             }
             
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                updateNotification()
                 if (isPlaying) {
                     startForeground(NOTIFICATION_ID, createNotification())
                 } else {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        stopForeground(false)
-                    }
+                    // Keep notification visible while paused
+                    @Suppress("DEPRECATION")
+                    stopForeground(false)
+                    notificationManager.notify(NOTIFICATION_ID, createNotification())
                 }
             }
             
