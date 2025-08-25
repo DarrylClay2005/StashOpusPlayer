@@ -7,6 +7,10 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import androidx.core.os.bundleOf
+import com.google.common.util.concurrent.MoreExecutors
 import com.stash.opusplayer.audio.EqualizerManager
 import com.stash.opusplayer.audio.EqualizerPreset
 import com.stash.opusplayer.databinding.FragmentEqualizerBinding
@@ -18,6 +22,7 @@ class EqualizerFragment : Fragment() {
     private val binding get() = _binding!!
     
     private var equalizerManager: EqualizerManager? = null
+    private var mediaController: MediaController? = null
     private val bandSliders = mutableListOf<SeekBar>()
     private val bandLabels = mutableListOf<TextView>()
     
@@ -34,22 +39,20 @@ class EqualizerFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         
         initializeEqualizer()
+        connectToMediaController()
         setupUI()
         setupListeners()
     }
     
     private fun initializeEqualizer() {
+        // Keep a local manager only for default ranges; live control goes via MediaSession
         equalizerManager = EqualizerManager(requireContext())
-        // Initialize with a dummy audio session ID for now
-        // In a real implementation, this would be connected to the actual player
-        equalizerManager?.initialize(0)
     }
     
     private fun setupUI() {
         setupPresetSpinner()
         setupEqualizerBands()
         setupEffectsControls()
-        updateUIFromEqualizer()
     }
     
     private fun setupPresetSpinner() {
@@ -59,6 +62,14 @@ class EqualizerFragment : Fragment() {
         binding.presetSpinner.adapter = adapter
     }
     
+    private fun connectToMediaController() {
+        val token = SessionToken(requireContext(), android.content.ComponentName(requireContext(), com.stash.opusplayer.service.MusicService::class.java))
+        val future = MediaController.Builder(requireContext(), token).buildAsync()
+        future.addListener({
+            mediaController = future.get()
+        }, MoreExecutors.directExecutor())
+    }
+
     private fun setupEqualizerBands() {
         val numberOfBands = equalizerManager?.getNumberOfBands() ?: 5
         val bandRange = equalizerManager?.getBandRange() ?: Pair(-1500, 1500)
@@ -114,7 +125,10 @@ class EqualizerFragment : Fragment() {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     if (fromUser) {
                         val level = (progress + range.first).toFloat() / 1000f
-                        equalizerManager?.setBandLevel(bandIndex, level)
+                        mediaController?.sendCustomCommand(
+                            androidx.media3.session.SessionCommand("SET_EQ_BAND", android.os.Bundle.EMPTY),
+                            bundleOf("band" to bandIndex, "level" to level)
+                        )
                         levelLabel.text = "${String.format("%.1f", level)} dB"
                     }
                 }
@@ -139,7 +153,10 @@ class EqualizerFragment : Fragment() {
         binding.bassBoostSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
-                    equalizerManager?.setBassBoost(progress)
+                    mediaController?.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_BASS_BOOST", android.os.Bundle.EMPTY),
+                        bundleOf("strength" to progress)
+                    )
                     binding.bassBoostValue.text = "${progress / 10}%"
                 }
             }
@@ -152,7 +169,10 @@ class EqualizerFragment : Fragment() {
         binding.virtualizerSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
-                    equalizerManager?.setVirtualizer(progress)
+                    mediaController?.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_VIRTUALIZER", android.os.Bundle.EMPTY),
+                        bundleOf("strength" to progress)
+                    )
                     binding.virtualizerValue.text = "${progress / 10}%"
                 }
             }
@@ -163,21 +183,27 @@ class EqualizerFragment : Fragment() {
     
     private fun setupListeners() {
         binding.equalizerSwitch.setOnCheckedChangeListener { _, isChecked ->
-            equalizerManager?.setEnabled(isChecked)
             updateBandControlsEnabled(isChecked)
+            mediaController?.sendCustomCommand(
+                androidx.media3.session.SessionCommand("SET_EQ_ENABLED", android.os.Bundle.EMPTY),
+                bundleOf("enabled" to isChecked)
+            )
         }
         
         binding.presetSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val preset = EqualizerPreset.values()[position]
-                equalizerManager?.setPreset(preset)
-                updateBandSlidersFromEqualizer()
+                mediaController?.sendCustomCommand(
+                    androidx.media3.session.SessionCommand("SET_EQ_PRESET", android.os.Bundle.EMPTY),
+                    bundleOf("preset" to preset.name)
+                )
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
     }
     
-    private fun updateUIFromEqualizer() {
+    /* UI state sync omitted: equalizer state is driven live via MediaSession commands. */
+    /*private fun updateUIFromEqualizer() {
         lifecycleScope.launch {
             equalizerManager?.let { eq ->
                 eq.isEnabled.collect { enabled ->
@@ -212,7 +238,7 @@ class EqualizerFragment : Fragment() {
                 }
             }
         }
-    }
+    }*/
     
     private fun updateBandSlidersFromEqualizer() {
         lifecycleScope.launch {
@@ -246,6 +272,7 @@ class EqualizerFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         equalizerManager?.release()
+        mediaController?.release()
         _binding = null
     }
 }
