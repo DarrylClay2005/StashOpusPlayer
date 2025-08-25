@@ -16,6 +16,7 @@ import androidx.core.view.GravityCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.preference.PreferenceManager
 import androidx.appcompat.app.AlertDialog
 import kotlinx.coroutines.launch
@@ -72,7 +73,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         checkPermissionsAndSetup()
 
         // Observe image download tracker to show top banner
-        lifecycleScope.launchWhenStarted {
+lifecycleScope.launch {
+            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
             com.stash.opusplayer.utils.ImageDownloadTracker.active.collect { count ->
                 val banner = findViewById<android.view.View>(com.stash.opusplayer.R.id.download_banner)
                 val text = findViewById<android.widget.TextView>(com.stash.opusplayer.R.id.download_text)
@@ -84,14 +86,17 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 }
             }
         }
+        }
 
         // Show loading overlay while scanning
 showLoadingOverlay()
         // Observe library scan tracker to update loading text
-        lifecycleScope.launchWhenStarted {
+        lifecycleScope.launch {
+            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
             com.stash.opusplayer.utils.LibraryScanTracker.status.collect { msg ->
                 loadingView?.findViewById<android.widget.TextView>(com.stash.opusplayer.R.id.loadingText)?.text = msg
             }
+        }
         }
         
         // Check for updates on app start (AI will decide if/when to show)
