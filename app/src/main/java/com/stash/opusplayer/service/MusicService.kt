@@ -105,7 +105,7 @@ class MusicService : MediaSessionService() {
                 if (isPlaying) {
                     startForeground(NOTIFICATION_ID, createNotification())
                 } else {
-                    stopForeground(false)
+                    stopForeground(android.app.Service.STOP_FOREGROUND_DETACH)
                 }
             }
             

@@ -67,6 +67,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         setupNavigationDrawer()
         setupBackgroundImage()
         
+        setupBottomNavigation()
         checkPermissionsAndSetup()
         
         // Check for updates on app start (AI will decide if/when to show)
@@ -75,6 +76,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         // Load default fragment
         if (savedInstanceState == null) {
             loadFragment(MusicLibraryFragment())
+            binding.bottomNav.selectedItemId = R.id.nav_songs
             binding.navView.setCheckedItem(R.id.nav_music_library)
         }
         
@@ -94,6 +96,39 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = getString(R.string.app_name)
+    }
+    
+    private fun setupBottomNavigation() {
+        binding.bottomNav.setOnItemSelectedListener { item ->
+            when (item.itemId) {
+                R.id.nav_songs -> {
+                    loadFragment(MusicLibraryFragment())
+                    supportActionBar?.title = getString(R.string.menu_music_library)
+                    true
+                }
+                R.id.nav_artists -> {
+                    loadFragment(com.stash.opusplayer.ui.fragments.ArtistsFragment())
+                    supportActionBar?.title = getString(R.string.menu_artists)
+                    true
+                }
+                R.id.nav_genres -> {
+                    loadFragment(com.stash.opusplayer.ui.fragments.GenresFragment())
+                    supportActionBar?.title = getString(R.string.menu_genres)
+                    true
+                }
+                R.id.nav_folders -> {
+                    loadFragment(com.stash.opusplayer.ui.fragments.FoldersFragment())
+                    supportActionBar?.title = getString(R.string.menu_folders)
+                    true
+                }
+                R.id.nav_settings -> {
+                    loadFragment(SettingsFragment())
+                    supportActionBar?.title = getString(R.string.menu_settings)
+                    true
+                }
+                else -> false
+            }
+        }
     }
     
     private fun setupNavigationDrawer() {

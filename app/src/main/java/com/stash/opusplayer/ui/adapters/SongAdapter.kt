@@ -46,8 +46,7 @@ class SongAdapter(
             // Load album artwork
             loadAlbumArt(song)
             
-            // Set favorite icon state
-            updateFavoriteIcon(song.isFavorite)
+            // Favorite indicator could be shown here if added to layout
             
             binding.root.setOnClickListener {
                 onSongClick(song)
@@ -81,11 +80,6 @@ class SongAdapter(
             Glide.with(binding.root.context)
                 .load(R.drawable.ic_music_note)
                 .into(binding.songArtwork)
-        }
-        
-        private fun updateFavoriteIcon(isFavorite: Boolean) {
-            // Add favorite indicator (you can add a favorite icon to the layout)
-            // For now, we'll handle this in the context menu
         }
         
         private fun showContextMenu(song: Song, anchor: View) {
