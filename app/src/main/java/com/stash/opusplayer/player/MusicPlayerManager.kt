@@ -197,20 +197,27 @@ class MusicPlayerManager(private val context: Context) {
     }
     
     private fun resolveSongUri(song: Song): android.net.Uri {
-        // Prefer MediaStore content URIs when possible for scoped storage compatibility
+        // Prefer explicit content URIs and verified file paths; only fall back to MediaStore by ID
         return try {
-            val file = java.io.File(song.path)
-            // If we have a real MediaStore id (from scanner) and file path points to external storage
-            if (song.id > 0 && song.path.startsWith("/storage")) {
-                android.content.ContentUris.withAppendedId(
+            val path = song.path
+            // 1) If it's already a content URI, use it as-is
+            if (path.startsWith("content://")) {
+                return android.net.Uri.parse(path)
+            }
+            // 2) If the underlying file exists, play from file path
+            val file = java.io.File(path)
+            if (file.exists()) {
+                return android.net.Uri.fromFile(file)
+            }
+            // 3) As a last resort, if we have a MediaStore ID, build a content URI
+            if (song.id > 0L) {
+                return android.content.ContentUris.withAppendedId(
                     android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                     song.id
                 )
-            } else if (song.path.startsWith("content://")) {
-                android.net.Uri.parse(song.path)
-            } else {
-                android.net.Uri.fromFile(file)
             }
+            // 4) Fallback to parsing whatever we have
+            android.net.Uri.parse(path)
         } catch (_: Exception) {
             // Fallback to parsing the raw path
             android.net.Uri.parse(song.path)
