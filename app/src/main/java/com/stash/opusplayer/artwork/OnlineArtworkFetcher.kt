@@ -145,7 +145,7 @@ class OnlineArtworkFetcher(context: Context) {
         return@withContext null
     }
 
-    private fun buildUserAgent(): String = "StashOpusPlayer/${com.stash.opusplayer.BuildConfig.VERSION_NAME} (Android; +https://github.com/DarrylClay2005/StashOpusPlayer)"
+    private fun buildUserAgent(): String = "StashAudio/${com.stash.opusplayer.BuildConfig.VERSION_NAME} (Android; +https://github.com/DarrylClay2005/StashOpusPlayer)"
 
     private fun request(url: String): Request = Request.Builder()
         .url(url)

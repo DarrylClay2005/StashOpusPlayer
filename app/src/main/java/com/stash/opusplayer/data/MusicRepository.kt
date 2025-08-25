@@ -199,31 +199,41 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
     }
     
     private suspend fun scanFolderRecursively(folderPath: String): List<Song> {
+        return scanFolderRecursivelyFast(folderPath)
+    }
+
+    // Fast disk scan: avoids heavy metadata until later, filters by extension
+    private suspend fun scanFolderRecursivelyFast(folderPath: String): List<Song> = withContext(Dispatchers.IO) {
         val songs = mutableListOf<Song>()
         val folder = File(folderPath)
-        
-        if (!folder.exists() || !folder.isDirectory) return songs
-        
+        if (!folder.exists() || !folder.isDirectory) return@withContext songs
         try {
-            folder.listFiles()?.forEach { file ->
-                when {
-                    file.isDirectory -> {
-                        // Recursively scan subfolders
-                        songs.addAll(scanFolderRecursively(file.absolutePath))
-                    }
-                    file.isFile && isValidAudioFile(file.absolutePath) -> {
-                        metadataExtractor.extractBasicInfo(file.absolutePath)?.let { song ->
-                            // Fast path: basic info only (full metadata later)
-                            songs.add(song)
-                        }
+            val list = folder.listFiles()
+            if (list != null) {
+                for (file in list) {
+                    if (file.isDirectory) {
+                        songs.addAll(scanFolderRecursivelyFast(file.absolutePath))
+                    } else if (file.isFile && isValidAudioFile(file.absolutePath)) {
+                        // Build minimal Song object without invoking retriever
+                        val title = file.nameWithoutExtension
+                        songs.add(
+                            Song(
+                                id = file.absolutePath.hashCode().toLong(),
+                                title = title,
+                                artist = "Unknown Artist",
+                                album = file.parentFile?.name ?: "Unknown Album",
+                                duration = 0L,
+                                path = file.absolutePath,
+                                size = file.length(),
+                                mimeType = "audio/*",
+                                dateAdded = file.lastModified()
+                            )
+                        )
                     }
                 }
             }
-        } catch (e: Exception) {
-            // Log error but continue scanning
-        }
-        
-        return songs
+        } catch (_: Exception) { }
+        songs
     }
     
     // Favorites management

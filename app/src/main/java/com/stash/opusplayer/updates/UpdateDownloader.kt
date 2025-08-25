@@ -67,7 +67,7 @@ class UpdateDownloader(private val context: Context) {
             // Download the file
             val request = Request.Builder()
                 .url(updateInfo.downloadUrl)
-                .addHeader("User-Agent", "StashOpusPlayer-UpdateDownloader/2.0")
+                .addHeader("User-Agent", "StashAudio-UpdateDownloader/2.0")
                 .build()
             
             okHttpClient.newCall(request).execute().use { response ->
@@ -162,7 +162,7 @@ class UpdateDownloader(private val context: Context) {
         val notification = NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_system_update)
             .setContentTitle("Downloading Update")
-            .setContentText("Stash Opus Player v${updateInfo.latestVersion}")
+            .setContentText("Stash Audio v${updateInfo.latestVersion}")
             .setProgress(100, 0, false)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -175,7 +175,7 @@ class UpdateDownloader(private val context: Context) {
         val notification = NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_system_update)
             .setContentTitle("Downloading Update")
-            .setContentText("Stash Opus Player v${updateInfo.latestVersion} - $progress%")
+            .setContentText("Stash Audio v${updateInfo.latestVersion} - $progress%")
             .setProgress(100, progress, false)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -196,7 +196,7 @@ class UpdateDownloader(private val context: Context) {
         val notification = NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_system_update)
             .setContentTitle("Update Ready to Install")
-            .setContentText("Tap to install Stash Opus Player v${updateInfo.latestVersion}")
+            .setContentText("Tap to install Stash Audio v${updateInfo.latestVersion}")
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .addAction(

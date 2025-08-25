@@ -125,7 +125,7 @@ class UpdateManager(private val context: Context) {
             setPadding(50, 50, 50, 50)
             
             addView(android.widget.TextView(activity).apply {
-                text = "Downloading Stash Opus Player v${updateInfo.latestVersion}"
+                text = "Downloading Stash Audio v${updateInfo.latestVersion}"
                 textSize = 16f
                 setPadding(0, 0, 0, 20)
             })
@@ -164,7 +164,7 @@ class UpdateManager(private val context: Context) {
         
         dialogBuilder
             .setTitle("Update Downloaded")
-            .setMessage("Stash Opus Player v${updateInfo.latestVersion} has been downloaded successfully. Install now?")
+            .setMessage("Stash Audio v${updateInfo.latestVersion} has been downloaded successfully. Install now?")
             .setPositiveButton("Install") { _, _ ->
                 updateDownloader.installUpdate(updateFile)
             }

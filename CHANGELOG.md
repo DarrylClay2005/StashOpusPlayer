@@ -1,5 +1,11 @@
 # Changelog
 
+## 7.1.0 - 2025-08-25
+
+- Branding: Updated About dialog and all update-related notifications to "Stash Audio"
+- Android 13+: Request POST_NOTIFICATIONS permission at runtime for playback notification
+- Folders: Faster folder listing using quick scan path and deferred metadata
+
 ## 7.0.0 - 2025-08-25
 
 - Official name: Stash Audio
