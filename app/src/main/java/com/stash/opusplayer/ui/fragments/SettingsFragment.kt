@@ -330,7 +330,7 @@ class SettingsFragment : Fragment() {
         }
 
         fun semitonesToPitch(semi: Int): Float {
-            return kotlin.math.pow(2f, semi / 12f)
+            return Math.pow(2.0, semi / 12.0).toFloat()
         }
 
         fun updateLabel(semi: Int) {

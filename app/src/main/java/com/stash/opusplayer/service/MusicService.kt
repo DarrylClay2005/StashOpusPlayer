@@ -70,7 +70,7 @@ class MusicService : MediaSessionService() {
         try {
             val prefs = getSharedPreferences("settings", 0)
             val savedSemitones = prefs.getInt("pitch_semitones", 0)
-            currentPitch = kotlin.math.pow(2f, savedSemitones / 12f)
+            currentPitch = Math.pow(2.0, savedSemitones / 12.0).toFloat()
             val savedSpeed = prefs.getFloat("playback_speed", 1.0f)
             if (savedSpeed in 0.25f..2.5f) currentSpeed = savedSpeed
             player.playbackParameters = PlaybackParameters(currentSpeed, currentPitch)
