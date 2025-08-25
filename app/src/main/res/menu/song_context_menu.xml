@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_favorite"
+        android:title="Add to Favorites"
+        android:icon="@drawable/ic_favorite_border" />
+    
+    <item
+        android:id="@+id/action_add_to_playlist"
+        android:title="Add to Playlist"
+        android:icon="@drawable/ic_playlist_add" />
+    
+    <item
+        android:id="@+id/action_play_next"
+        android:title="Play Next"
+        android:icon="@drawable/ic_queue" />
+    
+    <item
+        android:id="@+id/action_share"
+        android:title="Share"
+        android:icon="@drawable/ic_share" />
+</menu>

@@ -53,6 +53,11 @@
     <style name="TextAppearance.StashOpus.Body" parent="TextAppearance.Material3.BodyMedium">
         <item name="android:textColor">@color/text_primary</item>
     </style>
+    
+    <style name="TextAppearance.StashOpus.Headline" parent="TextAppearance.Material3.HeadlineMedium">
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textStyle">bold</item>
+    </style>
 
     <!-- Card styles -->
     <style name="CardView.StashOpus">
