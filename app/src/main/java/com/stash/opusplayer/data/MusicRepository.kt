@@ -27,47 +27,90 @@ class MusicRepository(private val context: Context) {
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
         val sortOrder = "${MediaStore.Audio.Media.DISPLAY_NAME} ASC"
         
-        val cursor = context.contentResolver.query(
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-            PROJECTION,
-            selection,
-            null,
-            sortOrder
-        )
+        // Use a projection compatible with scoped storage on Android 10+
+        val projection = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) arrayOf(
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.TITLE,
+            MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.ALBUM,
+            MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.ALBUM_ID,
+            MediaStore.Audio.Media.ARTIST_ID,
+            MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.SIZE,
+            MediaStore.Audio.Media.MIME_TYPE
+        ) else PROJECTION
         
-        cursor?.use {
-            while (it.moveToNext()) {
-                val song = createSongFromCursor(it)
-                if (song != null && isValidAudioFile(song.path)) {
-                    songs.add(song)
+        try {
+            val cursor = context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                null,
+                sortOrder
+            )
+            
+            cursor?.use {
+                while (it.moveToNext()) {
+                    val song = createSongFromCursorCompat(it)
+                    if (song != null && isValidAudioFile(song.path)) {
+                        songs.add(song)
+                    }
                 }
             }
+        } catch (_: SecurityException) {
+            // Permission issue: return empty list gracefully
+        } catch (_: Exception) {
+            // Any other resolver error: return what we have so far
         }
         
         songs
     }
     
-    private fun createSongFromCursor(cursor: Cursor): Song? {
+    private fun createSongFromCursorCompat(cursor: Cursor): Song? {
         return try {
+            val id = cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media._ID).coerceAtLeast(0))
+            val title = cursor.getString(cursor.getColumnIndex(MediaStore.Audio.Media.TITLE).coerceAtLeast(0)) ?: ""
+            val artist = cursor.getString(cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST).coerceAtLeast(0)) ?: ""
+            val album = cursor.getString(cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM).coerceAtLeast(0)) ?: ""
+            val duration = cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media.DURATION).coerceAtLeast(0))
+            
+            // DATA may be unavailable on Android 10+, fall back to content Uri string
+            val dataIndex = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+            val path = if (dataIndex != -1) {
+                cursor.getString(dataIndex) ?: ""
+            } else {
+                android.content.ContentUris.withAppendedId(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id
+                ).toString()
+            }
+            
+            val albumId = cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM_ID).coerceAtLeast(0))
+            val artistId = cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST_ID).coerceAtLeast(0))
+            val dateAdded = cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media.DATE_ADDED).coerceAtLeast(0))
+            val size = cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media.SIZE).coerceAtLeast(0))
+            val mimeType = cursor.getString(cursor.getColumnIndex(MediaStore.Audio.Media.MIME_TYPE).coerceAtLeast(0)) ?: ""
+            
             Song(
-                id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)),
-                title = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)) ?: "",
-                artist = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)) ?: "",
-                album = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)) ?: "",
-                duration = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)),
-                path = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)) ?: "",
-                albumId = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)),
-                artistId = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST_ID)),
-                dateAdded = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)),
-                size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)),
-                mimeType = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)) ?: ""
+                id = id,
+                title = title,
+                artist = artist,
+                album = album,
+                duration = duration,
+                path = path,
+                albumId = albumId,
+                artistId = artistId,
+                dateAdded = dateAdded,
+                size = size,
+                mimeType = mimeType
             )
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
     
     private fun isValidAudioFile(path: String): Boolean {
+        if (path.startsWith("content://")) return true // content URIs are valid
         val supportedExtensions = listOf("mp3", "opus", "ogg", "flac", "m4a", "wav", "aac", "wma")
         val extension = path.substringAfterLast(".", "").lowercase()
         return supportedExtensions.contains(extension)

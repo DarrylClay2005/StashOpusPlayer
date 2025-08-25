@@ -20,7 +20,11 @@ class MetadataExtractor(private val context: Context) {
     fun extractMetadata(song: Song): Song {
         val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(song.path)
+            if (song.path.startsWith("content://")) {
+                retriever.setDataSource(context, Uri.parse(song.path))
+            } else {
+                retriever.setDataSource(song.path)
+            }
             
             val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
             val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
