@@ -4,13 +4,23 @@ A visually appealing Android music player with advanced features and support for
 
 ## Features
 
+### 🎵 Audio & Playback
 - **Multi-format Support**: Play Opus, MP3, FLAC, OGG, M4A, WAV, AAC, and WMA audio files
+- **10-Band Equalizer**: Professional audio tuning with preset and custom settings
+- **ExoPlayer Integration**: High-quality, gapless audio playback
+- **Full Metadata Support**: Artist, album, genre, and artwork display
+
+### 🎨 User Interface
+- **Modern UI**: Material Design 3 with enhanced Now Playing interface
 - **Custom Backgrounds**: Set your own image as the app background
 - **Side Navigation**: Easy access to music library, playlists, equalizer, and settings
-- **Modern UI**: Material Design 3 with dark theme
-- **Audio Permissions**: Smart permission handling for Android 13+
-- **Reliable Installation**: Fixed package validation issues from v1.0
-- **Professional Icon**: New multimedia audio player icon design
+- **Album Art Display**: Beautiful artwork integration throughout the app
+
+### 🔧 Technical
+- **Smart Permissions**: Intelligent permission handling for Android 13+
+- **AI Update Checker**: Automated update detection system
+- **Reliable Installation**: Fixed APK signing issues for seamless installation
+- **Professional Icon**: Multimedia audio player icon design
 
 ## Screenshots
 
@@ -18,13 +28,17 @@ A visually appealing Android music player with advanced features and support for
 
 ## Installation
 
-1. Download the latest **v2.0 release APK** from the [Releases](../../releases) page
+1. Download the latest **v3.0.1 release APK** from the [Releases](../../releases) page
+   - Use **StashOpusPlayer-v3.0.1-release-properly-signed.apk** for guaranteed installation
 2. Enable "Unknown Sources" in your Android settings if prompted
 3. Install the APK on your Android device (requires Android 5.0+ / API 21+)
-4. Grant audio permissions when prompted
-5. Enjoy your music with custom backgrounds!
+4. Grant audio and storage permissions when prompted
+5. Enjoy your music with the full-featured player!
 
-**Note**: If upgrading from v1.0, you may need to uninstall the previous version first.
+### 🔧 Installation Fix (v3.0.1)
+If you experienced "package appears to be invalid" errors with v3.0, v3.0.1 resolves all APK signing issues for seamless installation.
+
+**Note**: If upgrading from earlier versions, you may need to uninstall the previous version first.
 
 ## Development
 
