@@ -24,6 +24,14 @@
         
         <!-- Navigation bar -->
         <item name="android:navigationBarColor">@color/background_color</item>
+</style>
+
+    <!-- Splash Theme -->
+    <style name="Theme.StashOpusPlayer.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/background_color</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="windowSplashScreenAnimationDuration">300</item>
+        <item name="postSplashScreenTheme">@style/Theme.StashOpusPlayer</item>
     </style>
 
     <!-- Player control styles -->

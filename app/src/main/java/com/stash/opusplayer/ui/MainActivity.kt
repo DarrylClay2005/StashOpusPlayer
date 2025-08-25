@@ -18,6 +18,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.preference.PreferenceManager
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.appcompat.app.AlertDialog
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
@@ -56,6 +57,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
+installSplashScreen()
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -88,16 +90,7 @@ lifecycleScope.launch {
         }
         }
 
-        // Show loading overlay while scanning
-showLoadingOverlay()
-        // Observe library scan tracker to update loading text
-        lifecycleScope.launch {
-            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-            com.stash.opusplayer.utils.LibraryScanTracker.status.collect { msg ->
-                loadingView?.findViewById<android.widget.TextView>(com.stash.opusplayer.R.id.loadingText)?.text = msg
-            }
-        }
-        }
+// Removed custom loading overlay; using Android SplashScreen API instead
         
         // Check for updates on app start (AI will decide if/when to show)
         updateManager.checkForUpdates(this)
