@@ -9,7 +9,8 @@ A visually appealing Android music player with advanced features and support for
 - **Side Navigation**: Easy access to music library, playlists, equalizer, and settings
 - **Modern UI**: Material Design 3 with dark theme
 - **Audio Permissions**: Smart permission handling for Android 13+
-- **Lightweight**: Optimized APK size (~4MB for release build)
+- **Reliable Installation**: Fixed package validation issues from v1.0
+- **Professional Icon**: New multimedia audio player icon design
 
 ## Screenshots
 
@@ -17,9 +18,13 @@ A visually appealing Android music player with advanced features and support for
 
 ## Installation
 
-1. Download the latest APK from the [Releases](../../releases) page
-2. Install on your Android device (requires Android 5.0+ / API 21+)
-3. Grant audio permissions when prompted
+1. Download the latest **v2.0 release APK** from the [Releases](../../releases) page
+2. Enable "Unknown Sources" in your Android settings if prompted
+3. Install the APK on your Android device (requires Android 5.0+ / API 21+)
+4. Grant audio permissions when prompted
+5. Enjoy your music with custom backgrounds!
+
+**Note**: If upgrading from v1.0, you may need to uninstall the previous version first.
 
 ## Development
 
