@@ -73,11 +73,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         // Check for updates on app start (AI will decide if/when to show)
         updateManager.checkForUpdates(this)
         
-        // Load default fragment
-        if (savedInstanceState == null) {
-            loadFragment(MusicLibraryFragment())
-            binding.bottomNav.selectedItemId = R.id.nav_songs
-            binding.navView.setCheckedItem(R.id.nav_music_library)
+        // Defer loading content until permissions are granted
+        if (savedInstanceState != null) {
+            // If recreating, assume content already loaded
         }
         
         // Handle back button press
@@ -191,13 +189,18 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             .withListener(object : MultiplePermissionsListener {
                 override fun onPermissionsChecked(report: MultiplePermissionsReport) {
                     if (report.areAllPermissionsGranted()) {
-                        // Permissions granted, continue with setup
+                        // Permissions granted, proceed to load default content
+                        loadDefaultContentIfNeeded()
                     } else {
                         Toast.makeText(
                             this@MainActivity,
-                            "Audio permissions are required to scan music files",
+                            "Audio permission is required to show your music library.",
                             Toast.LENGTH_LONG
                         ).show()
+                        // Load a safe screen (Settings) so app doesn't crash
+                        loadFragment(SettingsFragment())
+                        supportActionBar?.title = getString(R.string.menu_settings)
+                        binding.bottomNav.selectedItemId = R.id.nav_settings
                     }
                 }
                 
@@ -209,6 +212,16 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 }
             })
             .check()
+    }
+
+    private fun loadDefaultContentIfNeeded() {
+        // Only load if nothing is displayed yet
+        if (supportFragmentManager.findFragmentById(R.id.main_content) == null) {
+            loadFragment(MusicLibraryFragment())
+            supportActionBar?.title = getString(R.string.menu_music_library)
+            binding.bottomNav.selectedItemId = R.id.nav_songs
+            binding.navView.setCheckedItem(R.id.nav_music_library)
+        }
     }
     
     override fun onNavigationItemSelected(item: android.view.MenuItem): Boolean {
