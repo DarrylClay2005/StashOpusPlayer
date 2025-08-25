@@ -16,6 +16,7 @@ data class Song(
     val dateAdded: Long = 0,
     val size: Long = 0,
     val mimeType: String = "",
+    val relativePath: String = "",
     val albumArt: String? = null,
     val track: Int = 0,
     val year: String = "",

@@ -15,6 +15,8 @@ class MetadataExtractor(private val context: Context) {
     
     companion object {
         private const val TAG = "MetadataExtractor"
+        private const val MAX_ART_DIMENSION = 512 // px, cap decoded size to reduce memory
+        private const val JPEG_QUALITY = 70 // compress more to keep memory and storage low
     }
     
     fun extractMetadata(song: Song): Song {
@@ -63,21 +65,55 @@ class MetadataExtractor(private val context: Context) {
     
     private fun extractAlbumArt(retriever: MediaMetadataRetriever): String? {
         return try {
-            val artBytes = retriever.embeddedPicture
-            if (artBytes != null && artBytes.isNotEmpty()) {
-                // Compress and encode to base64 for storage
-                val bitmap = BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size)
-                if (bitmap != null) {
-                    val stream = ByteArrayOutputStream()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
-                    val compressedBytes = stream.toByteArray()
-                    Base64.encodeToString(compressedBytes, Base64.DEFAULT)
-                } else null
-            } else null
+            val artBytes = retriever.embeddedPicture ?: return null
+            if (artBytes.isEmpty()) return null
+
+            // First decode bounds to compute an inSampleSize
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size, bounds)
+            val sampleSize = calculateInSampleSize(bounds, MAX_ART_DIMENSION, MAX_ART_DIMENSION)
+
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = false
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.RGB_565 // smaller than ARGB_8888
+                inDither = true
+            }
+
+            val bitmap = BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size, options) ?: return null
+
+            val stream = ByteArrayOutputStream(32 * 1024)
+            try {
+                bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, stream)
+            } finally {
+                // Release native memory ASAP
+                try { bitmap.recycle() } catch (_: Throwable) {}
+            }
+            val compressedBytes = stream.toByteArray()
+            // Use NO_WRAP to keep string compact
+            Base64.encodeToString(compressedBytes, Base64.NO_WRAP)
+        } catch (oom: OutOfMemoryError) {
+            Log.e(TAG, "OOM extracting album art", oom)
+            null
         } catch (e: Exception) {
             Log.e(TAG, "Error extracting album art", e)
             null
         }
+    }
+
+    private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
+        val width = options.outWidth
+        val height = options.outHeight
+        var inSampleSize = 1
+        if (height > reqHeight || width > reqWidth) {
+            var halfHeight = height / 2
+            var halfWidth = width / 2
+            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                inSampleSize *= 2
+            }
+        }
+        if (inSampleSize <= 0) inSampleSize = 1
+        return inSampleSize
     }
     
     fun decodeAlbumArt(albumArtBase64: String?): Bitmap? {

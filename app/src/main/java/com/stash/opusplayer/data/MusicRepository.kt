@@ -8,6 +8,10 @@ import android.provider.MediaStore
 import androidx.preference.PreferenceManager
 import com.stash.opusplayer.data.database.FavoriteEntity
 import com.stash.opusplayer.data.database.MusicDatabase
+import com.stash.opusplayer.data.database.PlaylistDao
+import com.stash.opusplayer.data.database.PlaylistEntity
+import com.stash.opusplayer.data.database.PlaylistTrackEntity
+import com.stash.opusplayer.data.database.PlaylistWithCount
 import com.stash.opusplayer.utils.MetadataExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -19,9 +23,40 @@ class MusicRepository(private val context: Context) {
     
     private val database = MusicDatabase.getDatabase(context)
     private val favoriteDao = database.favoriteDao()
+    private val playlistDao: PlaylistDao = database.playlistDao()
     private val metadataExtractor = MetadataExtractor(context)
     private val prefs: SharedPreferences = PreferenceManager.getDefaultSharedPreferences(context)
     
+    // Playlists API
+    fun getPlaylists(): Flow<List<PlaylistWithCount>> = playlistDao.getPlaylistsWithCount()
+
+    suspend fun createPlaylist(name: String): Long = withContext(Dispatchers.IO) {
+        playlistDao.insertPlaylist(PlaylistEntity(name = name))
+    }
+
+    suspend fun deletePlaylist(playlistId: Long) = withContext(Dispatchers.IO) {
+        playlistDao.deletePlaylist(playlistId)
+    }
+
+    fun getPlaylistTracks(playlistId: Long): Flow<List<PlaylistTrackEntity>> = playlistDao.getTracks(playlistId)
+
+    suspend fun addSongToPlaylist(playlistId: Long, song: Song) = withContext(Dispatchers.IO) {
+        val track = PlaylistTrackEntity(
+            playlistId = playlistId,
+            songId = song.id,
+            title = song.displayName,
+            artist = song.artistName,
+            album = song.albumName,
+            duration = song.duration,
+            path = song.path
+        )
+        playlistDao.insertTrack(track)
+    }
+
+    suspend fun removeSongFromPlaylist(playlistId: Long, songId: Long) = withContext(Dispatchers.IO) {
+        playlistDao.deleteTrackByPlaylistAndSong(playlistId, songId)
+    }
+
     suspend fun getAllSongs(): List<Song> = withContext(Dispatchers.IO) {
         val songs = mutableListOf<Song>()
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
@@ -38,7 +73,8 @@ class MusicRepository(private val context: Context) {
             MediaStore.Audio.Media.ARTIST_ID,
             MediaStore.Audio.Media.DATE_ADDED,
             MediaStore.Audio.Media.SIZE,
-            MediaStore.Audio.Media.MIME_TYPE
+            MediaStore.Audio.Media.MIME_TYPE,
+            MediaStore.Audio.Media.RELATIVE_PATH
         ) else PROJECTION
         
         try {
@@ -67,13 +103,24 @@ class MusicRepository(private val context: Context) {
         songs
     }
     
+    private fun Cursor.safeString(column: String, default: String = ""): String {
+        val idx = getColumnIndex(column)
+        return if (idx != -1) getString(idx) ?: default else default
+    }
+
+    private fun Cursor.safeLong(column: String, default: Long = 0L): Long {
+        val idx = getColumnIndex(column)
+        return if (idx != -1) runCatching { getLong(idx) }.getOrNull() ?: default else default
+    }
+
     private fun createSongFromCursorCompat(cursor: Cursor): Song? {
         return try {
-            val id = cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media._ID).coerceAtLeast(0))
-            val title = cursor.getString(cursor.getColumnIndex(MediaStore.Audio.Media.TITLE).coerceAtLeast(0)) ?: ""
-            val artist = cursor.getString(cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST).coerceAtLeast(0)) ?: ""
-            val album = cursor.getString(cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM).coerceAtLeast(0)) ?: ""
-            val duration = cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media.DURATION).coerceAtLeast(0))
+            val id = cursor.safeLong(MediaStore.Audio.Media._ID)
+            if (id <= 0) return null
+            val title = cursor.safeString(MediaStore.Audio.Media.TITLE)
+            val artist = cursor.safeString(MediaStore.Audio.Media.ARTIST)
+            val album = cursor.safeString(MediaStore.Audio.Media.ALBUM)
+            val duration = cursor.safeLong(MediaStore.Audio.Media.DURATION)
             
             // DATA may be unavailable on Android 10+, fall back to content Uri string
             val dataIndex = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
@@ -85,11 +132,12 @@ class MusicRepository(private val context: Context) {
                 ).toString()
             }
             
-            val albumId = cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM_ID).coerceAtLeast(0))
-            val artistId = cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST_ID).coerceAtLeast(0))
-            val dateAdded = cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media.DATE_ADDED).coerceAtLeast(0))
-            val size = cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media.SIZE).coerceAtLeast(0))
-            val mimeType = cursor.getString(cursor.getColumnIndex(MediaStore.Audio.Media.MIME_TYPE).coerceAtLeast(0)) ?: ""
+            val albumId = cursor.safeLong(MediaStore.Audio.Media.ALBUM_ID, -1)
+            val artistId = cursor.safeLong(MediaStore.Audio.Media.ARTIST_ID, -1)
+            val dateAdded = cursor.safeLong(MediaStore.Audio.Media.DATE_ADDED)
+            val size = cursor.safeLong(MediaStore.Audio.Media.SIZE)
+            val mimeType = cursor.safeString(MediaStore.Audio.Media.MIME_TYPE)
+            val relativePath = cursor.safeString(MediaStore.Audio.Media.RELATIVE_PATH)
             
             Song(
                 id = id,
@@ -102,7 +150,8 @@ class MusicRepository(private val context: Context) {
                 artistId = artistId,
                 dateAdded = dateAdded,
                 size = size,
-                mimeType = mimeType
+                mimeType = mimeType,
+                relativePath = relativePath
             )
         } catch (_: Exception) {
             null

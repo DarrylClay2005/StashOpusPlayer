@@ -48,24 +48,32 @@ class FoldersFragment : Fragment() {
     }
 
     private fun loadFolders() {
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val songs = repository.getAllSongsFromAllSources()
                 val folders = songs
-                    .groupBy { File(it.path).parent ?: "/" }
+                    .groupBy { song ->
+                        if (song.path.startsWith("content://")) {
+                            song.relativePath.ifBlank { "Music/" }
+                        } else {
+                            File(song.path).parent ?: "/"
+                        }
+                    }
                     .map { (path, group) -> FolderInfo(path, group.size, group) }
                     .sortedBy { it.path.lowercase() }
+                val b = _binding ?: return@launch
                 if (folders.isNotEmpty()) {
                     adapter.submitList(folders)
-                    binding.recyclerView.visibility = View.VISIBLE
-                    binding.emptyStateText.visibility = View.GONE
+                    b.recyclerView.visibility = View.VISIBLE
+                    b.emptyStateText.visibility = View.GONE
                 } else {
-                    binding.recyclerView.visibility = View.GONE
-                    binding.emptyStateText.visibility = View.VISIBLE
+                    b.recyclerView.visibility = View.GONE
+                    b.emptyStateText.visibility = View.VISIBLE
                 }
             } catch (_: Exception) {
-                binding.recyclerView.visibility = View.GONE
-                binding.emptyStateText.visibility = View.VISIBLE
+                val b = _binding ?: return@launch
+                b.recyclerView.visibility = View.GONE
+                b.emptyStateText.visibility = View.VISIBLE
             }
         }
     }

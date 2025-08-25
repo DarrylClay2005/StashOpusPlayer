@@ -1,5 +1,6 @@
 package com.stash.opusplayer.ui.adapters
 
+import android.util.Base64
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -8,6 +9,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
+import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.stash.opusplayer.R
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.databinding.ItemSongBinding
@@ -59,13 +61,18 @@ class SongAdapter(
         
         private fun loadAlbumArt(song: Song) {
             if (!song.albumArt.isNullOrEmpty()) {
-                // Load from base64 encoded album art
-                val bitmap = metadataExtractor?.decodeAlbumArt(song.albumArt)
-                if (bitmap != null) {
+                // Prefer letting Glide decode + cache from bytes to reduce memory churn
+                val artBytes = try {
+                    Base64.decode(song.albumArt, Base64.DEFAULT)
+                } catch (_: IllegalArgumentException) { null }
+
+                if (artBytes != null && artBytes.isNotEmpty()) {
                     Glide.with(binding.root.context)
-                        .load(bitmap)
+                        .load(artBytes)
                         .placeholder(R.drawable.ic_music_note)
                         .error(R.drawable.ic_music_note)
+                        .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
+                        .override(256, 256)
                         .centerCrop()
                         .into(binding.songArtwork)
                 } else {
