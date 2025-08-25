@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.0.2 - 2025-08-25
+
+- Folders: improved SAF grouping and subfolder detection for added primary folders
+- Songs: OPUS and content URI files reliably listed via resilient metadata fallback
+- General: broadened audio detection for common extensions (opus, oga, mka, etc.)
+
 ## 6.0.1 - 2025-08-25
 
 - Removed legacy loading overlay entirely
