@@ -66,13 +66,14 @@ class MusicService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
-        // Apply persisted playback parameters (speed/pitch) if available
+        // Apply persisted playback parameters (speed/pitch/reverb) if available
         try {
             val prefs = getSharedPreferences("settings", 0)
             val savedSemitones = prefs.getInt("pitch_semitones", 0)
             currentPitch = Math.pow(2.0, savedSemitones / 12.0).toFloat()
             val savedSpeed = prefs.getFloat("playback_speed", 1.0f)
             if (savedSpeed in 0.25f..2.5f) currentSpeed = savedSpeed
+            currentReverb = prefs.getInt("reverb_preset", 0).toShort()
             player.playbackParameters = PlaybackParameters(currentSpeed, currentPitch)
         } catch (_: Exception) { /* ignore */ }
     }
@@ -341,6 +342,7 @@ class MusicService : MediaSessionService() {
     fun setReverbPreset(preset: Short) {
         currentReverb = preset
         try { presetReverb?.preset = preset } catch (_: Exception) {}
+        try { getSharedPreferences("settings", 0).edit().putInt("reverb_preset", preset.toInt()).apply() } catch (_: Exception) {}
     }
     
     override fun onDestroy() {

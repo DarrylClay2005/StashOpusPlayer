@@ -147,89 +147,9 @@ class NowPlayingActivity : AppCompatActivity() {
             }
         }
 
-        // Audio controls
-        setupAudioControls()
+        // Audio controls have moved to Settings
     }
 
-    private fun setupAudioControls() {
-        // Speed: map 0..175 -> 0.25x..2.0x (value/100 + 0.25)
-        binding.speedSeek.max = 175
-        binding.speedSeek.progress = 75 // 1.00x initial
-        binding.speedLabel.text = "1.00x"
-        binding.speedSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                val speed = 0.25f + (progress.toFloat() / 100f)
-                binding.speedLabel.text = String.format("%.2fx", speed)
-                mediaController?.let { controller ->
-                    val current = controller.playbackParameters
-                    try {
-                        controller.playbackParameters = PlaybackParameters(speed, current.pitch)
-                    } catch (_: Exception) { /* ignore */ }
-                    // Send to service to keep ExoPlayer parameters in sync
-                    try {
-                        controller.sendCustomCommand(
-                            androidx.media3.session.SessionCommand("SET_SPEED", android.os.Bundle.EMPTY),
-                            bundleOf("speed" to speed)
-                        )
-                    } catch (_: Exception) { /* ignore */ }
-                }
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // Pitch semitones: -12..+12 -> pitch factor 2^(st/12)
-        binding.pitchSeek.max = 24
-        binding.pitchSeek.progress = 12 // 0 semitones
-        binding.pitchLabel.text = "0 st"
-        binding.pitchSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                val semitones = progress - 12
-                binding.pitchLabel.text = "$semitones st"
-                val pitch = Math.pow(2.0, semitones / 12.0).toFloat()
-                mediaController?.let { controller ->
-                    val current = controller.playbackParameters
-                    try {
-                        controller.playbackParameters = PlaybackParameters(current.speed, pitch)
-                    } catch (_: Exception) { /* ignore */ }
-                    try {
-                        controller.sendCustomCommand(
-                            androidx.media3.session.SessionCommand("SET_PITCH", android.os.Bundle.EMPTY),
-                            bundleOf("pitch" to pitch)
-                        )
-                    } catch (_: Exception) { /* ignore */ }
-                }
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // Reverb 0..1000 mapped to Preset (0..6 typical). We'll approximate presets by buckets.
-        binding.reverbSeek.max = 1000
-        binding.reverbSeek.progress = 0
-        binding.reverbLabel.text = "Reverb 0%"
-        binding.reverbSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                binding.reverbLabel.text = "Reverb ${progress / 10}%"
-                val preset: Short = when {
-                    progress < 50 -> 0 // none
-                    progress < 200 -> 1
-                    progress < 400 -> 2
-                    progress < 600 -> 3
-                    progress < 800 -> 4
-                    progress < 950 -> 5
-                    else -> 6
-                }.toShort()
-mediaController?.sendCustomCommand(
-                    androidx.media3.session.SessionCommand("SET_REVERB", android.os.Bundle.EMPTY),
-                    bundleOf("preset" to preset.toInt())
-                )
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-    }
-    
     private fun connectToMediaController() {
         val sessionToken = SessionToken(this, ComponentName(this, MusicService::class.java))
         val controllerFuture = MediaController.Builder(this, sessionToken).buildAsync()
