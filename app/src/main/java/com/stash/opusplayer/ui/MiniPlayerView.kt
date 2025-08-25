@@ -94,6 +94,8 @@ class MiniPlayerView @JvmOverloads constructor(
             try {
                 mediaController = controllerFuture.get()
                 setupMediaControllerListeners()
+                // Resync initial state so mini player shows even after process recreation
+                resyncFromController()
             } catch (e: Exception) {
                 // Handle connection failure
             }
@@ -106,13 +108,23 @@ class MiniPlayerView @JvmOverloads constructor(
                 updatePlayPauseButton(isPlaying)
                 if (isPlaying) {
                     startProgressUpdates()
+                    show()
                 } else {
+                    // Keep visible when paused, only hide if idle with no item
                     stopProgressUpdates()
+                    if (mediaController?.playbackState == Player.STATE_IDLE && mediaController?.currentMediaItem == null) hide() else show()
+                }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState != Player.STATE_IDLE || mediaController?.currentMediaItem != null) {
+                    show()
                 }
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 updateMediaInfo()
+                if (mediaItem != null) show()
             }
         })
     }
@@ -127,7 +139,15 @@ class MiniPlayerView @JvmOverloads constructor(
                             displaySongInfo(song)
                             show()
                         } else {
-                            hide()
+                            // If we don't have a Song from manager, try controller state
+                            if (mediaController?.currentMediaItem != null || mediaController?.playbackState == Player.STATE_READY) {
+                                updateMediaInfo()
+                                // Attempt to set artwork from cache using metadata
+                                setArtworkFromMetadata()
+                                show()
+                            } else {
+                                hide()
+                            }
                         }
                     }
                 }
@@ -199,6 +219,42 @@ class MiniPlayerView @JvmOverloads constructor(
             binding.miniSongTitle.text = mediaMetadata.title ?: "Unknown Title"
             binding.miniArtistName.text = mediaMetadata.artist ?: "Unknown Artist"
         }
+    }
+
+    private fun setArtworkFromMetadata() {
+        try {
+            val controller = mediaController ?: return
+            val title = controller.mediaMetadata.title?.toString() ?: return
+            val artist = controller.mediaMetadata.artist?.toString() ?: ""
+            val album = controller.mediaMetadata.albumTitle?.toString() ?: ""
+            val fakeSong = Song(
+                id = 0L,
+                title = title,
+                artist = artist,
+                album = album,
+                duration = 0L,
+                path = ""
+            )
+            val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
+            val bmp = cache.loadBitmapIfPresent(fakeSong, 256)
+            if (bmp != null) {
+                Glide.with(context)
+                    .load(bmp)
+                    .centerCrop()
+                    .into(binding.miniAlbumArt)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun resyncFromController() {
+        try {
+            val controller = mediaController ?: return
+            if (controller.currentMediaItem != null || controller.playbackState == Player.STATE_READY || controller.isPlaying) {
+                updateMediaInfo()
+                setArtworkFromMetadata()
+                show()
+            }
+        } catch (_: Exception) {}
     }
 
     private fun updatePlayPauseButton(isPlaying: Boolean) {
