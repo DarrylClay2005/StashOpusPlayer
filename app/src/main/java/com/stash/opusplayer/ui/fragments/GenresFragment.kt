@@ -47,24 +47,26 @@ class GenresFragment : Fragment() {
     }
 
     private fun loadGenres() {
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val allSongs = repository.getAllSongsWithMetadata()
                 val genres = allSongs
                     .groupBy { it.genre.ifBlank { "Unknown" } }
                     .map { (name, songs) -> GenreInfo(name, songs.size, songs) }
                     .sortedBy { it.name.lowercase() }
+                val b = _binding ?: return@launch
                 if (genres.isNotEmpty()) {
                     adapter.submitList(genres)
-                    binding.recyclerView.visibility = View.VISIBLE
-                    binding.emptyStateText.visibility = View.GONE
+                    b.recyclerView.visibility = View.VISIBLE
+                    b.emptyStateText.visibility = View.GONE
                 } else {
-                    binding.recyclerView.visibility = View.GONE
-                    binding.emptyStateText.visibility = View.VISIBLE
+                    b.recyclerView.visibility = View.GONE
+                    b.emptyStateText.visibility = View.VISIBLE
                 }
             } catch (_: Exception) {
-                binding.recyclerView.visibility = View.GONE
-                binding.emptyStateText.visibility = View.VISIBLE
+                val b = _binding ?: return@launch
+                b.recyclerView.visibility = View.GONE
+                b.emptyStateText.visibility = View.VISIBLE
             }
         }
     }

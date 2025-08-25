@@ -19,6 +19,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceManager
 import androidx.appcompat.app.AlertDialog
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import com.bumptech.glide.Glide
 import com.stash.opusplayer.BuildConfig
 import com.google.android.material.navigation.NavigationView
@@ -311,8 +312,51 @@ Check for updates anytime from Settings.""")
     }
     
     fun addToPlaylist(song: com.stash.opusplayer.data.Song) {
-        // TODO: Implement playlist functionality
-        Toast.makeText(this, "Added to playlist: ${song.displayName}", Toast.LENGTH_SHORT).show()
+        val repo = com.stash.opusplayer.data.MusicRepository(this)
+        lifecycleScope.launch {
+            // Fetch current playlists
+            val first = repo.getPlaylists().first()
+            val names = first.map { it.name }.toTypedArray()
+            val ids = first.map { it.id }.toLongArray()
+            runOnUiThread {
+                val options = names + "New playlist…"
+                androidx.appcompat.app.AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Add to playlist")
+                    .setItems(options) { dialog, which ->
+                        lifecycleScope.launch {
+                            if (which < names.size) {
+                                val playlistId = ids[which]
+                                repo.addSongToPlaylist(playlistId, song)
+                                Toast.makeText(this@MainActivity, "Added to ${names[which]}", Toast.LENGTH_SHORT).show()
+                            } else {
+                                // create new
+                                promptCreatePlaylistAndAdd(repo, song)
+                            }
+                        }
+                    }
+                    .show()
+            }
+        }
+    }
+
+    private fun promptCreatePlaylistAndAdd(repo: com.stash.opusplayer.data.MusicRepository, song: com.stash.opusplayer.data.Song) {
+        val edit = android.widget.EditText(this)
+        edit.hint = "Playlist name"
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Create playlist")
+            .setView(edit)
+            .setPositiveButton("Create") { _, _ ->
+                val name = edit.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    lifecycleScope.launch {
+                        val id = repo.createPlaylist(name)
+                        repo.addSongToPlaylist(id, song)
+                        Toast.makeText(this@MainActivity, "Added to $name", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
     
     fun toggleFavorite(song: com.stash.opusplayer.data.Song) {

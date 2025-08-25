@@ -50,9 +50,10 @@ class ArtistsFragment : Fragment() {
     }
     
     private fun loadArtists() {
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val songsByArtist = musicRepository.getSongsByArtist()
+                val b = _binding ?: return@launch
                 if (songsByArtist.isNotEmpty()) {
                     // Convert to list of artist info
                     val artistList = songsByArtist.map { (artist, songs) ->
@@ -64,15 +65,16 @@ class ArtistsFragment : Fragment() {
                     }.sortedBy { it.name }
                     
                     artistAdapter.submitList(artistList)
-                    binding.recyclerView.visibility = View.VISIBLE
-                    binding.emptyStateText.visibility = View.GONE
+                    b.recyclerView.visibility = View.VISIBLE
+                    b.emptyStateText.visibility = View.GONE
                 } else {
-                    binding.recyclerView.visibility = View.GONE
-                    binding.emptyStateText.visibility = View.VISIBLE
+                    b.recyclerView.visibility = View.GONE
+                    b.emptyStateText.visibility = View.VISIBLE
                 }
             } catch (e: Exception) {
-                binding.recyclerView.visibility = View.GONE
-                binding.emptyStateText.visibility = View.VISIBLE
+                val b = _binding ?: return@launch
+                b.recyclerView.visibility = View.GONE
+                b.emptyStateText.visibility = View.VISIBLE
             }
         }
     }
@@ -81,7 +83,7 @@ class ArtistsFragment : Fragment() {
         // Create a new fragment to show songs by this artist
         val fragment = ArtistSongsFragment.newInstance(artist.name, ArrayList(artist.songs))
         parentFragmentManager.beginTransaction()
-            .replace(android.R.id.content, fragment)
+            .replace(com.stash.opusplayer.R.id.main_content, fragment)
             .addToBackStack(null)
             .commit()
     }

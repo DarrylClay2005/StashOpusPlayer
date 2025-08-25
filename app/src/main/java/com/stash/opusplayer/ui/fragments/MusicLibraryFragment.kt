@@ -6,6 +6,7 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.stash.opusplayer.databinding.FragmentMusicLibraryBinding
 import com.stash.opusplayer.data.MusicRepository
@@ -49,9 +50,9 @@ class MusicLibraryFragment : Fragment() {
             onFavoriteToggle = { song ->
                 // Toggle favorite status
                 (activity as? MainActivity)?.toggleFavorite(song)
-                // Refresh the list after a short delay
-                CoroutineScope(Dispatchers.Main).launch {
-                    kotlinx.coroutines.delay(500)
+                // Refresh the list after a short delay, tied to the view lifecycle
+                viewLifecycleOwner.lifecycleScope.launch {
+                    delay(500)
                     loadSongs()
                 }
             },
@@ -69,20 +70,22 @@ class MusicLibraryFragment : Fragment() {
     }
     
     private fun loadSongs() {
-        CoroutineScope(Dispatchers.Main).launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val songs = musicRepository.getAllSongs()
+                val b = _binding ?: return@launch
                 if (songs.isNotEmpty()) {
                     songAdapter.submitList(songs)
-                    binding.recyclerView.visibility = View.VISIBLE
-                    binding.emptyStateText.visibility = View.GONE
+                    b.recyclerView.visibility = View.VISIBLE
+                    b.emptyStateText.visibility = View.GONE
                 } else {
-                    binding.recyclerView.visibility = View.GONE
-                    binding.emptyStateText.visibility = View.VISIBLE
+                    b.recyclerView.visibility = View.GONE
+                    b.emptyStateText.visibility = View.VISIBLE
                 }
             } catch (e: Exception) {
-                binding.recyclerView.visibility = View.GONE
-                binding.emptyStateText.visibility = View.VISIBLE
+                val b = _binding ?: return@launch
+                b.recyclerView.visibility = View.GONE
+                b.emptyStateText.visibility = View.VISIBLE
             }
         }
     }
