@@ -1,0 +1,27 @@
+Stash Audio is a fast, modern Android music player with precision controls and a clean, Material design. Play your local music with independent pitch (±12 semitones) and speed control, a 10‑band equalizer with presets, bass boost, virtualizer, and reverb. Enjoy instant library loading, rich metadata, and beautiful album art (embedded or fetched online).
+
+Key features:
+- Audio & playback
+  • Pitch shift: ±12 semitones (independent from speed)
+  • Variable speed: 0.25×–2.0×
+  • Gapless playback via ExoPlayer (Media3)
+- Equalizer & effects
+  • 10‑band EQ with presets and custom band levels
+  • Bass boost, virtualizer, and reverb presets
+- Library & artwork
+  • Fast initial scan with background metadata enrichment
+  • Embedded artwork support + optional online fetching (MusicBrainz/CAA, iTunes)
+- Design & usability
+  • Modern UI with Now Playing screen and queue controls
+  • Swipe-to-refresh and folder-based browsing (SAF support)
+- Privacy
+  • Works offline; network only used for optional artwork fetching
+  • No accounts or analytics
+
+Permissions:
+- Media access: to scan and play your audio files
+- Network: optional online artwork fetching
+- Notifications (Android 13+): used for the playback notification
+
+Tip: On smaller screens, scroll below Playback Speed to access Pitch and Reverb controls.
+
