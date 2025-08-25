@@ -72,15 +72,23 @@ class MusicLibraryFragment : Fragment() {
     private fun loadSongs() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-val songs = musicRepository.getAllSongsFromAllSources()
+                // Fast listing first for quick UI, then full enrich in background
+                val fast = musicRepository.getAllSongsFromAllSourcesFast()
                 val b = _binding ?: return@launch
-                if (songs.isNotEmpty()) {
-                    songAdapter.submitList(songs)
+                if (fast.isNotEmpty()) {
+                    songAdapter.submitList(fast)
                     b.recyclerView.visibility = View.VISIBLE
                     b.emptyStateText.visibility = View.GONE
                 } else {
                     b.recyclerView.visibility = View.GONE
                     b.emptyStateText.visibility = View.VISIBLE
+                }
+                // Background enrichment; update list when done
+                launch {
+                    val full = musicRepository.getAllSongsFromAllSources()
+                    if (_binding != null && full.isNotEmpty()) {
+                        songAdapter.submitList(full)
+                    }
                 }
                 (activity as? com.stash.opusplayer.ui.MainActivity)?.notifyContentLoaded()
             } catch (e: Exception) {

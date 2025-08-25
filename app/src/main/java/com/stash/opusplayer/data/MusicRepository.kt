@@ -213,7 +213,8 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
                     }
                     file.isFile && isValidAudioFile(file.absolutePath) -> {
                         metadataExtractor.extractBasicInfo(file.absolutePath)?.let { song ->
-                            songs.add(metadataExtractor.extractMetadata(song))
+                            // Fast path: basic info only (full metadata later)
+                            songs.add(song)
                         }
                     }
                 }
@@ -349,8 +350,18 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
         return prefs.getStringSet("custom_music_folders_tree", setOf()) ?: setOf()
     }
 
-    // Combined method to get all songs from both MediaStore and custom folders
-suspend fun getAllSongsFromAllSources(): List<Song> = withContext(Dispatchers.IO) {
+    // Fast combined scan (no heavy metadata/AI), for quick UI population
+    suspend fun getAllSongsFromAllSourcesFast(): List<Song> = withContext(Dispatchers.IO) {
+        val mediaStoreSongs = getAllSongs()
+        val diskFolderSongs = scanCustomFolders()
+        val treeSongs = runCatching { scanDocumentTreesFast() }.getOrElse { emptyList() }
+        (mediaStoreSongs + diskFolderSongs + treeSongs)
+            .distinctBy { it.path }
+            .sortedBy { it.displayName }
+    }
+
+    // Combined method to get all songs from both MediaStore and custom folders (full metadata + AI)
+    suspend fun getAllSongsFromAllSources(): List<Song> = withContext(Dispatchers.IO) {
         com.stash.opusplayer.utils.LibraryScanTracker.update("Scanning your library…")
         val mediaStoreSongs = getAllSongsWithMetadata()
         val diskFolderSongs = scanCustomFolders()
@@ -397,8 +408,7 @@ private suspend fun scanDocumentTrees(): List<Song> = withContext(Dispatchers.IO
 if (isValidAudioFile(name) || child.type?.startsWith("audio/") == true) {
                     val uriStr = child.uri.toString()
                     metadataExtractor.extractBasicInfo(uriStr)?.let { base ->
-                        val withMeta = metadataExtractor.extractMetadata(base)
-                        val adjusted = withMeta.copy(
+                        val adjusted = base.copy(
                             relativePath = "$currentPath/"
                         )
                         out.add(adjusted)
@@ -406,6 +416,63 @@ if (isValidAudioFile(name) || child.type?.startsWith("audio/") == true) {
                 }
             }
         }
+    }
+
+    // Fast path: use MediaStore to list audio under primary storage tree URIs
+    private suspend fun scanDocumentTreesFast(): List<Song> = withContext(Dispatchers.IO) {
+        val result = mutableListOf<Song>()
+        val trees = getCustomMusicFolderTreeUris()
+        for (uriStr in trees) {
+            try {
+                val treeUri = android.net.Uri.parse(uriStr)
+                val docId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
+                if (docId != null && (docId.startsWith("primary:") || docId.matches(Regex("[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}:.*")))) {
+                    // Support both primary and removable storage UUID patterns
+                    val rel = docId.substringAfter(":", "")
+                    if (rel.isNotBlank()) {
+                        val likeArg = "$rel/%"
+                        val selection = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                            "${android.provider.MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?"
+                        } else {
+                            // Pre-Q fallback: DATA contains full path; best-effort substring match
+                            "${android.provider.MediaStore.Audio.Media.DATA} LIKE ?"
+                        }
+                        val args = arrayOf(likeArg)
+                        val projection = arrayOf(
+                            android.provider.MediaStore.Audio.Media._ID,
+                            android.provider.MediaStore.Audio.Media.TITLE,
+                            android.provider.MediaStore.Audio.Media.ARTIST,
+                            android.provider.MediaStore.Audio.Media.ALBUM,
+                            android.provider.MediaStore.Audio.Media.DURATION,
+                            android.provider.MediaStore.Audio.Media.DATA,
+                            android.provider.MediaStore.Audio.Media.ALBUM_ID,
+                            android.provider.MediaStore.Audio.Media.ARTIST_ID,
+                            android.provider.MediaStore.Audio.Media.DATE_ADDED,
+                            android.provider.MediaStore.Audio.Media.SIZE,
+                            android.provider.MediaStore.Audio.Media.MIME_TYPE,
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) android.provider.MediaStore.Audio.Media.RELATIVE_PATH else android.provider.MediaStore.Audio.Media.DATA
+                        )
+                        val cursor = context.contentResolver.query(
+                            android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                            projection,
+                            selection,
+                            args,
+                            "${android.provider.MediaStore.Audio.Media.DISPLAY_NAME} ASC"
+                        )
+                        cursor?.use { c ->
+                            while (c.moveToNext()) {
+                                createSongFromCursorCompat(c)?.let { s ->
+                                    if (isValidAudioFile(s.path)) result.add(s)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Fallback handled by the slow recursive scan elsewhere
+                }
+            } catch (_: Exception) {}
+        }
+        result
     }
     
     companion object {
