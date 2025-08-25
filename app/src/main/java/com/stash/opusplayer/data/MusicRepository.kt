@@ -330,24 +330,35 @@ class MusicRepository(private val context: Context) {
                 val treeUri = android.net.Uri.parse(uriStr)
                 val docTree = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
                 if (docTree != null && docTree.isDirectory) {
-                    scanDocumentTreeRecursive(docTree, result)
+                    val rootLabel = docTree.name ?: "Music"
+                    scanDocumentTreeRecursive(docTree, result, rootLabel, rootLabel)
                 }
             } catch (_: Exception) { }
         }
         result
     }
 
-    private fun scanDocumentTreeRecursive(dir: androidx.documentfile.provider.DocumentFile, out: MutableList<Song>) {
+    private fun scanDocumentTreeRecursive(
+        dir: androidx.documentfile.provider.DocumentFile,
+        out: MutableList<Song>,
+        rootLabel: String,
+        currentPath: String
+    ) {
         val children = dir.listFiles()
         for (child in children) {
             if (child.isDirectory) {
-                scanDocumentTreeRecursive(child, out)
+                val childName = child.name ?: "Folder"
+                scanDocumentTreeRecursive(child, out, rootLabel, "$currentPath/$childName")
             } else if (child.isFile) {
                 val name = child.name ?: continue
                 if (isValidAudioFile(name)) {
                     val uriStr = child.uri.toString()
-                    metadataExtractor.extractBasicInfo(uriStr)?.let { song ->
-                        out.add(metadataExtractor.extractMetadata(song))
+                    metadataExtractor.extractBasicInfo(uriStr)?.let { base ->
+                        val withMeta = metadataExtractor.extractMetadata(base)
+                        val adjusted = withMeta.copy(
+                            relativePath = "$currentPath/"
+                        )
+                        out.add(adjusted)
                     }
                 }
             }

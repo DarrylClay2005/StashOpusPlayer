@@ -12,6 +12,7 @@ import com.stash.opusplayer.databinding.FragmentFoldersBinding
 import com.stash.opusplayer.ui.adapters.FolderAdapter
 import kotlinx.coroutines.launch
 import java.io.File
+import android.net.Uri
 
 class FoldersFragment : Fragment() {
 
@@ -54,7 +55,10 @@ class FoldersFragment : Fragment() {
                 val folders = songs
                     .groupBy { song ->
                         if (song.path.startsWith("content://")) {
-                            song.relativePath.ifBlank { "Music/" }
+                            // Use relativePath set during SAF scan; fallback to content URI host
+                            val rp = song.relativePath.ifBlank { "Content/${Uri.parse(song.path).host ?: "Music"}/" }
+                            // Normalize leading/trailing slashes
+                            rp.trimStart('/').trimEnd('/')
                         } else {
                             File(song.path).parent ?: "/"
                         }
