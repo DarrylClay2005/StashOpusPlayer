@@ -138,15 +138,20 @@ class MetadataExtractor(private val context: Context) {
     }
     
     fun extractBasicInfo(filePath: String): Song? {
-        val file = File(filePath)
-        if (!file.exists()) return null
+        val isContent = filePath.startsWith("content://")
+        val file = if (!isContent) File(filePath) else null
+        if (!isContent && (file == null || !file.exists())) return null
         
         val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(filePath)
+            if (isContent) {
+                retriever.setDataSource(context, Uri.parse(filePath))
+            } else {
+                retriever.setDataSource(filePath)
+            }
             
             val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) 
-                ?: file.nameWithoutExtension
+                ?: (if (!isContent) file!!.nameWithoutExtension else "Unknown Title")
             val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST) 
                 ?: "Unknown Artist"
             val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM) 
@@ -160,9 +165,9 @@ class MetadataExtractor(private val context: Context) {
                 album = album,
                 duration = duration,
                 path = filePath,
-                size = file.length(),
-                mimeType = getMimeType(filePath),
-                dateAdded = file.lastModified()
+                size = if (!isContent) file!!.length() else 0L,
+                mimeType = if (!isContent) getMimeType(filePath) else "audio/*",
+                dateAdded = if (!isContent) file!!.lastModified() else 0L
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error extracting basic info for $filePath", e)

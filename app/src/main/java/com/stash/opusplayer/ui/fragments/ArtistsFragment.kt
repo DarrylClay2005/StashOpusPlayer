@@ -53,16 +53,20 @@ class ArtistsFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val songsByArtist = musicRepository.getSongsByArtist()
+                // Basic AI-like normalization: collapse Unknowns, trim whitespace
+                val normalized = songsByArtist.mapKeys { (artist, _) ->
+                    artist.trim().ifBlank { "Unknown Artist" }
+                }
                 val b = _binding ?: return@launch
                 if (songsByArtist.isNotEmpty()) {
                     // Convert to list of artist info
-                    val artistList = songsByArtist.map { (artist, songs) ->
+                    val artistList = normalized.map { (artist, songs) ->
                         ArtistInfo(
                             name = artist,
                             songCount = songs.size,
                             songs = songs
                         )
-                    }.sortedBy { it.name }
+                    }.sortedBy { it.name.lowercase() }
                     
                     artistAdapter.submitList(artistList)
                     b.recyclerView.visibility = View.VISIBLE

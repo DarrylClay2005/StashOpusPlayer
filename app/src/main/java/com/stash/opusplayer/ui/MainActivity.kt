@@ -70,6 +70,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         
         setupBottomNavigation()
         checkPermissionsAndSetup()
+
+        // Show loading overlay while scanning
+        showLoadingOverlay()
         
         // Check for updates on app start (AI will decide if/when to show)
         updateManager.checkForUpdates(this)
@@ -223,6 +226,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             binding.bottomNav.selectedItemId = R.id.nav_songs
             binding.navView.setCheckedItem(R.id.nav_music_library)
         }
+        hideLoadingOverlay()
     }
     
     override fun onNavigationItemSelected(item: android.view.MenuItem): Boolean {
@@ -256,6 +260,21 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         supportFragmentManager.beginTransaction()
             .replace(R.id.main_content, fragment)
             .commit()
+    }
+    private var loadingView: android.view.View? = null
+
+    private fun showLoadingOverlay() {
+        if (loadingView != null) return
+        val inflater = layoutInflater
+        loadingView = inflater.inflate(com.stash.opusplayer.R.layout.view_loading_screen, null)
+        (binding.root as android.view.ViewGroup).addView(loadingView)
+    }
+
+    private fun hideLoadingOverlay() {
+        loadingView?.let { view ->
+            (binding.root as android.view.ViewGroup).removeView(view)
+            loadingView = null
+        }
     }
     
     private fun showAboutDialog() {
