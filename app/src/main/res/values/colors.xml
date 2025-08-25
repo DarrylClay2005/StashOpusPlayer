@@ -35,6 +35,9 @@
     <color name="black">#000000</color>
     <color name="transparent">#00000000</color>
     <color name="semi_transparent">#80000000</color>
+    <color name="light_gray">#F5F5F5</color>
+    <color name="border_gray">#E0E0E0</color>
+    <color name="text_color_secondary">#757575</color>
     
     <!-- Gradient colors -->
     <color name="gradient_start">#6200EA</color>

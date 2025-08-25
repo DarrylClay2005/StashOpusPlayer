@@ -15,7 +15,14 @@ data class Song(
     val artistId: Long = -1,
     val dateAdded: Long = 0,
     val size: Long = 0,
-    val mimeType: String = ""
+    val mimeType: String = "",
+    val albumArt: String? = null,
+    val track: Int = 0,
+    val year: String = "",
+    val genre: String = "",
+    val bitrate: Int = 0,
+    val sampleRate: Int = 0,
+    val isFavorite: Boolean = false
 ) : Parcelable {
     
     val displayName: String

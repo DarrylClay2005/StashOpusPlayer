@@ -5,28 +5,30 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.stash.opusplayer.databinding.FragmentMusicLibraryBinding
+import com.stash.opusplayer.databinding.FragmentFavoritesBinding
 import com.stash.opusplayer.data.MusicRepository
 import com.stash.opusplayer.ui.MainActivity
 import com.stash.opusplayer.ui.adapters.SongAdapter
-import kotlinx.coroutines.*
+import com.stash.opusplayer.utils.MetadataExtractor
+import kotlinx.coroutines.launch
 
-class MusicLibraryFragment : Fragment() {
+class FavoritesFragment : Fragment() {
     
-    private var _binding: FragmentMusicLibraryBinding? = null
+    private var _binding: FragmentFavoritesBinding? = null
     private val binding get() = _binding!!
     
     private lateinit var songAdapter: SongAdapter
     private lateinit var musicRepository: MusicRepository
+    private lateinit var metadataExtractor: MetadataExtractor
     
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
-        _binding = FragmentMusicLibraryBinding.inflate(inflater, container, false)
+        _binding = FragmentFavoritesBinding.inflate(inflater, container, false)
         return binding.root
     }
     
@@ -34,25 +36,22 @@ class MusicLibraryFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         
         musicRepository = MusicRepository(requireContext())
+        metadataExtractor = MetadataExtractor(requireContext())
         setupRecyclerView()
-        loadSongs()
+        loadFavorites()
     }
     
     private fun setupRecyclerView() {
-        val metadataExtractor = com.stash.opusplayer.utils.MetadataExtractor(requireContext())
-        
         songAdapter = SongAdapter(
             onSongClick = { song ->
-                // Handle song click - play the song
+                // Play the favorite song
                 (activity as? MainActivity)?.playMusic(song)
             },
             onFavoriteToggle = { song ->
-                // Toggle favorite status
-                (activity as? MainActivity)?.toggleFavorite(song)
-                // Refresh the list after a short delay
-                CoroutineScope(Dispatchers.Main).launch {
-                    kotlinx.coroutines.delay(500)
-                    loadSongs()
+                // Remove from favorites
+                lifecycleScope.launch {
+                    musicRepository.removeFromFavorites(song.id)
+                    loadFavorites() // Refresh the list
                 }
             },
             onAddToPlaylist = { song ->
@@ -68,21 +67,17 @@ class MusicLibraryFragment : Fragment() {
         }
     }
     
-    private fun loadSongs() {
-        CoroutineScope(Dispatchers.Main).launch {
-            try {
-                val songs = musicRepository.getAllSongs()
-                if (songs.isNotEmpty()) {
-                    songAdapter.submitList(songs)
+    private fun loadFavorites() {
+        lifecycleScope.launch {
+            musicRepository.getFavorites().collect { favorites ->
+                if (favorites.isNotEmpty()) {
+                    songAdapter.submitList(favorites)
                     binding.recyclerView.visibility = View.VISIBLE
                     binding.emptyStateText.visibility = View.GONE
                 } else {
                     binding.recyclerView.visibility = View.GONE
                     binding.emptyStateText.visibility = View.VISIBLE
                 }
-            } catch (e: Exception) {
-                binding.recyclerView.visibility = View.GONE
-                binding.emptyStateText.visibility = View.VISIBLE
             }
         }
     }

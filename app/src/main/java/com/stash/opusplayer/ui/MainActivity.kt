@@ -15,8 +15,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GravityCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceManager
 import androidx.appcompat.app.AlertDialog
+import kotlinx.coroutines.launch
 import com.bumptech.glide.Glide
 import com.stash.opusplayer.BuildConfig
 import com.google.android.material.navigation.NavigationView
@@ -226,5 +228,31 @@ Check for updates anytime from Settings.""")
     }
     
     fun getUpdateManager() = updateManager
+    
+    // Music player functionality placeholders - these will be implemented with the full player UI
+    fun playMusic(song: com.stash.opusplayer.data.Song) {
+        // TODO: Implement with MusicPlayerManager
+        // For now, just show a toast
+        Toast.makeText(this, "Playing: ${song.displayName}", Toast.LENGTH_SHORT).show()
+    }
+    
+    fun addToPlaylist(song: com.stash.opusplayer.data.Song) {
+        // TODO: Implement playlist functionality
+        Toast.makeText(this, "Added to playlist: ${song.displayName}", Toast.LENGTH_SHORT).show()
+    }
+    
+    fun toggleFavorite(song: com.stash.opusplayer.data.Song) {
+        // TODO: Implement favorite toggle
+        lifecycleScope.launch {
+            val repository = com.stash.opusplayer.data.MusicRepository(this@MainActivity)
+            if (song.isFavorite) {
+                repository.removeFromFavorites(song.id)
+                Toast.makeText(this@MainActivity, "Removed from favorites", Toast.LENGTH_SHORT).show()
+            } else {
+                repository.addToFavorites(song)
+                Toast.makeText(this@MainActivity, "Added to favorites", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     
 }
