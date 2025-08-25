@@ -1,5 +1,11 @@
 # Changelog
 
+## 7.5.0 - 2025-08-25
+
+- UI: Extended card-based visual style to Artists, Genres, Playlists, and Folders items.
+- Now Playing: Added waveform-style progress bar with tap-to-seek; keeps legacy SeekBar hidden for compatibility.
+- Perf: Continued preference for cached artwork across views.
+
 ## 7.4.0 - 2025-08-25
 
 - Visual overhaul: refreshed palette (YouTube Music red -> SoundCloud orange), card-based lists, and blurred Now Playing backdrop.

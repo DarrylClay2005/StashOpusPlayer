@@ -164,11 +164,19 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/songInfoContainer">
 
-        <!-- Progress bar -->
+        <!-- Waveform progress (primary) -->
+        <com.stash.opusplayer.ui.widgets.WaveformProgressView
+            android:id="@+id/waveformView"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="4dp" />
+
+        <!-- Legacy SeekBar (hidden, kept for compatibility) -->
         <SeekBar
             android:id="@+id/seekBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:visibility="gone"
             android:max="100"
             android:progress="0"
             android:progressDrawable="@drawable/seek_bar_progress"
