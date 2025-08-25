@@ -49,7 +49,7 @@ class SettingsFragment : Fragment() {
 
         val tabs = com.google.android.material.tabs.TabLayout(requireContext()).apply {
             addTab(newTab().setText("General"))
-            addTab(newTab().setText("Pitch"))
+            addTab(newTab().setText("Audio"))
             tabGravity = com.google.android.material.tabs.TabLayout.GRAVITY_FILL
         }
         root.addView(tabs, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
@@ -59,7 +59,7 @@ class SettingsFragment : Fragment() {
 
         // Build the two pages as Views
         val generalView = buildGeneralContent()
-        val pitchView = buildPitchContent()
+        val pitchView = buildPitchContent() // Now includes Speed & Reverb too
 
         // Default to General tab
         contentContainer.addView(generalView)
@@ -310,14 +310,14 @@ class SettingsFragment : Fragment() {
         }
 
         val title = TextView(requireContext()).apply {
-            text = "Pitch / Semitones"
+            text = "Audio Controls"
             textSize = 22f
             setPadding(0, 0, 0, 16)
         }
         layout.addView(title)
 
         val desc = TextView(requireContext()).apply {
-            text = "Adjust global pitch in semitones. This applies to playback and persists across sessions."
+            text = "Adjust global audio: speed, pitch, and reverb. Applies live and persists across sessions."
             textSize = 14f
         }
         layout.addView(desc)
@@ -388,12 +388,119 @@ class SettingsFragment : Fragment() {
             updateLabel(0)
         }
 
+        // --- Playback Speed ---
+        val speedHeader = TextView(requireContext()).apply {
+            text = "Playback Speed"
+            textSize = 18f
+            setPadding(0, 24, 0, 8)
+        }
+        layout.addView(speedHeader)
+
+        val speedLabel = TextView(requireContext()).apply { text = "1.00x" }
+        layout.addView(speedLabel)
+
+        val savedSpeed = prefs.getFloat("playback_speed", 1.0f)
+        fun speedToProgress(sp: Float) = ((sp - 0.25f) * 100).toInt().coerceIn(0, 175) // 0.25..2.0
+        fun progressToSpeed(p: Int) = 0.25f + (p.toFloat() / 100f)
+
+        val speedSeek = SeekBar(requireContext()).apply {
+            max = 175
+            progress = speedToProgress(savedSpeed)
+        }
+        layout.addView(speedSeek)
+
+        fun applySpeed(sp: Float) {
+            // Persist
+            prefs.edit().putFloat("playback_speed", sp).apply()
+            speedLabel.text = String.format("%.2fx", sp)
+            // Apply live
+            mediaController?.let { controller ->
+                try {
+                    val cur = controller.playbackParameters
+                    controller.playbackParameters = androidx.media3.common.PlaybackParameters(sp, cur.pitch)
+                } catch (_: Exception) {}
+                try {
+                    controller.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_SPEED", android.os.Bundle.EMPTY),
+                        androidx.core.os.bundleOf("speed" to sp)
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+
+        speedSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val sp = progressToSpeed(progress)
+                speedLabel.text = String.format("%.2fx", sp)
+                if (fromUser) applySpeed(sp)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
         // Info note
         val note = TextView(requireContext()).apply {
-            text = "Note: Pitch adjustment is independent of speed. Some devices may exhibit minor artifacts at extreme values."
+            text = "Note: Pitch is independent of speed. Some devices may exhibit artifacts at extreme values."
             textSize = 12f
         }
         layout.addView(note)
+
+        // --- Reverb ---
+        val reverbHeader = TextView(requireContext()).apply {
+            text = "Reverb"
+            textSize = 18f
+            setPadding(0, 24, 0, 8)
+        }
+        layout.addView(reverbHeader)
+
+        val reverbLabel = TextView(requireContext()).apply { text = "Reverb 0%" }
+        layout.addView(reverbLabel)
+
+        val savedPreset = prefs.getInt("reverb_preset", 0)
+        val reverbSeek = SeekBar(requireContext()).apply {
+            max = 1000
+            progress = when (savedPreset) {
+                0 -> 0
+                1 -> 150
+                2 -> 300
+                3 -> 500
+                4 -> 750
+                5 -> 900
+                else -> 980
+            }
+        }
+        layout.addView(reverbSeek)
+
+        fun applyReverbPresetFromProgress(p: Int) {
+            reverbLabel.text = "Reverb ${p / 10}%"
+            val preset: Short = when {
+                p < 50 -> 0
+                p < 200 -> 1
+                p < 400 -> 2
+                p < 600 -> 3
+                p < 800 -> 4
+                p < 950 -> 5
+                else -> 6
+            }.toShort()
+            prefs.edit().putInt("reverb_preset", preset.toInt()).apply()
+            mediaController?.let { controller ->
+                try {
+                    controller.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_REVERB", android.os.Bundle.EMPTY),
+                        androidx.core.os.bundleOf("preset" to preset.toInt())
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+
+        reverbSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) applyReverbPresetFromProgress(progress)
+                else reverbLabel.text = "Reverb ${progress / 10}%"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
 
         scrollView.addView(layout)
         return scrollView

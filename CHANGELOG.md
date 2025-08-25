@@ -1,5 +1,10 @@
 # Changelog
 
+## 7.6.0 - 2025-08-25
+
+- Moved audio controls (speed, pitch, reverb) from Now Playing into Settings -> Audio.
+- Persisted reverb preset across sessions; cleaned up duplicate controls in Now Playing.
+
 ## 7.5.0 - 2025-08-25
 
 - UI: Extended card-based visual style to Artists, Genres, Playlists, and Folders items.
