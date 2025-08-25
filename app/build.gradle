@@ -5,6 +5,9 @@ plugins {
     id 'kotlin-kapt'
 }
 
+// Enable Google Play publishing plugin
+apply plugin: 'com.github.triplet.play'
+
 android {
     namespace 'com.stash.opusplayer'
     compileSdk 34
@@ -58,6 +61,19 @@ android {
     lint {
         abortOnError false
         checkReleaseBuilds false
+    }
+}
+
+// Configure Gradle Play Publisher. Credentials path is provided via env var GPP_SERVICE_ACCOUNT_JSON.
+play {
+    // Use AAB by default for publishing
+    defaultToAppBundles.set(true)
+    // Target the production track for release
+    track.set("production")
+    // Optional: infer credentials from env var; if absent, publishing will prompt/fail gracefully
+    def creds = System.getenv("GPP_SERVICE_ACCOUNT_JSON")
+    if (creds != null && creds.length() > 0) {
+        serviceAccountCredentials.set(file(creds))
     }
 }
 
