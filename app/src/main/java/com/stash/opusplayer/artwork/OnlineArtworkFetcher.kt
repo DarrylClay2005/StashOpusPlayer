@@ -72,8 +72,7 @@ class ArtworkCache(private val context: Context) {
             val finalOpts = BitmapFactory.Options().apply {
                 inJustDecodeBounds = false
                 inSampleSize = if (inSample <= 0) 1 else inSample
-                inPreferredConfig = Bitmap.Config.RGB_565
-                inDither = true
+inPreferredConfig = Bitmap.Config.RGB_565 // smaller than ARGB_8888
             }
             BitmapFactory.decodeFile(file.absolutePath, finalOpts)
         } catch (_: Throwable) {

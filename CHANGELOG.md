@@ -1,5 +1,12 @@
 # Changelog
 
+## 6.0.0 - 2025-08-25
+
+- Major stability pass: removed deprecated APIs, improved lifecycle collection with repeatOnLifecycle
+- Polished loading and folder refresh UX; Folders tab supports pull-to-refresh
+- AI artist/genre tagging refined and integrated into repository flow
+- Release artifacts: APK and AAB
+
 ## 5.0.5 - 2025-08-25
 
 - Fixed: Folders tab now shows added folder tree directories (SAF) and supports pull-to-refresh

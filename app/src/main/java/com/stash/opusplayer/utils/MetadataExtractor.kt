@@ -76,8 +76,7 @@ class MetadataExtractor(private val context: Context) {
             val options = BitmapFactory.Options().apply {
                 inJustDecodeBounds = false
                 inSampleSize = sampleSize
-                inPreferredConfig = Bitmap.Config.RGB_565 // smaller than ARGB_8888
-                inDither = true
+inPreferredConfig = Bitmap.Config.RGB_565 // smaller than ARGB_8888
             }
 
             val bitmap = BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size, options) ?: return null
