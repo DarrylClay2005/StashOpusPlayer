@@ -1,5 +1,17 @@
 # Changelog
 
+## 5.0.5 - 2025-08-25
+
+- Fixed: Folders tab now shows added folder tree directories (SAF) and supports pull-to-refresh
+- New: Informative loading screen with live progress (library scan, AI tagging, image downloads)
+- New: AI auto-assignment for Artist and Genre
+  - Heuristic filename/folder parsing for artists
+  - Last.fm tag fetch for genres when API key is provided (optional)
+- Improved: Artists and Genres tabs reflect AI-enhanced metadata
+- Misc: Minor UI polish, download banner for image fetch activity
+
+# Changelog
+
 ## Version 5.3.0 (2025-08-25)
 
 ### Added

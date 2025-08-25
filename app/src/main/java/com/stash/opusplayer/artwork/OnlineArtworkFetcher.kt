@@ -123,7 +123,9 @@ class OnlineArtworkFetcher(context: Context) {
             val cached = cache.fileFor(song)
             if (cached.exists()) return@withContext cached
 
-            // Try MusicBrainz + CAA
+            com.stash.opusplayer.utils.ImageDownloadTracker.begin()
+            try {
+                // Try MusicBrainz + CAA
             val mbid = searchMusicBrainzRecording(song)
             if (mbid != null) {
                 downloadCoverArtArchive(mbid)?.let { bytes ->
@@ -134,6 +136,9 @@ class OnlineArtworkFetcher(context: Context) {
             // Fallback: iTunes artwork
             fetchFromITunes(song)?.let { bytes ->
                 if (cache.saveJpeg(bytes, cached)) return@withContext cached
+            }
+            } finally {
+                com.stash.opusplayer.utils.ImageDownloadTracker.end()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Artwork fetch error", e)

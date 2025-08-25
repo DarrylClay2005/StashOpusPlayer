@@ -14,6 +14,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.common.PlaybackParameters
+import android.media.audiofx.PresetReverb
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.stash.opusplayer.R
@@ -31,6 +33,10 @@ class MusicService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private lateinit var player: ExoPlayer
     private lateinit var equalizerManager: EqualizerManager
+    private var presetReverb: PresetReverb? = null
+    private var currentSpeed: Float = 1.0f
+    private var currentPitch: Float = 1.0f
+    private var currentReverb: Short = 0
     private lateinit var notificationManager: NotificationManager
     
     override fun onCreate() {
@@ -81,6 +87,15 @@ class MusicService : MediaSessionService() {
         player.audioSessionId.let { sessionId ->
             if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
                 equalizerManager.initialize(sessionId)
+                try {
+                    presetReverb?.release()
+                } catch (_: Exception) {}
+                try {
+                    presetReverb = PresetReverb(0, sessionId).apply {
+                        enabled = true
+                        preset = currentReverb
+                    }
+                } catch (_: Exception) {}
             }
         }
     }
@@ -236,6 +251,22 @@ class MusicService : MediaSessionService() {
     }
     
     fun getEqualizerManager(): EqualizerManager = equalizerManager
+
+    // Live controls
+    fun setPlaybackSpeed(speed: Float) {
+        currentSpeed = speed
+        try { player.playbackParameters = PlaybackParameters(currentSpeed, currentPitch) } catch (_: Exception) {}
+    }
+
+    fun setPlaybackPitch(pitch: Float) {
+        currentPitch = pitch
+        try { player.playbackParameters = PlaybackParameters(currentSpeed, currentPitch) } catch (_: Exception) {}
+    }
+
+    fun setReverbPreset(preset: Short) {
+        currentReverb = preset
+        try { presetReverb?.preset = preset } catch (_: Exception) {}
+    }
     
     override fun onDestroy() {
         equalizerManager.release()

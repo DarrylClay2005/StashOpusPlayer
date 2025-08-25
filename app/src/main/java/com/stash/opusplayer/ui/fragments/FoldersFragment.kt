@@ -34,7 +34,8 @@ class FoldersFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         repository = MusicRepository(requireContext())
-        setupRecyclerView()
+setupRecyclerView()
+        setupRefresh()
         loadFolders()
     }
 
@@ -49,6 +50,12 @@ class FoldersFragment : Fragment() {
         binding.recyclerView.apply {
             layoutManager = LinearLayoutManager(requireContext())
             adapter = this@FoldersFragment.adapter
+        }
+}
+
+    private fun setupRefresh() {
+        binding.swipeRefresh.setOnRefreshListener {
+            loadFolders()
         }
     }
 
@@ -72,16 +79,19 @@ class FoldersFragment : Fragment() {
                 val b = _binding ?: return@launch
                 if (folders.isNotEmpty()) {
                     adapter.submitList(folders)
-                    b.recyclerView.visibility = View.VISIBLE
+b.recyclerView.visibility = View.VISIBLE
                     b.emptyStateText.visibility = View.GONE
+                    b.swipeRefresh.isRefreshing = false
                 } else {
-                    b.recyclerView.visibility = View.GONE
+b.recyclerView.visibility = View.GONE
                     b.emptyStateText.visibility = View.VISIBLE
+                    b.swipeRefresh.isRefreshing = false
                 }
             } catch (_: Exception) {
                 val b = _binding ?: return@launch
-                b.recyclerView.visibility = View.GONE
+b.recyclerView.visibility = View.GONE
                 b.emptyStateText.visibility = View.VISIBLE
+                b.swipeRefresh.isRefreshing = false
             }
         }
     }
