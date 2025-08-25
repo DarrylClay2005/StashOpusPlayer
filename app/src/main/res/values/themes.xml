@@ -30,7 +30,7 @@
     <style name="Theme.StashOpusPlayer.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/background_color</item>
         <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
-        <item name="windowSplashScreenAnimationDuration">300</item>
+<item name="windowSplashScreenAnimationDuration">500</item>
         <item name="postSplashScreenTheme">@style/Theme.StashOpusPlayer</item>
     </style>
 
