@@ -202,21 +202,43 @@ class NowPlayingActivity : AppCompatActivity() {
         binding.artistName.text = song.artistName
         binding.albumName.text = song.albumName
         
-        // Load album artwork
-        if (!song.albumArt.isNullOrEmpty()) {
-            val bitmap = metadataExtractor.decodeAlbumArt(song.albumArt)
-            if (bitmap != null) {
+        // Load album artwork (embedded or cached/online)
+        val embedded = metadataExtractor.decodeAlbumArt(song.albumArt)
+        if (embedded != null) {
+            Glide.with(this)
+                .load(embedded)
+                .placeholder(R.drawable.ic_music_note)
+                .error(R.drawable.ic_music_note)
+                .centerCrop()
+                .into(binding.albumArtwork)
+        } else {
+            // First try cached artwork synchronously for instant UI
+            val cached = metadataExtractor.loadCachedArtwork(this, song)
+            if (cached != null) {
                 Glide.with(this)
-                    .load(bitmap)
-                    .placeholder(R.drawable.ic_music_note)
-                    .error(R.drawable.ic_music_note)
+                    .load(cached)
                     .centerCrop()
                     .into(binding.albumArtwork)
             } else {
                 setDefaultArtwork()
             }
-        } else {
-            setDefaultArtwork()
+            // Then try online in background if enabled
+            val prefs = getSharedPreferences("settings", 0)
+            val allowOnline = prefs.getBoolean("fetch_artwork_online", true)
+            if (allowOnline) {
+                lifecycleScope.launch {
+                    val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingActivity)
+                    val file = fetcher.getOrFetch(song)
+                    if (file != null && song == currentSong) {
+                        Glide.with(this@NowPlayingActivity)
+                            .load(file)
+                            .placeholder(R.drawable.ic_music_note)
+                            .error(R.drawable.ic_music_note)
+                            .centerCrop()
+                            .into(binding.albumArtwork)
+                    }
+                }
+            }
         }
         
         updateFavoriteButton(song.isFavorite)

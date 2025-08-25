@@ -150,21 +150,43 @@ class MiniPlayerView @JvmOverloads constructor(
         binding.miniSongTitle.text = song.displayName
         binding.miniArtistName.text = song.artistName
 
-        // Load album artwork
-        if (!song.albumArt.isNullOrEmpty()) {
-            val bitmap = metadataExtractor.decodeAlbumArt(song.albumArt)
-            if (bitmap != null) {
+        // Load album artwork (embedded or cached/online)
+        val embedded = metadataExtractor.decodeAlbumArt(song.albumArt)
+        if (embedded != null) {
+            Glide.with(context)
+                .load(embedded)
+                .placeholder(R.drawable.ic_music_note)
+                .error(R.drawable.ic_music_note)
+                .centerCrop()
+                .into(binding.miniAlbumArt)
+        } else {
+            // First try cached artwork synchronously
+            val cached = metadataExtractor.loadCachedArtwork(context, song)
+            if (cached != null) {
                 Glide.with(context)
-                    .load(bitmap)
-                    .placeholder(R.drawable.ic_music_note)
-                    .error(R.drawable.ic_music_note)
+                    .load(cached)
                     .centerCrop()
                     .into(binding.miniAlbumArt)
             } else {
                 setDefaultArtwork()
             }
-        } else {
-            setDefaultArtwork()
+            // Then try online in background if enabled
+            val prefs = context.getSharedPreferences("settings", 0)
+            val allowOnline = prefs.getBoolean("fetch_artwork_online", true)
+            if (allowOnline) {
+                lifecycleOwner?.lifecycleScope?.launch {
+                    val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
+                    val file = fetcher.getOrFetch(song)
+                    if (file != null && song == currentSong) {
+                        Glide.with(context)
+                            .load(file)
+                            .placeholder(R.drawable.ic_music_note)
+                            .error(R.drawable.ic_music_note)
+                            .centerCrop()
+                            .into(binding.miniAlbumArt)
+                    }
+                }
+            }
         }
     }
 

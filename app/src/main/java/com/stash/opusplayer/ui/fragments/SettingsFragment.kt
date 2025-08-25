@@ -62,6 +62,25 @@ class SettingsFragment : Fragment() {
             }
         }
         layout.addView(autoCheckToggle)
+
+        // Online Artwork Section
+        addSectionHeader(layout, "Album Artwork")
+        val artworkToggle = CheckBox(requireContext()).apply {
+            text = "Fetch album art online when missing"
+            isChecked = true
+            setOnCheckedChangeListener { _, isChecked ->
+                // Persist in shared preferences for now (simple)
+                val prefs = requireContext().getSharedPreferences("settings", 0)
+                prefs.edit().putBoolean("fetch_artwork_online", isChecked).apply()
+            }
+        }
+        layout.addView(artworkToggle)
+        
+        val providerHint = TextView(requireContext()).apply {
+            text = "Uses MusicBrainz + Cover Art Archive with iTunes fallback."
+            textSize = 12f
+        }
+        layout.addView(providerHint)
         
         // Check frequency
         val frequencyLabel = TextView(requireContext()).apply {

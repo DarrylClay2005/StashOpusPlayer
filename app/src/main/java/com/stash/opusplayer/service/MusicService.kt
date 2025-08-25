@@ -157,7 +157,7 @@ class MusicService : MediaSessionService() {
             .setContentTitle(mediaMetadata.title ?: "Unknown Title")
             .setContentText(mediaMetadata.artist ?: "Unknown Artist")
             .setSubText(mediaMetadata.albumTitle ?: "Unknown Album")
-            .setLargeIcon(null as android.graphics.Bitmap?) // TODO: Load album art
+            .setLargeIcon(getCurrentLargeIcon())
             .setSmallIcon(R.drawable.ic_music_note)
             .setContentIntent(createContentIntent())
             .setDeleteIntent(createMediaActionPendingIntent("STOP"))
@@ -209,6 +209,29 @@ class MusicService : MediaSessionService() {
     private fun updateNotification() {
         if (player.playbackState != Player.STATE_IDLE) {
             notificationManager.notify(NOTIFICATION_ID, createNotification())
+        }
+    }
+    
+    private fun getCurrentLargeIcon(): android.graphics.Bitmap? {
+        // Attempt to retrieve cached artwork for current media item using minimal overhead.
+        // We derive a pseudo Song-like structure from MediaMetadata for cache key stability.
+        val title = player.mediaMetadata.title?.toString() ?: ""
+        val artist = player.mediaMetadata.artist?.toString() ?: ""
+        val album = player.mediaMetadata.albumTitle?.toString() ?: ""
+        if (title.isBlank() && artist.isBlank() && album.isBlank()) return null
+        return try {
+            val fakeSong = com.stash.opusplayer.data.Song(
+                id = 0L,
+                title = title,
+                artist = artist,
+                album = album,
+                duration = 0L,
+                path = ""
+            )
+            val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
+            cache.loadBitmapIfPresent(fakeSong)
+        } catch (_: Exception) {
+            null
         }
     }
     

@@ -1,5 +1,19 @@
 # Stash Opus Player
 
+## Online Album Artwork (New)
+
+When embedded artwork is missing, the player can fetch cover images online based on the current song's title and artist.
+
+- Sources: MusicBrainz + Cover Art Archive (primary), iTunes Search (fallback)
+- Caching: Images are stored under the app cache at runtime; subsequent plays load instantly.
+- Toggle: Settings -> Album Artwork -> "Fetch album art online when missing"
+- Privacy: Only the title/artist are sent as query terms. No audio files are uploaded.
+
+Notes:
+- A network connection is required. Respect provider rate limits.
+- The app uses a generic User-Agent compliant with MusicBrainz guidelines.
+- You can clear app cache to remove downloaded artwork.
+
 A visually appealing Android music player with advanced features and support for multiple audio formats.
 
 ## Features
