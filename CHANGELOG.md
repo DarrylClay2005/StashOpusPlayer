@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.0.1 - 2025-08-25
+
+- Removed legacy loading overlay entirely
+- Added Android SplashScreen on startup (500ms); simplified startup flow
+- Minor cleanup and stability improvements
+
 ## 6.0.0 - 2025-08-25
 
 - Major stability pass: removed deprecated APIs, improved lifecycle collection with repeatOnLifecycle
