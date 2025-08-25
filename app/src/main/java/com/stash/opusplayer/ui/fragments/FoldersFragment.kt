@@ -39,8 +39,12 @@ class FoldersFragment : Fragment() {
     }
 
     private fun setupRecyclerView() {
-        adapter = FolderAdapter { _ ->
-            // TODO: navigate to folder detail list if needed
+        adapter = FolderAdapter { info ->
+            val fragment = FolderDetailFragment.newInstance(info.path, ArrayList(info.songs))
+            parentFragmentManager.beginTransaction()
+                .replace(com.stash.opusplayer.R.id.main_content, fragment)
+                .addToBackStack(null)
+                .commit()
         }
         binding.recyclerView.apply {
             layoutManager = LinearLayoutManager(requireContext())

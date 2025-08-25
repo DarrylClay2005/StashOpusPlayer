@@ -165,6 +165,17 @@ class SettingsFragment : Fragment() {
             setOnClickListener { clearArtworkCache() }
         }
         layout.addView(clearCacheButton)
+
+        val bgRescanToggle = CheckBox(requireContext()).apply {
+            text = "Enable background rescans"
+            isChecked = true
+            setOnCheckedChangeListener { _, isChecked ->
+                val prefs = requireContext().getSharedPreferences("settings", 0)
+                prefs.edit().putBoolean("enable_background_rescans", isChecked).apply()
+                Toast.makeText(requireContext(), if (isChecked) "Background rescans enabled" else "Background rescans disabled", Toast.LENGTH_SHORT).show()
+            }
+        }
+        layout.addView(bgRescanToggle)
         
         // Check frequency
         val frequencyLabel = TextView(requireContext()).apply {
