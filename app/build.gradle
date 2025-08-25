@@ -16,8 +16,8 @@ android {
         applicationId "com.stash.opusplayer"
         minSdk 21
         targetSdk 34
-        versionCode 29
-        versionName "7.3.1"
+        versionCode 30
+        versionName "7.4.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -78,6 +78,8 @@ play {
 }
 
 dependencies {
+    // Glide transformations for blurred backdrops, etc.
+    implementation 'jp.wasabeef:glide-transformations:4.3.0'
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.core:core-splashscreen:1.0.1'
     implementation 'androidx.appcompat:appcompat:1.6.1'

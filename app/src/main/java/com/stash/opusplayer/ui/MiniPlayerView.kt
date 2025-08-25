@@ -149,10 +149,16 @@ class MiniPlayerView @JvmOverloads constructor(
     private fun displaySongInfo(song: Song) {
         binding.miniSongTitle.text = song.displayName
         binding.miniArtistName.text = song.artistName
-
-        // Load album artwork (embedded or cached/online)
+        
+        // Load album artwork (prefer cached, fallback to embedded/online)
+        val cached = metadataExtractor.loadCachedArtwork(context, song)
         val embedded = metadataExtractor.decodeAlbumArt(song.albumArt)
-        if (embedded != null) {
+        if (cached != null) {
+            Glide.with(context)
+                .load(cached)
+                .centerCrop()
+                .into(binding.miniAlbumArt)
+        } else if (embedded != null) {
             Glide.with(context)
                 .load(embedded)
                 .placeholder(R.drawable.ic_music_note)
@@ -160,31 +166,22 @@ class MiniPlayerView @JvmOverloads constructor(
                 .centerCrop()
                 .into(binding.miniAlbumArt)
         } else {
-            // First try cached artwork synchronously
-            val cached = metadataExtractor.loadCachedArtwork(context, song)
-            if (cached != null) {
-                Glide.with(context)
-                    .load(cached)
-                    .centerCrop()
-                    .into(binding.miniAlbumArt)
-            } else {
-                setDefaultArtwork()
-            }
-            // Then try online in background if enabled
-            val prefs = context.getSharedPreferences("settings", 0)
-            val allowOnline = prefs.getBoolean("fetch_artwork_online", true)
-            if (allowOnline) {
-                lifecycleOwner?.lifecycleScope?.launch {
-                    val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
-                    val file = fetcher.getOrFetch(song)
-                    if (file != null && song == currentSong) {
-                        Glide.with(context)
-                            .load(file)
-                            .placeholder(R.drawable.ic_music_note)
-                            .error(R.drawable.ic_music_note)
-                            .centerCrop()
-                            .into(binding.miniAlbumArt)
-                    }
+            setDefaultArtwork()
+        }
+        // Try online in background if enabled
+        val prefs = context.getSharedPreferences("settings", 0)
+        val allowOnline = prefs.getBoolean("fetch_artwork_online", true)
+        if (allowOnline) {
+            lifecycleOwner?.lifecycleScope?.launch {
+                val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
+                val file = fetcher.getOrFetch(song)
+                if (file != null && song == currentSong) {
+                    Glide.with(context)
+                        .load(file)
+                        .placeholder(R.drawable.ic_music_note)
+                        .error(R.drawable.ic_music_note)
+                        .centerCrop()
+                        .into(binding.miniAlbumArt)
                 }
             }
         }

@@ -7,6 +7,29 @@
     android:background="@color/background_primary"
     tools:context=".ui.NowPlayingActivity">
 
+    <!-- Blurred backdrop from album art -->
+    <ImageView
+        android:id="@+id/backdropImage"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:scaleType="centerCrop"
+        android:alpha="0.35"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Subtle gradient overlay -->
+    <View
+        android:id="@+id/backdropScrim"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@drawable/gradient_overlay"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
     <!-- Status bar gradient -->
     <View
         android:id="@+id/statusBarGradient"
