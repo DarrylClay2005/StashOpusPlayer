@@ -1,5 +1,20 @@
 # Changelog
 
+## Version 5.0.1 (2025-08-25)
+
+### Added
+- Online album artwork fetching when embedded art is missing
+  - Providers: MusicBrainz + Cover Art Archive (primary), iTunes Search (fallback)
+  - On-device cache with deterministic keys and downsampled loads
+  - Settings toggle: Settings -> Album Artwork -> "Fetch album art online when missing"
+  - Notification large icon now uses cached artwork when available
+
+### Changed
+- Minor dependency tidy (deduplicated Gson)
+- Updated User-Agent for external requests
+
+---
+
 ## Version 2.0 (2025-08-25)
 
 ### 🔧 **Fixed**

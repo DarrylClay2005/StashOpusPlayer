@@ -126,6 +126,16 @@ class MetadataExtractor(private val context: Context) {
             null
         }
     }
+
+    fun loadCachedArtwork(context: Context, song: Song, maxDim: Int = MAX_ART_DIMENSION): Bitmap? {
+        return try {
+            val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
+            cache.loadBitmapIfPresent(song, maxDim)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading cached artwork", e)
+            null
+        }
+    }
     
     fun extractBasicInfo(filePath: String): Song? {
         val file = File(filePath)
