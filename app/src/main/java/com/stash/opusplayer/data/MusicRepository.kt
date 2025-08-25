@@ -364,10 +364,14 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
     suspend fun getAllSongsFromAllSourcesFast(): List<Song> = withContext(Dispatchers.IO) {
         val mediaStoreSongs = getAllSongs()
         val diskFolderSongs = scanCustomFolders()
-        val treeSongs = runCatching { scanDocumentTreesFast() }.getOrElse { emptyList() }
-        (mediaStoreSongs + diskFolderSongs + treeSongs)
-            .distinctBy { it.path }
-            .sortedBy { it.displayName }
+        // Do not include treeSongs here; MediaStore query already covers them and caused duplicates in "All songs"
+        val combined = mediaStoreSongs + diskFolderSongs
+        val deduped = LinkedHashMap<String, Song>()
+        for (s in combined) {
+            val key = stableKey(s)
+            if (!deduped.containsKey(key)) deduped[key] = s
+        }
+        deduped.values.sortedBy { it.displayName }
     }
 
     // Combined method to get all songs from both MediaStore and custom folders (full metadata + AI)
@@ -378,14 +382,14 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
         // Then enrich each with metadata and AI
         val enriched = fast.map { s -> metadataExtractor.extractMetadata(s) }
         val ai = aiTagger.enhanceSongs(enriched)
-        val mediaStoreSongs = emptyList<Song>()
-        val diskFolderSongs = emptyList<Song>()
-        val treeSongs = emptyList<Song>()
-        
-val combined = ai
-            .distinctBy { it.path }
+        // Deduplicate using a stable key across sources (MediaStore vs file scans)
+        val deduped = LinkedHashMap<String, Song>()
+        for (s in ai) {
+            val key = stableKey(s)
+            if (!deduped.containsKey(key)) deduped[key] = s
+        }
         com.stash.opusplayer.utils.LibraryScanTracker.update("Finalizing…")
-        combined.sortedBy { it.displayName }
+        deduped.values.sortedBy { it.displayName }
     }
 
 private suspend fun scanDocumentTrees(): List<Song> = withContext(Dispatchers.IO) {
@@ -488,6 +492,24 @@ if (isValidAudioFile(name) || child.type?.startsWith("audio/") == true) {
         result
     }
     
+    private fun stableKey(song: Song): String {
+        return try {
+            // Prefer MediaStore ID when available (covers content:// and MediaStore-backed scans)
+            if (song.id > 0L) {
+                "msid:${song.id}"
+            } else if (!song.path.startsWith("content://")) {
+                // Use normalized absolute path when accessible
+                "path:${song.path.lowercase()}"
+            } else {
+                // Fallback: filename + size + duration heuristic
+                val name = try { java.io.File(song.path).name.lowercase() } catch (_: Exception) { song.displayName.lowercase() }
+                "meta:$name|${song.size}|${song.duration}"
+            }
+        } catch (_: Exception) {
+            "path:${song.path}"
+        }
+    }
+
     companion object {
         private val PROJECTION = arrayOf(
             MediaStore.Audio.Media._ID,
