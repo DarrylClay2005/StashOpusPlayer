@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary colors -->
+    <color name="primary_color">#6200EA</color>
+    <color name="primary_dark_color">#3700B3</color>
+    <color name="primary_light_color">#BB86FC</color>
+    
+    <!-- Secondary colors -->
+    <color name="secondary_color">#03DAC6</color>
+    <color name="secondary_dark_color">#018786</color>
+    <color name="secondary_light_color">#66FFF5</color>
+    
+    <!-- Background colors -->
+    <color name="background_color">#121212</color>
+    <color name="surface_color">#1E1E1E</color>
+    <color name="card_background">#2A2A2A</color>
+    
+    <!-- Text colors -->
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#B3B3B3</color>
+    <color name="text_hint">#808080</color>
+    
+    <!-- Control colors -->
+    <color name="control_normal">#FFFFFF</color>
+    <color name="control_active">#6200EA</color>
+    <color name="control_disabled">#666666</color>
+    
+    <!-- Status colors -->
+    <color name="success_color">#4CAF50</color>
+    <color name="warning_color">#FF9800</color>
+    <color name="error_color">#F44336</color>
+    
+    <!-- Common colors -->
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+    <color name="transparent">#00000000</color>
+    <color name="semi_transparent">#80000000</color>
+    
+    <!-- Gradient colors -->
+    <color name="gradient_start">#6200EA</color>
+    <color name="gradient_end">#03DAC6</color>
+</resources>
