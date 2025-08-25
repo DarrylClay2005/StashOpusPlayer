@@ -42,7 +42,7 @@ class UpdateChecker(private val context: Context) {
     suspend fun checkForUpdates(forceCheck: Boolean = false): UpdateCheckResult = withContext(Dispatchers.IO) {
         try {
             // AI Decision: Should we check for updates now?
-            if (!forceCheck && !aiAnalyzer.shouldCheckForUpdates(context, prefs)) {
+            if (!forceCheck && !aiAnalyzer.shouldCheckForUpdates(prefs)) {
                 return@withContext UpdateCheckResult.NoCheckNeeded
             }
             

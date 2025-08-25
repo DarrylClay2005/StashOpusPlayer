@@ -1,6 +1,7 @@
 package com.stash.opusplayer.ui
 
 import android.content.ComponentName
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -48,9 +49,15 @@ class NowPlayingActivity : AppCompatActivity() {
         setupPlayerManager()
         
         // Get song from intent
-        intent.getParcelableExtra<Song>("song")?.let { song ->
-            currentSong = song
-            displaySongInfo(song)
+        val song: Song? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra("song", Song::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra<Song>("song")
+        }
+        song?.let {
+            currentSong = it
+            displaySongInfo(it)
         }
     }
     

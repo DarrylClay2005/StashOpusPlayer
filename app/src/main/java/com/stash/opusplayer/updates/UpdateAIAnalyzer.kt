@@ -31,7 +31,7 @@ class UpdateAIAnalyzer {
      * AI Decision: Should we check for updates now?
      * Considers user behavior, timing, and preferences
      */
-    fun shouldCheckForUpdates(context: Context, prefs: SharedPreferences): Boolean {
+    fun shouldCheckForUpdates(prefs: SharedPreferences): Boolean {
         val autoCheckEnabled = prefs.getBoolean("auto_update_check", true)
         if (!autoCheckEnabled) return false
         

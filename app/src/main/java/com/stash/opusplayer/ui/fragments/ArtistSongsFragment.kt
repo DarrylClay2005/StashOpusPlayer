@@ -44,7 +44,12 @@ class ArtistSongsFragment : Fragment() {
         super.onCreate(savedInstanceState)
         arguments?.let {
             artistName = it.getString(ARG_ARTIST_NAME, "")
-            songs = it.getParcelableArrayList<Song>(ARG_SONGS) ?: emptyList()
+            songs = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                it.getParcelableArrayList(ARG_SONGS, Song::class.java) ?: emptyList()
+            } else {
+                @Suppress("DEPRECATION")
+                it.getParcelableArrayList<Song>(ARG_SONGS) ?: emptyList()
+            }
         }
     }
     
