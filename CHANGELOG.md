@@ -1,5 +1,11 @@
 # Changelog
 
+## 7.4.0 - 2025-08-25
+
+- Visual overhaul: refreshed palette (YouTube Music red -> SoundCloud orange), card-based lists, and blurred Now Playing backdrop.
+- UX: Polished Now Playing layout with gradient scrim and clearer controls.
+- Performance: Prefer cached artwork across the app; reduced per-bind decode work.
+
 ## 7.3.1 - 2025-08-25
 
 - Performance: Song list thumbnails now prefer cached artwork for faster binds; fallback to embedded art when cache is missing.

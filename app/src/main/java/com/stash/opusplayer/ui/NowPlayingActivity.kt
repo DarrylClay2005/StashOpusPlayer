@@ -286,41 +286,59 @@ mediaController?.sendCustomCommand(
         binding.artistName.text = song.artistName
         binding.albumName.text = song.albumName
         
-        // Load album artwork (embedded or cached/online)
+        // Load album artwork (prefer cached for speed; fallback to embedded/online)
+        val cached = metadataExtractor.loadCachedArtwork(this, song)
         val embedded = metadataExtractor.decodeAlbumArt(song.albumArt)
-        if (embedded != null) {
+        if (cached != null) {
+            Glide.with(this)
+                .load(cached)
+                .centerCrop()
+                .into(binding.albumArtwork)
+            // Set blurred backdrop
+            try {
+                Glide.with(this)
+                    .load(cached)
+                    .apply(com.bumptech.glide.request.RequestOptions.bitmapTransform(jp.wasabeef.glide.transformations.BlurTransformation(25, 3)))
+                    .into(binding.backdropImage)
+            } catch (_: Exception) {}
+        } else if (embedded != null) {
             Glide.with(this)
                 .load(embedded)
                 .placeholder(R.drawable.ic_music_note)
                 .error(R.drawable.ic_music_note)
                 .centerCrop()
                 .into(binding.albumArtwork)
-        } else {
-            // First try cached artwork synchronously for instant UI
-            val cached = metadataExtractor.loadCachedArtwork(this, song)
-            if (cached != null) {
+            // Set blurred backdrop
+            try {
                 Glide.with(this)
-                    .load(cached)
-                    .centerCrop()
-                    .into(binding.albumArtwork)
-            } else {
-                setDefaultArtwork()
-            }
-            // Then try online in background if enabled
-            val prefs = getSharedPreferences("settings", 0)
-            val allowOnline = prefs.getBoolean("fetch_artwork_online", true)
-            if (allowOnline) {
-                lifecycleScope.launch {
-                    val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingActivity)
-                    val file = fetcher.getOrFetch(song)
-                    if (file != null && song == currentSong) {
+                    .load(embedded)
+                    .apply(com.bumptech.glide.request.RequestOptions.bitmapTransform(jp.wasabeef.glide.transformations.BlurTransformation(25, 3)))
+                    .into(binding.backdropImage)
+            } catch (_: Exception) {}
+        } else {
+            setDefaultArtwork()
+        }
+        
+        // Then try online in background if enabled to improve when missing
+        val prefs = getSharedPreferences("settings", 0)
+        val allowOnline = prefs.getBoolean("fetch_artwork_online", true)
+        if (allowOnline) {
+            lifecycleScope.launch {
+                val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingActivity)
+                val file = fetcher.getOrFetch(song)
+                if (file != null && song == currentSong) {
+                    Glide.with(this@NowPlayingActivity)
+                        .load(file)
+                        .placeholder(R.drawable.ic_music_note)
+                        .error(R.drawable.ic_music_note)
+                        .centerCrop()
+                        .into(binding.albumArtwork)
+                    try {
                         Glide.with(this@NowPlayingActivity)
                             .load(file)
-                            .placeholder(R.drawable.ic_music_note)
-                            .error(R.drawable.ic_music_note)
-                            .centerCrop()
-                            .into(binding.albumArtwork)
-                    }
+                            .apply(com.bumptech.glide.request.RequestOptions.bitmapTransform(jp.wasabeef.glide.transformations.BlurTransformation(25, 3)))
+                            .into(binding.backdropImage)
+                    } catch (_: Exception) {}
                 }
             }
         }
