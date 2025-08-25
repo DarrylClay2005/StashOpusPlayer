@@ -1,5 +1,9 @@
 # Changelog
 
+## 7.3.1 - 2025-08-25
+
+- Performance: Song list thumbnails now prefer cached artwork for faster binds; fallback to embedded art when cache is missing.
+
 ## 7.3.0 - 2025-08-25
 
 - Performance: Embedded album art is now saved to the on-device artwork cache during metadata extraction, enabling instant thumbnail loads across the app.
