@@ -49,9 +49,8 @@ class GenresFragment : Fragment() {
     private fun loadGenres() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val allSongs = repository.getAllSongsWithMetadata()
-                val genres = allSongs
-                    .groupBy { it.genre.ifBlank { "Unknown" } }
+                val genresSmart = repository.getSongsByGenreSmart()
+                val genres = genresSmart
                     .map { (name, songs) -> GenreInfo(name, songs.size, songs) }
                     .sortedBy { it.name.lowercase() }
                 val b = _binding ?: return@launch

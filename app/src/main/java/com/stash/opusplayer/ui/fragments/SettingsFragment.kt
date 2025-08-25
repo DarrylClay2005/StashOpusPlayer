@@ -114,6 +114,18 @@ class SettingsFragment : Fragment() {
             textSize = 12f
         }
         layout.addView(currentFoldersLabel)
+
+        val manageFoldersButton = Button(requireContext()).apply {
+            text = "Manage Folders"
+            setOnClickListener { showManageFoldersDialog() }
+        }
+        layout.addView(manageFoldersButton)
+
+        val clearCacheButton = Button(requireContext()).apply {
+            text = "Clear Artwork Cache"
+            setOnClickListener { clearArtworkCache() }
+        }
+        layout.addView(clearCacheButton)
         
         // Check frequency
         val frequencyLabel = TextView(requireContext()).apply {
@@ -190,6 +202,43 @@ class SettingsFragment : Fragment() {
             folderPickerLauncher.launch(null)
         } catch (_: Exception) {
             Toast.makeText(requireContext(), "Unable to open folder picker", Toast.LENGTH_SHORT).show()
+        }
+    }
+    private fun showManageFoldersDialog() {
+        val repo = com.stash.opusplayer.data.MusicRepository(requireContext())
+        val trees = repo.getCustomMusicFolderTreeUris().toList()
+        if (trees.isEmpty()) {
+            Toast.makeText(requireContext(), "No folders added", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val names = trees.map { uri ->
+            try { android.net.Uri.parse(uri).lastPathSegment ?: uri } catch (_: Exception) { uri }
+        }.toTypedArray()
+
+        androidx.appcompat.app.AlertDialog.Builder(requireContext())
+            .setTitle("Manage Folders")
+            .setItems(names) { _, which ->
+                val chosen = trees[which]
+                // Remove chosen URI
+                val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+                val set = prefs.getStringSet("custom_music_folders_tree", setOf())?.toMutableSet() ?: mutableSetOf()
+                set.remove(chosen)
+                prefs.edit().putStringSet("custom_music_folders_tree", set).apply()
+                Toast.makeText(requireContext(), "Folder removed", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun clearArtworkCache() {
+        try {
+            val dir = java.io.File(requireContext().cacheDir, "artwork")
+            if (dir.exists()) {
+                dir.listFiles()?.forEach { it.delete() }
+            }
+            Toast.makeText(requireContext(), "Artwork cache cleared", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            Toast.makeText(requireContext(), "Failed to clear cache", Toast.LENGTH_SHORT).show()
         }
     }
 }
