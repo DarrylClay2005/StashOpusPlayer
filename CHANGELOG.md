@@ -1,5 +1,12 @@
 # Changelog
 
+## 7.0.0 - 2025-08-25
+
+- Official name: Stash Audio
+- Now Playing: Pitch controls are visible on all devices (scrollable controls)
+- Play Store readiness: removed REQUEST_INSTALL_PACKAGES; added FOREGROUND_SERVICE_MEDIA_PLAYBACK
+- Final polish and stability improvements for equalizer/pitch integration and library scanning
+
 ## 6.0.5 - 2025-08-25
 
 - Integrated pitch semitones (-12..+12) with ExoPlayer and MediaSession commands

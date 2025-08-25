@@ -261,142 +261,153 @@
 
     </LinearLayout>
 
-    <!-- Audio Controls -->
-    <LinearLayout
-        android:id="@+id/audioControlsContainer"
+    <!-- Scrolling container for audio + secondary controls to ensure visibility on all screens -->
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/controlsScrollView"
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="24dp"
-        android:layout_marginTop="24dp"
-        android:layout_marginEnd="24dp"
-        android:orientation="vertical"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/controlsContainer">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Playback Speed"
-            android:textColor="@color/text_primary"
-            android:textStyle="bold"/>
-
-        <SeekBar
-            android:id="@+id/speedSeek"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="175"/>
-
-        <TextView
-            android:id="@+id/speedLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="1.00x"
-            android:textColor="@color/text_secondary"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="Pitch (Semitones)"
-            android:textColor="@color/text_primary"
-            android:textStyle="bold"/>
-
-        <SeekBar
-            android:id="@+id/pitchSeek"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="24"/>
-
-        <TextView
-            android:id="@+id/pitchLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="0 st"
-            android:textColor="@color/text_secondary"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="Reverb"
-            android:textColor="@color/text_primary"
-            android:textStyle="bold"/>
-
-        <SeekBar
-            android:id="@+id/reverbSeek"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="1000"/>
-
-        <TextView
-            android:id="@+id/reverbLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Reverb 0%"
-            android:textColor="@color/text_secondary"/>
-
-    </LinearLayout>
-
-    <!-- Secondary controls -->
-    <LinearLayout
-        android:id="@+id/secondaryControlsContainer"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="32dp"
-        android:layout_marginTop="24dp"
-        android:layout_marginEnd="32dp"
-        android:layout_marginBottom="32dp"
-        android:gravity="center"
-        android:orientation="horizontal"
+        android:layout_height="0dp"
+        android:fillViewport="true"
+        app:layout_constraintTop_toBottomOf="@id/controlsContainer"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/audioControlsContainer">
+        app:layout_constraintEnd_toEndOf="parent">
 
-        <!-- Favorite button -->
-        <ImageButton
-            android:id="@+id/favoriteButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:alpha="0.7"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/favorite"
-            android:src="@drawable/ic_favorite_border"
-            android:tint="@color/text_primary" />
+        <LinearLayout
+            android:id="@+id/scrollContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingBottom="32dp">
 
-        <Space
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
+            <!-- Audio Controls -->
+            <LinearLayout
+                android:id="@+id/audioControlsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:orientation="vertical">
 
-        <!-- Queue button -->
-        <ImageButton
-            android:id="@+id/queueButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:alpha="0.7"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/queue"
-            android:src="@drawable/ic_queue_music"
-            android:tint="@color/text_primary" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Playback Speed"
+                    android:textColor="@color/text_primary"
+                    android:textStyle="bold"/>
 
-        <Space
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
+                <SeekBar
+                    android:id="@+id/speedSeek"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="175"/>
 
-        <!-- Share button -->
-        <ImageButton
-            android:id="@+id/shareButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:alpha="0.7"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/share"
-            android:src="@drawable/ic_share_24"
-            android:tint="@color/text_primary" />
+                <TextView
+                    android:id="@+id/speedLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="1.00x"
+                    android:textColor="@color/text_secondary"/>
 
-    </LinearLayout>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Pitch (Semitones)"
+                    android:textColor="@color/text_primary"
+                    android:textStyle="bold"/>
+
+                <SeekBar
+                    android:id="@+id/pitchSeek"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="24"/>
+
+                <TextView
+                    android:id="@+id/pitchLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0 st"
+                    android:textColor="@color/text_secondary"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Reverb"
+                    android:textColor="@color/text_primary"
+                    android:textStyle="bold"/>
+
+                <SeekBar
+                    android:id="@+id/reverbSeek"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="1000"/>
+
+                <TextView
+                    android:id="@+id/reverbLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Reverb 0%"
+                    android:textColor="@color/text_secondary"/>
+
+            </LinearLayout>
+
+            <!-- Secondary controls -->
+            <LinearLayout
+                android:id="@+id/secondaryControlsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <!-- Favorite button -->
+                <ImageButton
+                    android:id="@+id/favoriteButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:alpha="0.7"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/favorite"
+                    android:src="@drawable/ic_favorite_border"
+                    android:tint="@color/text_primary" />
+
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <!-- Queue button -->
+                <ImageButton
+                    android:id="@+id/queueButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:alpha="0.7"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/queue"
+                    android:src="@drawable/ic_queue_music"
+                    android:tint="@color/text_primary" />
+
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <!-- Share button -->
+                <ImageButton
+                    android:id="@+id/shareButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:alpha="0.7"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/share"
+                    android:src="@drawable/ic_share_24"
+                    android:tint="@color/text_primary" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
