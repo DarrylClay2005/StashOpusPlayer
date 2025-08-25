@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Default screen margins, per the Android Design guidelines. -->
+    <dimen name="activity_horizontal_margin">16dp</dimen>
+    <dimen name="activity_vertical_margin">16dp</dimen>
+    <dimen name="nav_header_vertical_spacing">8dp</dimen>
+    <dimen name="nav_header_height">176dp</dimen>
+    <dimen name="fab_margin">16dp</dimen>
+    
+    <!-- Player dimensions -->
+    <dimen name="mini_player_height">64dp</dimen>
+    <dimen name="player_controls_height">80dp</dimen>
+    <dimen name="album_art_size">200dp</dimen>
+    <dimen name="album_art_mini_size">48dp</dimen>
+    
+    <!-- Common dimensions -->
+    <dimen name="card_margin">8dp</dimen>
+    <dimen name="item_padding">16dp</dimen>
+    <dimen name="button_size_normal">48dp</dimen>
+    <dimen name="button_size_large">64dp</dimen>
+    
+    <!-- Text sizes -->
+    <dimen name="text_size_large">18sp</dimen>
+    <dimen name="text_size_medium">16sp</dimen>
+    <dimen name="text_size_small">14sp</dimen>
+    <dimen name="text_size_extra_small">12sp</dimen>
+</resources>

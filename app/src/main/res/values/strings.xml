@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Stash Opus Player</string>
+    
+    <!-- Navigation -->
+    <string name="nav_open">Open navigation</string>
+    <string name="nav_close">Close navigation</string>
+    
+    <!-- Menu items -->
+    <string name="menu_music_library">Music Library</string>
+    <string name="menu_playlists">Playlists</string>
+    <string name="menu_equalizer">Equalizer</string>
+    <string name="menu_settings">Settings</string>
+    <string name="menu_about">About</string>
+    
+    <!-- Player controls -->
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+    <string name="stop">Stop</string>
+    <string name="next">Next</string>
+    <string name="previous">Previous</string>
+    <string name="shuffle">Shuffle</string>
+    <string name="repeat">Repeat</string>
+    
+    <!-- Settings -->
+    <string name="settings_background">Background</string>
+    <string name="settings_change_background">Change Background</string>
+    <string name="settings_audio">Audio Settings</string>
+    <string name="settings_equalizer">Equalizer Settings</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_about">About</string>
+    
+    <!-- Equalizer -->
+    <string name="eq_preset_normal">Normal</string>
+    <string name="eq_preset_rock">Rock</string>
+    <string name="eq_preset_pop">Pop</string>
+    <string name="eq_preset_jazz">Jazz</string>
+    <string name="eq_preset_classical">Classical</string>
+    <string name="eq_preset_dance">Dance</string>
+    <string name="eq_preset_metal">Metal</string>
+    <string name="eq_preset_custom">Custom</string>
+    
+    <!-- Permissions -->
+    <string name="permission_audio_title">Audio Permission</string>
+    <string name="permission_audio_message">This app needs access to your audio files to play music.</string>
+    <string name="permission_storage_title">Storage Permission</string>
+    <string name="permission_storage_message">This app needs access to your storage to scan for music files.</string>
+    
+    <!-- Common -->
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="unknown_artist">Unknown Artist</string>
+    <string name="unknown_album">Unknown Album</string>
+    <string name="no_songs_found">No songs found</string>
+    
+</resources>
