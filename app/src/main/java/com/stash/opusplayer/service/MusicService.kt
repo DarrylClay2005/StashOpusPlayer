@@ -105,7 +105,12 @@ class MusicService : MediaSessionService() {
                 if (isPlaying) {
                     startForeground(NOTIFICATION_ID, createNotification())
                 } else {
-                    stopForeground(android.app.Service.STOP_FOREGROUND_DETACH)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        stopForeground(false)
+                    }
                 }
             }
             
