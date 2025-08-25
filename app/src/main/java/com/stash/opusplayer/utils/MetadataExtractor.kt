@@ -37,8 +37,8 @@ class MetadataExtractor(private val context: Context) {
             val genre = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE) ?: ""
             val bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull() ?: 0
             
-            // Extract album art
-            val albumArt = extractAlbumArt(retriever)
+            // Extract album art and store a thumbnail in cache for fast future loads
+            val albumArt = extractAlbumArt(retriever, song)
             
             song.copy(
                 title = title ?: song.title,
@@ -63,7 +63,7 @@ class MetadataExtractor(private val context: Context) {
         }
     }
     
-    private fun extractAlbumArt(retriever: MediaMetadataRetriever): String? {
+    private fun extractAlbumArt(retriever: MediaMetadataRetriever, song: Song): String? {
         return try {
             val artBytes = retriever.embeddedPicture ?: return null
             if (artBytes.isEmpty()) return null
@@ -76,7 +76,7 @@ class MetadataExtractor(private val context: Context) {
             val options = BitmapFactory.Options().apply {
                 inJustDecodeBounds = false
                 inSampleSize = sampleSize
-inPreferredConfig = Bitmap.Config.RGB_565 // smaller than ARGB_8888
+                inPreferredConfig = Bitmap.Config.RGB_565 // smaller than ARGB_8888
             }
 
             val bitmap = BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size, options) ?: return null
@@ -89,6 +89,18 @@ inPreferredConfig = Bitmap.Config.RGB_565 // smaller than ARGB_8888
                 try { bitmap.recycle() } catch (_: Throwable) {}
             }
             val compressedBytes = stream.toByteArray()
+
+            // Save to on-device cache for fast reuse
+            try {
+                val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
+                val outFile = cache.fileFor(song)
+                if (!outFile.exists()) {
+                    cache.saveJpeg(compressedBytes, outFile)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to write album art to cache", e)
+            }
+
             // Use NO_WRAP to keep string compact
             Base64.encodeToString(compressedBytes, Base64.NO_WRAP)
         } catch (oom: OutOfMemoryError) {
