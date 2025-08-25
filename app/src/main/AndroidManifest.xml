@@ -39,6 +39,16 @@
             </intent-filter>
         </activity>
         
+        <activity
+            android:name=".ui.NowPlayingActivity"
+            android:exported="false"
+            android:theme="@style/Theme.StashOpusPlayer" />
+        
+        <receiver
+            android:name=".service.MediaActionReceiver"
+            android:enabled="true"
+            android:exported="false" />
+        
         <service
             android:name=".service.MusicService"
             android:enabled="true"

@@ -9,11 +9,15 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import com.stash.opusplayer.audio.EqualizerManager
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.service.MusicService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import android.media.AudioManager
+import android.os.Handler
+import android.os.Looper
 
 class MusicPlayerManager(private val context: Context) {
     

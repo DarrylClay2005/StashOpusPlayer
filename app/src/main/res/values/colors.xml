@@ -42,4 +42,10 @@
     <!-- Gradient colors -->
     <color name="gradient_start">#6200EA</color>
     <color name="gradient_end">#03DAC6</color>
+    
+    <!-- Additional UI colors -->
+    <color name="background_primary">@color/background_color</color>
+    <color name="surface_variant">#333333</color>
+    <color name="accent_color">@color/primary_color</color>
+    <color name="text_tertiary">#999999</color>
 </resources>
