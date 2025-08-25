@@ -300,15 +300,58 @@ class MusicRepository(private val context: Context) {
     fun getCustomMusicFolders(): Set<String> {
         return prefs.getStringSet("custom_music_folders", setOf()) ?: setOf()
     }
-    
+
+    fun addCustomMusicFolderTreeUri(treeUri: String) {
+        val existing = prefs.getStringSet("custom_music_folders_tree", setOf())?.toMutableSet() ?: mutableSetOf()
+        existing.add(treeUri)
+        prefs.edit().putStringSet("custom_music_folders_tree", existing).apply()
+    }
+
+    fun getCustomMusicFolderTreeUris(): Set<String> {
+        return prefs.getStringSet("custom_music_folders_tree", setOf()) ?: setOf()
+    }
+
     // Combined method to get all songs from both MediaStore and custom folders
     suspend fun getAllSongsFromAllSources(): List<Song> = withContext(Dispatchers.IO) {
         val mediaStoreSongs = getAllSongsWithMetadata()
-        val customFolderSongs = scanCustomFolders()
+        val diskFolderSongs = scanCustomFolders()
+        val treeSongs = scanDocumentTrees()
         
-        (mediaStoreSongs + customFolderSongs)
+        (mediaStoreSongs + diskFolderSongs + treeSongs)
             .distinctBy { it.path } // Remove duplicates based on file path
             .sortedBy { it.displayName }
+    }
+
+    private suspend fun scanDocumentTrees(): List<Song> = withContext(Dispatchers.IO) {
+        val result = mutableListOf<Song>()
+        val trees = getCustomMusicFolderTreeUris()
+        for (uriStr in trees) {
+            try {
+                val treeUri = android.net.Uri.parse(uriStr)
+                val docTree = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+                if (docTree != null && docTree.isDirectory) {
+                    scanDocumentTreeRecursive(docTree, result)
+                }
+            } catch (_: Exception) { }
+        }
+        result
+    }
+
+    private fun scanDocumentTreeRecursive(dir: androidx.documentfile.provider.DocumentFile, out: MutableList<Song>) {
+        val children = dir.listFiles()
+        for (child in children) {
+            if (child.isDirectory) {
+                scanDocumentTreeRecursive(child, out)
+            } else if (child.isFile) {
+                val name = child.name ?: continue
+                if (isValidAudioFile(name)) {
+                    val uriStr = child.uri.toString()
+                    metadataExtractor.extractBasicInfo(uriStr)?.let { song ->
+                        out.add(metadataExtractor.extractMetadata(song))
+                    }
+                }
+            }
+        }
     }
     
     companion object {
