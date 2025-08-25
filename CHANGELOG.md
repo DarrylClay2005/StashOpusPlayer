@@ -1,5 +1,17 @@
 # Changelog
 
+## Version 5.0.5 (2025-08-25)
+
+### Fixed
+- Folders tab now shows folders from added SAF tree directories (content://), with proper relative paths.
+
+### Added
+- Loading screen overlay during initial scan with helpful tips.
+- Basic AI normalization for artists; improved grouping.
+- Smart genre grouping using tag/heuristic inference API in repository.
+
+---
+
 ## Version 5.0.2 (2025-08-25)
 
 ### Added

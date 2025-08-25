@@ -283,6 +283,36 @@ class MusicRepository(private val context: Context) {
         val allSongs = getAllSongsWithMetadata()
         allSongs.map { it.albumName }.distinct().sorted()
     }
+
+    // AI-ish genre inference using tags or heuristics; placeholder for external APIs
+    suspend fun getSongsByGenreSmart(): Map<String, List<Song>> = withContext(Dispatchers.IO) {
+        val all = getAllSongsWithMetadata()
+        val normalized = all.map { s ->
+            val g = s.genre.trim()
+            if (g.isNotEmpty()) {
+                s.copy(genre = g)
+            } else {
+                // Simple heuristic: infer from file path or album keywords
+                val inferred = inferGenreFromHeuristics(s)
+                s.copy(genre = inferred)
+            }
+        }
+        normalized.groupBy { it.genre.ifBlank { "Unknown" } }
+    }
+
+    private fun inferGenreFromHeuristics(s: Song): String {
+        val haystack = (s.albumName + " " + s.displayName + " " + s.path).lowercase()
+        return when {
+            listOf("live", "unplugged").any { haystack.contains(it) } -> "Live"
+            listOf("remix", "mix", "club").any { haystack.contains(it) } -> "Dance"
+            listOf("lofi", "chill").any { haystack.contains(it) } -> "Lo-Fi"
+            listOf("metal", "hardcore").any { haystack.contains(it) } -> "Metal"
+            listOf("hip hop", "rap").any { haystack.contains(it) } -> "Hip-Hop"
+            listOf("jazz").any { haystack.contains(it) } -> "Jazz"
+            listOf("classical", "symphony", "concerto").any { haystack.contains(it) } -> "Classical"
+            else -> "Unknown"
+        }
+    }
     
     // Folder management
     fun addCustomMusicFolder(folderPath: String) {
