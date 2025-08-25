@@ -36,6 +36,7 @@ class MusicService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private lateinit var equalizerManager: EqualizerManager
     private var presetReverb: PresetReverb? = null
+    private var lastAudioSessionId: Int = C.AUDIO_SESSION_ID_UNSET
     private var currentSpeed: Float = 1.0f
     private var currentPitch: Float = 1.0f
     private var currentReverb: Short = 0
@@ -137,8 +138,10 @@ class MusicService : MediaSessionService() {
     private fun initializeEqualizer() {
         equalizerManager = EqualizerManager(this)
         // Initialize equalizer with audio session ID when player is ready
-        player.audioSessionId.let { sessionId ->
-            if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
+        val sessionId = player.audioSessionId
+        if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
+            if (sessionId != lastAudioSessionId) {
+                lastAudioSessionId = sessionId
                 equalizerManager.initialize(sessionId)
                 try {
                     presetReverb?.release()
@@ -160,10 +163,19 @@ class MusicService : MediaSessionService() {
                 
                 // Initialize equalizer when player is ready and has audio session
                 if (playbackState == Player.STATE_READY) {
-                    player.audioSessionId.let { sessionId ->
-                        if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
-                            equalizerManager.initialize(sessionId)
-                        }
+                    val sessionId = player.audioSessionId
+                    if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
+                        lastAudioSessionId = sessionId
+                        equalizerManager.initialize(sessionId)
+                        try {
+                            presetReverb?.release()
+                        } catch (_: Exception) {}
+                        try {
+                            presetReverb = PresetReverb(0, sessionId).apply {
+                                enabled = true
+                                preset = currentReverb
+                            }
+                        } catch (_: Exception) {}
                     }
                 }
             }
@@ -322,6 +334,7 @@ class MusicService : MediaSessionService() {
     }
     
     override fun onDestroy() {
+        try { presetReverb?.release() } catch (_: Exception) {}
         equalizerManager.release()
         mediaSession?.run {
             player.release()

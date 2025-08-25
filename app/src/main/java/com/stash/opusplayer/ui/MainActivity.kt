@@ -91,6 +91,22 @@ lifecycleScope.launch {
         }
         }
 
+        // Observe library scanning status
+        lifecycleScope.launch {
+            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                com.stash.opusplayer.utils.LibraryScanTracker.status.collect { msg ->
+                    val banner = findViewById<android.view.View>(com.stash.opusplayer.R.id.scanning_banner)
+                    val text = findViewById<android.widget.TextView>(com.stash.opusplayer.R.id.scanning_text)
+                    if (msg.isNotBlank()) {
+                        banner.visibility = android.view.View.VISIBLE
+                        text.text = msg
+                    } else {
+                        banner.visibility = android.view.View.GONE
+                    }
+                }
+            }
+        }
+
 // Removed custom loading overlay; using Android SplashScreen API instead
         
         // Check for updates on app start (AI will decide if/when to show)
