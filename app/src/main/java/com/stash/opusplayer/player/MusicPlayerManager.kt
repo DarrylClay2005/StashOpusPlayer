@@ -23,6 +23,9 @@ class MusicPlayerManager(private val context: Context) {
     
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
+
+    // Queue actions invoked before controller is ready
+    private val pendingControllerActions = mutableListOf<(MediaController) -> Unit>()
     
     private val _currentSong = MutableStateFlow<Song?>(null)
     val currentSong: StateFlow<Song?> = _currentSong.asStateFlow()
@@ -76,6 +79,16 @@ class MusicPlayerManager(private val context: Context) {
         controllerFuture?.addListener({
             mediaController = controllerFuture?.get()
             mediaController?.addListener(playerListener)
+            // Flush any queued actions
+            mediaController?.let { controller ->
+                val iterator = pendingControllerActions.iterator()
+                while (iterator.hasNext()) {
+                    try {
+                        iterator.next().invoke(controller)
+                    } catch (_: Exception) {}
+                    iterator.remove()
+                }
+            }
         }, MoreExecutors.directExecutor())
     }
     
@@ -85,21 +98,13 @@ class MusicPlayerManager(private val context: Context) {
     }
     
     // Playback control methods
-    fun play() {
-        mediaController?.play()
-    }
+    fun play() { runWhenReady { it.play() } }
     
-    fun pause() {
-        mediaController?.pause()
-    }
+    fun pause() { runWhenReady { it.pause() } }
     
-    fun stop() {
-        mediaController?.stop()
-    }
+    fun stop() { runWhenReady { it.stop() } }
     
-    fun seekTo(position: Long) {
-        mediaController?.seekTo(position)
-    }
+    fun seekTo(position: Long) { runWhenReady { it.seekTo(position) } }
     
     fun skipToNext() {
         val currentIndex = _currentIndex.value
@@ -124,12 +129,12 @@ class MusicPlayerManager(private val context: Context) {
     
     fun toggleShuffle() {
         val enabled = !_shuffleMode.value
-        mediaController?.shuffleModeEnabled = enabled
+        runWhenReady { it.shuffleModeEnabled = enabled }
         _shuffleMode.value = enabled
     }
     
     fun setRepeatMode(repeatMode: Int) {
-        mediaController?.repeatMode = repeatMode
+        runWhenReady { it.repeatMode = repeatMode }
         _repeatMode.value = repeatMode
     }
     
@@ -142,7 +147,7 @@ class MusicPlayerManager(private val context: Context) {
     fun setPlaylist(songs: List<Song>) {
         _playlist.value = songs
         val mediaItems = songs.map { song -> createMediaItem(song) }
-        mediaController?.setMediaItems(mediaItems)
+        runWhenReady { it.setMediaItems(mediaItems) }
     }
     
     fun addToPlaylist(song: Song) {
@@ -151,7 +156,7 @@ class MusicPlayerManager(private val context: Context) {
         _playlist.value = currentPlaylist
         
         val mediaItem = createMediaItem(song)
-        mediaController?.addMediaItem(mediaItem)
+        runWhenReady { it.addMediaItem(mediaItem) }
     }
     
     fun removeFromPlaylist(index: Int) {
@@ -160,7 +165,7 @@ class MusicPlayerManager(private val context: Context) {
             currentPlaylist.removeAt(index)
             _playlist.value = currentPlaylist
             
-            mediaController?.removeMediaItem(index)
+            runWhenReady { it.removeMediaItem(index) }
         }
     }
     
@@ -168,9 +173,11 @@ class MusicPlayerManager(private val context: Context) {
         if (index >= 0 && index < _playlist.value.size) {
             _currentIndex.value = index
             _currentSong.value = _playlist.value[index]
-            mediaController?.seekToDefaultPosition(index)
-            mediaController?.prepare()
-            mediaController?.play()
+            runWhenReady {
+                it.seekToDefaultPosition(index)
+                it.prepare()
+                it.play()
+            }
         }
     }
     
@@ -182,10 +189,32 @@ class MusicPlayerManager(private val context: Context) {
             .setAlbumTitle(song.albumName)
             .build()
         
+        val uri = resolveSongUri(song)
         return MediaItem.Builder()
-            .setUri(song.path)
+            .setUri(uri)
             .setMediaMetadata(metadata)
             .build()
+    }
+    
+    private fun resolveSongUri(song: Song): android.net.Uri {
+        // Prefer MediaStore content URIs when possible for scoped storage compatibility
+        return try {
+            val file = java.io.File(song.path)
+            // If we have a real MediaStore id (from scanner) and file path points to external storage
+            if (song.id > 0 && song.path.startsWith("/storage")) {
+                android.content.ContentUris.withAppendedId(
+                    android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    song.id
+                )
+            } else if (song.path.startsWith("content://")) {
+                android.net.Uri.parse(song.path)
+            } else {
+                android.net.Uri.fromFile(file)
+            }
+        } catch (_: Exception) {
+            // Fallback to parsing the raw path
+            android.net.Uri.parse(song.path)
+        }
     }
     
     private fun updateCurrentSong() {
@@ -200,6 +229,15 @@ class MusicPlayerManager(private val context: Context) {
     fun updatePosition() {
         mediaController?.let { controller ->
             _currentPosition.value = controller.currentPosition
+        }
+    }
+    
+    private fun runWhenReady(action: (MediaController) -> Unit) {
+        val controller = mediaController
+        if (controller != null) {
+            action(controller)
+        } else {
+            pendingControllerActions.add(action)
         }
     }
     

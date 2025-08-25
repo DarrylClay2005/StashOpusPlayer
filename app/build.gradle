@@ -13,17 +13,21 @@ android {
         applicationId "com.stash.opusplayer"
         minSdk 21
         targetSdk 34
-        versionCode 5
-        versionName "3.0"
+        versionCode 6
+        versionName "3.0.4"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    def hasReleaseKeystore = file('../release-key.keystore').exists()
+
     signingConfigs {
-        release {
-            keyAlias 'release-key'
-            keyPassword 'stash123'
-            storeFile file('../release-key.keystore')
-            storePassword 'stash123'
+        if (hasReleaseKeystore) {
+            release {
+                keyAlias 'release-key'
+                keyPassword 'stash123'
+                storeFile file('../release-key.keystore')
+                storePassword 'stash123'
+            }
         }
     }
     
@@ -32,7 +36,9 @@ android {
             minifyEnabled false
             shrinkResources false
             debuggable false
-            signingConfig signingConfigs.release
+            if (hasReleaseKeystore) {
+                signingConfig signingConfigs.release
+            }
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
