@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.0.4 - 2025-08-25
+
+- Faster initial load for Songs: fast scan shown immediately, full metadata/AI enriches in background
+- Reduced heavy metadata work during scans; SAF fast scan via MediaStore when possible
+- Keeps OPUS/content URI reliability and improved SAF folder grouping from prior releases
+
 ## 6.0.3 - 2025-08-25
 
 - Persist read+write permissions for SAF trees; guidance to refresh after adding
