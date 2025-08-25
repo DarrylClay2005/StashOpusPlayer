@@ -50,6 +50,18 @@ class NowPlayingActivity : AppCompatActivity() {
         connectToMediaController()
         setupPlayerManager()
         
+        // Wire waveform seek listener
+        try {
+            binding.waveformView.setOnSeekListener { ratio ->
+                mediaController?.let { controller ->
+                    val dur = controller.duration
+                    if (dur > 0) {
+                        controller.seekTo((ratio * dur).toLong())
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+
         // Get song from intent
         val song: Song? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             intent.getParcelableExtra("song", Song::class.java)
@@ -107,7 +119,7 @@ class NowPlayingActivity : AppCompatActivity() {
             }
         }
         
-        // Seek bar
+        // Seek bar (hidden) handlers retained for compatibility
         binding.seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
@@ -286,6 +298,9 @@ mediaController?.sendCustomCommand(
         binding.artistName.text = song.artistName
         binding.albumName.text = song.albumName
         
+        // Seed waveform for a stable shape per track
+        try { binding.waveformView.setSeed("${song.displayName}|${song.artistName}|${song.path}") } catch (_: Exception) {}
+
         // Load album artwork (prefer cached for speed; fallback to embedded/online)
         val cached = metadataExtractor.loadCachedArtwork(this, song)
         val embedded = metadataExtractor.decodeAlbumArt(song.albumArt)
@@ -435,8 +450,9 @@ mediaController?.sendCustomCommand(
     
     private fun updateSeekBar(currentPosition: Long, duration: Long) {
         if (duration > 0) {
-            binding.seekBar.max = duration.toInt()
-            binding.seekBar.progress = currentPosition.toInt()
+            try { binding.seekBar.max = duration.toInt() } catch (_: Exception) {}
+            try { binding.seekBar.progress = currentPosition.toInt() } catch (_: Exception) {}
+            try { binding.waveformView.setProgress(currentPosition, duration) } catch (_: Exception) {}
             binding.currentTime.text = formatTime(currentPosition)
             binding.totalTime.text = formatTime(duration)
         }
