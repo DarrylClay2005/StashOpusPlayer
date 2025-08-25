@@ -205,6 +205,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                         loadFragment(SettingsFragment())
                         supportActionBar?.title = getString(R.string.menu_settings)
                         binding.bottomNav.selectedItemId = R.id.nav_settings
+                        // Ensure loading overlay is dismissed even if permission denied
+                        hideLoadingOverlay()
                     }
                 }
                 
