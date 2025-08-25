@@ -18,13 +18,14 @@ class SettingsFragment : Fragment() {
         if (uri != null) {
             try {
                 // Persist permission to read
+val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 requireContext().contentResolver.takePersistableUriPermission(
-                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    uri, flags
                 )
                 // Save to repository prefs
                 val repo = com.stash.opusplayer.data.MusicRepository(requireContext())
                 repo.addCustomMusicFolderTreeUri(uri.toString())
-                Toast.makeText(requireContext(), "Folder added", Toast.LENGTH_SHORT).show()
+Toast.makeText(requireContext(), "Folder added. Pull-to-refresh Folders tab to rescan.", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(requireContext(), "Failed to add folder", Toast.LENGTH_SHORT).show()
             }
