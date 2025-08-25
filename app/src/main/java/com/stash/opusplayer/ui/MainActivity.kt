@@ -35,6 +35,8 @@ import com.stash.opusplayer.ui.fragments.SettingsFragment
 import com.stash.opusplayer.ui.fragments.PlaylistsFragment
 import com.stash.opusplayer.utils.PermissionUtils
 import com.stash.opusplayer.updates.UpdateManager
+import com.stash.opusplayer.player.MusicPlayerManager
+import com.stash.opusplayer.data.Song
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
     
@@ -42,6 +44,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var toggle: ActionBarDrawerToggle
     private lateinit var sharedPreferences: SharedPreferences
     private lateinit var updateManager: UpdateManager
+    private lateinit var musicPlayerManager: MusicPlayerManager
+    private lateinit var miniPlayerView: MiniPlayerView
     
     private val imagePickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -57,6 +61,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this)
         updateManager = UpdateManager(this)
         
+        setupMusicPlayer()
+        setupMiniPlayer()
         setupToolbar()
         setupNavigationDrawer()
         setupBackgroundImage()
@@ -229,11 +235,31 @@ Check for updates anytime from Settings.""")
     
     fun getUpdateManager() = updateManager
     
-    // Music player functionality placeholders - these will be implemented with the full player UI
-    fun playMusic(song: com.stash.opusplayer.data.Song) {
-        // TODO: Implement with MusicPlayerManager
-        // For now, just show a toast
-        Toast.makeText(this, "Playing: ${song.displayName}", Toast.LENGTH_SHORT).show()
+    private fun setupMusicPlayer() {
+        musicPlayerManager = MusicPlayerManager(this).apply {
+            initialize()
+        }
+    }
+    
+    private fun setupMiniPlayer() {
+        miniPlayerView = binding.miniPlayer
+        miniPlayerView.initialize(this, musicPlayerManager)
+    }
+    
+    // Music player functionality
+    fun playMusic(song: Song) {
+        lifecycleScope.launch {
+            try {
+                musicPlayerManager.playSong(song)
+                // Open Now Playing activity
+                val intent = Intent(this@MainActivity, NowPlayingActivity::class.java).apply {
+                    putExtra("song", song)
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Error playing song: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
     
     fun addToPlaylist(song: com.stash.opusplayer.data.Song) {
@@ -252,6 +278,16 @@ Check for updates anytime from Settings.""")
                 repository.addToFavorites(song)
                 Toast.makeText(this@MainActivity, "Added to favorites", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        if (::miniPlayerView.isInitialized) {
+            miniPlayerView.release()
+        }
+        if (::musicPlayerManager.isInitialized) {
+            musicPlayerManager.release()
         }
     }
     
