@@ -160,11 +160,14 @@ class MusicRepository(private val context: Context) {
         }
     }
     
-    private fun isValidAudioFile(path: String): Boolean {
-        if (path.startsWith("content://")) return true // content URIs are valid
-        val supportedExtensions = listOf("mp3", "opus", "ogg", "flac", "m4a", "wav", "aac", "wma")
+private fun isValidAudioFile(path: String): Boolean {
+        if (path.startsWith("content://")) {
+            // Allow all content URIs; filtering is done by retriever and decoding later
+            return true
+        }
         val extension = path.substringAfterLast(".", "").lowercase()
-        return supportedExtensions.contains(extension)
+        // Accept common audio file extensions, especially .opus
+        return extension in setOf("mp3", "opus", "ogg", "oga", "flac", "m4a", "aac", "wav", "wma", "mka")
     }
     
     // Enhanced method to get all songs with metadata and favorites status
@@ -391,7 +394,7 @@ private suspend fun scanDocumentTrees(): List<Song> = withContext(Dispatchers.IO
                 scanDocumentTreeRecursive(child, out, rootLabel, "$currentPath/$childName")
             } else if (child.isFile) {
                 val name = child.name ?: continue
-                if (isValidAudioFile(name)) {
+if (isValidAudioFile(name) || child.type?.startsWith("audio/") == true) {
                     val uriStr = child.uri.toString()
                     metadataExtractor.extractBasicInfo(uriStr)?.let { base ->
                         val withMeta = metadataExtractor.extractMetadata(base)
