@@ -1,7 +1,6 @@
 package com.stash.opusplayer.artwork
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -58,38 +57,43 @@ class ArtistGenreArtworkFetcher(private val context: Context) {
         if (out.exists()) return@withContext out
         if (!allow) return@withContext null
 
-        // Try Last.fm if API key exists
-        val apiKey = prefs().getString("lastfm_api_key", null)
-        if (!apiKey.isNullOrBlank()) {
+        com.stash.opusplayer.utils.ImageDownloadTracker.begin()
+        try {
+            // Try Last.fm if API key exists
+            val apiKey = prefs().getString("lastfm_api_key", null)
+            if (!apiKey.isNullOrBlank()) {
+                try {
+                    val url = "https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=${enc(name)}&api_key=${enc(apiKey)}&format=json"
+                    val json = requestJson(url)
+                    val images = json?.getAsJsonObject("artist")?.getAsJsonArray("image")
+                    val best = images?.lastOrNull()?.asJsonObject?.get("#text")?.asString
+                    if (!best.isNullOrBlank()) {
+                        requestBytes(best)?.let { bytes ->
+                            if (save(out, bytes)) return@withContext out
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Last.fm fetch failed", e)
+                }
+            }
+
+            // Fallback: Wikipedia page image
             try {
-                val url = "https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=${enc(name)}&api_key=${enc(apiKey)}&format=json"
-                val json = requestJson(url)
-                val images = json?.getAsJsonObject("artist")?.getAsJsonArray("image")
-                val best = images?.lastOrNull()?.asJsonObject?.get("#text")?.asString
-                if (!best.isNullOrBlank()) {
-                    requestBytes(best)?.let { bytes ->
+                val json = requestJson("https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=thumbnail&pithumbsize=600&redirects=1&titles=${enc(name)}")
+                val pages = json?.getAsJsonObject("query")?.getAsJsonObject("pages")
+                pages?.entrySet()?.firstOrNull()?.value?.asJsonObject?.getAsJsonObject("thumbnail")?.get("source")?.asString?.let { src ->
+                    requestBytes(src)?.let { bytes ->
                         if (save(out, bytes)) return@withContext out
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Last.fm fetch failed", e)
+                Log.w(TAG, "Wikipedia artist fetch failed", e)
             }
-        }
 
-        // Fallback: Wikipedia page image
-        try {
-            val json = requestJson("https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=thumbnail&pithumbsize=600&redirects=1&titles=${enc(name)}")
-            val pages = json?.getAsJsonObject("query")?.getAsJsonObject("pages")
-            pages?.entrySet()?.firstOrNull()?.value?.asJsonObject?.getAsJsonObject("thumbnail")?.get("source")?.asString?.let { src ->
-                requestBytes(src)?.let { bytes ->
-                    if (save(out, bytes)) return@withContext out
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Wikipedia artist fetch failed", e)
+            return@withContext null
+        } finally {
+            com.stash.opusplayer.utils.ImageDownloadTracker.end()
         }
-
-        return@withContext null
     }
 
     suspend fun getOrFetchGenre(name: String): File? = withContext(Dispatchers.IO) {
@@ -98,20 +102,25 @@ class ArtistGenreArtworkFetcher(private val context: Context) {
         if (out.exists()) return@withContext out
         if (!allow) return@withContext null
 
-        // Wikipedia: try "<Genre> (music)"
-        val title = if (name.contains("(music)", true)) name else "$name (music)"
+        com.stash.opusplayer.utils.ImageDownloadTracker.begin()
         try {
-            val json = requestJson("https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=thumbnail&pithumbsize=600&redirects=1&titles=${enc(title)}")
-            val pages = json?.getAsJsonObject("query")?.getAsJsonObject("pages")
-            pages?.entrySet()?.firstOrNull()?.value?.asJsonObject?.getAsJsonObject("thumbnail")?.get("source")?.asString?.let { src ->
-                requestBytes(src)?.let { bytes ->
-                    if (save(out, bytes)) return@withContext out
+            // Wikipedia: try "<Genre> (music)"
+            val title = if (name.contains("(music)", true)) name else "$name (music)"
+            try {
+                val json = requestJson("https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=thumbnail&pithumbsize=600&redirects=1&titles=${enc(title)}")
+                val pages = json?.getAsJsonObject("query")?.getAsJsonObject("pages")
+                pages?.entrySet()?.firstOrNull()?.value?.asJsonObject?.getAsJsonObject("thumbnail")?.get("source")?.asString?.let { src ->
+                    requestBytes(src)?.let { bytes ->
+                        if (save(out, bytes)) return@withContext out
+                    }
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "Wikipedia genre fetch failed", e)
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Wikipedia genre fetch failed", e)
+            return@withContext null
+        } finally {
+            com.stash.opusplayer.utils.ImageDownloadTracker.end()
         }
-        return@withContext null
     }
 
     private fun requestJson(url: String): JsonObject? {

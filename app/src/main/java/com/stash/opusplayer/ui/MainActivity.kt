@@ -71,8 +71,28 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         setupBottomNavigation()
         checkPermissionsAndSetup()
 
+        // Observe image download tracker to show top banner
+        lifecycleScope.launchWhenStarted {
+            com.stash.opusplayer.utils.ImageDownloadTracker.active.collect { count ->
+                val banner = findViewById<android.view.View>(com.stash.opusplayer.R.id.download_banner)
+                val text = findViewById<android.widget.TextView>(com.stash.opusplayer.R.id.download_text)
+                if (count > 0) {
+                    banner.visibility = android.view.View.VISIBLE
+                    text.text = "Downloading images… ($count)"
+                } else {
+                    banner.visibility = android.view.View.GONE
+                }
+            }
+        }
+
         // Show loading overlay while scanning
-        showLoadingOverlay()
+showLoadingOverlay()
+        // Observe library scan tracker to update loading text
+        lifecycleScope.launchWhenStarted {
+            com.stash.opusplayer.utils.LibraryScanTracker.status.collect { msg ->
+                loadingView?.findViewById<android.widget.TextView>(com.stash.opusplayer.R.id.loadingText)?.text = msg
+            }
+        }
         
         // Check for updates on app start (AI will decide if/when to show)
         updateManager.checkForUpdates(this)
@@ -304,6 +324,11 @@ Check for updates anytime from Settings.""")
     }
     
     fun getUpdateManager() = updateManager
+
+    // Called by fragments once they have loaded their initial content
+    fun notifyContentLoaded() {
+        hideLoadingOverlay()
+    }
     
     private fun setupMusicPlayer() {
         musicPlayerManager = MusicPlayerManager(this).apply {

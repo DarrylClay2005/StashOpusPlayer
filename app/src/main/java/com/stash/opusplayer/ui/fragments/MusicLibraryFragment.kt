@@ -72,7 +72,7 @@ class MusicLibraryFragment : Fragment() {
     private fun loadSongs() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val songs = musicRepository.getAllSongs()
+val songs = musicRepository.getAllSongsFromAllSources()
                 val b = _binding ?: return@launch
                 if (songs.isNotEmpty()) {
                     songAdapter.submitList(songs)
@@ -82,10 +82,12 @@ class MusicLibraryFragment : Fragment() {
                     b.recyclerView.visibility = View.GONE
                     b.emptyStateText.visibility = View.VISIBLE
                 }
+                (activity as? com.stash.opusplayer.ui.MainActivity)?.notifyContentLoaded()
             } catch (e: Exception) {
                 val b = _binding ?: return@launch
                 b.recyclerView.visibility = View.GONE
                 b.emptyStateText.visibility = View.VISIBLE
+                (activity as? com.stash.opusplayer.ui.MainActivity)?.notifyContentLoaded()
             }
         }
     }
