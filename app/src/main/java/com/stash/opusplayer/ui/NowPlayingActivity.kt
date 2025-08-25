@@ -103,8 +103,11 @@ class NowPlayingActivity : AppCompatActivity() {
         
         binding.shuffleButton.setOnClickListener {
             mediaController?.let { controller ->
-                controller.shuffleModeEnabled = !controller.shuffleModeEnabled
-                updateShuffleButton(controller.shuffleModeEnabled)
+                val enabled = !controller.shuffleModeEnabled
+                controller.shuffleModeEnabled = enabled
+                updateShuffleButton(enabled)
+                // Persist shuffle state
+                try { getSharedPreferences("settings", 0).edit().putBoolean("playback_shuffle", enabled).apply() } catch (_: Exception) {}
             }
         }
         
@@ -117,6 +120,8 @@ class NowPlayingActivity : AppCompatActivity() {
                 }
                 controller.repeatMode = nextMode
                 updateRepeatButton(nextMode)
+                // Persist repeat mode
+                try { getSharedPreferences("settings", 0).edit().putInt("playback_repeat_mode", nextMode).apply() } catch (_: Exception) {}
             }
         }
 

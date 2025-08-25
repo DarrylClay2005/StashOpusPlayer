@@ -66,7 +66,7 @@ class MusicService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
-        // Apply persisted playback parameters (speed/pitch/reverb) if available
+        // Apply persisted playback parameters (speed/pitch/reverb) and playback modes if available
         try {
             val prefs = getSharedPreferences("settings", 0)
             val savedSemitones = prefs.getInt("pitch_semitones", 0)
@@ -75,6 +75,11 @@ class MusicService : MediaSessionService() {
             if (savedSpeed in 0.25f..2.5f) currentSpeed = savedSpeed
             currentReverb = prefs.getInt("reverb_preset", 0).toShort()
             player.playbackParameters = PlaybackParameters(currentSpeed, currentPitch)
+            // Apply shuffle and repeat mode
+            val savedShuffle = prefs.getBoolean("playback_shuffle", false)
+            val savedRepeat = prefs.getInt("playback_repeat_mode", Player.REPEAT_MODE_OFF)
+            player.shuffleModeEnabled = savedShuffle
+            player.repeatMode = savedRepeat
         } catch (_: Exception) { /* ignore */ }
     }
     
@@ -148,21 +153,13 @@ class MusicService : MediaSessionService() {
     
     private fun initializeEqualizer() {
         equalizerManager = EqualizerManager(this)
-        // Initialize equalizer with audio session ID when player is ready
+        // Initialize equalizer and reverb when player has a valid audio session
         val sessionId = player.audioSessionId
         if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
             if (sessionId != lastAudioSessionId) {
                 lastAudioSessionId = sessionId
                 equalizerManager.initialize(sessionId)
-                try {
-                    presetReverb?.release()
-                } catch (_: Exception) {}
-                try {
-                    presetReverb = PresetReverb(0, sessionId).apply {
-                        enabled = true
-                        preset = currentReverb
-                    }
-                } catch (_: Exception) {}
+                configureReverbForSession(sessionId)
             }
         }
     }
@@ -178,15 +175,7 @@ class MusicService : MediaSessionService() {
                     if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
                         lastAudioSessionId = sessionId
                         equalizerManager.initialize(sessionId)
-                        try {
-                            presetReverb?.release()
-                        } catch (_: Exception) {}
-                        try {
-                            presetReverb = PresetReverb(0, sessionId).apply {
-                                enabled = true
-                                preset = currentReverb
-                            }
-                        } catch (_: Exception) {}
+                        configureReverbForSession(sessionId)
                     }
                 }
             }
@@ -341,10 +330,32 @@ class MusicService : MediaSessionService() {
 
     fun setReverbPreset(preset: Short) {
         currentReverb = preset
-        try { presetReverb?.preset = preset } catch (_: Exception) {}
+        try {
+            if (presetReverb != null) {
+                presetReverb?.preset = preset
+                presetReverb?.enabled = (preset != 0.toShort())
+            } else {
+                val sessionId = player.audioSessionId
+                if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
+                    configureReverbForSession(sessionId)
+                }
+            }
+        } catch (_: Exception) {}
         try { getSharedPreferences("settings", 0).edit().putInt("reverb_preset", preset.toInt()).apply() } catch (_: Exception) {}
     }
     
+    private fun configureReverbForSession(sessionId: Int) {
+        try {
+            try { presetReverb?.release() } catch (_: Exception) {}
+            presetReverb = PresetReverb(0, sessionId).apply {
+                preset = currentReverb
+                enabled = (currentReverb != 0.toShort())
+            }
+        } catch (_: Exception) {
+            // Device may not support PresetReverb; ignore gracefully
+        }
+    }
+
     override fun onDestroy() {
         try { presetReverb?.release() } catch (_: Exception) {}
         equalizerManager.release()
