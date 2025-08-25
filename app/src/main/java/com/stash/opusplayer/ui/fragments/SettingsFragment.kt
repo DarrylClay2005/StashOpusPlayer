@@ -61,8 +61,14 @@ class SettingsFragment : Fragment() {
         val generalView = buildGeneralContent()
         val pitchView = buildPitchContent() // Now includes Speed & Reverb too
 
-        // Default to General tab
-        contentContainer.addView(generalView)
+        // Select initial tab based on arguments
+        val initialIndex = arguments?.getInt("initial_tab", 0) ?: 0
+        if (initialIndex == 1) {
+            contentContainer.addView(pitchView)
+        } else {
+            contentContainer.addView(generalView)
+        }
+        tabs.getTabAt(initialIndex)?.select()
 
         tabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab) {

@@ -1,6 +1,7 @@
 package com.stash.opusplayer.ui
 
 import android.content.ComponentName
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -117,6 +118,38 @@ class NowPlayingActivity : AppCompatActivity() {
                 controller.repeatMode = nextMode
                 updateRepeatButton(nextMode)
             }
+        }
+
+        // Overflow menu (three dots)
+        binding.menuButton.setOnClickListener { view ->
+            val popup = android.widget.PopupMenu(this, view)
+            popup.menuInflater.inflate(R.menu.now_playing_menu, popup.menu)
+            popup.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    R.id.action_audio_settings -> {
+                        // Open MainActivity with Audio settings tab
+                        val intent = Intent(this, MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        }
+                        startActivity(intent)
+                        // Programmatic navigation will be via drawer item; user can also access directly in drawer
+                        true
+                    }
+                    R.id.action_share -> {
+                        currentSong?.let { s ->
+                            val text = "Now playing: ${s.displayName} — ${s.artistName}"
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, text)
+                            }
+                            startActivity(Intent.createChooser(shareIntent, "Share"))
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+            popup.show()
         }
         
         // Seek bar (hidden) handlers retained for compatibility

@@ -293,6 +293,13 @@ lifecycleScope.launch {
                 loadFragment(SettingsFragment())
                 supportActionBar?.title = getString(R.string.menu_settings)
             }
+            R.id.nav_audio_settings -> {
+                val f = SettingsFragment().apply {
+                    arguments = android.os.Bundle().apply { putInt("initial_tab", 1) }
+                }
+                loadFragment(f)
+                supportActionBar?.title = "Audio Settings"
+            }
             R.id.nav_about -> {
                 showAboutDialog()
             }
