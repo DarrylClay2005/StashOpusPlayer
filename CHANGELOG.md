@@ -1,5 +1,21 @@
 # Changelog
 
+## Version 5.3.0 (2025-08-25)
+
+### Added
+- Folder drill-down: tap a folder in Folders to view all its songs and play them.
+- Artist and genre hero images with online fetching (Last.fm optional + Wikipedia fallback) and Settings toggles/API key.
+- Background rescan toggle placeholder (preparing for scheduled rescans).
+
+---
+
+## Version 5.2.0 (2025-08-25)
+
+### Added
+- Artist/Genre images (Last.fm + Wikipedia), settings toggles & API key.
+
+---
+
 ## Version 5.1.1 (2025-08-25)
 
 ### Fixed
