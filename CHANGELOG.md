@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 5.1.0 (2025-08-25)
+
+### Added
+- Genres tab now uses smart genre grouping (tags + heuristics) to better organize tracks.
+- Manage Folders in Settings to view/remove selected tree URIs.
+- Clear Artwork Cache button in Settings.
+
+---
+
 ## Version 5.0.5 (2025-08-25)
 
 ### Fixed
