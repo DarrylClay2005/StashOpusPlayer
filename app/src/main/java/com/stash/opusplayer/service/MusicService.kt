@@ -17,6 +17,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.PlaybackParameters
 import android.media.audiofx.PresetReverb
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import androidx.media3.session.MediaSessionService
 import com.stash.opusplayer.R
 import com.stash.opusplayer.audio.EqualizerManager
@@ -72,8 +74,59 @@ class MusicService : MediaSessionService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         
+        val callback = object : MediaSession.Callback {
+            override fun onCustomCommand(
+                session: MediaSession,
+                controller: MediaSession.ControllerInfo,
+                customCommand: SessionCommand,
+                args: android.os.Bundle
+            ): com.google.common.util.concurrent.ListenableFuture<SessionResult> {
+                try {
+                    when (customCommand.customAction) {
+                        "SET_EQ_ENABLED" -> {
+                            val enabled = args.getBoolean("enabled", false)
+                            equalizerManager.setEnabled(enabled)
+                        }
+                        "SET_EQ_PRESET" -> {
+                            val name = args.getString("preset") ?: "NORMAL"
+                            try {
+                                equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(name))
+                            } catch (_: Exception) {}
+                        }
+                        "SET_EQ_BAND" -> {
+                            val band = args.getInt("band", 0)
+                            val level = args.getFloat("level", 0f)
+                            equalizerManager.setBandLevel(band, level)
+                        }
+                        "SET_BASS_BOOST" -> {
+                            val strength = args.getInt("strength", 0)
+                            equalizerManager.setBassBoost(strength)
+                        }
+                        "SET_VIRTUALIZER" -> {
+                            val strength = args.getInt("strength", 0)
+                            equalizerManager.setVirtualizer(strength)
+                        }
+                        "SET_SPEED" -> {
+                            val speed = args.getFloat("speed", 1f)
+                            setPlaybackSpeed(speed)
+                        }
+                        "SET_PITCH" -> {
+                            val pitch = args.getFloat("pitch", 1f)
+                            setPlaybackPitch(pitch)
+                        }
+                        "SET_REVERB" -> {
+                            val preset = args.getInt("preset", 0).toShort()
+                            setReverbPreset(preset)
+                        }
+                    }
+                } catch (_: Exception) {}
+                return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+        }
+        
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(sessionActivityPendingIntent)
+            .setCallback(callback)
             .build()
     }
     

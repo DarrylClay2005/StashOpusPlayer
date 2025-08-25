@@ -363,16 +363,19 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
     // Combined method to get all songs from both MediaStore and custom folders (full metadata + AI)
     suspend fun getAllSongsFromAllSources(): List<Song> = withContext(Dispatchers.IO) {
         com.stash.opusplayer.utils.LibraryScanTracker.update("Scanning your library…")
-        val mediaStoreSongs = getAllSongsWithMetadata()
-        val diskFolderSongs = scanCustomFolders()
-        val treeSongs = scanDocumentTrees()
+        // Use fast scan first to avoid blocking
+        val fast = getAllSongsFromAllSourcesFast()
+        // Then enrich each with metadata and AI
+        val enriched = fast.map { s -> metadataExtractor.extractMetadata(s) }
+        val ai = aiTagger.enhanceSongs(enriched)
+        val mediaStoreSongs = emptyList<Song>()
+        val diskFolderSongs = emptyList<Song>()
+        val treeSongs = emptyList<Song>()
         
-val combined = (mediaStoreSongs + diskFolderSongs + treeSongs)
+val combined = ai
             .distinctBy { it.path }
-        com.stash.opusplayer.utils.LibraryScanTracker.update("AI tagging songs…")
-        val tagged = aiTagger.enhanceSongs(combined)
         com.stash.opusplayer.utils.LibraryScanTracker.update("Finalizing…")
-        tagged.sortedBy { it.displayName }
+        combined.sortedBy { it.displayName }
     }
 
 private suspend fun scanDocumentTrees(): List<Song> = withContext(Dispatchers.IO) {

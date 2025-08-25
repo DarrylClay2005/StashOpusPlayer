@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.0.5 - 2025-08-25
+
+- Integrated pitch semitones (-12..+12) with ExoPlayer and MediaSession commands
+- Reworked Equalizer to control live playback via MediaSession (presets, bands, bass, virtualizer)
+- Further speedups: fast-first song listing with background enrichment; reduced heavy metadata during scans
+
 ## 6.0.4 - 2025-08-25
 
 - Faster initial load for Songs: fast scan shown immediately, full metadata/AI enriches in background

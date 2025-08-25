@@ -21,6 +21,7 @@ import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.databinding.ActivityNowPlayingBinding
 import com.stash.opusplayer.player.MusicPlayerManager
 import com.stash.opusplayer.service.MusicService
+import androidx.core.os.bundleOf
 import com.stash.opusplayer.utils.MetadataExtractor
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
@@ -150,10 +151,12 @@ class NowPlayingActivity : AppCompatActivity() {
                 mediaController?.let { controller ->
                     val current = controller.playbackParameters
                     controller.playbackParameters = PlaybackParameters(speed, current.pitch)
+                    // Send to service to keep ExoPlayer parameters in sync
+controller.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_SPEED", android.os.Bundle.EMPTY),
+                        bundleOf("speed" to speed)
+                    )
                 }
-                // Also update service explicitly for robustness
-                val intent = android.content.Intent(this@NowPlayingActivity, com.stash.opusplayer.service.MusicService::class.java)
-                // Not binding; Media3 controller change should suffice.
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -171,6 +174,10 @@ class NowPlayingActivity : AppCompatActivity() {
                 mediaController?.let { controller ->
                     val current = controller.playbackParameters
                     controller.playbackParameters = PlaybackParameters(current.speed, pitch)
+controller.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_PITCH", android.os.Bundle.EMPTY),
+                        bundleOf("pitch" to pitch)
+                    )
                 }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -193,11 +200,10 @@ class NowPlayingActivity : AppCompatActivity() {
                     progress < 950 -> 5
                     else -> 6
                 }.toShort()
-                // Call service via controller custom command if needed; for now, rely on effect init
-                try {
-                    // Best-effort: send to service by creating a MediaController and invoking a custom action is non-trivial here.
-                    // Most OEMs apply preset directly on Equalizer init; a real implementation would use a bound service or session command.
-                } catch (_: Exception) {}
+mediaController?.sendCustomCommand(
+                    androidx.media3.session.SessionCommand("SET_REVERB", android.os.Bundle.EMPTY),
+                    bundleOf("preset" to preset.toInt())
+                )
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
