@@ -1,5 +1,12 @@
 # Changelog
 
+## 7.3.0 - 2025-08-25
+
+- Performance: Embedded album art is now saved to the on-device artwork cache during metadata extraction, enabling instant thumbnail loads across the app.
+- Efficiency: Downsampled decode (RGB_565 + inSampleSize) and JPEG compression tuned for low memory and fast Glide rendering.
+- Consistency: Unified artwork cache usage across activities and adapters to avoid duplicate work and conflicts.
+- Stability: Defensive error handling to prevent OOM/crashes when parsing very large embedded images.
+
 ## 7.1.1 - 2025-08-25
 
 - UI: Added library scanning banner (reflects MediaStore/custom folder scanning progress)
