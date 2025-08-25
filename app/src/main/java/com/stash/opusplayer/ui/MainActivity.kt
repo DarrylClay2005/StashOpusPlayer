@@ -281,21 +281,8 @@ lifecycleScope.launch {
             .replace(R.id.main_content, fragment)
             .commit()
     }
-    private var loadingView: android.view.View? = null
-
-    private fun showLoadingOverlay() {
-        if (loadingView != null) return
-        val inflater = layoutInflater
-        loadingView = inflater.inflate(com.stash.opusplayer.R.layout.view_loading_screen, null)
-        (binding.root as android.view.ViewGroup).addView(loadingView)
-    }
-
-    private fun hideLoadingOverlay() {
-        loadingView?.let { view ->
-            (binding.root as android.view.ViewGroup).removeView(view)
-            loadingView = null
-        }
-    }
+    // No-op: legacy method retained for compatibility with older calls
+    private fun hideLoadingOverlay() { /* no overlay to hide */ }
     
     private fun showAboutDialog() {
         AlertDialog.Builder(this)
