@@ -45,23 +45,14 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:layout_below="@id/toolbar"
-            android:layout_above="@id/mini_player_container" />
+            android:layout_above="@id/mini_player" />
 
         <!-- Mini Player Container -->
-        <LinearLayout
-            android:id="@+id/mini_player_container"
+        <com.stash.opusplayer.ui.MiniPlayerView
+            android:id="@+id/mini_player"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_alignParentBottom="true"
-            android:orientation="vertical">
-
-            <!-- Mini Player -->
-            <include layout="@layout/layout_mini_player" />
-
-            <!-- Bottom Controls -->
-            <include layout="@layout/layout_player_controls" />
-
-        </LinearLayout>
+            android:layout_alignParentBottom="true" />
 
     </RelativeLayout>
 
