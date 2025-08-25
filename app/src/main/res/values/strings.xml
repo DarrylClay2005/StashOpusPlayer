@@ -53,4 +53,13 @@
     <string name="unknown_album">Unknown Album</string>
     <string name="no_songs_found">No songs found</string>
     
+    <!-- Additional UI strings -->
+    <string name="back">Back</string>
+    <string name="menu">Menu</string>
+    <string name="album_artwork">Album Artwork</string>
+    <string name="play_pause">Play/Pause</string>
+    <string name="favorite">Favorite</string>
+    <string name="queue">Queue</string>
+    <string name="share">Share</string>
+    
 </resources>
