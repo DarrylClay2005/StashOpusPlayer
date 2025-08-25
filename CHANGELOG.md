@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 5.1.1 (2025-08-25)
+
+### Fixed
+- Infinite loading overlay when permission is denied; the overlay now dismisses when falling back to Settings.
+
+---
+
 ## Version 5.1.0 (2025-08-25)
 
 ### Added
