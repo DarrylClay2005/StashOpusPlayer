@@ -172,30 +172,46 @@ private fun isValidAudioFile(path: String): Boolean {
     
     // Enhanced method to get all songs with metadata and favorites status
 suspend fun getAllSongsWithMetadata(): List<Song> = withContext(Dispatchers.IO) {
-        com.stash.opusplayer.utils.LibraryScanTracker.update("Scanning MediaStore…")
-        val baseSongs = getAllSongs()
-        // For now, we'll just return songs without favorite status since Flow handling is complex
-        // This will be enhanced in future updates
-        val favoriteIds = emptySet<Long>()
+        if (com.stash.opusplayer.utils.LibraryScanTracker.isScanInProgress()) {
+            return@withContext emptyList()
+        }
         
-baseSongs.map { song ->
-            val enhancedSong = metadataExtractor.extractMetadata(song)
-            val withFav = enhancedSong.copy(isFavorite = favoriteIds.contains(song.id))
-            aiTagger.enhanceSong(withFav)
+        try {
+            com.stash.opusplayer.utils.LibraryScanTracker.startScan("Scanning MediaStore…")
+            val baseSongs = getAllSongs()
+            // For now, we'll just return songs without favorite status since Flow handling is complex
+            // This will be enhanced in future updates
+            val favoriteIds = emptySet<Long>()
+            
+            baseSongs.map { song ->
+                val enhancedSong = metadataExtractor.extractMetadata(song)
+                val withFav = enhancedSong.copy(isFavorite = favoriteIds.contains(song.id))
+                aiTagger.enhanceSong(withFav)
+            }
+        } finally {
+            com.stash.opusplayer.utils.LibraryScanTracker.completeScan()
         }
     }
     
     // Scan custom folders for music files
 suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
-        com.stash.opusplayer.utils.LibraryScanTracker.update("Scanning custom folders…")
-        val customFolders = getCustomMusicFolders()
-        val songs = mutableListOf<Song>()
-        
-        customFolders.forEach { folderPath ->
-            songs.addAll(scanFolderRecursively(folderPath))
+        if (com.stash.opusplayer.utils.LibraryScanTracker.isScanInProgress()) {
+            return@withContext emptyList()
         }
         
-        songs.distinctBy { it.path } // Remove duplicates
+        try {
+            com.stash.opusplayer.utils.LibraryScanTracker.startScan("Scanning custom folders…")
+            val customFolders = getCustomMusicFolders()
+            val songs = mutableListOf<Song>()
+            
+            customFolders.forEach { folderPath ->
+                songs.addAll(scanFolderRecursively(folderPath))
+            }
+            
+            songs.distinctBy { it.path } // Remove duplicates
+        } finally {
+            com.stash.opusplayer.utils.LibraryScanTracker.completeScan()
+        }
     }
     
     private suspend fun scanFolderRecursively(folderPath: String): List<Song> {
@@ -376,20 +392,29 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
 
     // Combined method to get all songs from both MediaStore and custom folders (full metadata + AI)
     suspend fun getAllSongsFromAllSources(): List<Song> = withContext(Dispatchers.IO) {
-        com.stash.opusplayer.utils.LibraryScanTracker.update("Scanning your library…")
-        // Use fast scan first to avoid blocking
-        val fast = getAllSongsFromAllSourcesFast()
-        // Then enrich each with metadata and AI
-        val enriched = fast.map { s -> metadataExtractor.extractMetadata(s) }
-        val ai = aiTagger.enhanceSongs(enriched)
-        // Deduplicate using a stable key across sources (MediaStore vs file scans)
-        val deduped = LinkedHashMap<String, Song>()
-        for (s in ai) {
-            val key = stableKey(s)
-            if (!deduped.containsKey(key)) deduped[key] = s
+        if (com.stash.opusplayer.utils.LibraryScanTracker.isScanInProgress()) {
+            return@withContext emptyList()
         }
-        com.stash.opusplayer.utils.LibraryScanTracker.update("Finalizing…")
-        deduped.values.sortedBy { it.displayName }
+        
+        try {
+            com.stash.opusplayer.utils.LibraryScanTracker.startScan("Scanning your library…")
+            // Use fast scan first to avoid blocking
+            val fast = getAllSongsFromAllSourcesFast()
+            com.stash.opusplayer.utils.LibraryScanTracker.update("Processing metadata…")
+            // Then enrich each with metadata and AI
+            val enriched = fast.map { s -> metadataExtractor.extractMetadata(s) }
+            val ai = aiTagger.enhanceSongs(enriched)
+            // Deduplicate using a stable key across sources (MediaStore vs file scans)
+            val deduped = LinkedHashMap<String, Song>()
+            for (s in ai) {
+                val key = stableKey(s)
+                if (!deduped.containsKey(key)) deduped[key] = s
+            }
+            com.stash.opusplayer.utils.LibraryScanTracker.update("Finalizing…")
+            deduped.values.sortedBy { it.displayName }
+        } finally {
+            com.stash.opusplayer.utils.LibraryScanTracker.completeScan()
+        }
     }
 
 private suspend fun scanDocumentTrees(): List<Song> = withContext(Dispatchers.IO) {
