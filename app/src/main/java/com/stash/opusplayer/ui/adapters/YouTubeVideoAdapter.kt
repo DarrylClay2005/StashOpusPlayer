@@ -21,7 +21,7 @@ class YouTubeVideoAdapter(
     private val onPreviewClick: (YouTubeVideo) -> Unit = {}
 ) : ListAdapter<YouTubeVideo, YouTubeVideoAdapter.VideoViewHolder>(DiffCallback) {
 
-    private val downloadProgress = mutableMapOf<String, DownloadProgress>()
+    private val downloadProgressMap = mutableMapOf<String, DownloadProgress>()
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VideoViewHolder {
         val binding = ItemYoutubeVideoBinding.inflate(
@@ -38,7 +38,7 @@ class YouTubeVideoAdapter(
     }
 
     fun updateDownloadProgress(videoId: String, progress: DownloadProgress) {
-        downloadProgress[videoId] = progress
+        downloadProgressMap[videoId] = progress
         // Find the position of this video and notify
         val position = currentList.indexOfFirst { it.id == videoId }
         if (position >= 0) {
@@ -71,7 +71,7 @@ class YouTubeVideoAdapter(
                     .into(thumbnailImageView)
 
                 // Handle download progress
-                val progress = downloadProgress[video.id]
+                val progress = downloadProgressMap[video.id]
                 if (progress != null) {
                     downloadProgressContainer.visibility = View.VISIBLE
                     when (progress.status) {
