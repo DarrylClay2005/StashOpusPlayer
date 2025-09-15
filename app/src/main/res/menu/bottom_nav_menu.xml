@@ -17,6 +17,10 @@
         android:title="Folders"
         android:icon="@drawable/ic_folder" />
     <item
+        android:id="@+id/nav_youtube"
+        android:title="YouTube"
+        android:icon="@android:drawable/ic_menu_search" />
+    <item
         android:id="@+id/nav_settings"
         android:title="Settings"
         android:icon="@drawable/ic_settings" />

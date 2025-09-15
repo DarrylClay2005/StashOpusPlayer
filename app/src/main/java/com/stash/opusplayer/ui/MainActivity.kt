@@ -36,6 +36,7 @@ import com.stash.opusplayer.ui.fragments.MusicLibraryFragment
 import com.stash.opusplayer.ui.fragments.EqualizerFragment
 import com.stash.opusplayer.ui.fragments.SettingsFragment
 import com.stash.opusplayer.ui.fragments.PlaylistsFragment
+import com.stash.opusplayer.ui.fragments.YouTubeSearchFragment
 import com.stash.opusplayer.utils.PermissionUtils
 import com.stash.opusplayer.updates.UpdateManager
 import com.stash.opusplayer.player.MusicPlayerManager
@@ -165,6 +166,11 @@ lifecycleScope.launch {
                 R.id.nav_folders -> {
                     loadFragment(com.stash.opusplayer.ui.fragments.FoldersFragment())
                     supportActionBar?.title = getString(R.string.menu_folders)
+                    true
+                }
+                R.id.nav_youtube -> {
+                    loadFragment(YouTubeSearchFragment())
+                    supportActionBar?.title = "YouTube Search"
                     true
                 }
                 R.id.nav_settings -> {

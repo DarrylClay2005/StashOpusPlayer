@@ -16,8 +16,8 @@ android {
         applicationId "com.stash.opusplayer"
         minSdk 21
         targetSdk 34
-        versionCode 34
-        versionName "7.6.3"
+        versionCode 35
+        versionName "8.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -113,6 +113,20 @@ dependencies {
 
     // Networking for online artwork
     implementation 'com.squareup.okhttp3:okhttp:4.11.0'
+    
+    // YouTube Data API and video downloading
+    implementation 'com.google.apis:google-api-services-youtube:v3-rev20220719-2.0.0'
+    implementation 'com.google.api-client:google-api-client-android:2.0.0'
+    implementation 'com.google.http-client:google-http-client-gson:1.42.3'
+    
+    // Video downloading (yt-dlp alternative for Android)
+    implementation 'com.github.yausername:youtubedl-android:0.14.+'
+    
+    // Additional HTTP client for downloads
+    implementation 'com.squareup.okhttp3:okhttp:4.11.0'
+    
+    // JSON parsing
+    implementation 'org.json:json:20230618'
     
     // Preferences
     implementation 'androidx.preference:preference-ktx:1.2.1'
