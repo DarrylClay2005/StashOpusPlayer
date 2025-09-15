@@ -31,13 +31,8 @@ class FormatSelectionDialog(
         setContentView(binding.root)
         
         setupVideoInfo()
-        setupFormatList()
         setupButtons()
-        
-        // Auto-select highest quality format (first in list)
-        if (formats.isNotEmpty()) {
-            formatAdapter.selectFormat(formats.first())
-        }
+        setupFormatList()
     }
 
     private fun setupVideoInfo() {
@@ -57,7 +52,9 @@ class FormatSelectionDialog(
     private fun setupFormatList() {
         formatAdapter = AudioFormatAdapter { format ->
             selectedFormat = format
-            binding.downloadButton.isEnabled = true
+            // Automatically start download when format is selected
+            onFormatSelected(format)
+            dismiss()
         }
         
         binding.formatsRecyclerView.apply {
@@ -72,13 +69,6 @@ class FormatSelectionDialog(
         binding.apply {
             cancelButton.setOnClickListener {
                 dismiss()
-            }
-            
-            downloadButton.setOnClickListener {
-                selectedFormat?.let { format ->
-                    onFormatSelected(format)
-                    dismiss()
-                }
             }
         }
     }
