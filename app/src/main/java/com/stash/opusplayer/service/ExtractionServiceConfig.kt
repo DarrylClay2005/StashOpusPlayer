@@ -1,57 +1,48 @@
 package com.stash.opusplayer.service
 
 /**
- * Configuration for external YouTube extraction services.
- * Users can modify these URLs to use their own hosted services or alternative APIs.
+ * Configuration for YouTube extraction using local yt-dlp.
+ * 
+ * This app now uses built-in yt-dlp and FFmpeg libraries for YouTube audio extraction,
+ * eliminating the need for external services. This means the app will work for any user
+ * on any IP address without relying on hosted services.
  */
 object ExtractionServiceConfig {
     
-    // Local yt-dlp Service (using cloned official repository)
-    const val LOCAL_SERVICE_URL = "http://192.168.12.186:8080/quick"
-    const val LOCAL_SERVICE_ENABLED = true  // Re-enabled to use official yt-dlp
-    
-    // Backup services
-    
-    // Direct YouTube extraction (fallback)
-    const val DIRECT_EXTRACTION_ENABLED = true
-    
-    // Cobra API configuration - Open source YouTube downloader
-    const val COBRA_API_URL = "https://co.wuk.sh/api/json"
-    const val COBRA_ENABLED = false  // Disabled - service returning 404
-    
-    // yt-dlp API service configuration
-    const val YOUTUBE_DL_API_URL = "https://ytdl-api.onrender.com/api/yt-dlp"
-    const val YOUTUBE_DL_ENABLED = false  // Disabled - service returning 404
-    
-    // Invidious instance configuration - Privacy-focused YouTube frontend
-    const val INVIDIOUS_INSTANCE_URL = "https://invidious.io/api/v1/videos"
-    const val INVIDIOUS_ENABLED = false  // Disabled - service returning 404
-    
-    // Alternative services (disabled by default - enable if you have access)
-    const val ALTERNATIVE_SERVICE_1_URL = "https://your-custom-service.com/extract"
-    const val ALTERNATIVE_SERVICE_1_ENABLED = false
-    
-    const val ALTERNATIVE_SERVICE_2_URL = "https://another-service.com/api/youtube"
-    const val ALTERNATIVE_SERVICE_2_ENABLED = false
-    
     /**
-     * Instructions for users who want to set up their own extraction service:
+     * Local yt-dlp Configuration
      * 
-     * 1. Deploy your own yt-dlp API service (e.g., using Docker)
-     * 2. Update the URL constants above to point to your service
-     * 3. Set the corresponding _ENABLED flag to true
-     * 4. Recompile the app
+     * The app now uses the youtubedl-android library which bundles yt-dlp and FFmpeg
+     * directly into the Android app. This provides:
      * 
-     * Example yt-dlp API Docker setup:
-     * ```
-     * docker run -p 8080:8080 -d --name ytdl-api \
-     *   ghcr.io/alexta/ytdl-api:latest
-     * ```
-     * 
-     * Then update YOUTUBE_DL_API_URL to "http://your-server:8080/api/extract"
+     * - Universal compatibility: Works on any device/IP
+     * - No external dependencies: Everything runs locally
+     * - Better reliability: No network service failures
+     * - Privacy: No data sent to third-party services
+     * - Offline capability: Works without internet for cached videos
      */
     
-    // Timeout settings
-    const val REQUEST_TIMEOUT_MS = 30000L
-    const val CONNECT_TIMEOUT_MS = 10000L
+    // yt-dlp update configuration
+    const val AUTO_UPDATE_YTDLP = true  // Automatically update yt-dlp when possible
+    
+    // Timeout settings for downloads
+    const val REQUEST_TIMEOUT_MS = 60000L  // Increased for large audio files
+    const val CONNECT_TIMEOUT_MS = 15000L
+    
+    /**
+     * Audio format preferences for yt-dlp extraction
+     * These formats will be tried in order of preference
+     */
+    val PREFERRED_AUDIO_FORMATS = listOf(
+        "bestaudio[ext=m4a]/bestaudio[ext=mp4]",  // Best quality M4A/MP4
+        "bestaudio[ext=webm]",                     // WebM audio
+        "bestaudio[ext=mp3]",                      // MP3 audio
+        "bestaudio"                                 // Fallback to any best audio
+    )
+    
+    /**
+     * User agent string for YouTube requests
+     * This helps avoid bot detection
+     */
+    const val USER_AGENT = "Mozilla/5.0 (Android 11; Mobile; rv:68.0) Gecko/68.0 Firefox/88.0"
 }
