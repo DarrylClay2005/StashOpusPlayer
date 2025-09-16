@@ -169,7 +169,8 @@ class MetadataExtractor(private val context: Context) {
                 ?: "Unknown Album"
             val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             
-            Song(
+            // Extract album art for better thumbnails
+            val albumArt = extractAlbumArt(retriever, Song(
                 id = filePath.hashCode().toLong(),
                 title = title,
                 artist = artist,
@@ -179,6 +180,19 @@ class MetadataExtractor(private val context: Context) {
                 size = if (!isContent) file!!.length() else 0L,
                 mimeType = if (!isContent) getMimeType(filePath) else "audio/*",
                 dateAdded = if (!isContent) file!!.lastModified() else 0L
+            ))
+            
+            Song(
+                id = filePath.hashCode().toLong(),
+                title = title,
+                artist = artist,
+                album = album,
+                duration = duration,
+                path = filePath,
+                size = if (!isContent) file!!.length() else 0L,
+                mimeType = if (!isContent) getMimeType(filePath) else "audio/*",
+                dateAdded = if (!isContent) file!!.lastModified() else 0L,
+                albumArt = albumArt
             )
         } catch (e: Exception) {
             // Fallback: build minimal Song so we still list files like .opus when retriever fails
@@ -223,7 +237,135 @@ class MetadataExtractor(private val context: Context) {
             "m4a", "aac" -> "audio/mp4"
             "wav" -> "audio/wav"
             "wma" -> "audio/x-ms-wma"
+            "webm" -> "audio/webm"
+            "mp4" -> "video/mp4"
+            "mkv" -> "video/x-matroska"
+            "avi" -> "video/x-msvideo"
             else -> "audio/*"
         }
+    }
+    
+    /**
+     * Downloads YouTube thumbnail and returns Base64 encoded image
+     */
+    suspend fun downloadYouTubeThumbnail(videoId: String): String? {
+        return try {
+            // YouTube thumbnail URLs in order of preference (quality)
+            val thumbnailUrls = listOf(
+                "https://img.youtube.com/vi/$videoId/maxresdefault.jpg",
+                "https://img.youtube.com/vi/$videoId/hqdefault.jpg",
+                "https://img.youtube.com/vi/$videoId/mqdefault.jpg",
+                "https://img.youtube.com/vi/$videoId/default.jpg"
+            )
+            
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            
+            for (url in thumbnailUrls) {
+                try {
+                    val request = okhttp3.Request.Builder()
+                        .url(url)
+                        .addHeader("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:40.0) Gecko/40.0 Firefox/40.0")
+                        .build()
+                    
+                    val response = client.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        val imageBytes = response.body?.bytes()
+                        if (imageBytes != null && imageBytes.isNotEmpty()) {
+                            // Process and optimize the thumbnail
+                            val optimizedBytes = optimizeImage(imageBytes)
+                            if (optimizedBytes != null) {
+                                Log.d(TAG, "Downloaded YouTube thumbnail from: $url")
+                                return Base64.encodeToString(optimizedBytes, Base64.NO_WRAP)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to download thumbnail from $url", e)
+                }
+            }
+            
+            Log.w(TAG, "Failed to download any YouTube thumbnail for video: $videoId")
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error downloading YouTube thumbnail", e)
+            null
+        }
+    }
+    
+    /**
+     * Optimizes downloaded image for better performance and storage
+     */
+    private fun optimizeImage(imageBytes: ByteArray): ByteArray? {
+        return try {
+            // First decode bounds to compute an inSampleSize
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, bounds)
+            val sampleSize = calculateInSampleSize(bounds, MAX_ART_DIMENSION, MAX_ART_DIMENSION)
+            
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = false
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.RGB_565 // smaller than ARGB_8888
+            }
+            
+            val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, options)
+            if (bitmap != null) {
+                val stream = ByteArrayOutputStream(32 * 1024)
+                try {
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, stream)
+                } finally {
+                    try { bitmap.recycle() } catch (_: Throwable) {}
+                }
+                stream.toByteArray()
+            } else null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error optimizing image", e)
+            null
+        }
+    }
+    
+    /**
+     * Creates a Song with YouTube metadata and thumbnail
+     */
+    suspend fun createYouTubeSong(
+        videoId: String,
+        title: String,
+        artist: String,
+        filePath: String,
+        duration: Long = 0L
+    ): Song {
+        val thumbnailBase64 = downloadYouTubeThumbnail(videoId)
+        
+        val song = Song(
+            id = filePath.hashCode().toLong(),
+            title = title,
+            artist = artist,
+            album = "YouTube",
+            duration = duration,
+            path = filePath,
+            size = if (!filePath.startsWith("content://")) File(filePath).length() else 0L,
+            mimeType = getMimeType(filePath),
+            dateAdded = System.currentTimeMillis(),
+            albumArt = thumbnailBase64
+        )
+        
+        // Cache the thumbnail for faster future loads
+        if (thumbnailBase64 != null) {
+            try {
+                val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
+                val artBytes = Base64.decode(thumbnailBase64, Base64.DEFAULT)
+                val outFile = cache.fileFor(song)
+                if (!outFile.exists()) {
+                    cache.saveJpeg(artBytes, outFile)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to cache YouTube thumbnail", e)
+            }
+        }
+        
+        return song
     }
 }
