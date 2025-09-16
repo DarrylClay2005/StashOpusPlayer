@@ -1,15 +1,12 @@
 # Track APK files with Git LFS
 *.apk filter=lfs diff=lfs merge=lfs -text
 *.aab filter=lfs diff=lfs merge=lfs -text
-
 # Track keystore files
 *.keystore filter=lfs diff=lfs merge=lfs -text
 *.jks filter=lfs diff=lfs merge=lfs -text
-
 # Track large asset files
 *.so filter=lfs diff=lfs merge=lfs -text
 *.jar filter=lfs diff=lfs merge=lfs -text
-
 # Track media files that might be used as test data
 *.mp3 filter=lfs diff=lfs merge=lfs -text
 *.wav filter=lfs diff=lfs merge=lfs -text
@@ -19,13 +16,11 @@
 *.opus filter=lfs diff=lfs merge=lfs -text
 *.webm filter=lfs diff=lfs merge=lfs -text
 *.mp4 filter=lfs diff=lfs merge=lfs -text
-
 # Track large image files
 *.png filter=lfs diff=lfs merge=lfs -text
 *.jpg filter=lfs diff=lfs merge=lfs -text
 *.jpeg filter=lfs diff=lfs merge=lfs -text
 *.webp filter=lfs diff=lfs merge=lfs -text
-
 # Track build outputs and large files
 app/build/outputs/**/*.apk filter=lfs diff=lfs merge=lfs -text
 app/build/outputs/**/*.aab filter=lfs diff=lfs merge=lfs -text
