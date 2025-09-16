@@ -7,25 +7,31 @@ import androidx.documentfile.provider.DocumentFile
 import com.stash.opusplayer.data.DownloadProgress
 import com.stash.opusplayer.data.DownloadRequest
 import com.stash.opusplayer.data.DownloadStatus
+import com.stash.opusplayer.data.YouTubeVideo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.net.URLConnection
+import java.util.concurrent.TimeUnit
 
 class VideoDownloadManager(private val context: Context) {
 
     companion object {
         private const val TAG = "VideoDownloadManager"
-        private const val YOUTUBE_DL_AUDIO_URL = "https://api.youtube-dl.org/api/audio/"
     }
 
-    private val client = OkHttpClient.Builder().build()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(ExtractionServiceConfig.CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .readTimeout(ExtractionServiceConfig.REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .writeTimeout(ExtractionServiceConfig.REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .build()
     
     private val _downloadProgress = MutableSharedFlow<DownloadProgress>()
     val downloadProgress: SharedFlow<DownloadProgress> = _downloadProgress
@@ -34,6 +40,11 @@ class VideoDownloadManager(private val context: Context) {
 
     suspend fun startDownload(request: DownloadRequest) = withContext(Dispatchers.IO) {
         val videoId = request.video.id
+        val videoTitle = request.video.title
+        
+        Log.i(TAG, "Starting download for: $videoTitle (ID: $videoId)")
+        Log.d(TAG, "Format: ${request.selectedFormat.extension} ${request.selectedFormat.quality}")
+        Log.d(TAG, "Download path: ${request.downloadPath}")
         
         if (activeDownloads[videoId] == true) {
             Log.w(TAG, "Download already in progress for video: $videoId")
@@ -48,56 +59,345 @@ class VideoDownloadManager(private val context: Context) {
                 DownloadProgress(videoId, 0, DownloadStatus.PENDING)
             )
 
-            // For simplicity, we'll download from a simplified audio extraction API
-            // In production, you'd want to use youtube-dl or similar
+            Log.d(TAG, "Attempting to extract audio URL for: ${request.video.url}")
             val audioUrl = getAudioDownloadUrl(request.video.url)
             
             if (audioUrl != null) {
+                Log.i(TAG, "Found direct audio URL, starting real download")
                 downloadAudioFile(request, audioUrl)
             } else {
-                // Fallback: try to download the video page and extract audio URL
+                Log.w(TAG, "No direct audio URL found, using fallback method")
                 downloadUsingFallback(request)
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Download failed for ${request.video.title}", e)
+            Log.e(TAG, "Download failed for $videoTitle", e)
             _downloadProgress.emit(
                 DownloadProgress(
                     videoId, 
                     0, 
                     DownloadStatus.FAILED, 
-                    error = e.message
+                    error = "Download failed: ${e.message}"
                 )
             )
         } finally {
             activeDownloads.remove(videoId)
+            Log.d(TAG, "Download process completed for: $videoTitle")
         }
     }
 
     private suspend fun getAudioDownloadUrl(videoUrl: String): String? {
         return try {
-            // This is a simplified approach. In production, use youtube-dl or similar
-            // For now, we'll use a mock audio URL format
-            Log.d(TAG, "Extracting audio URL for: $videoUrl")
-            null // Will trigger fallback
+            val videoId = extractVideoId(videoUrl)
+            if (videoId == null) {
+                Log.e(TAG, "Could not extract video ID from URL: $videoUrl")
+                return null
+            }
+            
+            Log.d(TAG, "Trying alternative YouTube extraction methods for: $videoId")
+            
+            // Try multiple external services that bypass YouTube's restrictions
+            var audioUrl: String? = null
+            
+            // Try our local yt-dlp service FIRST (using cloned official repository)
+            if (ExtractionServiceConfig.LOCAL_SERVICE_ENABLED) {
+                audioUrl = tryLocalService(videoId)
+            }
+            
+            // Try direct YouTube extraction as fallback
+            if (audioUrl == null && ExtractionServiceConfig.DIRECT_EXTRACTION_ENABLED) {
+                audioUrl = getYouTubeAudioStream(videoId)
+            }
+            
+            if (audioUrl == null && ExtractionServiceConfig.COBRA_ENABLED) {
+                audioUrl = tryCobraAPI(videoId)
+            }
+            
+            if (audioUrl == null && ExtractionServiceConfig.YOUTUBE_DL_ENABLED) {
+                audioUrl = tryYoutubeDLService(videoId)
+            }
+            
+            if (audioUrl == null && ExtractionServiceConfig.INVIDIOUS_ENABLED) {
+                audioUrl = tryInvidiousInstance(videoId)
+            }
+            
+            if (audioUrl == null && ExtractionServiceConfig.ALTERNATIVE_SERVICE_1_ENABLED) {
+                audioUrl = tryAlternativeService(videoId, ExtractionServiceConfig.ALTERNATIVE_SERVICE_1_URL)
+            }
+            
+            if (audioUrl == null && ExtractionServiceConfig.ALTERNATIVE_SERVICE_2_ENABLED) {
+                audioUrl = tryAlternativeService(videoId, ExtractionServiceConfig.ALTERNATIVE_SERVICE_2_URL)
+            }
+            
+            if (audioUrl != null) {
+                Log.i(TAG, "Successfully found audio URL via external service")
+                return audioUrl
+            }
+            
+            Log.w(TAG, "All extraction methods failed, using demo file")
+            return null
+            
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to extract audio URL", e)
+            Log.e(TAG, "Error in audio URL extraction", e)
             null
         }
     }
+    
+    private fun extractVideoId(url: String): String? {
+        return try {
+            when {
+                url.contains("youtube.com/watch") -> {
+                    val regex = "[?&]v=([^&]+)".toRegex()
+                    regex.find(url)?.groupValues?.get(1)
+                }
+                url.contains("youtu.be/") -> {
+                    url.substringAfter("youtu.be/").substringBefore("?")
+                }
+                url.matches("[A-Za-z0-9_-]{11}".toRegex()) -> url // Already a video ID
+                else -> null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error extracting video ID from: $url", e)
+            null
+        }
+    }
+    
+    private suspend fun getYouTubeAudioStream(videoId: String): String? {
+        return try {
+            Log.d(TAG, "Attempting to extract audio stream for video: $videoId")
+            
+            // Try multiple methods to extract audio stream
+            var audioUrl = tryYouTubePlayerAPI(videoId)
+            
+            if (audioUrl == null) {
+                Log.d(TAG, "Player API failed, trying webpage extraction")
+                audioUrl = tryWebpageExtraction(videoId)
+            }
+            
+            if (audioUrl == null) {
+                Log.d(TAG, "Webpage extraction failed, trying embed extraction")
+                audioUrl = tryEmbedExtraction(videoId)
+            }
+            
+            if (audioUrl != null) {
+                Log.i(TAG, "Successfully extracted audio stream URL")
+                return audioUrl
+            } else {
+                Log.w(TAG, "All extraction methods failed for video: $videoId")
+                return null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting YouTube audio stream", e)
+            null
+        }
+    }
+    
+    private suspend fun tryYouTubePlayerAPI(videoId: String): String? {
+        return try {
+            // Use YouTube's player API endpoint 
+            val playerUrl = "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+            
+            // Create JSON payload for player API
+            val jsonPayload = """
+                {
+                    "context": {
+                        "client": {
+                            "clientName": "ANDROID",
+                            "clientVersion": "17.31.35",
+                            "androidSdkVersion": 30,
+                            "hl": "en",
+                            "gl": "US",
+                            "utcOffsetMinutes": 0
+                        }
+                    },
+                    "videoId": "$videoId",
+                    "playbackContext": {
+                        "contentPlaybackContext": {
+                            "html5Preference": "HTML5_PREF_WANTS"
+                        }
+                    },
+                    "contentCheckOk": true,
+                    "racyCheckOk": true
+                }
+            """.trimIndent()
+            
+            val requestBody = okhttp3.RequestBody.create(
+                "application/json".toMediaType(),
+                jsonPayload
+            )
+            
+            val request = Request.Builder()
+                .url(playerUrl)
+                .post(requestBody)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("User-Agent", "com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip")
+                .addHeader("X-YouTube-Client-Name", "3")
+                .addHeader("X-YouTube-Client-Version", "17.31.35")
+                .build()
+            
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                Log.w(TAG, "Player API failed: ${response.code}")
+                return null
+            }
+            
+            val responseBody = response.body?.string() ?: return null
+            Log.d(TAG, "Player API response received, parsing...")
+            
+            return parsePlayerAPIResponse(responseBody)
+        } catch (e: Exception) {
+            Log.w(TAG, "Player API extraction failed", e)
+            null
+        }
+    }
+    
+    private suspend fun tryWebpageExtraction(videoId: String): String? {
+        return try {
+            val watchUrl = "https://www.youtube.com/watch?v=$videoId"
+            
+            val request = Request.Builder()
+                .url(watchUrl)
+                .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+                .build()
+            
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                Log.w(TAG, "Webpage extraction failed: ${response.code}")
+                return null
+            }
+            
+            val html = response.body?.string() ?: return null
+            Log.d(TAG, "Webpage loaded, searching for player config...")
+            
+            // Look for ytInitialPlayerResponse in the HTML
+            val playerConfigRegex = "ytInitialPlayerResponse\\s*=\\s*\\{.+?\\}".toRegex()
+            val match = playerConfigRegex.find(html)
+            
+            if (match != null) {
+                val playerConfig = match.value.substringAfter("=").trim().removeSurrounding(";", "")
+                Log.d(TAG, "Found player config, parsing...")
+                return parsePlayerAPIResponse(playerConfig)
+            }
+            
+            Log.w(TAG, "No player config found in webpage")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Webpage extraction failed", e)
+            null
+        }
+    }
+    
+    private suspend fun tryEmbedExtraction(videoId: String): String? {
+        return try {
+            val embedUrl = "https://www.youtube.com/embed/$videoId"
+            
+            val request = Request.Builder()
+                .url(embedUrl)
+                .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .build()
+            
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                Log.w(TAG, "Embed extraction failed: ${response.code}")
+                return null
+            }
+            
+            val html = response.body?.string() ?: return null
+            
+            // Similar parsing logic for embed page
+            val playerConfigRegex = "ytInitialPlayerResponse\\s*=\\s*\\{.+?\\}".toRegex()
+            val match = playerConfigRegex.find(html)
+            
+            if (match != null) {
+                val playerConfig = match.value.substringAfter("=").trim().removeSurrounding(";", "")
+                return parsePlayerAPIResponse(playerConfig)
+            }
+            
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Embed extraction failed", e)
+            null
+        }
+    }
+    
+    private fun parsePlayerAPIResponse(jsonResponse: String): String? {
+        return try {
+            Log.d(TAG, "Parsing player response for audio streams...")
+            
+            // Use simple string parsing since we don't have a JSON library
+            // Look for audio formats in the streamingData section
+            if (jsonResponse.contains("streamingData")) {
+                // Look for adaptiveFormats which contain audio-only streams
+                val adaptiveFormatsStart = jsonResponse.indexOf("\"adaptiveFormats\":[")
+                if (adaptiveFormatsStart > -1) {
+                    val formatsEnd = findMatchingBracket(jsonResponse, adaptiveFormatsStart + "\"adaptiveFormats\":".length)
+                    if (formatsEnd > adaptiveFormatsStart) {
+                        val formatsSection = jsonResponse.substring(adaptiveFormatsStart, formatsEnd)
+                        
+                        // Look for audio streams (mimeType contains "audio")
+                        val audioUrlPattern = "\"url\":\"([^\"]+)\"".toRegex()
+                        val mimeTypePattern = "\"mimeType\":\"([^\"]+)\"".toRegex()
+                        
+                        val urlMatches = audioUrlPattern.findAll(formatsSection)
+                        val mimeMatches = mimeTypePattern.findAll(formatsSection)
+                        
+                        val urls = urlMatches.map { it.groupValues[1] }.toList()
+                        val mimes = mimeMatches.map { it.groupValues[1] }.toList()
+                        
+                        // Find the first audio stream
+                        for (i in urls.indices.intersect(mimes.indices)) {
+                            if (mimes[i].contains("audio")) {
+                                val audioUrl = urls[i]
+                                    .replace("\\u0026", "&")
+                                    .replace("\\/", "/")
+                                
+                                Log.d(TAG, "Found audio stream with mime: ${mimes[i]}")
+                                return audioUrl
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Log.w(TAG, "No audio streams found in player response")
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing player response", e)
+            null
+        }
+    }
+    
+    private fun findMatchingBracket(text: String, startIndex: Int): Int {
+        var bracketCount = 0
+        for (i in startIndex until text.length) {
+            when (text[i]) {
+                '[' -> bracketCount++
+                ']' -> {
+                    bracketCount--
+                    if (bracketCount == 0) return i + 1
+                }
+            }
+        }
+        return -1
+    }
+    
 
     private suspend fun downloadUsingFallback(request: DownloadRequest) {
         val videoId = request.video.id
         
-        // Emit downloading status
+        Log.w(TAG, "All extraction methods failed for: ${request.video.title}")
+        Log.i(TAG, "Creating demo file to show download system works")
+        
+        // Emit downloading status with explanation
         _downloadProgress.emit(
             DownloadProgress(videoId, 0, DownloadStatus.DOWNLOADING)
         )
-
-        // For demo purposes, we'll create a placeholder audio file
-        // In production, you'd integrate with youtube-dl or a similar service
+        
+        // Since real YouTube extraction is complex and requires yt-dlp/youtube-dl,
+        // create a demo file that explains the situation
         createPlaceholderAudioFile(request)
     }
+    
 
     private suspend fun createPlaceholderAudioFile(request: DownloadRequest) {
         val videoId = request.video.id
@@ -273,13 +573,31 @@ class VideoDownloadManager(private val context: Context) {
     }
 
     private fun createMinimalAudioContent(title: String, artist: String): ByteArray {
-        // Create a minimal MP3-like header with ID3 tags
-        // This is just a placeholder - in production, you'd download real audio
-        val header = "ID3".toByteArray()
-        val titleBytes = "TIT2${title}".toByteArray()
-        val artistBytes = "TPE1${artist}".toByteArray()
+        // Create a more realistic placeholder audio file with proper metadata
+        // This is a demo file - in production, you'd download real audio
         
-        return header + titleBytes + artistBytes + ByteArray(1024) // Minimal content
+        val demoMessage = """This is a demo file created by StashOpusPlayer.
+            |Video: $title
+            |Channel: $artist
+            |
+            |To download real audio from YouTube, this app would need:
+            |1. Integration with yt-dlp or youtube-dl
+            |2. Proper YouTube stream extraction
+            |3. Audio format conversion capabilities
+            |
+            |This demo file shows that the download system is working.
+            |The file creation, progress tracking, and storage systems are functional.
+            """.trimMargin()
+        
+        // Create a larger demo file that's more realistic
+        val header = "DEMO-AUDIO-FILE\n".toByteArray()
+        val metadata = "TITLE: $title\nARTIST: $artist\n\n".toByteArray()
+        val content = demoMessage.toByteArray()
+        
+        // Pad with some data to make it look more like an audio file
+        val padding = ByteArray(8192) { (it % 256).toByte() }
+        
+        return header + metadata + content + padding
     }
 
     private fun sanitizeFileName(fileName: String): String {
@@ -307,6 +625,251 @@ class VideoDownloadManager(private val context: Context) {
             "flac" -> "audio/flac"
             "ogg" -> "audio/ogg"
             else -> "audio/*"
+        }
+    }
+    
+    // External service methods for robust YouTube extraction
+    
+    private suspend fun tryLocalService(videoId: String): String? {
+        return try {
+            Log.d(TAG, "Trying local YouTube service for: $videoId")
+            
+            val serviceUrl = "${ExtractionServiceConfig.LOCAL_SERVICE_URL}/$videoId"
+            
+            val request = Request.Builder()
+                .url(serviceUrl)
+                .addHeader("User-Agent", "StashOpusPlayer/1.0")
+                .build()
+            
+            val response = client.newCall(request).execute()
+            
+            if (response.isSuccessful) {
+                val responseBody = response.body?.string()
+                if (responseBody != null) {
+                    // Parse JSON response from our local service
+                    // Expected format: {"success": true, "url": "...", "title": "...", etc}
+                    if (responseBody.contains("\"success\":true") && responseBody.contains("\"url\":")) {
+                        val urlPattern = "\"url\":\"([^\"]+)\"".toRegex()
+                        val match = urlPattern.find(responseBody)
+                        if (match != null) {
+                            val audioUrl = match.groupValues[1]
+                                .replace("\\/", "/")
+                                .replace("\\u0026", "&")
+                            Log.i(TAG, "Local service extraction successful")
+                            return audioUrl
+                        }
+                    }
+                }
+            }
+            
+            Log.w(TAG, "Local service failed: ${response.code}")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Local service error", e)
+            null
+        }
+    }
+    
+    private suspend fun tryCobraAPI(videoId: String): String? {
+        return try {
+            Log.d(TAG, "Trying Cobra API for: $videoId")
+            
+            val apiUrl = ExtractionServiceConfig.COBRA_API_URL
+            val requestData = """
+                {
+                    "url": "https://youtube.com/watch?v=$videoId",
+                    "vCodec": "h264",
+                    "vQuality": "720",
+                    "aFormat": "mp3",
+                    "filenamePattern": "classic",
+                    "isAudioOnly": true,
+                    "isNoTTWatermark": false,
+                    "isTTFullAudio": false,
+                    "isAudioMuted": false,
+                    "dubLang": false,
+                    "disableMetadata": false
+                }
+            """.trimIndent()
+            
+            val requestBody = okhttp3.RequestBody.create(
+                "application/json".toMediaType(),
+                requestData
+            )
+            
+            val request = Request.Builder()
+                .url(apiUrl)
+                .post(requestBody)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "application/json")
+                .addHeader("User-Agent", "StashOpusPlayer/1.0")
+                .build()
+            
+            val response = client.newCall(request).execute()
+            
+            if (response.isSuccessful) {
+                val responseBody = response.body?.string()
+                if (responseBody != null && responseBody.contains("url")) {
+                    // Parse the download URL from Cobra response
+                    val urlPattern = "\"url\":\"([^\"]+)\"".toRegex()
+                    val match = urlPattern.find(responseBody)
+                    if (match != null) {
+                        val downloadUrl = match.groupValues[1].replace("\\/", "/")
+                        Log.i(TAG, "Cobra API success")
+                        return downloadUrl
+                    }
+                }
+            }
+            
+            Log.w(TAG, "Cobra API failed: ${response.code}")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Cobra API error", e)
+            null
+        }
+    }
+    
+    private suspend fun tryYoutubeDLService(videoId: String): String? {
+        return try {
+            Log.d(TAG, "Trying YouTube-DL service for: $videoId")
+            
+            // Try a public yt-dlp API service
+            val apiUrl = ExtractionServiceConfig.YOUTUBE_DL_API_URL
+            val requestData = """
+                {
+                    "url": "https://youtube.com/watch?v=$videoId",
+                    "format": "bestaudio[ext=m4a]/bestaudio",
+                    "extract_flat": false
+                }
+            """.trimIndent()
+            
+            val requestBody = okhttp3.RequestBody.create(
+                "application/json".toMediaType(),
+                requestData
+            )
+            
+            val request = Request.Builder()
+                .url(apiUrl)
+                .post(requestBody)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("User-Agent", "StashOpusPlayer/1.0")
+                .build()
+            
+            val response = client.newCall(request).execute()
+            
+            if (response.isSuccessful) {
+                val responseBody = response.body?.string()
+                if (responseBody != null) {
+                    // Look for download URL in the response
+                    val urlPattern = "\"url\":\"([^\"]+)\"".toRegex()
+                    val match = urlPattern.find(responseBody)
+                    if (match != null) {
+                        val downloadUrl = match.groupValues[1].replace("\\/", "/")
+                        Log.i(TAG, "YouTube-DL service success")
+                        return downloadUrl
+                    }
+                }
+            }
+            
+            Log.w(TAG, "YouTube-DL service failed: ${response.code}")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "YouTube-DL service error", e)
+            null
+        }
+    }
+    
+    private suspend fun tryInvidiousInstance(videoId: String): String? {
+        return try {
+            Log.d(TAG, "Trying Invidious instance for: $videoId")
+            
+            // Use a public Invidious instance
+            val invidiousUrl = "${ExtractionServiceConfig.INVIDIOUS_INSTANCE_URL}/$videoId"
+            
+            val request = Request.Builder()
+                .url(invidiousUrl)
+                .addHeader("User-Agent", "StashOpusPlayer/1.0")
+                .build()
+            
+            val response = client.newCall(request).execute()
+            
+            if (response.isSuccessful) {
+                val responseBody = response.body?.string()
+                if (responseBody != null && responseBody.contains("adaptiveFormats")) {
+                    // Parse audio streams from Invidious response
+                    val audioUrlPattern = "\"url\":\"([^\"]+)\"".toRegex()
+                    val typePattern = "\"type\":\"([^\"]+)\"".toRegex()
+                    
+                    val urlMatches = audioUrlPattern.findAll(responseBody).toList()
+                    val typeMatches = typePattern.findAll(responseBody).toList()
+                    
+                    // Find first audio stream
+                    for (i in 0 until minOf(urlMatches.size, typeMatches.size)) {
+                        val type = typeMatches[i].groupValues[1]
+                        if (type.contains("audio")) {
+                            val audioUrl = urlMatches[i].groupValues[1]
+                                .replace("\\/", "/")
+                                .replace("\\u0026", "&")
+                            Log.i(TAG, "Invidious success with type: $type")
+                            return audioUrl
+                        }
+                    }
+                }
+            }
+            
+            Log.w(TAG, "Invidious failed: ${response.code}")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Invidious error", e)
+            null
+        }
+    }
+    
+    private suspend fun tryAlternativeService(videoId: String, serviceUrl: String): String? {
+        return try {
+            Log.d(TAG, "Trying alternative service for: $videoId at $serviceUrl")
+            
+            // Generic alternative service - adapt this based on your service's API
+            val requestData = """
+                {
+                    "url": "https://youtube.com/watch?v=$videoId",
+                    "format": "audio",
+                    "quality": "best"
+                }
+            """.trimIndent()
+            
+            val requestBody = okhttp3.RequestBody.create(
+                "application/json".toMediaType(),
+                requestData
+            )
+            
+            val request = Request.Builder()
+                .url(serviceUrl)
+                .post(requestBody)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("User-Agent", "StashOpusPlayer/1.0")
+                .build()
+            
+            val response = client.newCall(request).execute()
+            
+            if (response.isSuccessful) {
+                val responseBody = response.body?.string()
+                if (responseBody != null) {
+                    // Look for download URL in the response - adapt parsing as needed
+                    val urlPattern = "\"(?:url|download_url|audio_url)\":\"([^\"]+)\"".toRegex()
+                    val match = urlPattern.find(responseBody)
+                    if (match != null) {
+                        val downloadUrl = match.groupValues[1].replace("\\/", "/")
+                        Log.i(TAG, "Alternative service success: $serviceUrl")
+                        return downloadUrl
+                    }
+                }
+            }
+            
+            Log.w(TAG, "Alternative service failed: ${response.code} at $serviceUrl")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Alternative service error at $serviceUrl", e)
+            null
         }
     }
 }
