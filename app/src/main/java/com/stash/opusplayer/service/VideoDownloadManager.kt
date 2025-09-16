@@ -9,6 +9,7 @@ import com.stash.opusplayer.data.DownloadRequest
 import com.stash.opusplayer.data.DownloadStatus
 import com.stash.opusplayer.data.YouTubeVideo
 import com.stash.opusplayer.utils.MetadataExtractor
+import com.stash.opusplayer.utils.YtDlpExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -38,6 +39,7 @@ class VideoDownloadManager(private val context: Context) {
     val downloadProgress: SharedFlow<DownloadProgress> = _downloadProgress
     
     private val metadataExtractor = MetadataExtractor(context)
+    private val ytDlpExtractor = YtDlpExtractor(context)
 
     private val activeDownloads = mutableMapOf<String, Boolean>()
 
@@ -45,7 +47,7 @@ class VideoDownloadManager(private val context: Context) {
         val videoId = request.video.id
         val videoTitle = request.video.title
         
-        Log.i(TAG, "Starting download for: $videoTitle (ID: $videoId)")
+        Log.i(TAG, "Starting yt-dlp + FFmpeg download for: $videoTitle (ID: $videoId)")
         Log.d(TAG, "Format: ${request.selectedFormat.extension} ${request.selectedFormat.quality}")
         Log.d(TAG, "Download path: ${request.downloadPath}")
         
@@ -57,21 +59,13 @@ class VideoDownloadManager(private val context: Context) {
         activeDownloads[videoId] = true
 
         try {
-            // Emit pending status
+            // Emit pending status and keep it pending throughout
             _downloadProgress.emit(
                 DownloadProgress(videoId, 0, DownloadStatus.PENDING)
             )
 
-            Log.d(TAG, "Attempting to extract audio URL for: ${request.video.url}")
-            val audioUrl = getAudioDownloadUrl(request.video.url)
-            
-            if (audioUrl != null) {
-                Log.i(TAG, "Found direct audio URL, starting real download")
-                downloadAudioFile(request, audioUrl)
-            } else {
-                Log.w(TAG, "No direct audio URL found, using fallback method")
-                downloadUsingFallback(request)
-            }
+            Log.i(TAG, "Using built-in yt-dlp + FFmpeg for reliable downloads")
+            downloadWithYtDlpAndFFmpeg(request)
 
         } catch (e: Exception) {
             Log.e(TAG, "Download failed for $videoTitle", e)
@@ -86,6 +80,166 @@ class VideoDownloadManager(private val context: Context) {
         } finally {
             activeDownloads.remove(videoId)
             Log.d(TAG, "Download process completed for: $videoTitle")
+        }
+    }
+
+    private suspend fun downloadWithYtDlpAndFFmpeg(request: DownloadRequest) {
+        val videoId = request.video.id
+        val videoTitle = request.video.title
+        val videoUrl = request.video.url
+        
+        Log.i(TAG, "🚀 Starting yt-dlp + FFmpeg download for: $videoTitle")
+        
+        try {
+            // Initialize yt-dlp
+            Log.d(TAG, "Initializing yt-dlp...")
+            if (!ytDlpExtractor.initialize()) {
+                throw Exception("Failed to initialize yt-dlp")
+            }
+            
+            // Determine output file path and name
+            val sanitizedTitle = sanitizeFileName(videoTitle)
+            val fileExtension = request.selectedFormat.extension
+            val fileName = "$sanitizedTitle.$fileExtension"
+            
+            val outputPath = if (request.downloadPath.startsWith("content://")) {
+                // For SAF (Storage Access Framework) paths, we'll download to internal storage first
+                // then copy to the desired location
+                val internalFile = File(context.getExternalFilesDir("downloads"), fileName)
+                internalFile.absolutePath
+            } else {
+                // For direct file system paths
+                val outputDir = File(request.downloadPath)
+                if (!outputDir.exists()) {
+                    outputDir.mkdirs()
+                }
+                File(outputDir, fileName).absolutePath
+            }
+            
+            Log.d(TAG, "Download output path: $outputPath")
+            
+            // Start the yt-dlp + FFmpeg download process
+            Log.i(TAG, "🎵 Downloading with yt-dlp + FFmpeg...")
+            val success = ytDlpExtractor.downloadAudio(
+                videoUrl = videoUrl,
+                outputPath = outputPath,
+                format = fileExtension
+            )
+            
+            if (success) {
+                // If we used internal storage, now copy to the actual destination
+                if (request.downloadPath.startsWith("content://")) {
+                    copyToSAFDestination(outputPath, request.downloadPath, fileName, request.selectedFormat.extension)
+                }
+                
+                // Download and embed thumbnail
+                Log.d(TAG, "Processing metadata and thumbnail...")
+                try {
+                    val thumbnailBase64 = metadataExtractor.downloadYouTubeThumbnail(videoId)
+                    val finalPath = if (request.downloadPath.startsWith("content://")) {
+                        "content://.../$fileName" // SAF path representation
+                    } else {
+                        outputPath
+                    }
+                    
+                    // Create song metadata
+                    val song = metadataExtractor.createYouTubeSong(
+                        videoId = videoId,
+                        title = videoTitle,
+                        artist = request.video.channelTitle,
+                        filePath = finalPath,
+                        duration = 0L
+                    )
+                    
+                    Log.i(TAG, "✅ Metadata processed successfully")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to process metadata, but audio download succeeded", e)
+                }
+                
+                // Emit success
+                _downloadProgress.emit(
+                    DownloadProgress(
+                        videoId,
+                        100,
+                        DownloadStatus.COMPLETED,
+                        filePath = if (request.downloadPath.startsWith("content://")) {
+                            "content://.../$fileName"
+                        } else {
+                            outputPath
+                        }
+                    )
+                )
+                
+                Log.i(TAG, "🎉 yt-dlp + FFmpeg download completed successfully: $videoTitle")
+                
+            } else {
+                throw Exception("yt-dlp + FFmpeg download failed")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ yt-dlp + FFmpeg download failed for: $videoTitle", e)
+            
+            // Try to update yt-dlp and retry once
+            Log.i(TAG, "🔄 Attempting to update yt-dlp and retry...")
+            try {
+                if (ytDlpExtractor.updateYtDlp()) {
+                    Log.i(TAG, "✅ yt-dlp updated, retrying download...")
+                    
+                    // Retry the download
+                    val retrySuccess = ytDlpExtractor.downloadAudio(
+                        videoUrl = request.video.url,
+                        outputPath = "${context.getExternalFilesDir("downloads")}/${sanitizeFileName(videoTitle)}.${request.selectedFormat.extension}",
+                        format = request.selectedFormat.extension
+                    )
+                    
+                    if (retrySuccess) {
+                        Log.i(TAG, "🎉 Retry successful after yt-dlp update")
+                        _downloadProgress.emit(
+                            DownloadProgress(videoId, 100, DownloadStatus.COMPLETED)
+                        )
+                        return
+                    }
+                }
+            } catch (retryException: Exception) {
+                Log.e(TAG, "Retry after update also failed", retryException)
+            }
+            
+            throw e // Re-throw the original exception
+        }
+    }
+    
+    private fun copyToSAFDestination(sourcePath: String, destinationUri: String, fileName: String, extension: String) {
+        try {
+            Log.d(TAG, "Copying file to SAF destination...")
+            val sourceFile = File(sourcePath)
+            if (!sourceFile.exists()) {
+                Log.e(TAG, "Source file does not exist: $sourcePath")
+                return
+            }
+            
+            val treeUri = Uri.parse(destinationUri)
+            val documentFile = DocumentFile.fromTreeUri(context, treeUri)
+            val mimeType = getMimeTypeForFormat(extension)
+            val destinationFile = documentFile?.createFile(mimeType, fileName)
+            
+            if (destinationFile != null) {
+                val outputStream = context.contentResolver.openOutputStream(destinationFile.uri)
+                val inputStream = sourceFile.inputStream()
+                
+                outputStream?.use { output ->
+                    inputStream.use { input ->
+                        input.copyTo(output)
+                    }
+                }
+                
+                // Delete the temporary file
+                sourceFile.delete()
+                Log.i(TAG, "✅ File copied to SAF destination successfully")
+            } else {
+                Log.e(TAG, "Failed to create destination file in SAF")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error copying to SAF destination", e)
         }
     }
 
