@@ -16,8 +16,8 @@ android {
         applicationId "com.stash.opusplayer"
         minSdk 21
         targetSdk 34
-        versionCode 43
-        versionName "8.1.5"
+        versionCode 44
+        versionName "8.1.6"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 

@@ -31,32 +31,39 @@ class YtDlpExtractor(private val context: Context) {
         }
     }
 
-    suspend fun downloadAudio(videoUrl: String, outputPath: String, format: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun downloadAudio(videoUrl: String, outputDir: String, fileName: String, format: String): String? = withContext(Dispatchers.IO) {
         return@withContext try {
             if (!isInitialized) {
                 Log.w(TAG, "yt-dlp not initialized, attempting to initialize...")
                 if (!initialize()) {
-                    return@withContext false
+                    return@withContext null
                 }
             }
 
             Log.i(TAG, "🎵 Starting yt-dlp audio download for: $videoUrl")
-            Log.d(TAG, "Output path: $outputPath")
+            Log.d(TAG, "Output directory: $outputDir")
+            Log.d(TAG, "Base filename: $fileName")
             Log.d(TAG, "Format: $format")
 
             // Create output directory if it doesn't exist
-            val outputFile = File(outputPath)
-            val outputDir = outputFile.parentFile
-            if (outputDir != null && !outputDir.exists()) {
-                outputDir.mkdirs()
+            val outputDirFile = File(outputDir)
+            if (!outputDirFile.exists()) {
+                outputDirFile.mkdirs()
+                Log.d(TAG, "Created output directory: $outputDir")
             }
+
+            // Create output template for yt-dlp (without extension, yt-dlp will add it)
+            val baseFileName = fileName.substringBeforeLast('.')
+            val outputTemplate = File(outputDirFile, baseFileName).absolutePath
+            
+            Log.d(TAG, "yt-dlp output template: $outputTemplate")
 
             // Configure yt-dlp request for audio-only download
             val request = YoutubeDLRequest(videoUrl).apply {
                 // Extract audio only
                 addOption("-x")
                 
-                // Set audio format
+                // Set audio format and quality
                 when (format.lowercase()) {
                     "mp3" -> {
                         addOption("--audio-format", "mp3")
@@ -70,67 +77,91 @@ class YtDlpExtractor(private val context: Context) {
                         addOption("--audio-format", "opus")
                         addOption("--audio-quality", "0")
                     }
+                    "ogg" -> {
+                        addOption("--audio-format", "vorbis")
+                        addOption("--audio-quality", "0")
+                    }
                     else -> {
+                        // Default to mp3
                         addOption("--audio-format", "mp3")
                         addOption("--audio-quality", "0")
                     }
                 }
                 
-                // Set output path
-                addOption("-o", outputPath)
+                // Set output template (yt-dlp will add proper extension)
+                addOption("-o", "$outputTemplate.%(ext)s")
                 
-                // Enhanced options for reliability
-                addOption("--embed-thumbnail") // Embed thumbnail
-                addOption("--add-metadata") // Add metadata
-                addOption("--prefer-ffmpeg") // Use FFmpeg for processing
-                addOption("--ffmpeg-location", "ffmpeg") // Use system FFmpeg
+                // Basic options for Android compatibility
+                addOption("--no-check-certificate")
+                addOption("--prefer-ffmpeg")
+                
+                // Metadata and thumbnail
+                addOption("--write-info-json")
+                addOption("--write-thumbnail")
                 
                 // Anti-detection measures
-                addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                addOption("--user-agent", "Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
                 addOption("--referer", "https://www.youtube.com/")
                 
-                // Skip unavailable content
+                // Error handling
                 addOption("--ignore-errors")
                 addOption("--no-abort-on-error")
                 
-                // Retry on failure
-                addOption("--retries", "3")
-                addOption("--fragment-retries", "3")
+                // Retries
+                addOption("--retries", "5")
+                addOption("--fragment-retries", "5")
+                addOption("--retry-sleep", "1")
                 
-                // Verbose for debugging
+                // Verbose logging
                 addOption("--verbose")
+                addOption("--print-traffic")
             }
 
-            Log.i(TAG, "🚀 Executing yt-dlp download...")
+            Log.i(TAG, "🚀 Executing yt-dlp download with enhanced Android settings...")
             val response = YoutubeDL.getInstance().execute(request)
             
-            if (response.exitCode == 0) {
+            Log.d(TAG, "yt-dlp exit code: ${response.exitCode}")
+            Log.d(TAG, "yt-dlp output: ${response.out}")
+            if (response.err.isNotEmpty()) {
+                Log.w(TAG, "yt-dlp errors: ${response.err}")
+            }
+            
+            // Look for the downloaded file (yt-dlp may change the extension)
+            val possibleExtensions = listOf(format, "mp3", "m4a", "opus", "webm", "ogg")
+            var actualOutputFile: File? = null
+            
+            for (ext in possibleExtensions) {
+                val testFile = File(outputDirFile, "$baseFileName.$ext")
+                if (testFile.exists()) {
+                    actualOutputFile = testFile
+                    Log.i(TAG, "✅ Found downloaded file: ${testFile.absolutePath}")
+                    break
+                }
+            }
+            
+            if (actualOutputFile?.exists() == true) {
                 Log.i(TAG, "✅ yt-dlp download completed successfully!")
-                Log.d(TAG, "Output: ${response.out}")
-                return@withContext true
+                Log.i(TAG, "📁 File saved as: ${actualOutputFile.absolutePath}")
+                Log.i(TAG, "📊 File size: ${actualOutputFile.length()} bytes")
+                return@withContext actualOutputFile.absolutePath
             } else {
-                Log.w(TAG, "⚠️ yt-dlp download completed with warnings")
-                Log.w(TAG, "Exit code: ${response.exitCode}")
-                Log.w(TAG, "Output: ${response.out}")
-                Log.w(TAG, "Error: ${response.err}")
-                
-                // Check if file was created despite warnings
-                val outputFileExists = File(outputPath).exists() || 
-                                     File(outputPath.replace(Regex("\\.[^.]+$"), ".mp3")).exists() ||
-                                     File(outputPath.replace(Regex("\\.[^.]+$"), ".m4a")).exists() ||
-                                     File(outputPath.replace(Regex("\\.[^.]+$"), ".opus")).exists()
-                                     
-                if (outputFileExists) {
-                    Log.i(TAG, "✅ File was created despite warnings - considering success")
-                    return@withContext true
+                // List files in output directory for debugging
+                Log.w(TAG, "❌ No output file found. Directory contents:")
+                outputDirFile.listFiles()?.forEach { file ->
+                    Log.w(TAG, "   📄 ${file.name} (${file.length()} bytes)")
                 }
                 
-                return@withContext false
+                if (response.exitCode != 0) {
+                    Log.e(TAG, "❌ yt-dlp failed with exit code: ${response.exitCode}")
+                    Log.e(TAG, "❌ Error output: ${response.err}")
+                }
+                
+                return@withContext null
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "❌ yt-dlp download failed", e)
-            false
+            Log.e(TAG, "❌ yt-dlp download failed with exception", e)
+            null
         }
     }
 

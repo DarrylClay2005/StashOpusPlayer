@@ -120,16 +120,19 @@ class VideoDownloadManager(private val context: Context) {
             
             // Start the yt-dlp + FFmpeg download process
             Log.i(TAG, "🎵 Downloading with yt-dlp + FFmpeg...")
-            val success = ytDlpExtractor.downloadAudio(
+            val actualOutputPath = ytDlpExtractor.downloadAudio(
                 videoUrl = videoUrl,
-                outputPath = outputPath,
+                outputDir = outputPath.substringBeforeLast('/'),
+                fileName = fileName,
                 format = fileExtension
             )
             
-            if (success) {
+            if (actualOutputPath != null) {
+                Log.i(TAG, "✅ yt-dlp download successful! File: $actualOutputPath")
+                
                 // If we used internal storage, now copy to the actual destination
                 if (request.downloadPath.startsWith("content://")) {
-                    copyToSAFDestination(outputPath, request.downloadPath, fileName, request.selectedFormat.extension)
+                    copyToSAFDestination(actualOutputPath, request.downloadPath, File(actualOutputPath).name, request.selectedFormat.extension)
                 }
                 
                 // Download and embed thumbnail
@@ -186,13 +189,14 @@ class VideoDownloadManager(private val context: Context) {
                     Log.i(TAG, "✅ yt-dlp updated, retrying download...")
                     
                     // Retry the download
-                    val retrySuccess = ytDlpExtractor.downloadAudio(
+                    val retryPath = ytDlpExtractor.downloadAudio(
                         videoUrl = request.video.url,
-                        outputPath = "${context.getExternalFilesDir("downloads")}/${sanitizeFileName(videoTitle)}.${request.selectedFormat.extension}",
+                        outputDir = context.getExternalFilesDir("downloads")!!.absolutePath,
+                        fileName = "${sanitizeFileName(videoTitle)}.${request.selectedFormat.extension}",
                         format = request.selectedFormat.extension
                     )
                     
-                    if (retrySuccess) {
+                    if (retryPath != null) {
                         Log.i(TAG, "🎉 Retry successful after yt-dlp update")
                         _downloadProgress.emit(
                             DownloadProgress(videoId, 100, DownloadStatus.COMPLETED)
