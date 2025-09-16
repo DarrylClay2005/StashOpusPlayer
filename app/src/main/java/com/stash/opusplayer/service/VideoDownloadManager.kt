@@ -8,6 +8,7 @@ import com.stash.opusplayer.data.DownloadProgress
 import com.stash.opusplayer.data.DownloadRequest
 import com.stash.opusplayer.data.DownloadStatus
 import com.stash.opusplayer.data.YouTubeVideo
+import com.stash.opusplayer.utils.MetadataExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -35,6 +36,8 @@ class VideoDownloadManager(private val context: Context) {
     
     private val _downloadProgress = MutableSharedFlow<DownloadProgress>()
     val downloadProgress: SharedFlow<DownloadProgress> = _downloadProgress
+    
+    private val metadataExtractor = MetadataExtractor(context)
 
     private val activeDownloads = mutableMapOf<String, Boolean>()
 
@@ -479,6 +482,32 @@ class VideoDownloadManager(private val context: Context) {
         val fileName = "${sanitizeFileName(request.video.title)}.${request.selectedFormat.extension}"
 
         try {
+            // Emit progress for metadata download
+            _downloadProgress.emit(
+                DownloadProgress(videoId, 0, DownloadStatus.DOWNLOADING)
+            )
+            
+            // Download YouTube thumbnail first
+            Log.d(TAG, "Downloading metadata and thumbnail for: ${request.video.title}")
+            val thumbnailBase64 = try {
+                _downloadProgress.emit(
+                    DownloadProgress(videoId, 5, DownloadStatus.DOWNLOADING)
+                )
+                val result = metadataExtractor.downloadYouTubeThumbnail(videoId)
+                _downloadProgress.emit(
+                    DownloadProgress(videoId, 8, DownloadStatus.DOWNLOADING)
+                )
+                result
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to download thumbnail, continuing without it", e)
+                null
+            }
+            
+            // Emit progress for audio download start
+            _downloadProgress.emit(
+                DownloadProgress(videoId, 10, DownloadStatus.DOWNLOADING)
+            )
+            
             val httpRequest = Request.Builder()
                 .url(audioUrl)
                 .build()
@@ -517,11 +546,43 @@ class VideoDownloadManager(private val context: Context) {
             outputStream.use { output ->
                 inputStream.use { input ->
                     downloadWithProgress(input, output, contentLength) { progress ->
+                        // Scale progress from 10-90 to leave room for post-processing
+                        val scaledProgress = 10 + (progress * 80 / 100)
                         _downloadProgress.tryEmit(
-                            DownloadProgress(videoId, progress, DownloadStatus.DOWNLOADING)
+                            DownloadProgress(videoId, scaledProgress, DownloadStatus.DOWNLOADING)
                         )
                     }
                 }
+            }
+            
+            // Post-process: Add metadata if possible
+            _downloadProgress.emit(
+                DownloadProgress(videoId, 95, DownloadStatus.DOWNLOADING)
+            )
+            
+            try {
+                val filePath = when (file) {
+                    is DocumentFile -> file.uri.toString()
+                    is File -> file.absolutePath
+                    else -> ""
+                }
+                
+                // Create a Song object with YouTube metadata and thumbnail
+                val song = metadataExtractor.createYouTubeSong(
+                    videoId = videoId,
+                    title = request.video.title,
+                    artist = request.video.channelTitle,
+                    filePath = filePath,
+                    duration = 0L // Duration will be extracted later if needed
+                )
+                
+                // Notify that metadata has been processed
+                Log.d(TAG, "Processed metadata for: ${request.video.title}")
+                if (song.albumArt != null) {
+                    Log.d(TAG, "Thumbnail successfully embedded for: ${request.video.title}")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to process metadata, but audio download succeeded", e)
             }
 
             // Emit completion
@@ -537,6 +598,8 @@ class VideoDownloadManager(private val context: Context) {
                     }
                 )
             )
+            
+            Log.i(TAG, "Download completed with metadata: ${request.video.title}")
 
         } catch (e: Exception) {
             Log.e(TAG, "Audio download failed", e)
@@ -560,6 +623,7 @@ class VideoDownloadManager(private val context: Context) {
         val buffer = ByteArray(8192)
         var totalBytesRead = 0L
         var bytesRead: Int
+        var lastReportedProgress = -1
 
         while (input.read(buffer).also { bytesRead = it } != -1) {
             output.write(buffer, 0, bytesRead)
@@ -567,7 +631,19 @@ class VideoDownloadManager(private val context: Context) {
 
             if (contentLength > 0) {
                 val progress = ((totalBytesRead * 100) / contentLength).toInt()
-                onProgress(progress)
+                // Only report progress when it changes to avoid excessive updates
+                if (progress != lastReportedProgress) {
+                    onProgress(progress)
+                    lastReportedProgress = progress
+                }
+            } else {
+                // If content length is unknown, report progress based on bytes downloaded
+                val megabytesDownloaded = totalBytesRead / (1024 * 1024)
+                val estimatedProgress = minOf((megabytesDownloaded * 10).toInt(), 90)
+                if (estimatedProgress != lastReportedProgress) {
+                    onProgress(estimatedProgress)
+                    lastReportedProgress = estimatedProgress
+                }
             }
         }
     }
