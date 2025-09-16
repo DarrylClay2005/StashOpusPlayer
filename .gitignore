@@ -27,7 +27,7 @@ gradle/wrapper/gradle-wrapper.jar
 
 # APK files (except releases)
 *.apk
-!releases/*.apk
+!releases/**/*.apk
 
 # Log files
 *.log
