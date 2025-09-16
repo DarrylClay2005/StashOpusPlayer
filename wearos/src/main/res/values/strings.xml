@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Stash Music</string>
+    <string name="player_title">Now Playing</string>
+    <string name="tracks_title">Tracks</string>
+    <string name="complication_label">Music Player</string>
+    
+    <!-- Player controls -->
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+    <string name="next">Next</string>
+    <string name="previous">Previous</string>
+    <string name="shuffle">Shuffle</string>
+    <string name="repeat">Repeat</string>
+    
+    <!-- Status messages -->
+    <string name="no_music_playing">No music playing</string>
+    <string name="phone_not_connected">Phone not connected</string>
+    <string name="connecting_to_phone">Connecting to phone…</string>
+    <string name="no_tracks">No tracks available</string>
+    
+    <!-- Menu items -->
+    <string name="open_on_phone">Open on phone</string>
+    <string name="settings">Settings</string>
+    
+    <!-- Accessibility -->
+    <string name="album_art">Album artwork</string>
+    <string name="volume_up">Volume up</string>
+    <string name="volume_down">Volume down</string>
+    
+    <!-- Plurals -->
+    <plurals name="track_count">
+        <item quantity="one">%d track</item>
+        <item quantity="other">%d tracks</item>
+    </plurals>
+</resources>

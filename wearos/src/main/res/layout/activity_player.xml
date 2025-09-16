@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/wear_background"
+    android:padding="16dp">
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="16dp">
+
+            <!-- Album Art -->
+            <FrameLayout
+                android:layout_width="100dp"
+                android:layout_height="100dp"
+                android:layout_marginBottom="16dp">
+
+                <ImageView
+                    android:id="@+id/album_art"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/wear_button_background"
+                    android:scaleType="centerCrop"
+                    android:src="@drawable/ic_music_note"
+                    android:contentDescription="@string/album_art" />
+
+                <!-- Progress ring overlay -->
+                <ProgressBar
+                    android:id="@+id/progress_ring"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:progress="30"
+                    android:max="100"
+                    android:progressTint="@color/wear_progress_primary"
+                    android:progressBackgroundTint="@color/wear_progress_background"
+                    tools:progress="30" />
+
+            </FrameLayout>
+
+            <!-- Song Info -->
+            <TextView
+                android:id="@+id/song_title"
+                style="@style/WearTrackTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:layout_marginBottom="4dp"
+                tools:text="Song Title" />
+
+            <TextView
+                android:id="@+id/artist_name"
+                style="@style/WearTrackArtist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:layout_marginBottom="8dp"
+                tools:text="Artist Name" />
+
+            <!-- Time Info -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:id="@+id/current_time"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0:00"
+                    android:textColor="@color/wear_on_surface_variant"
+                    android:textSize="12sp"
+                    android:layout_marginEnd="8dp" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="2dp"
+                    android:layout_weight="1"
+                    android:background="@color/wear_progress_background" />
+
+                <TextView
+                    android:id="@+id/total_time"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0:00"
+                    android:textColor="@color/wear_on_surface_variant"
+                    android:textSize="12sp"
+                    android:layout_marginStart="8dp" />
+
+            </LinearLayout>
+
+            <!-- Primary Controls -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:layout_marginBottom="16dp">
+
+                <ImageButton
+                    android:id="@+id/previous_button"
+                    style="@style/WearPlayerButton"
+                    android:src="@drawable/ic_skip_previous_24"
+                    android:contentDescription="@string/previous"
+                    android:layout_marginEnd="16dp"
+                    android:tint="@color/wear_on_primary" />
+
+                <ImageButton
+                    android:id="@+id/play_pause_button"
+                    style="@style/WearPlayerButtonLarge"
+                    android:src="@drawable/ic_play_arrow_24"
+                    android:contentDescription="@string/play"
+                    android:tint="@color/wear_on_primary" />
+
+                <ImageButton
+                    android:id="@+id/next_button"
+                    style="@style/WearPlayerButton"
+                    android:src="@drawable/ic_skip_next_24"
+                    android:contentDescription="@string/next"
+                    android:layout_marginStart="16dp"
+                    android:tint="@color/wear_on_primary" />
+
+            </LinearLayout>
+
+            <!-- Secondary Controls -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center">
+
+                <ImageButton
+                    android:id="@+id/shuffle_button"
+                    style="@style/WearPlayerButton"
+                    android:src="@drawable/ic_shuffle"
+                    android:contentDescription="@string/shuffle"
+                    android:layout_marginEnd="16dp"
+                    android:alpha="0.5"
+                    android:tint="@color/wear_on_primary" />
+
+                <ImageButton
+                    android:id="@+id/repeat_button"
+                    style="@style/WearPlayerButton"
+                    android:src="@drawable/ic_repeat"
+                    android:contentDescription="@string/repeat"
+                    android:layout_marginStart="16dp"
+                    android:alpha="0.5"
+                    android:tint="@color/wear_on_primary" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </androidx.core.widget.NestedScrollView>
+
+</FrameLayout>

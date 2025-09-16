@@ -482,31 +482,19 @@ class VideoDownloadManager(private val context: Context) {
         val fileName = "${sanitizeFileName(request.video.title)}.${request.selectedFormat.extension}"
 
         try {
-            // Emit progress for metadata download
+            // Emit pending status
             _downloadProgress.emit(
-                DownloadProgress(videoId, 0, DownloadStatus.DOWNLOADING)
+                DownloadProgress(videoId, 0, DownloadStatus.PENDING)
             )
             
             // Download YouTube thumbnail first
             Log.d(TAG, "Downloading metadata and thumbnail for: ${request.video.title}")
             val thumbnailBase64 = try {
-                _downloadProgress.emit(
-                    DownloadProgress(videoId, 5, DownloadStatus.DOWNLOADING)
-                )
-                val result = metadataExtractor.downloadYouTubeThumbnail(videoId)
-                _downloadProgress.emit(
-                    DownloadProgress(videoId, 8, DownloadStatus.DOWNLOADING)
-                )
-                result
+                metadataExtractor.downloadYouTubeThumbnail(videoId)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to download thumbnail, continuing without it", e)
                 null
             }
-            
-            // Emit progress for audio download start
-            _downloadProgress.emit(
-                DownloadProgress(videoId, 10, DownloadStatus.DOWNLOADING)
-            )
             
             val httpRequest = Request.Builder()
                 .url(audioUrl)
@@ -545,20 +533,14 @@ class VideoDownloadManager(private val context: Context) {
 
             outputStream.use { output ->
                 inputStream.use { input ->
-                    downloadWithProgress(input, output, contentLength) { progress ->
-                        // Scale progress from 10-90 to leave room for post-processing
-                        val scaledProgress = 10 + (progress * 80 / 100)
-                        _downloadProgress.tryEmit(
-                            DownloadProgress(videoId, scaledProgress, DownloadStatus.DOWNLOADING)
-                        )
+                    // Simple file copy without progress tracking
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
                     }
                 }
             }
-            
-            // Post-process: Add metadata if possible
-            _downloadProgress.emit(
-                DownloadProgress(videoId, 95, DownloadStatus.DOWNLOADING)
-            )
             
             try {
                 val filePath = when (file) {
@@ -614,39 +596,6 @@ class VideoDownloadManager(private val context: Context) {
         }
     }
 
-    private fun downloadWithProgress(
-        input: InputStream,
-        output: java.io.OutputStream,
-        contentLength: Long,
-        onProgress: (Int) -> Unit
-    ) {
-        val buffer = ByteArray(8192)
-        var totalBytesRead = 0L
-        var bytesRead: Int
-        var lastReportedProgress = -1
-
-        while (input.read(buffer).also { bytesRead = it } != -1) {
-            output.write(buffer, 0, bytesRead)
-            totalBytesRead += bytesRead
-
-            if (contentLength > 0) {
-                val progress = ((totalBytesRead * 100) / contentLength).toInt()
-                // Only report progress when it changes to avoid excessive updates
-                if (progress != lastReportedProgress) {
-                    onProgress(progress)
-                    lastReportedProgress = progress
-                }
-            } else {
-                // If content length is unknown, report progress based on bytes downloaded
-                val megabytesDownloaded = totalBytesRead / (1024 * 1024)
-                val estimatedProgress = minOf((megabytesDownloaded * 10).toInt(), 90)
-                if (estimatedProgress != lastReportedProgress) {
-                    onProgress(estimatedProgress)
-                    lastReportedProgress = estimatedProgress
-                }
-            }
-        }
-    }
 
     private fun createMinimalAudioContent(title: String, artist: String): ByteArray {
         // Create a more realistic placeholder audio file with proper metadata

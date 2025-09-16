@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base Wear theme -->
+    <style name="Theme.StashOpusPlayer.Wear" parent="@android:style/Theme.DeviceDefault">
+        <item name="android:windowBackground">@color/wear_background</item>
+    </style>
+
+    <!-- Player button style -->
+    <style name="WearPlayerButton">
+        <item name="android:layout_width">48dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:background">@drawable/wear_button_background</item>
+        <item name="android:scaleType">centerInside</item>
+        <item name="android:padding">8dp</item>
+    </style>
+
+    <!-- Large player button style -->
+    <style name="WearPlayerButtonLarge">
+        <item name="android:layout_width">56dp</item>
+        <item name="android:layout_height">56dp</item>
+        <item name="android:background">@drawable/wear_button_background</item>
+        <item name="android:scaleType">centerInside</item>
+        <item name="android:padding">12dp</item>
+    </style>
+
+    <!-- Track list text styles -->
+    <style name="WearTrackTitle">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/wear_on_surface</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+
+    <style name="WearTrackArtist">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">@color/wear_on_surface_variant</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+</resources>

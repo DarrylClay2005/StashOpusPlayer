@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/wear_background"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:layout_gravity="center">
+
+        <!-- Connection Status -->
+        <LinearLayout
+            android:id="@+id/connection_status_layout"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:layout_marginBottom="16dp">
+
+            <ImageView
+                android:id="@+id/connection_icon"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@drawable/ic_music_note"
+                android:tint="@color/wear_on_surface_variant"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/connection_status_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/connecting_to_phone"
+                android:textColor="@color/wear_on_surface_variant"
+                android:textSize="12sp"
+                android:gravity="center" />
+
+        </LinearLayout>
+
+        <!-- Current Song Info -->
+        <LinearLayout
+            android:id="@+id/current_song_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <ImageView
+                android:id="@+id/album_art"
+                android:layout_width="80dp"
+                android:layout_height="80dp"
+                android:layout_marginBottom="12dp"
+                android:background="@drawable/wear_button_background"
+                android:scaleType="centerCrop"
+                android:src="@drawable/ic_music_note"
+                android:contentDescription="@string/album_art" />
+
+            <TextView
+                android:id="@+id/song_title"
+                style="@style/WearTrackTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:layout_marginBottom="4dp"
+                tools:text="Song Title" />
+
+            <TextView
+                android:id="@+id/artist_name"
+                style="@style/WearTrackArtist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:layout_marginBottom="16dp"
+                tools:text="Artist Name" />
+
+        </LinearLayout>
+
+        <!-- Playback Controls -->
+        <LinearLayout
+            android:id="@+id/playback_controls_layout"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <ImageButton
+                android:id="@+id/previous_button"
+                style="@style/WearPlayerButton"
+                android:src="@drawable/ic_skip_previous_24"
+                android:contentDescription="@string/previous"
+                android:layout_marginEnd="8dp"
+                android:tint="@color/wear_on_primary" />
+
+            <ImageButton
+                android:id="@+id/play_pause_button"
+                style="@style/WearPlayerButtonLarge"
+                android:src="@drawable/ic_play_arrow_24"
+                android:contentDescription="@string/play"
+                android:layout_marginHorizontal="8dp"
+                android:tint="@color/wear_on_primary" />
+
+            <ImageButton
+                android:id="@+id/next_button"
+                style="@style/WearPlayerButton"
+                android:src="@drawable/ic_skip_next_24"
+                android:contentDescription="@string/next"
+                android:layout_marginStart="8dp"
+                android:tint="@color/wear_on_primary" />
+
+        </LinearLayout>
+
+        <!-- Menu Buttons -->
+        <LinearLayout
+            android:id="@+id/menu_layout"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginTop="16dp"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <ImageButton
+                android:id="@+id/tracks_button"
+                style="@style/WearPlayerButton"
+                android:src="@drawable/ic_queue_music"
+                android:contentDescription="@string/tracks_title"
+                android:layout_marginEnd="12dp"
+                android:tint="@color/wear_on_primary" />
+
+            <ImageButton
+                android:id="@+id/phone_app_button"
+                style="@style/WearPlayerButton"
+                android:src="@drawable/ic_open_in_new"
+                android:contentDescription="@string/open_on_phone"
+                android:layout_marginStart="12dp"
+                android:tint="@color/wear_on_primary" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</FrameLayout>

@@ -13,3 +13,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "Stash Opus Player"
 include ':app'
+include ':wearos'
