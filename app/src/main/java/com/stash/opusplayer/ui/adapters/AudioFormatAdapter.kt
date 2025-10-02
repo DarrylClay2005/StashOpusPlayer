@@ -1,13 +1,13 @@
-package com.stash.opusplayer.ui.adapters
+package com.stash.stashwave.ui.adapters
 
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import com.stash.opusplayer.R
-import com.stash.opusplayer.data.AudioFormat
-import com.stash.opusplayer.databinding.ItemAudioFormatBinding
+import com.stash.stashwave.R
+import com.stash.stashwave.data.AudioFormat
+import com.stash.stashwave.databinding.ItemAudioFormatBinding
 
 class AudioFormatAdapter(
     private val onFormatSelected: (AudioFormat) -> Unit

@@ -9,7 +9,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url 'https://jitpack.io' }
     }
 }
-rootProject.name = "Stash Opus Player"
+rootProject.name = "StashWave Player"
 include ':app'

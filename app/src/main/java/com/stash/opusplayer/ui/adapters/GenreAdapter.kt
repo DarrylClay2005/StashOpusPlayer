@@ -1,14 +1,14 @@
-package com.stash.opusplayer.ui.adapters
+package com.stash.stashwave.ui.adapters
 
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import com.stash.opusplayer.databinding.ItemGenreBinding
-import com.stash.opusplayer.ui.fragments.GenreInfo
+import com.stash.stashwave.databinding.ItemGenreBinding
+import com.stash.stashwave.ui.fragments.GenreInfo
 import com.bumptech.glide.Glide
-import com.stash.opusplayer.artwork.ArtistGenreArtworkFetcher
+import com.stash.stashwave.artwork.ArtistGenreArtworkFetcher
 import androidx.lifecycle.*
 import kotlinx.coroutines.launch
 
@@ -38,7 +38,7 @@ class GenreAdapter(
             if (cached.exists()) {
                 Glide.with(context).load(cached).centerCrop().into(binding.genreIcon)
             } else {
-                Glide.with(context).load(com.stash.opusplayer.R.drawable.ic_category).into(binding.genreIcon)
+                Glide.with(context).load(com.stash.stashwave.R.drawable.ic_category).into(binding.genreIcon)
                 val owner = context as? LifecycleOwner
                 owner?.lifecycleScope?.launch {
                     val f = fetcher.getOrFetchGenre(item.name)

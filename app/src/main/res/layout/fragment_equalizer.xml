@@ -15,7 +15,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Equalizer"
-            android:textAppearance="@style/TextAppearance.StashOpus.Headline"
+android:textAppearance="@style/TextAppearance.StashWave.Headline"
             android:textSize="24sp"
             android:textStyle="bold"
             android:layout_marginBottom="24dp" />
@@ -33,7 +33,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Enable Equalizer"
-                android:textAppearance="@style/TextAppearance.StashOpus.Body"
+android:textAppearance="@style/TextAppearance.StashWave.Body"
                 android:textSize="16sp" />
 
             <Switch
@@ -48,7 +48,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Presets"
-            android:textAppearance="@style/TextAppearance.StashOpus.Title"
+android:textAppearance="@style/TextAppearance.StashWave.Title"
             android:textSize="18sp"
             android:layout_marginBottom="8dp" />
 
@@ -63,7 +63,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Frequency Bands"
-            android:textAppearance="@style/TextAppearance.StashOpus.Title"
+            android:textAppearance="@style/TextAppearance.StashWave.Title"
             android:textSize="18sp"
             android:layout_marginBottom="16dp" />
 
@@ -79,7 +79,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Bass Boost"
-            android:textAppearance="@style/TextAppearance.StashOpus.Title"
+            android:textAppearance="@style/TextAppearance.StashWave.Title"
             android:textSize="18sp"
             android:layout_marginBottom="8dp" />
 
@@ -102,7 +102,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="0%"
-                android:textAppearance="@style/TextAppearance.StashOpus.Body"
+            android:textAppearance="@style/TextAppearance.StashWave.Body"
                 android:layout_marginStart="16dp"
                 android:minWidth="48dp"
                 android:gravity="center" />
@@ -114,7 +114,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Virtualizer"
-            android:textAppearance="@style/TextAppearance.StashOpus.Title"
+            android:textAppearance="@style/TextAppearance.StashWave.Title"
             android:textSize="18sp"
             android:layout_marginBottom="8dp" />
 
@@ -137,7 +137,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="0%"
-                android:textAppearance="@style/TextAppearance.StashOpus.Body"
+            android:textAppearance="@style/TextAppearance.StashWave.Body"
                 android:layout_marginStart="16dp"
                 android:minWidth="48dp"
                 android:gravity="center" />
@@ -149,7 +149,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Equalizer settings are automatically saved and will be applied to all music playback."
-            android:textAppearance="@style/TextAppearance.StashOpus.Subtitle"
+            android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
             android:textSize="12sp"
             android:layout_marginTop="16dp"
             android:gravity="center"

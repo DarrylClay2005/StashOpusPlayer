@@ -20,7 +20,7 @@
         android:layout_weight="1"
         android:gravity="center"
         android:text="No artists found\n\nAdd music files to see artists organized here"
-        android:textAppearance="@style/TextAppearance.StashOpus.Body"
+android:textAppearance="@style/TextAppearance.StashWave.Body"
         android:textAlignment="center"
         android:visibility="gone" />
 

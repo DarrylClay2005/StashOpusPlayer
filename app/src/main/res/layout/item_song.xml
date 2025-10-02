@@ -40,7 +40,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Song Title"
-            android:textAppearance="@style/TextAppearance.StashOpus.Body"
+android:textAppearance="@style/TextAppearance.StashWave.Body"
             android:textSize="16sp"
             android:maxLines="1"
             android:ellipsize="end" />
@@ -50,7 +50,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Artist Name"
-            android:textAppearance="@style/TextAppearance.StashOpus.Subtitle"
+android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
             android:textSize="14sp"
             android:maxLines="1"
             android:ellipsize="end"
@@ -63,7 +63,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="3:45"
-        android:textAppearance="@style/TextAppearance.StashOpus.Subtitle"
+android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
         android:textSize="12sp"
         android:layout_marginStart="8dp" />
 

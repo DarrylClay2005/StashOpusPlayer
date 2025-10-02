@@ -1,4 +1,4 @@
-package com.stash.opusplayer.ui
+package com.stash.stashwave.ui
 
 import android.content.ComponentName
 import android.content.Context
@@ -16,12 +16,12 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.bumptech.glide.Glide
 import com.google.common.util.concurrent.MoreExecutors
-import com.stash.opusplayer.R
-import com.stash.opusplayer.data.Song
-import com.stash.opusplayer.databinding.MiniPlayerBinding
-import com.stash.opusplayer.player.MusicPlayerManager
-import com.stash.opusplayer.service.MusicService
-import com.stash.opusplayer.utils.MetadataExtractor
+import com.stash.stashwave.R
+import com.stash.stashwave.data.Song
+import com.stash.stashwave.databinding.MiniPlayerBinding
+import com.stash.stashwave.player.MusicPlayerManager
+import com.stash.stashwave.service.MusicService
+import com.stash.stashwave.utils.MetadataExtractor
 import kotlinx.coroutines.launch
 
 class MiniPlayerView @JvmOverloads constructor(
@@ -83,6 +83,17 @@ class MiniPlayerView @JvmOverloads constructor(
 
         binding.miniNextButton.setOnClickListener {
             mediaController?.seekToNext()
+        }
+
+        binding.miniFastForwardButton.setOnClickListener {
+            mediaController?.let { controller ->
+                val currentPos = controller.currentPosition
+                val duration = controller.duration
+                if (duration > 0) {
+                    val newPos = (currentPos + 30000).coerceAtMost(duration)
+                    controller.seekTo(newPos)
+                }
+            }
         }
     }
 
@@ -193,7 +204,7 @@ class MiniPlayerView @JvmOverloads constructor(
         val allowOnline = prefs.getBoolean("fetch_artwork_online", true)
         if (allowOnline) {
             lifecycleOwner?.lifecycleScope?.launch {
-                val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
+val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(context)
                 val file = fetcher.getOrFetch(song)
                 if (file != null && song == currentSong) {
                     Glide.with(context)
@@ -235,7 +246,7 @@ class MiniPlayerView @JvmOverloads constructor(
                 duration = 0L,
                 path = ""
             )
-            val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
+val cache = com.stash.stashwave.artwork.ArtworkCache(context)
             val bmp = cache.loadBitmapIfPresent(fakeSong, 256)
             if (bmp != null) {
                 Glide.with(context)

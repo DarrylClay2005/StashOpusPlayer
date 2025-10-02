@@ -1,4 +1,4 @@
-package com.stash.opusplayer.ui.fragments
+package com.stash.stashwave.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -7,9 +7,9 @@ import android.widget.*
 import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
-import com.stash.opusplayer.ui.MainActivity
+import com.stash.stashwave.ui.MainActivity
 import android.content.Intent
-import com.stash.opusplayer.updates.UpdatePreferences
+import com.stash.stashwave.updates.UpdatePreferences
 
 class SettingsFragment : Fragment() {
     private val folderPickerLauncher = registerForActivityResult(
@@ -23,7 +23,7 @@ class SettingsFragment : Fragment() {
                     uri, flags
                 )
                 // Save to repository prefs
-                val repo = com.stash.opusplayer.data.MusicRepository(requireContext())
+val repo = com.stash.stashwave.data.MusicRepository(requireContext())
                 repo.addCustomMusicFolderTreeUri(uri.toString())
                 Toast.makeText(requireContext(), "Folder added. Pull-to-refresh Folders tab to rescan.", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
@@ -98,7 +98,7 @@ class SettingsFragment : Fragment() {
 
     private fun connectController() {
         try {
-            val token = androidx.media3.session.SessionToken(requireContext(), android.content.ComponentName(requireContext(), com.stash.opusplayer.service.MusicService::class.java))
+val token = androidx.media3.session.SessionToken(requireContext(), android.content.ComponentName(requireContext(), com.stash.stashwave.service.MusicService::class.java))
             controllerFuture = androidx.media3.session.MediaController.Builder(requireContext(), token).buildAsync()
             controllerFuture?.addListener({
                 try { mediaController = controllerFuture?.get() } catch (_: Exception) {}
@@ -323,10 +323,178 @@ class SettingsFragment : Fragment() {
         layout.addView(title)
 
         val desc = TextView(requireContext()).apply {
-            text = "Adjust global audio: speed, pitch, and reverb. Applies live and persists across sessions."
+            text = "Adjust global audio: speed, pitch, reverb, and effects presets. Applies live and persists across sessions."
             textSize = 14f
         }
         layout.addView(desc)
+
+        // --- Audio Effects (Equalizer & Presets) ---
+        val effectsHeader = TextView(requireContext()).apply {
+            text = "Audio Effects"
+            textSize = 18f
+            setPadding(0, 24, 0, 8)
+        }
+        layout.addView(effectsHeader)
+
+        // Enable Equalizer & Effects
+        val eqEnabledToggle = CheckBox(requireContext()).apply {
+            text = "Enable Equalizer & Effects"
+            val prefsEq = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+            isChecked = prefsEq.getBoolean("equalizer_enabled", false)
+            setOnCheckedChangeListener { _, isChecked ->
+                // Persist and apply
+                prefsEq.edit().putBoolean("equalizer_enabled", isChecked).apply()
+                mediaController?.sendCustomCommand(
+                    androidx.media3.session.SessionCommand("SET_EQ_ENABLED", android.os.Bundle.EMPTY),
+                    androidx.core.os.bundleOf("enabled" to isChecked)
+                )
+                Toast.makeText(requireContext(), if (isChecked) "Effects enabled" else "Effects disabled", Toast.LENGTH_SHORT).show()
+            }
+        }
+        layout.addView(eqEnabledToggle)
+
+        // Preset selector
+        val presetLabel = TextView(requireContext()).apply {
+            text = "Preset"
+            setPadding(0, 12, 0, 8)
+        }
+        layout.addView(presetLabel)
+
+        val presetSpinner = Spinner(requireContext())
+val presetNames = com.stash.stashwave.audio.EqualizerPreset.values().map {
+            it.name.replace("_", " ").lowercase().replaceFirstChar { c -> c.uppercaseChar() }
+        }
+        val presetAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, presetNames)
+        presetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        presetSpinner.adapter = presetAdapter
+        layout.addView(presetSpinner)
+
+        // Restore preset selection
+        val prefsEq2 = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+val savedPresetName = prefsEq2.getString("equalizer_preset", com.stash.stashwave.audio.EqualizerPreset.NORMAL.name) ?: com.stash.stashwave.audio.EqualizerPreset.NORMAL.name
+val savedIndex = com.stash.stashwave.audio.EqualizerPreset.values().indexOfFirst { it.name == savedPresetName }.coerceAtLeast(0)
+        presetSpinner.setSelection(savedIndex)
+
+        presetSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+val preset = com.stash.stashwave.audio.EqualizerPreset.values()[position]
+                prefsEq2.edit().putString("equalizer_preset", preset.name).apply()
+                mediaController?.sendCustomCommand(
+                    androidx.media3.session.SessionCommand("SET_EQ_PRESET", android.os.Bundle.EMPTY),
+                    androidx.core.os.bundleOf("preset" to preset.name)
+                )
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        // Quick preset chips
+        val chipGroup = com.google.android.material.chip.ChipGroup(requireContext()).apply {
+            isSingleSelection = true
+        }
+        val quickPresets = listOf(
+Pair("3D Surround", com.stash.stashwave.audio.EqualizerPreset.SURROUND_3D),
+            Pair("Concert Hall", com.stash.stashwave.audio.EqualizerPreset.CONCERT_HALL),
+            Pair("Super Bass", com.stash.stashwave.audio.EqualizerPreset.SUPER_BASS_BOOST),
+            Pair("Super Reverb", com.stash.stashwave.audio.EqualizerPreset.SUPER_REVERB),
+            Pair("Lo-Fi", com.stash.stashwave.audio.EqualizerPreset.LOFI)
+        )
+        quickPresets.forEach { (label, preset) ->
+            val chip = com.google.android.material.chip.Chip(requireContext()).apply {
+                text = label
+                isCheckable = true
+                setOnClickListener {
+                    val name = preset.name
+presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().indexOf(preset))
+                    prefsEq2.edit().putString("equalizer_preset", name).apply()
+                    mediaController?.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_EQ_PRESET", android.os.Bundle.EMPTY),
+                        androidx.core.os.bundleOf("preset" to name)
+                    )
+                    Toast.makeText(requireContext(), "$label preset applied", Toast.LENGTH_SHORT).show()
+                }
+            }
+            chipGroup.addView(chip)
+        }
+        layout.addView(chipGroup)
+
+        // Bass Boost
+        val bassHeader = TextView(requireContext()).apply {
+            text = "Bass Boost"
+            setPadding(0, 12, 0, 4)
+        }
+        layout.addView(bassHeader)
+
+        val bassValue = TextView(requireContext()).apply { text = "0%" }
+        layout.addView(bassValue)
+
+        val bassSeek = SeekBar(requireContext()).apply {
+            max = 1000
+            progress = prefsEq2.getInt("bass_boost_strength", 0)
+        }
+        layout.addView(bassSeek)
+
+        bassSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                bassValue.text = "${progress / 10}%"
+                if (fromUser) {
+                    prefsEq2.edit().putInt("bass_boost_strength", progress).apply()
+                    mediaController?.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_BASS_BOOST", android.os.Bundle.EMPTY),
+                        androidx.core.os.bundleOf("strength" to progress)
+                    )
+                }
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // Virtualizer
+        val virtHeader = TextView(requireContext()).apply {
+            text = "Virtualizer"
+            setPadding(0, 12, 0, 4)
+        }
+        layout.addView(virtHeader)
+
+        val virtValue = TextView(requireContext()).apply { text = "0%" }
+        layout.addView(virtValue)
+
+        val virtSeek = SeekBar(requireContext()).apply {
+            max = 1000
+            progress = prefsEq2.getInt("virtualizer_strength", 0)
+        }
+        layout.addView(virtSeek)
+
+        virtSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                virtValue.text = "${progress / 10}%"
+                if (fromUser) {
+                    prefsEq2.edit().putInt("virtualizer_strength", progress).apply()
+                    mediaController?.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_VIRTUALIZER", android.os.Bundle.EMPTY),
+                        androidx.core.os.bundleOf("strength" to progress)
+                    )
+                }
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // More audio effects button
+        val moreEffectsBtn = Button(requireContext()).apply {
+            text = "More Audio Effects"
+            setOnClickListener {
+                try {
+                    parentFragmentManager.beginTransaction()
+                        .replace((view?.parent as? ViewGroup)?.id ?: (requireActivity() as androidx.appcompat.app.AppCompatActivity).findViewById<View>(com.stash.stashwave.R.id.main_content).id, com.stash.stashwave.ui.fragments.EqualizerFragment())
+                        .addToBackStack(null)
+                        .commit()
+                } catch (_: Exception) {
+                    // Fallback: just show a toast
+                    Toast.makeText(requireContext(), "Open Equalizer from the drawer menu.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        layout.addView(moreEffectsBtn)
 
         val prefs = requireContext().getSharedPreferences("settings", 0)
         val savedSemitones = prefs.getInt("pitch_semitones", 0)
@@ -529,7 +697,7 @@ class SettingsFragment : Fragment() {
         }
     }
     private fun showManageFoldersDialog() {
-        val repo = com.stash.opusplayer.data.MusicRepository(requireContext())
+        val repo = com.stash.stashwave.data.MusicRepository(requireContext())
         val trees = repo.getCustomMusicFolderTreeUris().toList()
         if (trees.isEmpty()) {
             Toast.makeText(requireContext(), "No folders added", Toast.LENGTH_SHORT).show()

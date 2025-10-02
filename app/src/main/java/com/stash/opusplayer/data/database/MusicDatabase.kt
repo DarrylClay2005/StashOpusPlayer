@@ -1,4 +1,4 @@
-package com.stash.opusplayer.data.database
+package com.stash.stashwave.data.database
 
 import androidx.room.Database
 import androidx.room.Room

@@ -1,12 +1,12 @@
-package com.stash.opusplayer.ui.adapters
+package com.stash.stashwave.ui.adapters
 
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import com.stash.opusplayer.databinding.ItemFolderBinding
-import com.stash.opusplayer.ui.fragments.FolderInfo
+import com.stash.stashwave.databinding.ItemFolderBinding
+import com.stash.stashwave.ui.fragments.FolderInfo
 
 class FolderAdapter(
     private val onClick: (FolderInfo) -> Unit

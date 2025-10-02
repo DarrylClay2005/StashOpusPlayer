@@ -1,4 +1,4 @@
-package com.stash.opusplayer.ui.fragments
+package com.stash.stashwave.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -6,11 +6,11 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.stash.opusplayer.data.Song
-import com.stash.opusplayer.databinding.FragmentArtistSongsBinding
-import com.stash.opusplayer.ui.MainActivity
-import com.stash.opusplayer.ui.adapters.SongAdapter
-import com.stash.opusplayer.utils.MetadataExtractor
+import com.stash.stashwave.data.Song
+import com.stash.stashwave.databinding.FragmentArtistSongsBinding
+import com.stash.stashwave.ui.MainActivity
+import com.stash.stashwave.ui.adapters.SongAdapter
+import com.stash.stashwave.utils.MetadataExtractor
 
 class FolderDetailFragment : Fragment() {
     private var _binding: FragmentArtistSongsBinding? = null

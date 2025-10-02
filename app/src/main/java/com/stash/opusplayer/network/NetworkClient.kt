@@ -1,4 +1,4 @@
-package com.stash.opusplayer.network
+package com.stash.stashwave.network
 
 import com.google.gson.GsonBuilder
 import okhttp3.OkHttpClient

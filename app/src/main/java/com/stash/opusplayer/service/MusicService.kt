@@ -1,4 +1,4 @@
-package com.stash.opusplayer.service
+package com.stash.stashwave.service
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -20,10 +20,11 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import androidx.media3.session.MediaSessionService
-import com.stash.opusplayer.R
-import com.stash.opusplayer.audio.EqualizerManager
-import com.stash.opusplayer.data.Song
-import com.stash.opusplayer.ui.MainActivity
+import com.stash.stashwave.R
+import androidx.preference.PreferenceManager
+import com.stash.stashwave.audio.EqualizerManager
+import com.stash.stashwave.data.Song
+import com.stash.stashwave.ui.MainActivity
 
 class MusicService : MediaSessionService() {
     
@@ -41,6 +42,8 @@ class MusicService : MediaSessionService() {
     private var currentPitch: Float = 1.0f
     private var currentReverb: Short = 0
     private lateinit var notificationManager: NotificationManager
+    private var appInForeground = true
+    private var stopServiceWhenPaused = false
     
     override fun onCreate() {
         super.onCreate()
@@ -55,7 +58,16 @@ class MusicService : MediaSessionService() {
     }
     
     private fun initializePlayer() {
+        // Configure a custom HTTP data source with a modern mobile user-agent for broader CDN compatibility
+        val httpFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 StashAudio/8.1.6")
+            .setAllowCrossProtocolRedirects(true)
+        // Wrap http factory with DefaultDataSource so local file/content URIs continue to work
+        val defaultDsFactory = androidx.media3.datasource.DefaultDataSource.Factory(this, httpFactory)
+        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(defaultDsFactory)
+
         player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -107,21 +119,56 @@ class MusicService : MediaSessionService() {
                         "SET_EQ_PRESET" -> {
                             val name = args.getString("preset") ?: "NORMAL"
                             try {
-                                equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(name))
+equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(name))
+                                // Ensure effects are enabled when user selects a preset
+                                equalizerManager.setEnabled(true)
+                                // Persist in both default prefs and settings
+                                PreferenceManager.getDefaultSharedPreferences(this@MusicService).edit()
+                                    .putBoolean("equalizer_enabled", true)
+                                    .apply()
+                                getSharedPreferences("settings", 0).edit()
+                                    .putBoolean("equalizer_enabled", true)
+                                    .apply()
                             } catch (_: Exception) {}
                         }
                         "SET_EQ_BAND" -> {
                             val band = args.getInt("band", 0)
                             val level = args.getFloat("level", 0f)
                             equalizerManager.setBandLevel(band, level)
+                            // Auto-enable to ensure audible effect
+                            equalizerManager.setEnabled(true)
+                            PreferenceManager.getDefaultSharedPreferences(this@MusicService).edit()
+                                .putBoolean("equalizer_enabled", true)
+                                .apply()
+                            getSharedPreferences("settings", 0).edit()
+                                .putBoolean("equalizer_enabled", true)
+                                .apply()
                         }
                         "SET_BASS_BOOST" -> {
                             val strength = args.getInt("strength", 0)
                             equalizerManager.setBassBoost(strength)
+                            // Auto-enable to ensure audible effect
+                            equalizerManager.setEnabled(true)
+                            // Persist in both default prefs and settings
+                            PreferenceManager.getDefaultSharedPreferences(this@MusicService).edit()
+                                .putBoolean("equalizer_enabled", true)
+                                .apply()
+                            getSharedPreferences("settings", 0).edit()
+                                .putBoolean("equalizer_enabled", true)
+                                .apply()
                         }
                         "SET_VIRTUALIZER" -> {
                             val strength = args.getInt("strength", 0)
                             equalizerManager.setVirtualizer(strength)
+                            // Auto-enable to ensure audible effect
+                            equalizerManager.setEnabled(true)
+                            // Persist in both default prefs and settings
+                            PreferenceManager.getDefaultSharedPreferences(this@MusicService).edit()
+                                .putBoolean("equalizer_enabled", true)
+                                .apply()
+                            getSharedPreferences("settings", 0).edit()
+                                .putBoolean("equalizer_enabled", true)
+                                .apply()
                         }
                         "SET_SPEED" -> {
                             val speed = args.getFloat("speed", 1f)
@@ -152,6 +199,7 @@ class MusicService : MediaSessionService() {
     }
     
     private fun initializeEqualizer() {
+        android.util.Log.d("MusicService", "initializeEqualizer: player.audioSessionId=${'$'}{player.audioSessionId}")
         equalizerManager = EqualizerManager(this)
         // Initialize equalizer and reverb when player has a valid audio session
         val sessionId = player.audioSessionId
@@ -173,6 +221,7 @@ class MusicService : MediaSessionService() {
                 if (playbackState == Player.STATE_READY) {
                     val sessionId = player.audioSessionId
                     if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
+                        android.util.Log.d("MusicService", "STATE_READY: initializing EQ for sessionId=${'$'}sessionId")
                         lastAudioSessionId = sessionId
                         equalizerManager.initialize(sessionId)
                         configureReverbForSession(sessionId)
@@ -188,11 +237,23 @@ class MusicService : MediaSessionService() {
                     @Suppress("DEPRECATION")
                     stopForeground(false)
                     notificationManager.notify(NOTIFICATION_ID, createNotification())
+                    
+                    // Check if app is in background and no active activities
+                    checkAndStopServiceIfNeeded()
                 }
             }
             
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 updateNotification()
+                // Defensive: ensure effects are bound after item transitions as some devices
+                // only expose a stable session once the new item is active
+                val sessionId = player.audioSessionId
+                if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
+                    android.util.Log.d("MusicService", "onMediaItemTransition: initializing EQ for sessionId=${'$'}sessionId")
+                    lastAudioSessionId = sessionId
+                    try { equalizerManager.initialize(sessionId) } catch (_: Exception) {}
+                    try { configureReverbForSession(sessionId) } catch (_: Exception) {}
+                }
             }
         })
     }
@@ -246,7 +307,17 @@ class MusicService : MediaSessionService() {
                 "Previous",
                 createMediaActionPendingIntent("PREVIOUS")
             )
+            .addAction(
+                R.drawable.ic_replay_10_24,
+                "Rewind",
+                createMediaActionPendingIntent("REWIND")
+            )
             .addAction(playPauseAction)
+            .addAction(
+                R.drawable.ic_forward_30_24,
+                "Fast Forward",
+                createMediaActionPendingIntent("FAST_FORWARD")
+            )
             .addAction(
                 R.drawable.ic_skip_next_24,
                 "Next",
@@ -254,7 +325,8 @@ class MusicService : MediaSessionService() {
             )
             .setStyle(
                 MediaNotificationCompat.MediaStyle()
-                    .setShowActionsInCompactView(0, 1, 2)
+                    .setShowActionsInCompactView(1, 2, 3)
+                    .setMediaSession(mediaSession?.sessionCompatToken)
             )
             .build()
     }
@@ -297,7 +369,7 @@ class MusicService : MediaSessionService() {
         val album = player.mediaMetadata.albumTitle?.toString() ?: ""
         if (title.isBlank() && artist.isBlank() && album.isBlank()) return null
         return try {
-            val fakeSong = com.stash.opusplayer.data.Song(
+            val fakeSong = com.stash.stashwave.data.Song(
                 id = 0L,
                 title = title,
                 artist = artist,
@@ -305,7 +377,7 @@ class MusicService : MediaSessionService() {
                 duration = 0L,
                 path = ""
             )
-            val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
+            val cache = com.stash.stashwave.artwork.ArtworkCache(this)
             cache.loadBitmapIfPresent(fakeSong)
         } catch (_: Exception) {
             null
@@ -313,6 +385,29 @@ class MusicService : MediaSessionService() {
     }
     
     fun getEqualizerManager(): EqualizerManager = equalizerManager
+    
+    private fun checkAndStopServiceIfNeeded() {
+        // If app is not in foreground and music is paused, consider stopping service
+        val activityManager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
+        val appTasks = activityManager.getRunningTasks(1)
+        
+        val isAppInForeground = appTasks.isNotEmpty() && 
+            appTasks[0].topActivity?.packageName == packageName
+        
+        if (!isAppInForeground && !player.isPlaying) {
+            // App is in background and music is not playing
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                if (!player.isPlaying) {
+                    // Still not playing after delay, stop service
+                    stopSelf()
+                }
+            }, 30000) // 30 second grace period
+        }
+    }
+    
+    fun setAppInForeground(inForeground: Boolean) {
+        appInForeground = inForeground
+    }
 
     // Live controls
     fun setPlaybackSpeed(speed: Float) {
@@ -351,6 +446,15 @@ class MusicService : MediaSessionService() {
         } catch (_: Exception) {
             // Device may not support PresetReverb; ignore gracefully
         }
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        try { player.pause() } catch (_: Exception) {}
+        try {
+            stopForeground(true)
+            stopSelf()
+        } catch (_: Exception) {}
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

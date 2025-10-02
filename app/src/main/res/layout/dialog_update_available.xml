@@ -36,7 +36,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Update Available"
-                android:textAppearance="@style/TextAppearance.StashOpus.Title"
+android:textAppearance="@style/TextAppearance.StashWave.Title"
                 android:textSize="18sp" />
 
             <TextView
@@ -44,7 +44,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Version 2.1"
-                android:textAppearance="@style/TextAppearance.StashOpus.Subtitle"
+android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
                 android:textSize="14sp" />
 
         </LinearLayout>
@@ -83,7 +83,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Release Date"
-                android:textAppearance="@style/TextAppearance.StashOpus.Subtitle"
+android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
                 android:textSize="12sp" />
 
             <TextView
@@ -91,7 +91,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Jan 25, 2025"
-                android:textAppearance="@style/TextAppearance.StashOpus.Body"
+android:textAppearance="@style/TextAppearance.StashWave.Body"
                 android:textSize="14sp" />
 
         </LinearLayout>
@@ -107,7 +107,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Download Size"
-                android:textAppearance="@style/TextAppearance.StashOpus.Subtitle"
+android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
                 android:textSize="12sp" />
 
             <TextView
@@ -115,7 +115,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="8.1 MB"
-                android:textAppearance="@style/TextAppearance.StashOpus.Body"
+android:textAppearance="@style/TextAppearance.StashWave.Body"
                 android:textSize="14sp" />
 
         </LinearLayout>
@@ -127,7 +127,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="What's New"
-        android:textAppearance="@style/TextAppearance.StashOpus.Title"
+android:textAppearance="@style/TextAppearance.StashWave.Title"
         android:textSize="16sp"
         android:layout_marginBottom="8dp" />
 
@@ -142,7 +142,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="• AI-powered update notifications\n• Improved performance\n• Bug fixes and stability improvements"
-            android:textAppearance="@style/TextAppearance.StashOpus.Body"
+android:textAppearance="@style/TextAppearance.StashWave.Body"
             android:textSize="14sp"
             android:lineSpacingExtra="4dp" />
 
@@ -172,7 +172,7 @@
             android:layout_weight="1"
             android:layout_marginStart="12dp"
             android:text="AI recommends this update based on your usage patterns"
-            android:textAppearance="@style/TextAppearance.StashOpus.Body"
+android:textAppearance="@style/TextAppearance.StashWave.Body"
             android:textSize="13sp"
             android:textColor="@color/secondary_color" />
 

@@ -11,7 +11,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Artist Name"
-        android:textAppearance="@style/TextAppearance.StashOpus.Headline"
+android:textAppearance="@style/TextAppearance.StashWave.Headline"
         android:textSize="24sp"
         android:textStyle="bold"
         android:layout_marginBottom="16dp" />
@@ -30,7 +30,7 @@
         android:layout_weight="1"
         android:gravity="center"
         android:text="No songs found for this artist"
-        android:textAppearance="@style/TextAppearance.StashOpus.Body"
+android:textAppearance="@style/TextAppearance.StashWave.Body"
         android:textAlignment="center"
         android:visibility="gone" />
 

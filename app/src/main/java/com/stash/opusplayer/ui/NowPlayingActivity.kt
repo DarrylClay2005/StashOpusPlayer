@@ -1,4 +1,4 @@
-package com.stash.opusplayer.ui
+package com.stash.stashwave.ui
 
 import android.content.ComponentName
 import android.content.Intent
@@ -16,14 +16,14 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.session.SessionToken
 import com.bumptech.glide.Glide
 import com.google.common.util.concurrent.MoreExecutors
-import com.stash.opusplayer.R
-import com.stash.opusplayer.audio.EqualizerManager
-import com.stash.opusplayer.data.Song
-import com.stash.opusplayer.databinding.ActivityNowPlayingBinding
-import com.stash.opusplayer.player.MusicPlayerManager
-import com.stash.opusplayer.service.MusicService
+import com.stash.stashwave.R
+import com.stash.stashwave.audio.EqualizerManager
+import com.stash.stashwave.data.Song
+import com.stash.stashwave.databinding.ActivityNowPlayingBinding
+import com.stash.stashwave.player.MusicPlayerManager
+import com.stash.stashwave.service.MusicService
 import androidx.core.os.bundleOf
-import com.stash.opusplayer.utils.MetadataExtractor
+import com.stash.stashwave.utils.MetadataExtractor
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
@@ -51,17 +51,7 @@ class NowPlayingActivity : AppCompatActivity() {
         connectToMediaController()
         setupPlayerManager()
         
-        // Wire waveform seek listener
-        try {
-            binding.waveformView.setOnSeekListener { ratio ->
-                mediaController?.let { controller ->
-                    val dur = controller.duration
-                    if (dur > 0) {
-                        controller.seekTo((ratio * dur).toLong())
-                    }
-                }
-            }
-        } catch (_: Exception) { }
+        // SynthWave visualization is passive; seeking remains via buttons/album art
 
         // Get song from intent
         val song: Song? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -106,6 +96,9 @@ class NowPlayingActivity : AppCompatActivity() {
                 val enabled = !controller.shuffleModeEnabled
                 controller.shuffleModeEnabled = enabled
                 updateShuffleButton(enabled)
+                // Show feedback to user
+                val message = if (enabled) "Shuffle enabled" else "Shuffle disabled"
+                android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
                 // Persist shuffle state
                 try { getSharedPreferences("settings", 0).edit().putBoolean("playback_shuffle", enabled).apply() } catch (_: Exception) {}
             }
@@ -120,6 +113,16 @@ class NowPlayingActivity : AppCompatActivity() {
                 }
                 controller.repeatMode = nextMode
                 updateRepeatButton(nextMode)
+                
+                // Show feedback to user
+                val message = when (nextMode) {
+                    Player.REPEAT_MODE_OFF -> "Repeat off"
+                    Player.REPEAT_MODE_ALL -> "Repeat all"
+                    Player.REPEAT_MODE_ONE -> "Repeat one"
+                    else -> "Repeat mode changed"
+                }
+                android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
+                
                 // Persist repeat mode
                 try { getSharedPreferences("settings", 0).edit().putInt("playback_repeat_mode", nextMode).apply() } catch (_: Exception) {}
             }
@@ -131,24 +134,12 @@ class NowPlayingActivity : AppCompatActivity() {
             popup.menuInflater.inflate(R.menu.now_playing_menu, popup.menu)
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
-                    R.id.action_audio_settings -> {
-                        // Open MainActivity with Audio settings tab
-                        val intent = Intent(this, MainActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-                        }
-                        startActivity(intent)
-                        // Programmatic navigation will be via drawer item; user can also access directly in drawer
+                    R.id.action_share -> {
+                        shareCurrentTrack()
                         true
                     }
-                    R.id.action_share -> {
-                        currentSong?.let { s ->
-                            val text = "Now playing: ${s.displayName} — ${s.artistName}"
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_TEXT, text)
-                            }
-                            startActivity(Intent.createChooser(shareIntent, "Share"))
-                        }
+                    R.id.action_embed_artwork -> {
+                        embedArtworkIntoFile()
                         true
                     }
                     else -> false
@@ -179,13 +170,155 @@ class NowPlayingActivity : AppCompatActivity() {
         binding.favoriteButton.setOnClickListener {
             // Toggle favorite status
             currentSong?.let { song ->
-                val isFavorite = !song.isFavorite
-                updateFavoriteButton(isFavorite)
-                currentSong = song.copy(isFavorite = isFavorite)
+                lifecycleScope.launch {
+                    try {
+val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivity)
+                        val isFavorite = repository.isFavorite(song.id)
+                        
+                        if (isFavorite) {
+                            repository.removeFromFavorites(song.id)
+                            android.widget.Toast.makeText(this@NowPlayingActivity, "💔 Removed from favorites", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            repository.addToFavorites(song)
+                            android.widget.Toast.makeText(this@NowPlayingActivity, "❤️ Added to favorites", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        
+                        // Update UI
+                        updateFavoriteButton(!isFavorite)
+                        currentSong = song.copy(isFavorite = !isFavorite)
+                        
+                    } catch (e: Exception) {
+                        android.util.Log.e("NowPlayingActivity", "Error toggling favorite", e)
+                        android.widget.Toast.makeText(this@NowPlayingActivity, "Error updating favorites", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
+        
+        // Fast forward button (30 seconds)
+        binding.fastForwardButton.setOnClickListener {
+            mediaController?.let { controller ->
+                val currentPos = controller.currentPosition
+                val duration = controller.duration
+                if (duration > 0) {
+                    val newPos = (currentPos + 30000).coerceAtMost(duration)
+                    controller.seekTo(newPos)
+                    android.widget.Toast.makeText(this, "⏩ +30s", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        
+        // Add 10-second seek functionality to album artwork
+        setupAlbumArtworkSeek()
+
+        // Share button
+        binding.shareButton.setOnClickListener { shareCurrentTrack() }
 
         // Audio controls have moved to Settings
+    }
+    
+    private fun shareCurrentTrack() {
+        val song = currentSong ?: return
+        val text = "${song.displayName} — ${song.artistName}"
+        try {
+            val bitmap = metadataExtractor.loadCachedArtwork(this, song)
+                ?: metadataExtractor.decodeAlbumArt(song.albumArt)
+            if (bitmap != null) {
+                val outDir = externalCacheDir?.let { java.io.File(it, "share") } ?: java.io.File(cacheDir, "share")
+                if (!outDir.exists()) outDir.mkdirs()
+                val outFile = java.io.File(outDir, "art_${System.currentTimeMillis()}.jpg")
+                java.io.FileOutputStream(outFile).use { fos ->
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, fos)
+                }
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    this,
+                    "$packageName.fileprovider",
+                    outFile
+                )
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "image/jpeg"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_TEXT, text)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(intent, "Share track"))
+            } else {
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, text)
+                }
+                startActivity(Intent.createChooser(intent, "Share track"))
+            }
+        } catch (_: Exception) {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            startActivity(Intent.createChooser(intent, "Share track"))
+        }
+    }
+
+    private fun embedArtworkIntoFile() {
+        val song = currentSong ?: return
+        val path = song.path
+        val ext = path.substringAfterLast('.', "").lowercase()
+        // Get artwork bytes from cache or embedded field
+        val artBitmap = metadataExtractor.loadCachedArtwork(this, song)
+            ?: metadataExtractor.decodeAlbumArt(song.albumArt)
+        if (artBitmap == null) {
+            android.widget.Toast.makeText(this, "No artwork available to embed", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        val baos = java.io.ByteArrayOutputStream()
+        artBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, baos)
+        val jpegBytes = baos.toByteArray()
+        
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val ok = when (ext) {
+"mp3" -> com.stash.stashwave.utils.TagEditor.embedArtworkMp3(this@NowPlayingActivity, path, jpegBytes)
+else -> com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActivity, path, jpegBytes)
+            }
+            launch(kotlinx.coroutines.Dispatchers.Main) {
+                if (ok) {
+                    android.widget.Toast.makeText(this@NowPlayingActivity, "Artwork embedded", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    android.widget.Toast.makeText(this@NowPlayingActivity, "Failed to embed artwork", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun setupAlbumArtworkSeek() {
+        binding.albumArtwork.setOnTouchListener { view, event ->
+            if (event.action == android.view.MotionEvent.ACTION_UP) {
+                val viewWidth = view.width
+                val touchX = event.x
+                val leftThird = viewWidth / 3f
+                val rightThird = viewWidth * 2f / 3f
+                
+                mediaController?.let { controller ->
+                    when {
+                        touchX < leftThird -> {
+                            // Left side - seek backward 10 seconds
+                            val currentPos = controller.currentPosition
+                            val newPos = (currentPos - 10000).coerceAtLeast(0)
+                            controller.seekTo(newPos)
+                            android.widget.Toast.makeText(this, "⏪ -10s", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        touchX > rightThird -> {
+                            // Right side - seek forward 10 seconds
+                            val currentPos = controller.currentPosition
+                            val duration = controller.duration
+                            val newPos = (currentPos + 10000).coerceAtMost(duration)
+                            controller.seekTo(newPos)
+                            android.widget.Toast.makeText(this, "⏩ +10s", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        // Middle third - do nothing (avoid accidental seeks)
+                    }
+                }
+            }
+            true // Consume the touch event
+        }
     }
 
     private fun connectToMediaController() {
@@ -256,8 +389,7 @@ class NowPlayingActivity : AppCompatActivity() {
         binding.artistName.text = song.artistName
         binding.albumName.text = song.albumName
         
-        // Seed waveform for a stable shape per track
-        try { binding.waveformView.setSeed("${song.displayName}|${song.artistName}|${song.path}") } catch (_: Exception) {}
+        // Visualization animates in real-time; no seeding needed
 
         // Load album artwork (prefer cached for speed; fallback to embedded/online)
         val cached = metadataExtractor.loadCachedArtwork(this, song)
@@ -297,7 +429,7 @@ class NowPlayingActivity : AppCompatActivity() {
         val allowOnline = prefs.getBoolean("fetch_artwork_online", true)
         if (allowOnline) {
             lifecycleScope.launch {
-                val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingActivity)
+val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingActivity)
                 val file = fetcher.getOrFetch(song)
                 if (file != null && song == currentSong) {
                     Glide.with(this@NowPlayingActivity)
@@ -316,7 +448,32 @@ class NowPlayingActivity : AppCompatActivity() {
             }
         }
         
+        // Auto-embed artwork into MP3 on first play if enabled and embedded art is missing
+        tryAutoEmbedArtworkIfEnabled(song, cached, embedded)
+        
         updateFavoriteButton(song.isFavorite)
+    }
+    
+    private fun tryAutoEmbedArtworkIfEnabled(song: Song, cached: android.graphics.Bitmap?, embedded: android.graphics.Bitmap?) {
+        try {
+            val prefs = getSharedPreferences("settings", 0)
+            if (!prefs.getBoolean("auto_embed_artwork", false)) return
+            val ext = song.path.substringAfterLast('.', "").lowercase()
+            val supported = setOf("mp3", "m4a", "mp4", "aac", "opus", "ogg")
+            if (!supported.contains(ext)) return
+            if (embedded != null) return // already embedded
+            val art = cached ?: return
+            val baos = java.io.ByteArrayOutputStream()
+            art.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, baos)
+            val jpeg = baos.toByteArray()
+            lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                if (ext == "mp3") {
+                    com.stash.stashwave.utils.TagEditor.embedArtworkMp3(this@NowPlayingActivity, song.path, jpeg)
+                } else {
+                    com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActivity, song.path, jpeg)
+                }
+            }
+        } catch (_: Exception) {}
     }
     
     private fun setDefaultArtwork() {
@@ -410,7 +567,7 @@ class NowPlayingActivity : AppCompatActivity() {
         if (duration > 0) {
             try { binding.seekBar.max = duration.toInt() } catch (_: Exception) {}
             try { binding.seekBar.progress = currentPosition.toInt() } catch (_: Exception) {}
-            try { binding.waveformView.setProgress(currentPosition, duration) } catch (_: Exception) {}
+            // Visualization does not need explicit progress updates
             binding.currentTime.text = formatTime(currentPosition)
             binding.totalTime.text = formatTime(duration)
         }

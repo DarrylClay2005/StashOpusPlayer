@@ -1,4 +1,4 @@
-package com.stash.opusplayer.artwork
+package com.stash.stashwave.artwork
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -6,7 +6,7 @@ import android.graphics.BitmapFactory
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import com.stash.opusplayer.data.Song
+import com.stash.stashwave.data.Song
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -37,9 +37,17 @@ class ArtworkCache(private val context: Context) {
         return sha1(base)
     }
 
+    // Title-only key to improve cache hits when tags are unknown or differ post-download
+    fun keyForTitleOnly(title: String): String {
+        val base = normalize(title)
+        return "t_" + sha1(base)
+    }
+
     fun fileForKey(key: String): File = File(dir, "$key.jpg")
 
     fun fileFor(song: Song): File = fileForKey(keyFor(song))
+
+    fun fileForTitleOnly(title: String): File = fileForKey(keyForTitleOnly(title))
 
     fun exists(song: Song): Boolean = fileFor(song).exists()
 
@@ -59,6 +67,12 @@ class ArtworkCache(private val context: Context) {
         return decodeDownsampled(f, maxDim)
     }
 
+    fun loadBitmapByTitleIfPresent(title: String, maxDim: Int = 512): Bitmap? {
+        val f = fileForTitleOnly(title)
+        if (!f.exists()) return null
+        return decodeDownsampled(f, maxDim)
+    }
+
     private fun decodeDownsampled(file: File, reqSize: Int): Bitmap? {
         return try {
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -72,7 +86,7 @@ class ArtworkCache(private val context: Context) {
             val finalOpts = BitmapFactory.Options().apply {
                 inJustDecodeBounds = false
                 inSampleSize = if (inSample <= 0) 1 else inSample
-inPreferredConfig = Bitmap.Config.RGB_565 // smaller than ARGB_8888
+                inPreferredConfig = Bitmap.Config.RGB_565 // smaller than ARGB_8888
             }
             BitmapFactory.decodeFile(file.absolutePath, finalOpts)
         } catch (_: Throwable) {
@@ -122,7 +136,7 @@ class OnlineArtworkFetcher(context: Context) {
             val cached = cache.fileFor(song)
             if (cached.exists()) return@withContext cached
 
-            com.stash.opusplayer.utils.ImageDownloadTracker.begin()
+            com.stash.stashwave.utils.ImageDownloadTracker.begin()
             try {
                 // Try MusicBrainz + CAA
             val mbid = searchMusicBrainzRecording(song)
@@ -137,7 +151,7 @@ class OnlineArtworkFetcher(context: Context) {
                 if (cache.saveJpeg(bytes, cached)) return@withContext cached
             }
             } finally {
-                com.stash.opusplayer.utils.ImageDownloadTracker.end()
+                com.stash.stashwave.utils.ImageDownloadTracker.end()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Artwork fetch error", e)
@@ -145,7 +159,7 @@ class OnlineArtworkFetcher(context: Context) {
         return@withContext null
     }
 
-    private fun buildUserAgent(): String = "StashAudio/${com.stash.opusplayer.BuildConfig.VERSION_NAME} (Android; +https://github.com/DarrylClay2005/StashOpusPlayer)"
+private fun buildUserAgent(): String = "StashAudio/${com.stash.stashwave.BuildConfig.VERSION_NAME} (Android; +https://github.com/DarrylClay2005/StashOpusPlayer)"
 
     private fun request(url: String): Request = Request.Builder()
         .url(url)

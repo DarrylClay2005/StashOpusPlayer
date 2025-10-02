@@ -1,4 +1,4 @@
-package com.stash.opusplayer.ui.fragments
+package com.stash.stashwave.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -7,9 +7,9 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.stash.opusplayer.data.MusicRepository
-import com.stash.opusplayer.databinding.FragmentFoldersBinding
-import com.stash.opusplayer.ui.adapters.FolderAdapter
+import com.stash.stashwave.data.MusicRepository
+import com.stash.stashwave.databinding.FragmentFoldersBinding
+import com.stash.stashwave.ui.adapters.FolderAdapter
 import kotlinx.coroutines.launch
 import java.io.File
 import android.net.Uri
@@ -43,7 +43,7 @@ setupRecyclerView()
         adapter = FolderAdapter { info ->
             val fragment = FolderDetailFragment.newInstance(info.path, ArrayList(info.songs))
             parentFragmentManager.beginTransaction()
-                .replace(com.stash.opusplayer.R.id.main_content, fragment)
+                .replace(com.stash.stashwave.R.id.main_content, fragment)
                 .addToBackStack(null)
                 .commit()
         }
@@ -105,5 +105,5 @@ b.recyclerView.visibility = View.GONE
 data class FolderInfo(
     val path: String,
     val songCount: Int,
-    val songs: List<com.stash.opusplayer.data.Song>
+    val songs: List<com.stash.stashwave.data.Song>
 )

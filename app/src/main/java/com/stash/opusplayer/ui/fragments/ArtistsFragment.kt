@@ -1,4 +1,4 @@
-package com.stash.opusplayer.ui.fragments
+package com.stash.stashwave.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -7,9 +7,9 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.stash.opusplayer.databinding.FragmentArtistsBinding
-import com.stash.opusplayer.data.MusicRepository
-import com.stash.opusplayer.ui.adapters.ArtistAdapter
+import com.stash.stashwave.databinding.FragmentArtistsBinding
+import com.stash.stashwave.data.MusicRepository
+import com.stash.stashwave.ui.adapters.ArtistAdapter
 import kotlinx.coroutines.launch
 
 class ArtistsFragment : Fragment() {
@@ -87,7 +87,7 @@ class ArtistsFragment : Fragment() {
         // Create a new fragment to show songs by this artist
         val fragment = ArtistSongsFragment.newInstance(artist.name, ArrayList(artist.songs))
         parentFragmentManager.beginTransaction()
-            .replace(com.stash.opusplayer.R.id.main_content, fragment)
+            .replace(com.stash.stashwave.R.id.main_content, fragment)
             .addToBackStack(null)
             .commit()
     }
@@ -101,5 +101,5 @@ class ArtistsFragment : Fragment() {
 data class ArtistInfo(
     val name: String,
     val songCount: Int,
-    val songs: List<com.stash.opusplayer.data.Song>
+    val songs: List<com.stash.stashwave.data.Song>
 )
