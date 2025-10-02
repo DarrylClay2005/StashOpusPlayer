@@ -38,6 +38,8 @@ class YouTubeSearchFragment : Fragment() {
     private lateinit var downloadManager: VideoDownloadManager
 
     private var currentDownloadPath: String = ""
+    // When non-null, indicates we are picking a folder to hand off to Seal for this video
+    private var pendingSealVideo: YouTubeVideo? = null
 
     private val directoryPickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -197,6 +199,30 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
                 "Download location updated",
                 Toast.LENGTH_SHORT
             ).show()
+
+            // If we were waiting to hand off a specific video to Seal, do it now
+            pendingSealVideo?.let { video ->
+                pendingSealVideo = null
+                val suggested = sanitizeFileName(video.title) + ".opus"
+                val opened = com.stash.stashwave.integration.SealIntegration.openInSealWithLocation(
+                    requireContext(),
+                    video.formattedUrl,
+                    currentDownloadPath,
+                    suggested
+                )
+                if (opened) {
+                    Toast.makeText(requireContext(), "Opening Seal to download to selected folder…", Toast.LENGTH_SHORT).show()
+                } else {
+                    androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                        .setTitle("Install Seal")
+                        .setMessage("Seal is required to handle downloads. Install Seal to continue?")
+                        .setPositiveButton("Install") { _, _ ->
+                            com.stash.stashwave.integration.SealIntegration.promptInstall(requireContext())
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            }
         } catch (e: Exception) {
             Toast.makeText(
                 requireContext(),
@@ -297,21 +323,34 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
             } catch (_: Exception) {}
         }
 
-        // Sole downloader: delegate to Seal app
-        val url = video.formattedUrl
-        val opened = com.stash.stashwave.integration.SealIntegration.openInSeal(requireContext(), url)
-        if (opened) {
-            Toast.makeText(requireContext(), "Opening Seal to download...", Toast.LENGTH_SHORT).show()
+        // Decide whether to prompt for a folder or use the current selection based on settings
+        val prefs = requireContext().getSharedPreferences("settings", 0)
+        val alwaysAsk = prefs.getBoolean("always_ask_seal_folder", true)
+        if (alwaysAsk || currentDownloadPath.isBlank()) {
+            pendingSealVideo = video
+            Toast.makeText(requireContext(), "Choose a folder to save with Seal", Toast.LENGTH_SHORT).show()
+            openDirectoryPicker()
         } else {
-            // Prompt install if not available
-            androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                .setTitle("Install Seal")
-                .setMessage("This app uses Seal as the downloader. Install Seal to continue?")
-                .setPositiveButton("Install") { _, _ ->
-                    com.stash.stashwave.integration.SealIntegration.promptInstall(requireContext())
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
+            val suggested = sanitizeFileName(video.title) + ".opus"
+            val opened = com.stash.stashwave.integration.SealIntegration.openInSealWithLocation(
+                requireContext(),
+                video.formattedUrl,
+                currentDownloadPath,
+                suggested
+            )
+            if (opened) {
+                Toast.makeText(requireContext(), "Opening Seal to download…", Toast.LENGTH_SHORT).show()
+            } else {
+                // Prompt install if not available
+                androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                    .setTitle("Install Seal")
+                    .setMessage("This app uses Seal as the downloader. Install Seal to continue?")
+                    .setPositiveButton("Install") { _, _ ->
+                        com.stash.stashwave.integration.SealIntegration.promptInstall(requireContext())
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
         }
     }
     
@@ -351,6 +390,13 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
         binding.resultsRecyclerView.visibility = View.GONE
         binding.emptyStateContainer.visibility = View.VISIBLE
         Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show()
+    }
+
+    private fun sanitizeFileName(fileName: String): String {
+        return fileName
+            .replace(Regex("[^a-zA-Z0-9._\-\s]"), "_")
+            .replace(Regex("\s+"), "_")
+            .take(100)
     }
 
     override fun onDestroyView() {

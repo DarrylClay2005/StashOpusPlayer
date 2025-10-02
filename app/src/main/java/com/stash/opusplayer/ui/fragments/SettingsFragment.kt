@@ -304,6 +304,19 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         }
         layout.addView(checkUpdateButton)
 
+        // Downloads section
+        addSectionHeader(layout, "Downloads")
+        val askSealToggle = CheckBox(requireContext()).apply {
+            text = "Always ask download folder before using Seal"
+            val prefs = requireContext().getSharedPreferences("settings", 0)
+            isChecked = prefs.getBoolean("always_ask_seal_folder", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("always_ask_seal_folder", isChecked).apply()
+                Toast.makeText(requireContext(), if (isChecked) "Will ask for a folder before using Seal" else "Won't ask; using current folder", Toast.LENGTH_SHORT).show()
+            }
+        }
+        layout.addView(askSealToggle)
+
         scrollView.addView(layout)
         return scrollView
     }
