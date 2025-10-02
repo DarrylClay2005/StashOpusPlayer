@@ -19,7 +19,11 @@ class YouTubeApiService {
         private const val TAG = "YouTubeApiService"
     }
     
-    private val apiKey: String by lazy { com.stash.stashwave.BuildConfig.YOUTUBE_API_KEY ?: "" }
+    private val apiKey: String by lazy { 
+        // API key should be provided by user configuration, not hardcoded
+        // For YouTube functionality, users should use Seal integration instead
+        ""
+    }
     
     private val client = OkHttpClient.Builder()
         .build()
@@ -32,7 +36,7 @@ class YouTubeApiService {
         try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
             if (apiKey.isBlank()) {
-                return@withContext Result.failure(IOException("YouTube API key missing. Set YOUTUBE_API_KEY in local.properties"))
+                return@withContext Result.failure(IOException("YouTube API key not configured. For YouTube downloads, please use the Seal integration instead."))
             }
             val url = buildString {
                 append("$BASE_URL/search")
@@ -79,7 +83,7 @@ class YouTubeApiService {
     suspend fun getVideoDetails(videoId: String): Result<YouTubeVideo?> = withContext(Dispatchers.IO) {
         try {
             if (apiKey.isBlank()) {
-                return@withContext Result.failure(IOException("YouTube API key missing. Set YOUTUBE_API_KEY in local.properties"))
+                return@withContext Result.failure(IOException("YouTube API key not configured. For YouTube functionality, please use the Seal integration."))
             }
             val url = "$BASE_URL/videos?part=snippet,contentDetails,statistics&id=$videoId&key=$apiKey"
             
