@@ -158,11 +158,6 @@ loadFragment(com.stash.stashwave.ui.fragments.FavoritesFragment())
                     supportActionBar?.title = "Liked Songs"
                     true
                 }
-                R.id.nav_genres -> {
-loadFragment(com.stash.stashwave.ui.fragments.GenresFragment())
-                    supportActionBar?.title = getString(R.string.menu_genres)
-                    true
-                }
                 R.id.nav_folders -> {
 loadFragment(com.stash.stashwave.ui.fragments.FoldersFragment())
                     supportActionBar?.title = getString(R.string.menu_folders)

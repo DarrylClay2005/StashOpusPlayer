@@ -163,49 +163,6 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         }
         layout.addView(artworkToggle)
 
-        val artistToggle = CheckBox(requireContext()).apply {
-            text = "Fetch artist images online"
-            isChecked = true
-            setOnCheckedChangeListener { _, isChecked ->
-                val prefs = requireContext().getSharedPreferences("settings", 0)
-                prefs.edit().putBoolean("fetch_artist_images_online", isChecked).apply()
-            }
-        }
-        layout.addView(artistToggle)
-
-        val genreToggle = CheckBox(requireContext()).apply {
-            text = "Fetch genre images online"
-            isChecked = true
-            setOnCheckedChangeListener { _, isChecked ->
-                val prefs = requireContext().getSharedPreferences("settings", 0)
-                prefs.edit().putBoolean("fetch_genre_images_online", isChecked).apply()
-            }
-        }
-        layout.addView(genreToggle)
-
-        val providerHint = TextView(requireContext()).apply {
-            text = "Album: MusicBrainz + CAA + iTunes. Artist/Genre: Last.fm (if key) and Wikipedia fallback."
-            textSize = 12f
-        }
-        layout.addView(providerHint)
-
-        val apiKeyLabel = TextView(requireContext()).apply { text = "Last.fm API key (optional):" }
-        layout.addView(apiKeyLabel)
-        val apiKeyInput = EditText(requireContext()).apply {
-            val prefs = requireContext().getSharedPreferences("settings", 0)
-            setText(prefs.getString("lastfm_api_key", "") ?: "")
-            hint = "Enter Last.fm API key"
-        }
-        layout.addView(apiKeyInput)
-        val saveApiKeyBtn = Button(requireContext()).apply {
-            text = "Save Last.fm API key"
-            setOnClickListener {
-                val prefs = requireContext().getSharedPreferences("settings", 0)
-                prefs.edit().putString("lastfm_api_key", apiKeyInput.text.toString().trim()).apply()
-                Toast.makeText(requireContext(), "Saved", Toast.LENGTH_SHORT).show()
-            }
-        }
-        layout.addView(saveApiKeyBtn)
 
         // Music Folders Section
         addSectionHeader(layout, "Music Folders")
