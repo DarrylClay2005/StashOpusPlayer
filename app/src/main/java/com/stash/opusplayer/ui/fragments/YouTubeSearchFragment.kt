@@ -45,8 +45,10 @@ class YouTubeSearchFragment : Fragment() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let { uri ->
-                handleDirectorySelection(uri)
+            val dataIntent = result.data
+            val flags = dataIntent?.flags ?: 0
+            dataIntent?.data?.let { uri ->
+                handleDirectorySelection(uri, flags)
             }
         }
     }
@@ -173,6 +175,9 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
 
     private fun openDirectoryPicker() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             // Set initial directory to current download path if possible
             if (currentDownloadPath.isNotEmpty()) {
                 val uri = Uri.parse("file://$currentDownloadPath")
@@ -182,15 +187,13 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
         directoryPickerLauncher.launch(intent)
     }
 
-    private fun handleDirectorySelection(uri: Uri) {
+    private fun handleDirectorySelection(uri: Uri, resultFlags: Int) {
         try {
-            // Take persistent permission
-            requireContext().contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
+            // Take persistent permission using flags returned from the picker
+            val takeFlags = resultFlags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            requireContext().contentResolver.takePersistableUriPermission(uri, takeFlags)
 
-            // Convert URI to path if possible, or store URI string
+            // Store URI string for later use
             currentDownloadPath = uri.toString()
             updateLocationDisplay()
             
