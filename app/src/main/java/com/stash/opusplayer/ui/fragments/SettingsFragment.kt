@@ -659,7 +659,7 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
         layout.addView(reverbSeek)
 
         fun applyReverbPresetFromProgress(p: Int) {
-            reverbLabel.text = "Reverb ${p / 10}%"
+            reverbLabel.text = "Reverb ${'$'}{p / 10}%"
             val preset: Short = when {
                 p < 50 -> 0
                 p < 200 -> 1
@@ -683,7 +683,118 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
         reverbSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) applyReverbPresetFromProgress(progress)
-                else reverbLabel.text = "Reverb ${progress / 10}%"
+                else reverbLabel.text = "Reverb ${'$'}{progress / 10}%"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // --- App Volume ---
+        val volHeader = TextView(requireContext()).apply {
+            text = "App Volume"
+            textSize = 18f
+            setPadding(0, 24, 0, 8)
+        }
+        layout.addView(volHeader)
+
+        val volLabel = TextView(requireContext())
+        layout.addView(volLabel)
+
+        val savedVol = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
+        fun updateVolLabel(v: Float) { volLabel.text = "Volume: ${'$'}{(v * 100).toInt()}%" }
+        updateVolLabel(savedVol)
+
+        val volSeek = SeekBar(requireContext()).apply {
+            max = 100
+            progress = (savedVol * 100f).toInt()
+        }
+        layout.addView(volSeek)
+
+        fun applyAppVolume(progress: Int) {
+            val v = (progress / 100f).coerceIn(0f, 1f)
+            prefs.edit().putFloat("app_volume", v).apply()
+            updateVolLabel(v)
+            mediaController?.let { controller ->
+                try {
+                    controller.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_APP_VOLUME", android.os.Bundle.EMPTY),
+                        androidx.core.os.bundleOf("volume" to v)
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+        volSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) applyAppVolume(progress) else updateVolLabel(progress / 100f)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // --- Audio Focus ---
+        val afToggle = CheckBox(requireContext()).apply {
+            text = "Enable audio focus (pause/duck on interruptions)"
+            isChecked = prefs.getBoolean("audio_focus_enabled", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("audio_focus_enabled", isChecked).apply()
+                mediaController?.let { controller ->
+                    try {
+                        controller.sendCustomCommand(
+                            androidx.media3.session.SessionCommand("SET_AUDIO_FOCUS", android.os.Bundle.EMPTY),
+                            androidx.core.os.bundleOf("enabled" to isChecked)
+                        )
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+        layout.addView(afToggle)
+
+        // --- Crossfade ---
+        val cfToggle = CheckBox(requireContext()).apply {
+            text = "Enable crossfade between tracks"
+            isChecked = prefs.getBoolean("crossfade_enabled", false)
+        }
+        layout.addView(cfToggle)
+
+        val cfLabel = TextView(requireContext())
+        layout.addView(cfLabel)
+        val savedCf = prefs.getLong("crossfade_duration_ms", 1000L).coerceIn(0L, 5000L)
+        fun updateCfLabel(ms: Long) { cfLabel.text = "Crossfade duration: ${'$'}{ms}ms" }
+        updateCfLabel(savedCf)
+
+        val cfSeek = SeekBar(requireContext()).apply {
+            max = 5000
+            progress = savedCf.toInt()
+            isEnabled = cfToggle.isChecked
+        }
+        layout.addView(cfSeek)
+
+        cfToggle.setOnCheckedChangeListener { _, enabled ->
+            prefs.edit().putBoolean("crossfade_enabled", enabled).apply()
+            cfSeek.isEnabled = enabled
+            mediaController?.let { controller ->
+                try {
+                    controller.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_CROSSFADE_ENABLED", android.os.Bundle.EMPTY),
+                        androidx.core.os.bundleOf("enabled" to enabled)
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+        cfSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (!fromUser) { updateCfLabel(progress.toLong()); return }
+                val ms = progress.coerceIn(0, 5000).toLong()
+                updateCfLabel(ms)
+                prefs.edit().putLong("crossfade_duration_ms", ms).apply()
+                mediaController?.let { controller ->
+                    try {
+                        controller.sendCustomCommand(
+                            androidx.media3.session.SessionCommand("SET_CROSSFADE_DURATION", android.os.Bundle.EMPTY),
+                            androidx.core.os.bundleOf("duration_ms" to ms)
+                        )
+                    } catch (_: Exception) {}
+                }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
