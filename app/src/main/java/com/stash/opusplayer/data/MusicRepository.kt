@@ -166,8 +166,13 @@ private fun isValidAudioFile(path: String): Boolean {
             return true
         }
         val extension = path.substringAfterLast(".", "").lowercase()
-        // Accept common audio file extensions, especially .opus
-        return extension in setOf("mp3", "opus", "ogg", "oga", "flac", "m4a", "aac", "wav", "wma", "mka")
+        // Accept all common audio file extensions
+        return extension in setOf(
+            "mp3", "opus", "ogg", "oga", "flac", "m4a", "aac", "wav", "wma", "mka",
+            "mp4", "3gp", "webm", "mkv", "wv", "ape", "mpc", "ac3", "dts", "tta",
+            "ra", "rm", "amr", "awb", "au", "snd", "aiff", "aifc", "caf", "mp2",
+            "m4p", "m4b", "3g2", "asf", "wma", "wmv"
+        )
     }
     
     // Enhanced method to get all songs with metadata and favorites status

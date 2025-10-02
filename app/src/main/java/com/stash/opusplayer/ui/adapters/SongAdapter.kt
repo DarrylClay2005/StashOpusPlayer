@@ -50,7 +50,21 @@ class SongAdapter(
             
             // Favorite indicator could be shown here if added to layout
             
-            binding.root.setOnClickListener {
+            binding.root.setOnClickListener { view ->
+                // Add visual feedback - brief scale animation
+                view.animate()
+                    .scaleX(0.95f)
+                    .scaleY(0.95f)
+                    .setDuration(100)
+                    .withEndAction {
+                        view.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .setDuration(100)
+                            .start()
+                    }
+                    .start()
+                    
                 onSongClick(song)
             }
             
@@ -65,6 +79,7 @@ class SongAdapter(
                 metadataExtractor?.loadCachedArtwork(binding.root.context, song, 256)
             } catch (_: Exception) { null }
             if (cached != null) {
+                android.util.Log.d("SongAdapter", "Loading cached artwork for ${song.displayName}")
                 Glide.with(binding.root.context)
                     .load(cached)
                     .centerCrop()
@@ -73,11 +88,13 @@ class SongAdapter(
             }
 
             // Fallback to embedded bytes
+            android.util.Log.d("SongAdapter", "Checking embedded artwork for ${song.displayName} - albumArt length: ${song.albumArt?.length ?: 0}")
             if (!song.albumArt.isNullOrEmpty()) {
                 val artBytes = try {
                     Base64.decode(song.albumArt, Base64.DEFAULT)
                 } catch (_: IllegalArgumentException) { null }
                 if (artBytes != null && artBytes.isNotEmpty()) {
+                    android.util.Log.d("SongAdapter", "Loading embedded artwork for ${song.displayName} - decoded bytes: ${artBytes.size}")
                     Glide.with(binding.root.context)
                         .load(artBytes)
                         .placeholder(R.drawable.ic_music_note)
@@ -87,6 +104,8 @@ class SongAdapter(
                         .centerCrop()
                         .into(binding.songArtwork)
                     return
+                } else {
+                    android.util.Log.d("SongAdapter", "Failed to decode embedded artwork for ${song.displayName}")
                 }
             }
 
@@ -101,6 +120,11 @@ class SongAdapter(
         }
         
         private fun showContextMenu(song: Song, anchor: View) {
+            // Provide haptic feedback
+            try {
+                anchor.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+            } catch (_: Exception) {}
+            
             val popup = PopupMenu(binding.root.context, anchor)
             popup.menuInflater.inflate(R.menu.song_context_menu, popup.menu)
             
@@ -111,15 +135,31 @@ class SongAdapter(
             popup.setOnMenuItemClickListener { menuItem ->
                 when (menuItem.itemId) {
                     R.id.action_favorite -> {
+                        // Visual feedback for favorite action
+                        anchor.animate()
+                            .scaleX(1.1f)
+                            .scaleY(1.1f)
+                            .setDuration(150)
+                            .withEndAction {
+                                anchor.animate()
+                                    .scaleX(1f)
+                                    .scaleY(1f)
+                                    .setDuration(150)
+                                    .start()
+                            }
+                            .start()
                         onFavoriteToggle(song)
                         true
                     }
                     R.id.action_add_to_playlist -> {
+                        // Show confirmation toast
+                        android.widget.Toast.makeText(binding.root.context, "Opening playlists...", android.widget.Toast.LENGTH_SHORT).show()
                         onAddToPlaylist(song)
                         true
                     }
                     R.id.action_play_next -> {
-                        // TODO: Add to play next
+                        // Placeholder feedback for future feature
+                        android.widget.Toast.makeText(binding.root.context, "Play next feature coming soon!", android.widget.Toast.LENGTH_SHORT).show()
                         true
                     }
                     else -> false

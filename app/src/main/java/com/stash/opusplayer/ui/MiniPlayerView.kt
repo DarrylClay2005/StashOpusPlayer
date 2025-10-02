@@ -238,6 +238,7 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(context)
             val title = controller.mediaMetadata.title?.toString() ?: return
             val artist = controller.mediaMetadata.artist?.toString() ?: ""
             val album = controller.mediaMetadata.albumTitle?.toString() ?: ""
+            
             val fakeSong = Song(
                 id = 0L,
                 title = title,
@@ -246,15 +247,39 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(context)
                 duration = 0L,
                 path = ""
             )
-val cache = com.stash.stashwave.artwork.ArtworkCache(context)
+            
+            val cache = com.stash.stashwave.artwork.ArtworkCache(context)
             val bmp = cache.loadBitmapIfPresent(fakeSong, 256)
+            
             if (bmp != null) {
                 Glide.with(context)
                     .load(bmp)
+                    .placeholder(R.drawable.ic_music_note)
+                    .error(R.drawable.ic_music_note)
                     .centerCrop()
                     .into(binding.miniAlbumArt)
+            } else {
+                // Fallback to default artwork with subtle fade animation
+                binding.miniAlbumArt.animate()
+                    .alpha(0.7f)
+                    .setDuration(200)
+                    .withEndAction {
+                        Glide.with(context)
+                            .load(R.drawable.ic_music_note)
+                            .into(binding.miniAlbumArt)
+                        binding.miniAlbumArt.animate()
+                            .alpha(1f)
+                            .setDuration(200)
+                            .start()
+                    }
+                    .start()
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // On any error, just show default artwork
+            Glide.with(context)
+                .load(R.drawable.ic_music_note)
+                .into(binding.miniAlbumArt)
+        }
     }
 
     private fun resyncFromController() {

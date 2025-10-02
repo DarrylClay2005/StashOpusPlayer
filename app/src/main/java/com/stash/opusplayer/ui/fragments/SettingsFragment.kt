@@ -126,7 +126,24 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
 
         val backgroundButton = Button(requireContext()).apply {
             text = "Change Background Image"
-            setOnClickListener { (activity as? MainActivity)?.pickBackgroundImage() }
+            setOnClickListener { view ->
+                // Add visual feedback
+                view.animate()
+                    .scaleX(0.95f)
+                    .scaleY(0.95f)
+                    .setDuration(100)
+                    .withEndAction {
+                        view.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .setDuration(100)
+                            .start()
+                    }
+                    .start()
+                
+                Toast.makeText(requireContext(), "Opening image picker...", Toast.LENGTH_SHORT).show()
+                (activity as? MainActivity)?.pickBackgroundImage()
+            }
         }
         layout.addView(backgroundButton)
 
@@ -168,7 +185,24 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         addSectionHeader(layout, "Music Folders")
         val addFolderButton = Button(requireContext()).apply {
             text = "Add Folder (tree)"
-            setOnClickListener { pickMusicFolder() }
+            setOnClickListener { view ->
+                // Add visual feedback
+                view.animate()
+                    .scaleX(0.95f)
+                    .scaleY(0.95f)
+                    .setDuration(100)
+                    .withEndAction {
+                        view.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .setDuration(100)
+                            .start()
+                    }
+                    .start()
+                
+                Toast.makeText(requireContext(), "Select music folder...", Toast.LENGTH_SHORT).show()
+                pickMusicFolder()
+            }
         }
         layout.addView(addFolderButton)
 
@@ -180,7 +214,24 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
 
         val manageFoldersButton = Button(requireContext()).apply {
             text = "Manage Folders"
-            setOnClickListener { showManageFoldersDialog() }
+            setOnClickListener { view ->
+                // Add visual feedback
+                view.animate()
+                    .scaleX(0.95f)
+                    .scaleY(0.95f)
+                    .setDuration(100)
+                    .withEndAction {
+                        view.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .setDuration(100)
+                            .start()
+                    }
+                    .start()
+                
+                Toast.makeText(requireContext(), "Loading folder settings...", Toast.LENGTH_SHORT).show()
+                showManageFoldersDialog()
+            }
         }
         layout.addView(manageFoldersButton)
 
@@ -251,14 +302,38 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         // Library Rescan
         val rescanBtn = Button(requireContext()).apply {
             text = "Rescan Library Now"
-            setOnClickListener {
+            setOnClickListener { view ->
+                // Add visual feedback
+                view.animate()
+                    .scaleX(0.95f)
+                    .scaleY(0.95f)
+                    .setDuration(100)
+                    .withEndAction {
+                        view.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .setDuration(100)
+                            .start()
+                    }
+                    .start()
+                
+                // Disable button temporarily to prevent multiple clicks
+                view.isEnabled = false
+                (view as? Button)?.text = "Starting rescan..."
+                
                 try {
                     val req = androidx.work.OneTimeWorkRequestBuilder<com.stash.stashwave.work.LibraryRescanWorker>().build()
                     androidx.work.WorkManager.getInstance(requireContext()).enqueue(req)
-                    Toast.makeText(requireContext(), "Rescan started", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "📚 Library rescan started! Check the banner at top for progress.", Toast.LENGTH_LONG).show()
                 } catch (_: Exception) {
-                    Toast.makeText(requireContext(), "Failed to start rescan", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "❌ Failed to start rescan", Toast.LENGTH_LONG).show()
                 }
+                
+                // Re-enable button after delay
+                view.postDelayed({
+                    view.isEnabled = true
+                    (view as? Button)?.text = "Rescan Library Now"
+                }, 2000)
             }
         }
         layout.addView(rescanBtn)
@@ -283,6 +358,21 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         }
         layout.addView(periodicRescanToggle)
 
+        // Force Artwork Re-extraction
+        val forceArtworkBtn = Button(requireContext()).apply {
+            text = "Force Re-extract All Artwork"
+            setOnClickListener {
+                try {
+                    val req = androidx.work.OneTimeWorkRequestBuilder<com.stash.stashwave.work.ArtworkExtractionWorker>().build()
+                    androidx.work.WorkManager.getInstance(requireContext()).enqueue(req)
+                    Toast.makeText(requireContext(), "Artwork re-extraction started", Toast.LENGTH_SHORT).show()
+                } catch (_: Exception) {
+                    Toast.makeText(requireContext(), "Failed to start artwork extraction", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        layout.addView(forceArtworkBtn)
+
         // Manual check button
         val checkUpdateButton = Button(requireContext()).apply {
             text = "Check for Updates Now"
@@ -296,100 +386,6 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         }
         layout.addView(checkUpdateButton)
 
-        // Downloads section
-        addSectionHeader(layout, "Downloads")
-        val askSealToggle = CheckBox(requireContext()).apply {
-            text = "Always ask download folder before using Seal"
-            val prefs = requireContext().getSharedPreferences("settings", 0)
-            isChecked = prefs.getBoolean("always_ask_seal_folder", true)
-            setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean("always_ask_seal_folder", isChecked).apply()
-                Toast.makeText(requireContext(), if (isChecked) "Will ask for a folder before using Seal" else "Won't ask; using current folder", Toast.LENGTH_SHORT).show()
-            }
-        }
-        layout.addView(askSealToggle)
-
-        // Post-download mover
-        val moverToggle = CheckBox(requireContext()).apply {
-            text = "Move finished Seal downloads to target folder"
-            val prefs = requireContext().getSharedPreferences("settings", 0)
-            isChecked = prefs.getBoolean("enable_post_download_mover", false)
-            setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean("enable_post_download_mover", isChecked).apply()
-                if (isChecked) Toast.makeText(requireContext(), "Mover enabled (runs periodically)", Toast.LENGTH_SHORT).show()
-            }
-        }
-        layout.addView(moverToggle)
-
-        val pickSealSourceBtn = Button(requireContext()).apply {
-            text = "Pick Seal download folder (source)"
-            setOnClickListener {
-                try {
-                    (activity as? MainActivity)?.let { act ->
-                        val launcher = registerForActivityResult(
-                            androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
-                        ) { uri ->
-                            if (uri != null) {
-                                try {
-                                    val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                                    requireContext().contentResolver.takePersistableUriPermission(uri, flags)
-                                    val prefs = requireContext().getSharedPreferences("settings", 0)
-                                    prefs.edit().putString("seal_source_folder_uri", uri.toString()).apply()
-                                    Toast.makeText(requireContext(), "Source set", Toast.LENGTH_SHORT).show()
-                                } catch (_: Exception) {
-                                    Toast.makeText(requireContext(), "Failed to set source", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                        launcher.launch(null)
-                    }
-                } catch (_: Exception) {
-                    Toast.makeText(requireContext(), "Unable to open folder picker", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        layout.addView(pickSealSourceBtn)
-
-        val pickTargetBtn = Button(requireContext()).apply {
-            text = "Pick target folder (destination)"
-            setOnClickListener {
-                try {
-                    val launcher = registerForActivityResult(
-                        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
-                    ) { uri ->
-                        if (uri != null) {
-                            try {
-                                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                                requireContext().contentResolver.takePersistableUriPermission(uri, flags)
-                                val prefs = requireContext().getSharedPreferences("settings", 0)
-                                prefs.edit().putString("seal_last_target_folder_uri", uri.toString()).apply()
-                                Toast.makeText(requireContext(), "Target set", Toast.LENGTH_SHORT).show()
-                            } catch (_: Exception) {
-                                Toast.makeText(requireContext(), "Failed to set target", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-                    launcher.launch(null)
-                } catch (_: Exception) {
-                    Toast.makeText(requireContext(), "Unable to open folder picker", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        layout.addView(pickTargetBtn)
-
-        val moveNowBtn = Button(requireContext()).apply {
-            text = "Move finished downloads now"
-            setOnClickListener {
-                try {
-                    val req = androidx.work.OneTimeWorkRequestBuilder<com.stash.stashwave.work.PostDownloadMoverWorker>().build()
-                    androidx.work.WorkManager.getInstance(requireContext()).enqueue(req)
-                    Toast.makeText(requireContext(), "Move started", Toast.LENGTH_SHORT).show()
-                } catch (_: Exception) {
-                    Toast.makeText(requireContext(), "Failed to start mover", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-        layout.addView(moveNowBtn)
 
         scrollView.addView(layout)
         return scrollView
@@ -428,14 +424,24 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
             text = "Enable Equalizer & Effects"
             val prefsEq = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
             isChecked = prefsEq.getBoolean("equalizer_enabled", false)
-            setOnCheckedChangeListener { _, isChecked ->
+            setOnCheckedChangeListener { view, isChecked ->
+                // Add haptic feedback
+                try {
+                    view.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+                } catch (_: Exception) {}
+                
                 // Persist and apply
                 prefsEq.edit().putBoolean("equalizer_enabled", isChecked).apply()
                 mediaController?.sendCustomCommand(
                     androidx.media3.session.SessionCommand("SET_EQ_ENABLED", android.os.Bundle.EMPTY),
                     androidx.core.os.bundleOf("enabled" to isChecked)
                 )
-                Toast.makeText(requireContext(), if (isChecked) "Effects enabled" else "Effects disabled", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    requireContext(), 
+                    if (isChecked) "🎵 Effects enabled - Customize below!" 
+                    else "🔇 Effects disabled", 
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
         layout.addView(eqEnabledToggle)
@@ -569,7 +575,23 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
         // More audio effects button
         val moreEffectsBtn = Button(requireContext()).apply {
             text = "More Audio Effects"
-            setOnClickListener {
+            setOnClickListener { view ->
+                // Add visual feedback
+                view.animate()
+                    .scaleX(0.95f)
+                    .scaleY(0.95f)
+                    .setDuration(100)
+                    .withEndAction {
+                        view.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .setDuration(100)
+                            .start()
+                    }
+                    .start()
+                
+                Toast.makeText(requireContext(), "Opening advanced equalizer...", Toast.LENGTH_SHORT).show()
+                
                 try {
                     parentFragmentManager.beginTransaction()
                         .replace((view?.parent as? ViewGroup)?.id ?: (requireActivity() as androidx.appcompat.app.AppCompatActivity).findViewById<View>(com.stash.stashwave.R.id.main_content).id, com.stash.stashwave.ui.fragments.EqualizerFragment())
@@ -577,7 +599,7 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
                         .commit()
                 } catch (_: Exception) {
                     // Fallback: just show a toast
-                    Toast.makeText(requireContext(), "Open Equalizer from the drawer menu.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "🎚️ Open Equalizer from the drawer menu for advanced settings.", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -932,14 +954,47 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
     }
 
     private fun clearArtworkCache() {
-        try {
-            val dir = java.io.File(requireContext().cacheDir, "artwork")
-            if (dir.exists()) {
-                dir.listFiles()?.forEach { it.delete() }
+        // Show confirmation dialog first
+        androidx.appcompat.app.AlertDialog.Builder(requireContext())
+            .setTitle("Clear Artwork Cache")
+            .setMessage("This will delete all cached album artwork. They will be re-downloaded as needed. Continue?")
+            .setPositiveButton("Clear") { _, _ ->
+                // Show progress
+                val progressToast = Toast.makeText(requireContext(), "🗑️ Clearing cache...", Toast.LENGTH_SHORT)
+                progressToast.show()
+                
+                try {
+                    val artworkDir = java.io.File(requireContext().cacheDir, "artwork")
+                    val cacheDir = java.io.File(requireContext().cacheDir, "artwork_cache") // Our new cache
+                    var deletedFiles = 0
+                    
+                    if (artworkDir.exists()) {
+                        artworkDir.listFiles()?.forEach { 
+                            it.delete()
+                            deletedFiles++
+                        }
+                    }
+                    
+                    if (cacheDir.exists()) {
+                        cacheDir.listFiles()?.forEach { 
+                            it.delete()
+                            deletedFiles++
+                        }
+                    }
+                    
+                    // Note: The existing ArtworkCache class doesn't have a clearCache method,
+                    // so we manually clean the directory
+                    
+                    Toast.makeText(
+                        requireContext(), 
+                        "✅ Artwork cache cleared! ($deletedFiles files removed)", 
+                        Toast.LENGTH_LONG
+                    ).show()
+                } catch (_: Exception) {
+                    Toast.makeText(requireContext(), "❌ Failed to clear cache completely", Toast.LENGTH_LONG).show()
+                }
             }
-            Toast.makeText(requireContext(), "Artwork cache cleared", Toast.LENGTH_SHORT).show()
-        } catch (_: Exception) {
-            Toast.makeText(requireContext(), "Failed to clear cache", Toast.LENGTH_SHORT).show()
-        }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 }
