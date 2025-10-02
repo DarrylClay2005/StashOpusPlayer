@@ -6,7 +6,6 @@ This guide explains how to set up and use the enhanced YouTube extraction system
 
 Your StashOpusPlayer now includes:
 
-✅ **Updated YouTube API Key**: `AIzaSyBqWTC-S3vopTEMNTgpCalyqc_GJkUgsAg`  
 ✅ **Custom Extraction Service**: Hybrid approach using YouTube API + yt-dlp  
 ✅ **Enhanced Metadata**: Rich video information from official YouTube API  
 ✅ **Improved Reliability**: Fallback mechanisms and error handling  
