@@ -70,11 +70,40 @@ StashWave Player combines high-quality local music playback with seamless YouTub
 ### Install Pre-built APK
 Download the latest APK from the [Releases](https://github.com/xenus/StashOpusPlayer/releases) page.
 
-## 🚀 YouTube Download Setup with Seal Integration
+## 🚀 YouTube Setup Options
 
-StashWave Player integrates seamlessly with **Seal**, a powerful and reliable YouTube downloader app, to provide the best YouTube downloading experience on Android.
+StashWave Player offers multiple ways to access YouTube content:
 
-### 🔗 Method 1: Seal App Integration (Recommended)
+### 🔑 Option 1: YouTube Data API v3 (Enhanced Features)
+
+For the best YouTube experience with search, metadata, and comments:
+
+#### **📖 Quick Setup Guide:**
+1. **Get Your Own API Key**: [Follow our detailed guide](YOUTUBE_API_SETUP.md) to obtain a free YouTube Data API v3 key from Google Developer Console
+2. **Configure in App**: Add your API key to `local.properties` file (never committed to git)
+3. **Enhanced Features**: Enjoy rich YouTube search, metadata, thumbnails, and more!
+
+#### **✨ Benefits with Your Own API Key:**
+- 🔍 **Full YouTube Search**: Search within the app with rich results
+- 📊 **Rich Metadata**: Video titles, descriptions, view counts, channel info
+- 🖼️ **High-Quality Thumbnails**: Official YouTube thumbnails
+- 💬 **Comments Loading**: View video comments (if enabled)
+- 📈 **Related Videos**: Discover related content
+- 🔐 **Secure**: Your own private API key, not shared
+
+**⚠️ Important**: API keys are user-provided for security. The app doesn't include hardcoded keys.
+
+📚 **[📖 Complete Setup Guide →](YOUTUBE_API_SETUP.md)**
+
+---
+
+### 📱 Option 2: Seal Integration (Downloads Only)
+
+For downloading YouTube audio without API setup:
+
+**Seal** is a modern, open-source YouTube downloader that uses yt-dlp under the hood. StashWave Player automatically detects and integrates with Seal for optimal YouTube downloading.
+
+#### 🔗 Installing Seal App
 
 **Seal** is a modern, open-source YouTube downloader that uses yt-dlp under the hood. StashWave Player automatically detects and integrates with Seal for optimal YouTube downloading.
 
@@ -114,7 +143,7 @@ StashWave Player automatically detects these Seal variants:
 4. **Library Integration**: Downloaded files appear automatically in StashWave Player
 5. **Progress Tracking**: Monitor downloads from within StashWave Player
 
-### 🎵 Method 2: Built-in YouTube Streaming
+### 🎵 Option 3: Built-in YouTube Streaming
 
 For instant playback without downloading:
 
@@ -130,7 +159,7 @@ For instant playback without downloading:
 - 🎬 **Video Support**: Optional video playback with picture-in-picture
 - 🔄 **Auto-Queue**: Automatically queue related videos
 
-### 🔧 Method 3: Alternative Download Methods
+### 🔧 Option 4: Alternative Download Methods
 
 For advanced users or when Seal is unavailable:
 

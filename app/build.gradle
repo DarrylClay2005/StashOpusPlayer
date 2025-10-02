@@ -12,8 +12,20 @@ android {
     namespace 'com.stash.stashwave'
     compileSdk 34
 
-    // Configuration: API keys should be provided via environment variables or user configuration
-    // No hardcoded API keys in repository
+    // Load API keys from local.properties or environment variables
+    def localPropertiesFile = rootProject.file("local.properties")
+    def localProperties = new Properties()
+    def youtubeApiKey = ""
+    
+    if (localPropertiesFile.exists()) {
+        localProperties.load(new FileInputStream(localPropertiesFile))
+        youtubeApiKey = localProperties.getProperty('YOUTUBE_API_KEY', '')
+    }
+    
+    // Fallback to environment variable if not in local.properties
+    if (youtubeApiKey == null || youtubeApiKey.isEmpty()) {
+        youtubeApiKey = System.getenv('YOUTUBE_API_KEY') ?: ''
+    }
 
     defaultConfig {
         applicationId "com.stash.stashwave"
@@ -22,6 +34,9 @@ android {
         versionCode 105
         versionName "10.5b"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        
+        // Inject YouTube API key into BuildConfig
+        buildConfigField "String", "YOUTUBE_API_KEY", "\"${youtubeApiKey}\""
     }
 
     def hasReleaseKeystore = file('../release-key.keystore').exists()
