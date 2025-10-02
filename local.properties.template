@@ -1,0 +1,20 @@
+# local.properties.template
+# 
+# Copy this file to 'local.properties' and configure with your settings
+# WARNING: Never commit local.properties to version control!
+
+# Android SDK location (required)
+sdk.dir=/path/to/your/Android/Sdk
+
+# YouTube Data API v3 Key (optional but recommended)
+# Get your API key from: https://console.cloud.google.com/
+# See YOUTUBE_API_SETUP.md for detailed instructions
+# 
+# Uncomment and set your API key:
+# YOUTUBE_API_KEY=your_api_key_here
+#
+# Example (DO NOT USE - get your own key):
+# YOUTUBE_API_KEY=AIzaSyBqWTC-S3vopTEMNTgpCalyqc_GJkUgsAg
+
+# Other configuration options
+# Add any other sensitive configuration here that should not be committed

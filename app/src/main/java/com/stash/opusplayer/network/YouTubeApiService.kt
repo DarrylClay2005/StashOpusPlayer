@@ -1,6 +1,7 @@
 package com.stash.stashwave.network
 
 import android.util.Log
+import com.stash.stashwave.BuildConfig
 import com.stash.stashwave.data.YouTubeVideo
 import com.stash.stashwave.data.YouTubeSearchResult
 import com.stash.stashwave.data.AudioFormat
@@ -20,9 +21,9 @@ class YouTubeApiService {
     }
     
     private val apiKey: String by lazy { 
-        // API key should be provided by user configuration, not hardcoded
-        // For YouTube functionality, users should use Seal integration instead
-        ""
+        // API key is loaded from local.properties or environment variable
+        // See YOUTUBE_API_SETUP.md for instructions on obtaining your own API key
+        BuildConfig.YOUTUBE_API_KEY
     }
     
     private val client = OkHttpClient.Builder()
@@ -36,7 +37,7 @@ class YouTubeApiService {
         try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
             if (apiKey.isBlank()) {
-                return@withContext Result.failure(IOException("YouTube API key not configured. For YouTube downloads, please use the Seal integration instead."))
+                return@withContext Result.failure(IOException("YouTube API key not configured. To enable YouTube search:\n\n1. Get your own free API key: See YOUTUBE_API_SETUP.md\n2. Or use Seal integration for downloads only\n\nFor full YouTube features, configure your API key in local.properties"))
             }
             val url = buildString {
                 append("$BASE_URL/search")
@@ -83,7 +84,7 @@ class YouTubeApiService {
     suspend fun getVideoDetails(videoId: String): Result<YouTubeVideo?> = withContext(Dispatchers.IO) {
         try {
             if (apiKey.isBlank()) {
-                return@withContext Result.failure(IOException("YouTube API key not configured. For YouTube functionality, please use the Seal integration."))
+                return@withContext Result.failure(IOException("YouTube API key not configured. To enable video details:\n\n1. Get your own free API key: See YOUTUBE_API_SETUP.md\n2. Add to local.properties: YOUTUBE_API_KEY=your_key_here\n\nFor downloads only, use Seal integration instead"))
             }
             val url = "$BASE_URL/videos?part=snippet,contentDetails,statistics&id=$videoId&key=$apiKey"
             
