@@ -76,13 +76,43 @@ val metadataExtractor = com.stash.stashwave.utils.MetadataExtractor(requireConte
     }
     
     private fun setupSearchButton() {
-        binding.searchButton.setOnClickListener {
+        binding.searchButton.setOnClickListener { view ->
+            // Add visual feedback
+            view.animate()
+                .scaleX(0.9f)
+                .scaleY(0.9f)
+                .setDuration(100)
+                .withEndAction {
+                    view.animate()
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .setDuration(100)
+                        .start()
+                }
+                .start()
             showSearchDialog()
         }
     }
     
     private fun setupLikedButton() {
-        binding.likedButton.setOnClickListener {
+        binding.likedButton.setOnClickListener { view ->
+            // Add visual feedback
+            view.animate()
+                .scaleX(0.9f)
+                .scaleY(0.9f)
+                .setDuration(100)
+                .withEndAction {
+                    view.animate()
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .setDuration(100)
+                        .start()
+                }
+                .start()
+                
+            // Show loading toast
+            android.widget.Toast.makeText(requireContext(), "Loading liked songs...", android.widget.Toast.LENGTH_SHORT).show()
+            
             // Navigate to Liked Songs fragment
             (activity as? MainActivity)?.let { mainActivity ->
 val favoritesFragment = com.stash.stashwave.ui.fragments.FavoritesFragment()
@@ -125,22 +155,46 @@ val favoritesFragment = com.stash.stashwave.ui.fragments.FavoritesFragment()
     }
     
     private fun searchSongs(query: String) {
-        val filteredSongs = allSongs.filter { song ->
-            song.title.contains(query, ignoreCase = true) ||
-            song.artist.contains(query, ignoreCase = true) ||
-            song.album.contains(query, ignoreCase = true)
-        }
+        // Show loading state temporarily for better UX
+        binding.emptyStateText.text = "Searching..."
+        binding.emptyStateContainer.visibility = View.VISIBLE
+        binding.recyclerView.visibility = View.GONE
         
-        songAdapter.submitList(filteredSongs)
-        
-        // Update empty state based on search results
-        if (filteredSongs.isEmpty()) {
-            binding.recyclerView.visibility = View.GONE
-            binding.emptyStateText.text = "No songs found for \"$query\""
-            binding.emptyStateContainer.visibility = View.VISIBLE
-        } else {
-            binding.recyclerView.visibility = View.VISIBLE
-            binding.emptyStateContainer.visibility = View.GONE
+        viewLifecycleOwner.lifecycleScope.launch {
+            // Add small delay to show search feedback
+            kotlinx.coroutines.delay(300)
+            
+            val filteredSongs = allSongs.filter { song ->
+                song.title.contains(query, ignoreCase = true) ||
+                song.artist.contains(query, ignoreCase = true) ||
+                song.album.contains(query, ignoreCase = true)
+            }
+            
+            songAdapter.submitList(filteredSongs)
+            
+            // Update empty state based on search results
+            if (filteredSongs.isEmpty()) {
+                binding.recyclerView.visibility = View.GONE
+                binding.emptyStateText.text = "No songs found for \"$query\""
+                binding.emptyStateContainer.visibility = View.VISIBLE
+                
+                // Show helpful toast
+                android.widget.Toast.makeText(
+                    requireContext(),
+                    "No results for \"$query\". Try different keywords.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            } else {
+                binding.recyclerView.visibility = View.VISIBLE
+                binding.emptyStateContainer.visibility = View.GONE
+                
+                // Show results count
+                android.widget.Toast.makeText(
+                    requireContext(),
+                    "Found ${filteredSongs.size} song${if (filteredSongs.size != 1) "s" else ""}",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
         }
     }
     

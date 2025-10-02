@@ -76,7 +76,20 @@ class FavoritesFragment : Fragment() {
     }
     
     private fun setupSearchButton() {
-        binding.searchButton.setOnClickListener {
+        binding.searchButton.setOnClickListener { view ->
+            // Add visual feedback
+            view.animate()
+                .scaleX(0.9f)
+                .scaleY(0.9f)
+                .setDuration(100)
+                .withEndAction {
+                    view.animate()
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .setDuration(100)
+                        .start()
+                }
+                .start()
             showSearchDialog()
         }
     }
@@ -112,22 +125,46 @@ class FavoritesFragment : Fragment() {
     }
     
     private fun searchFavorites(query: String) {
-        val filteredSongs = allFavorites.filter { song ->
-            song.title.contains(query, ignoreCase = true) ||
-            song.artist.contains(query, ignoreCase = true) ||
-            song.album.contains(query, ignoreCase = true)
-        }
+        // Show searching state
+        binding.emptyStateText.text = "Searching favorites..."
+        binding.emptyStateContainer.visibility = View.VISIBLE
+        binding.recyclerView.visibility = View.GONE
         
-        songAdapter.submitList(filteredSongs)
-        
-        // Update empty state based on search results
-        if (filteredSongs.isEmpty()) {
-            binding.recyclerView.visibility = View.GONE
-            binding.emptyStateText.text = "No favorites found for \"$query\""
-            binding.emptyStateContainer.visibility = View.VISIBLE
-        } else {
-            binding.recyclerView.visibility = View.VISIBLE
-            binding.emptyStateContainer.visibility = View.GONE
+        viewLifecycleOwner.lifecycleScope.launch {
+            // Add small delay to show search feedback
+            delay(200)
+            
+            val filteredSongs = allFavorites.filter { song ->
+                song.title.contains(query, ignoreCase = true) ||
+                song.artist.contains(query, ignoreCase = true) ||
+                song.album.contains(query, ignoreCase = true)
+            }
+            
+            songAdapter.submitList(filteredSongs)
+            
+            // Update empty state based on search results
+            if (filteredSongs.isEmpty()) {
+                binding.recyclerView.visibility = View.GONE
+                binding.emptyStateText.text = "No favorites found for \"$query\"\n\n💡 Try different keywords or add more songs to favorites!"
+                binding.emptyStateContainer.visibility = View.VISIBLE
+                
+                // Show helpful toast
+                android.widget.Toast.makeText(
+                    requireContext(),
+                    "No results for \"$query\" in favorites",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                binding.recyclerView.visibility = View.VISIBLE
+                binding.emptyStateContainer.visibility = View.GONE
+                
+                // Show results count
+                android.widget.Toast.makeText(
+                    requireContext(),
+                    "Found ${filteredSongs.size} favorite${if (filteredSongs.size != 1) "s" else ""}",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
         }
     }
     

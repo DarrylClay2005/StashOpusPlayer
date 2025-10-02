@@ -37,21 +37,6 @@ class YouTubeSearchFragment : Fragment() {
     private lateinit var videoAdapter: YouTubeVideoAdapter
     private lateinit var downloadManager: VideoDownloadManager
 
-    private var currentDownloadPath: String = ""
-    // When non-null, indicates we are picking a folder to hand off to Seal for this video
-    private var pendingSealVideo: YouTubeVideo? = null
-
-    private val directoryPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val dataIntent = result.data
-            val flags = dataIntent?.flags ?: 0
-            dataIntent?.data?.let { uri ->
-                handleDirectorySelection(uri, flags)
-            }
-        }
-    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -68,8 +53,6 @@ class YouTubeSearchFragment : Fragment() {
         setupServices()
         setupRecyclerView()
         setupSearchInput()
-        setupLocationSelector()
-        initializeDefaultDownloadPath()
         setupSealBanner()
     }
 
@@ -158,101 +141,6 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
         }
     }
 
-    private fun setupLocationSelector() {
-        binding.selectLocationButton.setOnClickListener {
-            openDirectoryPicker()
-        }
-    }
-
-    private fun initializeDefaultDownloadPath() {
-        currentDownloadPath = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "Music"
-        ).absolutePath
-        
-        updateLocationDisplay()
-    }
-
-    private fun openDirectoryPicker() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-            // Set initial directory to current download path if possible
-            if (currentDownloadPath.isNotEmpty()) {
-                val uri = Uri.parse("file://$currentDownloadPath")
-                putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
-            }
-        }
-        directoryPickerLauncher.launch(intent)
-    }
-
-    private fun handleDirectorySelection(uri: Uri, resultFlags: Int) {
-        try {
-            // Take persistent permission using flags returned from the picker
-            val takeFlags = resultFlags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            requireContext().contentResolver.takePersistableUriPermission(uri, takeFlags)
-
-            // Store URI string for later use and persist for mover
-            currentDownloadPath = uri.toString()
-            requireContext().getSharedPreferences("settings", 0).edit()
-                .putString("seal_last_target_folder_uri", currentDownloadPath)
-                .apply()
-            updateLocationDisplay()
-            
-            Toast.makeText(
-                requireContext(),
-                "Download location updated",
-                Toast.LENGTH_SHORT
-            ).show()
-
-            // If we were waiting to hand off a specific video to Seal, do it now
-            pendingSealVideo?.let { video ->
-                pendingSealVideo = null
-                val suggested = sanitizeFileName(video.title) + ".opus"
-                val opened = com.stash.stashwave.integration.SealIntegration.openInSealWithLocation(
-                    requireContext(),
-                    video.formattedUrl,
-                    currentDownloadPath,
-                    suggested
-                )
-                if (opened) {
-                    Toast.makeText(requireContext(), "Opening Seal to download to selected folder…", Toast.LENGTH_SHORT).show()
-                } else {
-                    androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                        .setTitle("Install Seal")
-                        .setMessage("Seal is required to handle downloads. Install Seal to continue?")
-                        .setPositiveButton("Install") { _, _ ->
-                            com.stash.stashwave.integration.SealIntegration.promptInstall(requireContext())
-                        }
-                        .setNegativeButton("Cancel", null)
-                        .show()
-                }
-            }
-        } catch (e: Exception) {
-            Toast.makeText(
-                requireContext(),
-                "Failed to set download location: ${e.message}",
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-    }
-
-    private fun updateLocationDisplay() {
-        val displayPath = when {
-            currentDownloadPath.startsWith("content://") -> {
-                // Extract readable path from content URI
-                "Selected folder"
-            }
-            currentDownloadPath.contains("/storage/emulated/0/") -> {
-                currentDownloadPath.replace("/storage/emulated/0/", "")
-            }
-            else -> {
-                File(currentDownloadPath).name
-            }
-        }
-        binding.downloadLocationText.text = displayPath
-    }
 
     private fun performSearch() {
         val query = binding.searchEditText.text?.toString()?.trim()
@@ -329,62 +217,24 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
             } catch (_: Exception) {}
         }
 
-        // Decide whether to prompt for a folder or use the current selection based on settings
-        val prefs = requireContext().getSharedPreferences("settings", 0)
-        val alwaysAsk = prefs.getBoolean("always_ask_seal_folder", true)
-        if (alwaysAsk || currentDownloadPath.isBlank()) {
-            pendingSealVideo = video
-            Toast.makeText(requireContext(), "Choose a folder to save with Seal", Toast.LENGTH_SHORT).show()
-            openDirectoryPicker()
+        // Simple handoff to Seal without trying to set download location
+        val ytUrl = if (video.url.startsWith("http")) video.url else video.formattedUrl
+        val opened = com.stash.stashwave.integration.SealIntegration.openInSeal(requireContext(), ytUrl)
+        if (opened) {
+            Toast.makeText(requireContext(), "Opening Seal to download…", Toast.LENGTH_SHORT).show()
         } else {
-            val suggested = sanitizeFileName(video.title) + ".opus"
-            val opened = com.stash.stashwave.integration.SealIntegration.openInSealWithLocation(
-                requireContext(),
-                video.formattedUrl,
-                currentDownloadPath,
-                suggested
-            )
-            if (opened) {
-                Toast.makeText(requireContext(), "Opening Seal to download…", Toast.LENGTH_SHORT).show()
-            } else {
-                // Prompt install if not available
-                androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                    .setTitle("Install Seal")
-                    .setMessage("This app uses Seal as the downloader. Install Seal to continue?")
-                    .setPositiveButton("Install") { _, _ ->
-                        com.stash.stashwave.integration.SealIntegration.promptInstall(requireContext())
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-            }
+            // Prompt install if not available
+            androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                .setTitle("Install Seal")
+                .setMessage("This app uses Seal as the downloader. Install Seal to continue?")
+                .setPositiveButton("Install") { _, _ ->
+                    com.stash.stashwave.integration.SealIntegration.promptInstall(requireContext())
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
     }
     
-    private fun startDownloadWithFormat(video: YouTubeVideo, format: AudioFormat) {
-        val downloadRequest = DownloadRequest(
-            video = video,
-            downloadPath = currentDownloadPath,
-            selectedFormat = format,
-            audioOnly = true
-        )
-
-        lifecycleScope.launch {
-            try {
-                downloadManager.startDownload(downloadRequest)
-                Toast.makeText(
-                    requireContext(),
-                    "Download started: ${video.title} (${format.displayName})",
-                    Toast.LENGTH_SHORT
-                ).show()
-            } catch (e: Exception) {
-                Toast.makeText(
-                    requireContext(),
-                    "Failed to start download: ${e.message}",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-    }
 
     private fun showEmptyResults() {
         binding.resultsRecyclerView.visibility = View.GONE

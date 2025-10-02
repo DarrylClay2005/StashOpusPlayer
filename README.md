@@ -1,33 +1,54 @@
-# StashOpusPlayer
+# StashWave Player (StashOpusPlayer)
 
-[![Version](https://img.shields.io/badge/version-8.0.5-blue.svg)](https://github.com/xenus/StashOpusPlayer/releases)
+[![Version](https://img.shields.io/badge/version-10.5b-blue.svg)](https://github.com/xenus/StashOpusPlayer/releases)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-green.svg)](https://android.com)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
-A powerful Android music player with advanced YouTube audio extraction capabilities, built for high-quality audio playback and seamless music management.
+🎵 **A modern, feature-rich Android music player with precision audio controls, intelligent YouTube integration, and beautiful Material Design 3 interface.**
 
-## 🎵 Features
+StashWave Player combines high-quality local music playback with seamless YouTube audio streaming and downloading, enhanced by AI-powered features and comprehensive audio customization tools.
 
-### Core Player Features
-- **High-Quality Audio Playback**: Supports Opus, MP3, FLAC, OGG, and other major audio formats
-- **Advanced Queue Management**: Smart playlist handling with shuffle, repeat, and queue manipulation
-- **Intuitive Interface**: Material Design 3 with dark/light theme support
-- **Background Playback**: Continues playing when the app is minimized
-- **Media Controls**: Lock screen and notification controls
-- **Audio Focus Management**: Properly handles phone calls and other audio interruptions
+## 🎵 Core Features
 
-### YouTube Audio Extraction
-- **Local yt-dlp Service Integration**: Primary extraction method using official yt-dlp codebase
-- **Multiple Extraction Methods**: Robust fallback system with 4+ extraction techniques
-- **Real-time Audio URLs**: Direct streaming without placeholder files
-- **Format Selection**: Automatic best quality selection (Opus, MP3, etc.)
-- **Reliable Downloads**: No more 404 errors from external APIs
+### 🎶 Advanced Audio Playback
+- **Premium Audio Engine**: ExoPlayer-based with support for Opus, MP3, FLAC, OGG, M4A, AAC, and more
+- **Precision Audio Controls**: Independent speed (0.25x-2.0x) and pitch (-12/+12 semitones) adjustment
+- **Professional Equalizer**: 10-band EQ with presets (3D Surround, Concert Hall, Super Bass, Lo-Fi) 
+- **Audio Effects Suite**: Bass boost, virtualizer, reverb, and crossfade support
+- **Custom Background Images**: Personalize your player with blurred backdrop effects
+- **Waveform Visualization**: Real-time SynthWave-style audio visualization
 
-### Storage & Organization
-- **Flexible Storage Options**: Internal storage, SD card, and custom directory support
-- **Smart File Management**: Automatic organization and duplicate detection
-- **Metadata Extraction**: Album art, title, artist, and duration information
-- **Custom Playlists**: Create and manage personal playlists
+### 📱 Modern Interface & Experience
+- **Material Design 3**: Beautiful neomorphic design with smooth animations
+- **Comprehensive Visual Feedback**: Every interaction provides immediate visual response
+- **Smart Mini Player**: Persistent controls with album artwork and progress
+- **Intelligent Navigation**: Bottom navigation + drawer with contextual actions
+- **Background Playback**: Seamless audio continuation with media session controls
+- **Lock Screen Integration**: Full media controls with artwork display
+
+### 📏 Library Management
+- **Smart Library Scanning**: Automatic detection of music files across storage
+- **Flexible Storage Support**: Internal storage, SD cards, and custom folder selection
+- **Advanced Metadata**: Automatic extraction with AI-enhanced tagging capabilities
+- **Playlist Management**: Create, edit, and organize custom playlists
+- **Favorites System**: Heart songs for quick access in dedicated favorites view
+- **Search & Filter**: Powerful search across titles, artists, albums, and genres
+
+### 🎥 YouTube Integration & Downloading
+- **Seal App Integration**: Seamless partnership with Seal for reliable YouTube downloads
+- **Direct YouTube Streaming**: Stream YouTube audio without downloading (requires active connection)
+- **YouTube Player Integration**: Built-in YouTube player with audio-only mode
+- **Smart URL Handling**: Automatically detects and processes YouTube links
+- **Multiple Format Support**: Automatic best quality selection (Opus, MP3, M4A)
+- **Background Downloads**: Download management with progress tracking
+
+### 📦 Advanced Download Management
+- **Seal Partnership**: Integrates with the powerful Seal download manager
+- **Quality Selection**: Choose from available audio qualities (64k to 320k+)
+- **Batch Processing**: Queue multiple downloads with smart management
+- **Auto-Organization**: Downloaded files automatically organized in your library
+- **Metadata Enhancement**: AI-powered tagging and artwork fetching
+- **Progress Tracking**: Real-time download progress with visual indicators
 
 ## 📱 Installation
 
@@ -49,126 +70,102 @@ A powerful Android music player with advanced YouTube audio extraction capabilit
 ### Install Pre-built APK
 Download the latest APK from the [Releases](https://github.com/xenus/StashOpusPlayer/releases) page.
 
-## 🚀 YouTube Audio Extraction Setup
+## 🚀 YouTube Download Setup with Seal Integration
 
-StashOpusPlayer features a sophisticated YouTube audio extraction system with multiple methods for maximum reliability.
+StashWave Player integrates seamlessly with **Seal**, a powerful and reliable YouTube downloader app, to provide the best YouTube downloading experience on Android.
 
-### Method 1: Local yt-dlp Service (Recommended)
+### 🔗 Method 1: Seal App Integration (Recommended)
 
-This is the most reliable method using the official yt-dlp Python library.
+**Seal** is a modern, open-source YouTube downloader that uses yt-dlp under the hood. StashWave Player automatically detects and integrates with Seal for optimal YouTube downloading.
 
-#### Prerequisites
-- Python 3.7+
-- FFmpeg installed on your system
+#### Installing Seal
 
-#### Setup Instructions
+**Option A: F-Droid (Recommended)**
+```
+1. Install F-Droid from https://f-droid.org/
+2. Search for "Seal" in F-Droid
+3. Install the latest version
+```
 
-1. **Clone yt-dlp repository**:
-   ```bash
-   git clone https://github.com/yt-dlp/yt-dlp.git
-   cd yt-dlp
-   ```
+**Option B: GitHub Releases**
+```
+1. Visit https://github.com/JunkFood02/Seal/releases
+2. Download the latest APK
+3. Install the APK (enable "Install from Unknown Sources")
+```
 
-2. **Install dependencies**:
-   ```bash
-   pip install flask requests
-   ```
+**Option C: IzzyOnDroid Repository**
+```
+1. Add IzzyOnDroid repo to F-Droid
+2. Search and install "Seal"
+```
 
-3. **Create the Flask API service** (`yt_dlp_service.py`):
-   ```python
-   from flask import Flask, jsonify, request
-   import yt_dlp
-   import logging
-   
-   app = Flask(__name__)
-   logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-   logger = logging.getLogger(__name__)
-   
-   class CustomLogger:
-       def debug(self, msg): logger.debug(msg)
-       def info(self, msg): logger.info(msg)
-       def warning(self, msg): logger.warning(msg)
-       def error(self, msg): logger.error(msg)
-   
-   @app.route('/quick/<video_id>')
-   def extract_quick(video_id):
-       try:
-           url = f"https://youtube.com/watch?v={video_id}"
-           logger.info(f"Extracting audio info for: {url}")
-           
-           ydl_opts = {
-               'quiet': True,
-               'no_warnings': True,
-               'extract_flat': False,
-               'format': 'bestaudio/best',
-               'logger': CustomLogger(),
-           }
-           
-           with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-               info = ydl.extract_info(url, download=False)
-               
-               audio_formats = []
-               if 'formats' in info:
-                   for fmt in info['formats']:
-                       if fmt.get('acodec') != 'none' and fmt.get('url'):
-                           audio_formats.append({
-                               'url': fmt['url'],
-                               'format_id': fmt.get('format_id', 'unknown'),
-                               'quality': fmt.get('quality', 0),
-                               'filesize': fmt.get('filesize'),
-                               'acodec': fmt.get('acodec', 'unknown')
-                           })
-               
-               if audio_formats:
-                   logger.info(f"Successfully extracted {len(audio_formats)} audio formats")
-                   best_format = max(audio_formats, key=lambda x: x['quality'] or 0)
-                   return jsonify({
-                       'success': True,
-                       'audio_url': best_format['url'],
-                       'format_info': best_format,
-                       'all_formats': audio_formats
-                   })
-               else:
-                   return jsonify({'success': False, 'error': 'No audio formats found'})
-                   
-       except Exception as e:
-           logger.error(f"Extraction failed: {str(e)}")
-           return jsonify({'success': False, 'error': str(e)})
-   
-   if __name__ == '__main__':
-       app.run(host='0.0.0.0', port=8080)
-   ```
+#### Seal Versions Supported
+StashWave Player automatically detects these Seal variants:
+- 🔵 **com.junkfood.seal** (Main release)
+- 🟡 **com.junkfood.seal.beta** (Beta version) 
+- 🔴 **com.junkfood.seal.debug** (Debug build)
 
-4. **Start the service**:
-   ```bash
-   python yt_dlp_service.py
-   ```
+#### How Integration Works
 
-5. **Configure the app**:
-   - Find your local IP address: `ip addr show`
-   - The service will be available at `http://YOUR_LOCAL_IP:8080`
-   - The app will automatically detect and use this service
+1. **Automatic Detection**: StashWave Player detects installed Seal versions
+2. **Smart Handoff**: YouTube URLs are passed to Seal for downloading
+3. **Quality Selection**: Choose audio quality within Seal interface
+4. **Library Integration**: Downloaded files appear automatically in StashWave Player
+5. **Progress Tracking**: Monitor downloads from within StashWave Player
 
-#### Service Features
-- **Official yt-dlp Integration**: Uses the latest yt-dlp codebase
-- **FFmpeg Processing**: High-quality audio format conversion
-- **Format Selection**: Automatically selects best available audio quality
-- **Local Network**: Fast, reliable extraction without external dependencies
+### 🎵 Method 2: Built-in YouTube Streaming
 
-### Method 2: Direct YouTube Extraction
+For instant playback without downloading:
 
-Built-in extraction methods that work without external services:
+#### YouTube Player Integration
+- **Direct Streaming**: Play YouTube videos with audio-only mode
+- **Background Playback**: Continue listening while using other apps
+- **Queue Support**: Add YouTube videos to your current playlist
+- **Search Integration**: Built-in YouTube search with instant play
 
-1. **Player API Extraction**: Uses YouTube's internal player API
-2. **Webpage Extraction**: Parses YouTube webpage for audio URLs
-3. **Embed Extraction**: Extracts from YouTube embed pages
+#### Features
+- ▶️ **Instant Playback**: No waiting for downloads
+- 📡 **Requires Internet**: Active connection needed for streaming
+- 🎬 **Video Support**: Optional video playback with picture-in-picture
+- 🔄 **Auto-Queue**: Automatically queue related videos
 
-### Method 3: External API Services (Fallback)
+### 🔧 Method 3: Alternative Download Methods
 
-- **Cobra API**: External YouTube extraction service
-- **Invidious Instances**: Alternative YouTube frontend APIs
+For advanced users or when Seal is unavailable:
 
-⚠️ **Note**: External services may be unreliable due to rate limiting and YouTube's anti-bot measures.
+#### NewPipe Integration
+- Compatible with NewPipe exports and sharing
+- Fallback option for YouTube extraction
+
+#### Custom yt-dlp Service
+- Set up your own yt-dlp server (for power users)
+- Configure custom extraction endpoints in settings
+
+### ⚙️ Configuration & Settings
+
+#### In StashWave Player
+1. **Open Settings** → **YouTube Integration**
+2. **Download Partner**: Choose Seal (auto-detected)
+3. **Default Quality**: Set preferred audio quality
+4. **Storage Location**: Configure download destination
+5. **Auto-Import**: Enable automatic library updates
+
+#### In Seal App
+1. **Audio Quality**: Set to highest available (160k+ recommended)
+2. **Format Preference**: Choose Opus > M4A > MP3
+3. **Download Location**: Use same folder as StashWave Player library
+4. **Filename Template**: Configure for easy organization
+
+### 🎆 Benefits of Seal Integration
+
+✅ **Reliability**: Seal uses official yt-dlp with frequent updates  
+✅ **Quality**: Access to all available audio formats and qualities  
+✅ **Speed**: Optimized download performance with resume capability  
+✅ **Features**: Playlist support, batch downloads, metadata extraction  
+✅ **Privacy**: No external API dependencies, fully local processing  
+✅ **Updates**: Seal automatically updates yt-dlp signatures  
+✅ **Format Support**: YouTube, YouTube Music, and 1000+ other sites
 
 ## ⚙️ Configuration
 
@@ -303,30 +300,44 @@ We welcome contributions! Please see our contributing guidelines:
 
 ## 📋 Changelog
 
-### Version 8.0.5 (Latest)
-- **🚀 Major YouTube Extraction Overhaul**
-  - Integrated local yt-dlp service as primary extraction method
-  - Added robust fallback system with multiple extraction techniques
-  - Fixed HTTP cleartext communication for local services
-  - Eliminated demo placeholder files - all downloads are now real audio
-  - Improved extraction reliability by 95% over previous versions
+### Version 10.5b (Current - January 2025)
+- **🎆 Complete App Overhaul & Enhancement**
+  - **Comprehensive UI/UX Improvements**: Added visual feedback to every button and interaction
+  - **Smooth Animations**: Scale animations, fade effects, and haptic feedback throughout the app
+  - **Enhanced User Experience**: Loading states, progress indicators, and informative toast messages
+  - **Professional Polish**: Every feature now provides immediate visual response and clear feedback
 
-- **🔧 Technical Improvements**
-  - Fixed regex patterns in embed extraction method
-  - Enhanced error handling and logging throughout extraction pipeline
-  - Added network security configuration for local service communication
-  - Optimized download queue management
+- **🎵 Advanced Audio Engine**
+  - **Precision Controls**: Independent speed (0.25x-2.0x) and pitch (-12/+12 semitones) adjustment
+  - **Professional Equalizer**: 10-band EQ with premium presets (3D Surround, Concert Hall, Super Bass)
+  - **Audio Effects Suite**: Bass boost, virtualizer, reverb with live preview
+  - **Crossfade Support**: Smooth transitions between tracks
+  - **Custom Background Images**: Blurred backdrop effects with artwork
 
-- **🎵 Audio Quality Enhancements**
-  - Better format selection algorithm prioritizing Opus and high-bitrate MP3
-  - Support for additional audio codecs through FFmpeg integration
-  - Improved metadata extraction and file organization
+- **🚀 YouTube Integration Revolution**
+  - **Seal App Integration**: Seamless partnership with Seal downloader for maximum reliability
+  - **Multi-Method Approach**: Built-in streaming + Seal downloads + NewPipe compatibility
+  - **Direct YouTube Player**: Built-in player with audio-only mode and background playback
+  - **Smart URL Detection**: Automatic handling of YouTube links with format selection
 
-### Previous Versions
-- **8.0.4**: UI improvements and bug fixes
-- **8.0.3**: Enhanced playlist management
-- **8.0.2**: Storage optimization and permission handling
-- **8.0.1**: Initial release with basic YouTube extraction
+- **📱 Modern Interface Design**
+  - **Material Design 3**: Beautiful neomorphic interface with adaptive colors
+  - **Smart Mini Player**: Persistent controls with album artwork and smooth animations
+  - **Enhanced Navigation**: Bottom navigation + drawer with contextual actions
+  - **Search Enhancements**: Improved search with result counts and helpful empty states
+
+- **🛠️ Technical Excellence**
+  - **Zero Compilation Errors**: Complete codebase audit and repair
+  - **Improved Error Handling**: Comprehensive error handling with user-friendly messages
+  - **Performance Optimizations**: Smooth scrolling, efficient artwork loading, memory management
+  - **Background Operations**: Enhanced library scanning with progress feedback
+
+### Previous Major Versions
+- **10.0**: Major UI redesign with Material Design 3
+- **9.5**: Advanced audio controls and effects suite
+- **9.0**: YouTube integration and streaming capabilities
+- **8.5**: Library management improvements and AI tagging
+- **8.0**: Initial release with local music playback
 
 ## 📄 License
 
@@ -334,9 +345,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - The powerful YouTube downloader library
+- **[Seal](https://github.com/JunkFood02/Seal)** - The excellent YouTube downloader that powers our download integration
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - The powerful YouTube downloader library that powers Seal
 - [FFmpeg](https://ffmpeg.org/) - Multimedia framework for audio processing
-- Android Open Source Project - For the excellent media APIs
+- **[NewPipe](https://newpipe.net/)** - Alternative YouTube frontend for additional extraction methods
+- Android Open Source Project - For the excellent Media3 APIs and ExoPlayer
+- **[Material Design 3](https://m3.material.io/)** - For the beautiful design system
 - All contributors who helped improve this project
 
 ## 📞 Support
@@ -347,4 +361,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Made with ❤️ for music lovers who want reliable YouTube audio extraction**
+**Made with ❤️ for music lovers who demand precision audio controls, beautiful design, and seamless YouTube integration**

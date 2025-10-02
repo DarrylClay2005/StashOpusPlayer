@@ -15,10 +15,11 @@ import java.net.URLEncoder
 class YouTubeApiService {
     
     companion object {
-        private const val API_KEY = "AIzaSyBqWTC-S3vopTEMNTgpCalyqc_GJkUgsAg"
         private const val BASE_URL = "https://www.googleapis.com/youtube/v3"
         private const val TAG = "YouTubeApiService"
     }
+    
+    private val apiKey: String by lazy { com.stash.stashwave.BuildConfig.YOUTUBE_API_KEY ?: "" }
     
     private val client = OkHttpClient.Builder()
         .build()
@@ -30,13 +31,16 @@ class YouTubeApiService {
     ): Result<YouTubeSearchResult> = withContext(Dispatchers.IO) {
         try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
+            if (apiKey.isBlank()) {
+                return@withContext Result.failure(IOException("YouTube API key missing. Set YOUTUBE_API_KEY in local.properties"))
+            }
             val url = buildString {
                 append("$BASE_URL/search")
                 append("?part=snippet")
                 append("&q=$encodedQuery")
                 append("&type=video")
                 append("&maxResults=$maxResults")
-                append("&key=$API_KEY")
+                append("&key=$apiKey")
                 pageToken?.let { append("&pageToken=$it") }
             }
             
@@ -74,7 +78,10 @@ class YouTubeApiService {
     
     suspend fun getVideoDetails(videoId: String): Result<YouTubeVideo?> = withContext(Dispatchers.IO) {
         try {
-            val url = "$BASE_URL/videos?part=snippet,contentDetails,statistics&id=$videoId&key=$API_KEY"
+            if (apiKey.isBlank()) {
+                return@withContext Result.failure(IOException("YouTube API key missing. Set YOUTUBE_API_KEY in local.properties"))
+            }
+            val url = "$BASE_URL/videos?part=snippet,contentDetails,statistics&id=$videoId&key=$apiKey"
             
             val request = Request.Builder()
                 .url(url)
@@ -295,7 +302,7 @@ class YouTubeApiService {
                 append("&maxResults=$maxResults")
                 append("&order=$order")
                 append("&textFormat=html")
-                append("&key=$API_KEY")
+                append("&key=$apiKey")
                 pageToken?.let { append("&pageToken=$it") }
             }
 
@@ -366,7 +373,7 @@ return com.stash.stashwave.data.YouTubeCommentsResult(comments, nextPageToken)
                 append("&parentId=$parentId")
                 append("&maxResults=$maxResults")
                 append("&textFormat=html")
-                append("&key=$API_KEY")
+                append("&key=$apiKey")
                 pageToken?.let { append("&pageToken=$it") }
             }
             val request = Request.Builder().url(url).addHeader("Accept","application/json").build()

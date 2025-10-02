@@ -76,7 +76,7 @@ class AITagger(private val context: Context) {
         }
         if (rule.isNotBlank()) return rule
         // Try Last.fm tags if API key present and known artist/title
-        val apiKey = settings().getString("lastfm_api_key", null)
+        val apiKey: String? = null // Last.fm disabled
         if (!apiKey.isNullOrBlank() && !song.artistName.equals("Unknown Artist", true)) {
             try {
                 val tag = fetchLastFmTopTag(apiKey, song.artistName, song.displayName)
@@ -93,11 +93,8 @@ class AITagger(private val context: Context) {
     }
 
     private fun fetchLastFmTopTag(apiKey: String, artist: String, track: String): String? {
-        val url = "https://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key=${enc(apiKey)}&artist=${enc(artist)}&track=${enc(track)}&format=json"
-        val json = requestJson(url) ?: return null
-        val toptags = json.getAsJsonObject("track")?.getAsJsonObject("toptags")?.getAsJsonArray("tag")
-        val first = toptags?.firstOrNull()?.asJsonObject?.get("name")?.asString
-        return first?.let { normalizeGenreName(it) }
+        // Last.fm disabled: skip external call
+        return null
     }
 
     private fun normalizeGenreName(name: String): String {

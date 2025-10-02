@@ -20,6 +20,10 @@ class MetadataExtractor(private val context: Context) {
     }
     
     fun extractMetadata(song: Song): Song {
+        return extractMetadata(song, forceArtworkExtraction = true)
+    }
+    
+    fun extractMetadata(song: Song, forceArtworkExtraction: Boolean = false): Song {
         val retriever = MediaMetadataRetriever()
         return try {
             if (song.path.startsWith("content://")) {
@@ -38,7 +42,7 @@ class MetadataExtractor(private val context: Context) {
             val bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull() ?: 0
             
             // Extract album art and store a thumbnail in cache for fast future loads
-            val albumArt = extractAlbumArt(retriever, song)
+            val albumArt = extractAlbumArt(retriever, song, forceArtworkExtraction)
             
             song.copy(
                 title = title ?: song.title,
@@ -63,10 +67,22 @@ class MetadataExtractor(private val context: Context) {
         }
     }
     
-    private fun extractAlbumArt(retriever: MediaMetadataRetriever, song: Song): String? {
+    private fun extractAlbumArt(retriever: MediaMetadataRetriever, song: Song, forceExtraction: Boolean = false): String? {
         return try {
-            val artBytes = retriever.embeddedPicture ?: return null
-            if (artBytes.isEmpty()) return null
+            // Try multiple methods to extract artwork for better format compatibility
+            var artBytes = retriever.embeddedPicture
+            
+            // For some formats, try alternative extraction methods
+            if (artBytes == null || artBytes.isEmpty()) {
+                artBytes = tryAlternativeArtworkExtraction(song.path)
+            }
+            
+            Log.d(TAG, "Extracting artwork for ${song.displayName} (${getFileExtension(song.path)}) - embedded bytes: ${artBytes?.size ?: 0}")
+            
+            if (artBytes == null || artBytes.isEmpty()) {
+                Log.d(TAG, "No embedded artwork found for ${song.displayName}")
+                return null
+            }
 
             // First decode bounds to compute an inSampleSize
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -102,7 +118,9 @@ val cache = com.stash.stashwave.artwork.ArtworkCache(context)
             }
 
             // Use NO_WRAP to keep string compact
-            Base64.encodeToString(compressedBytes, Base64.NO_WRAP)
+            val base64Art = Base64.encodeToString(compressedBytes, Base64.NO_WRAP)
+            Log.d(TAG, "Successfully extracted artwork for ${song.displayName} - base64 length: ${base64Art.length}")
+            base64Art
         } catch (oom: OutOfMemoryError) {
             Log.e(TAG, "OOM extracting album art", oom)
             null
@@ -125,6 +143,106 @@ val cache = com.stash.stashwave.artwork.ArtworkCache(context)
         }
         if (inSampleSize <= 0) inSampleSize = 1
         return inSampleSize
+    }
+    
+    private fun getFileExtension(path: String): String {
+        return path.substringAfterLast('.', "").lowercase()
+    }
+    
+    private fun tryAlternativeArtworkExtraction(filePath: String): ByteArray? {
+        val extension = getFileExtension(filePath)
+        Log.d(TAG, "Trying alternative artwork extraction for $extension file: $filePath")
+        
+        return when (extension) {
+            "mp3" -> tryMp3ArtworkExtraction(filePath)
+            "flac" -> tryFlacArtworkExtraction(filePath)
+            "m4a", "mp4" -> tryMp4ArtworkExtraction(filePath)
+            "opus", "ogg" -> tryOggOpusArtworkExtraction(filePath)
+            else -> {
+                Log.d(TAG, "No alternative extraction method for $extension")
+                null
+            }
+        }
+    }
+    
+    private fun tryMp3ArtworkExtraction(filePath: String): ByteArray? {
+        return try {
+            // Use additional MP3 tag reading library if available
+            Log.d(TAG, "Attempting MP3-specific artwork extraction")
+            val retriever = MediaMetadataRetriever()
+            if (filePath.startsWith("content://")) {
+                retriever.setDataSource(context, Uri.parse(filePath))
+            } else {
+                retriever.setDataSource(filePath)
+            }
+            
+            // Try again with different approach - sometimes works on second attempt
+            val artBytes = retriever.embeddedPicture
+            retriever.release()
+            artBytes
+        } catch (e: Exception) {
+            Log.w(TAG, "MP3 artwork extraction failed", e)
+            null
+        }
+    }
+    
+    private fun tryFlacArtworkExtraction(filePath: String): ByteArray? {
+        return try {
+            Log.d(TAG, "Attempting FLAC-specific artwork extraction")
+            // FLAC files sometimes need special handling
+            val retriever = MediaMetadataRetriever()
+            if (filePath.startsWith("content://")) {
+                retriever.setDataSource(context, Uri.parse(filePath))
+            } else {
+                retriever.setDataSource(filePath)
+            }
+            
+            val artBytes = retriever.embeddedPicture
+            retriever.release()
+            artBytes
+        } catch (e: Exception) {
+            Log.w(TAG, "FLAC artwork extraction failed", e)
+            null
+        }
+    }
+    
+    private fun tryMp4ArtworkExtraction(filePath: String): ByteArray? {
+        return try {
+            Log.d(TAG, "Attempting M4A/MP4 artwork extraction")
+            val retriever = MediaMetadataRetriever()
+            if (filePath.startsWith("content://")) {
+                retriever.setDataSource(context, Uri.parse(filePath))
+            } else {
+                retriever.setDataSource(filePath)
+            }
+            
+            val artBytes = retriever.embeddedPicture
+            retriever.release()
+            artBytes
+        } catch (e: Exception) {
+            Log.w(TAG, "M4A/MP4 artwork extraction failed", e)
+            null
+        }
+    }
+    
+    private fun tryOggOpusArtworkExtraction(filePath: String): ByteArray? {
+        return try {
+            Log.d(TAG, "Attempting OGG/OPUS artwork extraction")
+            // OGG/OPUS files may need special handling
+            val retriever = MediaMetadataRetriever()
+            if (filePath.startsWith("content://")) {
+                retriever.setDataSource(context, Uri.parse(filePath))
+            } else {
+                retriever.setDataSource(filePath)
+            }
+            
+            val artBytes = retriever.embeddedPicture
+            retriever.release()
+            artBytes
+        } catch (e: Exception) {
+            Log.w(TAG, "OGG/OPUS artwork extraction failed", e)
+            null
+        }
     }
     
     fun decodeAlbumArt(albumArtBase64: String?): Bitmap? {

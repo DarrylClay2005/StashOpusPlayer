@@ -59,19 +59,11 @@ class ArtistGenreArtworkFetcher(private val context: Context) {
 
         com.stash.stashwave.utils.ImageDownloadTracker.begin()
         try {
-            // Try Last.fm if API key exists
-            val apiKey = prefs().getString("lastfm_api_key", null)
+            // Try Last.fm if API key exists (disabled)
+            val apiKey: String? = null // Last.fm disabled
             if (!apiKey.isNullOrBlank()) {
                 try {
-                    val url = "https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=${enc(name)}&api_key=${enc(apiKey)}&format=json"
-                    val json = requestJson(url)
-                    val images = json?.getAsJsonObject("artist")?.getAsJsonArray("image")
-                    val best = images?.lastOrNull()?.asJsonObject?.get("#text")?.asString
-                    if (!best.isNullOrBlank()) {
-                        requestBytes(best)?.let { bytes ->
-                            if (save(out, bytes)) return@withContext out
-                        }
-                    }
+                    // Last.fm disabled; skip remote fetch
                 } catch (e: Exception) {
                     Log.w(TAG, "Last.fm fetch failed", e)
                 }
