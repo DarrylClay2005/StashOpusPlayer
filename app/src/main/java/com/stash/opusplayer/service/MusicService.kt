@@ -279,6 +279,8 @@ val sessionId = activePlayer.audioSessionId
             
 override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
+                // Ensure app volume is applied when playback starts
+                if (isPlaying) { try { activePlayer.volume = appVolume } catch (_: Exception) {} }
                 if (isPlaying) {
                     startForeground(NOTIFICATION_ID, createNotification())
                 } else {
