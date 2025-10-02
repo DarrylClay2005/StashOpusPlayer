@@ -394,8 +394,8 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
 
     private fun sanitizeFileName(fileName: String): String {
         return fileName
-            .replace(Regex("[^a-zA-Z0-9._\-\s]"), "_")
-            .replace(Regex("\s+"), "_")
+            .replace(Regex("""[^a-zA-Z0-9._\-\s]"""), "_")
+            .replace(Regex("""\s+"""), "_")
             .take(100)
     }
 

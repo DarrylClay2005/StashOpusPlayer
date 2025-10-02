@@ -16,8 +16,8 @@ android {
         applicationId "com.stash.stashwave"
         minSdk 21
         targetSdk 34
-        versionCode 91
-        versionName "9.1.0"
+        versionCode 105
+        versionName "10.5b"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
