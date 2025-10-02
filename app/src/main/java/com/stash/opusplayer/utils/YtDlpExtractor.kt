@@ -1,4 +1,4 @@
-package com.stash.opusplayer.utils
+package com.stash.stashwave.utils
 
 import android.content.Context
 import android.util.Log
@@ -203,6 +203,50 @@ class YtDlpExtractor(private val context: Context) {
 
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get video info", e)
+            null
+        }
+    }
+
+    /**
+     * Resolve a direct best-audio stream URL suitable for streaming (not downloading).
+     */
+    suspend fun getBestAudioStreamUrl(videoUrl: String): String? = withContext(Dispatchers.IO) {
+        return@withContext try {
+            if (!isInitialized) {
+                if (!initialize()) return@withContext null
+            }
+            Log.d(TAG, "Resolving best audio stream URL for: $videoUrl")
+
+            // Try multiple selectors for better compatibility
+            val selectors = listOf(
+                "bestaudio[ext=webm]",
+                "bestaudio[ext=m4a]",
+                "bestaudio"
+            )
+            var resolved: String? = null
+            for (sel in selectors) {
+                val request = YoutubeDLRequest(videoUrl).apply {
+                    addOption("-f", sel)
+                    addOption("-g") // get direct URL
+                    addOption("--no-playlist")
+                }
+                val response = YoutubeDL.getInstance().execute(request)
+                val out = response.out.trim()
+                val url = out.lineSequence().lastOrNull()?.trim()
+                Log.d(TAG, "Selector '$sel' returned: ${url?.take(80)}")
+                if (!url.isNullOrBlank() && (url.startsWith("http://") || url.startsWith("https://"))) {
+                    resolved = url
+                    break
+                }
+            }
+            if (resolved != null) {
+                Log.d(TAG, "Resolved audio stream URL: $resolved")
+            } else {
+                Log.w(TAG, "No audio stream URL could be resolved after trying selectors")
+            }
+            resolved
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to resolve audio stream URL", e)
             null
         }
     }

@@ -1,4 +1,4 @@
-package com.stash.opusplayer.utils
+package com.stash.stashwave.utils
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -7,7 +7,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Base64
 import android.util.Log
-import com.stash.opusplayer.data.Song
+import com.stash.stashwave.data.Song
 import java.io.ByteArrayOutputStream
 import java.io.File
 
@@ -92,7 +92,7 @@ class MetadataExtractor(private val context: Context) {
 
             // Save to on-device cache for fast reuse
             try {
-                val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
+val cache = com.stash.stashwave.artwork.ArtworkCache(context)
                 val outFile = cache.fileFor(song)
                 if (!outFile.exists()) {
                     cache.saveJpeg(compressedBytes, outFile)
@@ -140,8 +140,20 @@ class MetadataExtractor(private val context: Context) {
 
     fun loadCachedArtwork(context: Context, song: Song, maxDim: Int = MAX_ART_DIMENSION): Bitmap? {
         return try {
-            val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
+            val cache = com.stash.stashwave.artwork.ArtworkCache(context)
+            // Try exact match
             cache.loadBitmapIfPresent(song, maxDim)
+                ?: run {
+                    // Try common album fallbacks for downloaded YouTube audio where album tag varies
+                    val candidates = listOf("YouTube", "Unknown Album", "")
+                    for (alb in candidates) {
+                        val alt = song.copy(album = alb)
+                        val bmp = cache.loadBitmapIfPresent(alt, maxDim)
+                        if (bmp != null) return bmp
+                    }
+                    // Fallback to title-only cache key (helps when tags are Unknown Artist/Album)
+                    cache.loadBitmapByTitleIfPresent(song.displayName, maxDim)
+                }
         } catch (e: Exception) {
             Log.e(TAG, "Error loading cached artwork", e)
             null
@@ -355,7 +367,7 @@ class MetadataExtractor(private val context: Context) {
         // Cache the thumbnail for faster future loads
         if (thumbnailBase64 != null) {
             try {
-                val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
+                val cache = com.stash.stashwave.artwork.ArtworkCache(context)
                 val artBytes = Base64.decode(thumbnailBase64, Base64.DEFAULT)
                 val outFile = cache.fileFor(song)
                 if (!outFile.exists()) {

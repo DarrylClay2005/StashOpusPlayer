@@ -1,4 +1,4 @@
-package com.stash.opusplayer.updates
+package com.stash.stashwave.updates
 
 import android.app.Dialog
 import android.content.Context
@@ -6,10 +6,10 @@ import android.view.LayoutInflater
 import android.view.View
 import androidx.core.content.ContextCompat
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.stash.opusplayer.R
-import com.stash.opusplayer.data.UpdateInfo
-import com.stash.opusplayer.data.UpdatePriority
-import com.stash.opusplayer.databinding.DialogUpdateAvailableBinding
+import com.stash.stashwave.R
+import com.stash.stashwave.data.UpdateInfo
+import com.stash.stashwave.data.UpdatePriority
+import com.stash.stashwave.databinding.DialogUpdateAvailableBinding
 
 class UpdateDialog(
     private val context: Context,

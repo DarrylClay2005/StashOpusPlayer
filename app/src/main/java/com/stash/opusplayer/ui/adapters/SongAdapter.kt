@@ -1,4 +1,4 @@
-package com.stash.opusplayer.ui.adapters
+package com.stash.stashwave.ui.adapters
 
 import android.util.Base64
 import android.view.LayoutInflater
@@ -10,10 +10,10 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.engine.DiskCacheStrategy
-import com.stash.opusplayer.R
-import com.stash.opusplayer.data.Song
-import com.stash.opusplayer.databinding.ItemSongBinding
-import com.stash.opusplayer.utils.MetadataExtractor
+import com.stash.stashwave.R
+import com.stash.stashwave.data.Song
+import com.stash.stashwave.databinding.ItemSongBinding
+import com.stash.stashwave.utils.MetadataExtractor
 
 class SongAdapter(
     private val onSongClick: (Song) -> Unit,

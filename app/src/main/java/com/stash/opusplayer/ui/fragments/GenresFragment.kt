@@ -1,4 +1,4 @@
-package com.stash.opusplayer.ui.fragments
+package com.stash.stashwave.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -7,9 +7,9 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.stash.opusplayer.data.MusicRepository
-import com.stash.opusplayer.databinding.FragmentGenresBinding
-import com.stash.opusplayer.ui.adapters.GenreAdapter
+import com.stash.stashwave.data.MusicRepository
+import com.stash.stashwave.databinding.FragmentGenresBinding
+import com.stash.stashwave.ui.adapters.GenreAdapter
 import kotlinx.coroutines.launch
 
 class GenresFragment : Fragment() {
@@ -79,5 +79,5 @@ class GenresFragment : Fragment() {
 data class GenreInfo(
     val name: String,
     val songCount: Int,
-    val songs: List<com.stash.opusplayer.data.Song>
+    val songs: List<com.stash.stashwave.data.Song>
 )

@@ -26,3 +26,4 @@ app/build/outputs/**/*.apk filter=lfs diff=lfs merge=lfs -text
 app/build/outputs/**/*.aab filter=lfs diff=lfs merge=lfs -text
 *.zip filter=lfs diff=lfs merge=lfs -text
 *.tar.gz filter=lfs diff=lfs merge=lfs -text
+bin/* filter=lfs diff=lfs merge=lfs -text

@@ -1,4 +1,4 @@
-package com.stash.opusplayer.ui.adapters
+package com.stash.stashwave.ui.adapters
 
 import android.view.LayoutInflater
 import android.view.View
@@ -7,11 +7,11 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
-import com.stash.opusplayer.R
-import com.stash.opusplayer.data.DownloadProgress
-import com.stash.opusplayer.data.DownloadStatus
-import com.stash.opusplayer.data.YouTubeVideo
-import com.stash.opusplayer.databinding.ItemYoutubeVideoBinding
+import com.stash.stashwave.R
+import com.stash.stashwave.data.DownloadProgress
+import com.stash.stashwave.data.DownloadStatus
+import com.stash.stashwave.data.YouTubeVideo
+import com.stash.stashwave.databinding.ItemYoutubeVideoBinding
 import java.text.NumberFormat
 import java.util.*
 
@@ -80,34 +80,40 @@ class YouTubeVideoAdapter(
                             downloadProgress.setProgressCompat(progress.progress, true)
                             downloadStatusText.text = "${progress.progress}%"
                             downloadButton.text = "Cancel"
+                            downloadButton.icon = root.context.getDrawable(R.drawable.ic_close)
                             downloadButton.isEnabled = true
                         }
                         DownloadStatus.COMPLETED -> {
                             downloadProgress.setProgressCompat(100, true)
                             downloadStatusText.text = "Complete"
                             downloadButton.text = "Downloaded"
+                            downloadButton.icon = root.context.getDrawable(R.drawable.ic_check)
                             downloadButton.isEnabled = false
                         }
                         DownloadStatus.FAILED -> {
                             downloadProgressContainer.visibility = View.GONE
                             downloadButton.text = "Retry"
+                            downloadButton.icon = root.context.getDrawable(R.drawable.ic_refresh)
                             downloadButton.isEnabled = true
                         }
                         DownloadStatus.PENDING -> {
                             downloadProgress.isIndeterminate = true
                             downloadStatusText.text = "Pending..."
                             downloadButton.text = "Cancel"
+                            downloadButton.icon = root.context.getDrawable(R.drawable.ic_close)
                             downloadButton.isEnabled = true
                         }
                         DownloadStatus.CANCELLED -> {
                             downloadProgressContainer.visibility = View.GONE
                             downloadButton.text = "Download HQ"
+                            downloadButton.icon = root.context.getDrawable(R.drawable.ic_download)
                             downloadButton.isEnabled = true
                         }
                     }
                 } else {
                     downloadProgressContainer.visibility = View.GONE
                     downloadButton.text = "Download HQ"
+                    downloadButton.icon = root.context.getDrawable(R.drawable.ic_download)
                     downloadButton.isEnabled = true
                 }
 

@@ -39,15 +39,15 @@
             app:titleTextColor="@color/text_primary"
             app:navigationIconTint="@color/text_primary" />
 
-        <!-- Library scanning banner -->
+        <!-- Neomorphic Library scanning banner -->
         <LinearLayout
             android:id="@+id/scanning_banner"
+            style="@style/NeomorphicCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_below="@id/toolbar"
             android:orientation="horizontal"
-            android:padding="8dp"
-            android:background="@color/surface_color"
+            android:layout_marginTop="8dp"
             android:visibility="gone">
 
             <ProgressBar
@@ -55,26 +55,27 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:indeterminate="true"
-                android:layout_marginEnd="8dp"/>
+                android:layout_marginEnd="12dp"/>
 
             <TextView
                 android:id="@+id/scanning_text"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:textColor="@color/text_primary"
-                android:textSize="14sp"
-                android:text="Scanning…"/>
+                android:textSize="16sp"
+                android:text="Scanning library…"/>
         </LinearLayout>
 
-        <!-- Download banner -->
+        <!-- Neomorphic Download banner -->
         <LinearLayout
             android:id="@+id/download_banner"
+            style="@style/NeomorphicCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_below="@id/scanning_banner"
             android:orientation="horizontal"
-            android:padding="8dp"
-            android:background="@color/accent_color"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/neomorphic_accent_button"
             android:visibility="gone">
 
             <ProgressBar
@@ -82,15 +83,15 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:indeterminate="true"
-                android:layout_marginEnd="8dp"/>
+                android:layout_marginEnd="12dp"/>
 
             <TextView
                 android:id="@+id/download_text"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:textColor="@android:color/white"
-                android:textSize="14sp"
-                android:text="Downloading images…"/>
+                android:textSize="16sp"
+                android:text="Downloading content…"/>
         </LinearLayout>
 
         <!-- Main content container -->
@@ -101,19 +102,24 @@
             android:layout_below="@id/download_banner"
             android:layout_above="@id/mini_player" />
 
-        <!-- Bottom Navigation -->
+        <!-- Neomorphic Bottom Navigation -->
         <com.google.android.material.bottomnavigation.BottomNavigationView
             android:id="@+id/bottom_nav"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_alignParentBottom="true"
-            android:background="@color/surface_color"
+            android:background="@drawable/neomorphic_navigation_background"
+            android:paddingTop="8dp"
+            android:paddingBottom="16dp"
             app:menu="@menu/bottom_nav_menu"
             app:itemIconTint="@color/text_primary"
-            app:itemTextColor="@color/text_primary" />
+            app:itemTextColor="@color/text_primary"
+            app:labelVisibilityMode="selected"
+            app:itemPaddingTop="8dp"
+            app:itemPaddingBottom="8dp" />
 
         <!-- Mini Player Container -->
-        <com.stash.opusplayer.ui.MiniPlayerView
+        <com.stash.stashwave.ui.MiniPlayerView
             android:id="@+id/mini_player"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

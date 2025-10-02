@@ -1,18 +1,22 @@
-package com.stash.opusplayer.ui.fragments
+package com.stash.stashwave.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.stash.opusplayer.databinding.FragmentFavoritesBinding
-import com.stash.opusplayer.data.MusicRepository
-import com.stash.opusplayer.ui.MainActivity
-import com.stash.opusplayer.ui.adapters.SongAdapter
-import com.stash.opusplayer.utils.MetadataExtractor
+import androidx.appcompat.app.AlertDialog
+import com.stash.stashwave.databinding.FragmentFavoritesBinding
+import com.stash.stashwave.data.MusicRepository
+import com.stash.stashwave.data.Song
+import com.stash.stashwave.ui.MainActivity
+import com.stash.stashwave.ui.adapters.SongAdapter
+import com.stash.stashwave.utils.MetadataExtractor
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 class FavoritesFragment : Fragment() {
     
@@ -22,6 +26,7 @@ class FavoritesFragment : Fragment() {
     private lateinit var songAdapter: SongAdapter
     private lateinit var musicRepository: MusicRepository
     private lateinit var metadataExtractor: MetadataExtractor
+    private var allFavorites: List<Song> = emptyList()
     
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -38,6 +43,7 @@ class FavoritesFragment : Fragment() {
         musicRepository = MusicRepository(requireContext())
         metadataExtractor = MetadataExtractor(requireContext())
         setupRecyclerView()
+        setupSearchButton()
         loadFavorites()
     }
     
@@ -48,10 +54,12 @@ class FavoritesFragment : Fragment() {
                 (activity as? MainActivity)?.playMusic(song)
             },
             onFavoriteToggle = { song ->
-                // Remove from favorites
-                lifecycleScope.launch {
-                    musicRepository.removeFromFavorites(song.id)
-                    loadFavorites() // Refresh the list
+                // Toggle favorite status
+                (activity as? MainActivity)?.toggleFavorite(song)
+                // Refresh the favorites list after a short delay
+                viewLifecycleOwner.lifecycleScope.launch {
+                    delay(500)
+                    loadFavorites()
                 }
             },
             onAddToPlaylist = { song ->
@@ -67,19 +75,106 @@ class FavoritesFragment : Fragment() {
         }
     }
     
-    private fun loadFavorites() {
-        lifecycleScope.launch {
-            musicRepository.getFavorites().collect { favorites ->
-                if (favorites.isNotEmpty()) {
-                    songAdapter.submitList(favorites)
-                    binding.recyclerView.visibility = View.VISIBLE
-                    binding.emptyStateText.visibility = View.GONE
+    private fun setupSearchButton() {
+        binding.searchButton.setOnClickListener {
+            showSearchDialog()
+        }
+    }
+    
+    private fun showSearchDialog() {
+        val searchView = EditText(requireContext()).apply {
+            hint = "Search favorites..."
+            setPadding(32, 16, 32, 16)
+        }
+        
+        AlertDialog.Builder(requireContext())
+            .setTitle("Search Favorites")
+            .setView(searchView)
+            .setPositiveButton("Search") { _, _ ->
+                val query = searchView.text.toString().trim()
+                if (query.isNotEmpty()) {
+                    searchFavorites(query)
                 } else {
-                    binding.recyclerView.visibility = View.GONE
-                    binding.emptyStateText.visibility = View.VISIBLE
+                    // Show all favorites if query is empty
+                    songAdapter.submitList(allFavorites)
                 }
             }
+            .setNegativeButton("Show All") { _, _ ->
+                // Reset to show all favorites
+                songAdapter.submitList(allFavorites)
+                updateEmptyState()
+            }
+            .setNeutralButton("Cancel", null)
+            .show()
+            
+        // Focus the search field and show keyboard
+        searchView.requestFocus()
+    }
+    
+    private fun searchFavorites(query: String) {
+        val filteredSongs = allFavorites.filter { song ->
+            song.title.contains(query, ignoreCase = true) ||
+            song.artist.contains(query, ignoreCase = true) ||
+            song.album.contains(query, ignoreCase = true)
         }
+        
+        songAdapter.submitList(filteredSongs)
+        
+        // Update empty state based on search results
+        if (filteredSongs.isEmpty()) {
+            binding.recyclerView.visibility = View.GONE
+            binding.emptyStateText.text = "No favorites found for \"$query\""
+            binding.emptyStateContainer.visibility = View.VISIBLE
+        } else {
+            binding.recyclerView.visibility = View.VISIBLE
+            binding.emptyStateContainer.visibility = View.GONE
+        }
+    }
+    
+    private fun loadFavorites() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                musicRepository.getFavorites().collect { favorites ->
+                    allFavorites = favorites
+                    
+                    val b = _binding ?: return@collect
+                    if (favorites.isNotEmpty()) {
+                        songAdapter.submitList(favorites)
+                        b.recyclerView.visibility = View.VISIBLE
+                        b.emptyStateContainer.visibility = View.GONE
+                    } else {
+                        b.recyclerView.visibility = View.GONE
+                        b.emptyStateText.text = "No liked songs yet\n\n💡 Tap the heart icon on any song to add it here!"
+                        b.emptyStateContainer.visibility = View.VISIBLE
+                    }
+                }
+                (activity as? MainActivity)?.notifyContentLoaded()
+            } catch (e: Exception) {
+                val b = _binding ?: return@launch
+                b.recyclerView.visibility = View.GONE
+                b.emptyStateText.text = "Error loading favorites\n${e.message}"
+                b.emptyStateContainer.visibility = View.VISIBLE
+                (activity as? MainActivity)?.notifyContentLoaded()
+            }
+        }
+    }
+    
+    private fun updateEmptyState() {
+        val b = _binding ?: return
+        if (allFavorites.isEmpty()) {
+            b.recyclerView.visibility = View.GONE
+            b.emptyStateText.text = "No liked songs yet\n\n💡 Tap the heart icon on any song to add it here!"
+            b.emptyStateContainer.visibility = View.VISIBLE
+        } else {
+            b.recyclerView.visibility = View.VISIBLE
+            b.emptyStateContainer.visibility = View.GONE
+        }
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        // Refresh favorites when returning to this screen
+        loadFavorites()
     }
     
     override fun onDestroyView() {

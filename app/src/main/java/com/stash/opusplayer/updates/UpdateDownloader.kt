@@ -1,4 +1,4 @@
-package com.stash.opusplayer.updates
+package com.stash.stashwave.updates
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -10,8 +10,8 @@ import android.os.Build
 import android.os.Environment
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
-import com.stash.opusplayer.R
-import com.stash.opusplayer.data.UpdateInfo
+import com.stash.stashwave.R
+import com.stash.stashwave.data.UpdateInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient

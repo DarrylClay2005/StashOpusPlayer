@@ -3,8 +3,9 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="64dp"
-    android:background="@drawable/mini_player_background"
+    android:layout_height="80dp"
+    android:background="@drawable/neomorphic_card_background"
+    android:layout_margin="8dp"
     android:clickable="true"
     android:focusable="true">
 
@@ -18,27 +19,28 @@
         android:progressDrawable="@drawable/mini_player_progress"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- Album artwork -->
-    <androidx.cardview.widget.CardView
+    <!-- Neomorphic Album artwork -->
+    <FrameLayout
         android:id="@+id/miniAlbumArtCard"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_marginStart="12dp"
-        app:cardCornerRadius="4dp"
-        app:cardElevation="2dp"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginStart="16dp"
+        android:background="@drawable/neomorphic_button_background"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/miniProgressBar">
 
         <ImageView
             android:id="@+id/miniAlbumArt"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_gravity="center"
             android:contentDescription="@string/album_artwork"
             android:scaleType="centerCrop"
+            android:background="@drawable/circular_background"
             android:src="@drawable/ic_music_note" />
 
-    </androidx.cardview.widget.CardView>
+    </FrameLayout>
 
     <!-- Song info -->
     <LinearLayout
@@ -94,9 +96,10 @@
         <!-- Previous button -->
         <ImageButton
             android:id="@+id/miniPreviousButton"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            style="@style/NeomorphicButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_margin="4dp"
             android:contentDescription="@string/previous"
             android:src="@drawable/ic_skip_previous_24"
             android:tint="@color/text_primary" />
@@ -104,21 +107,34 @@
         <!-- Play/Pause button -->
         <ImageButton
             android:id="@+id/miniPlayPauseButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            style="@style/NeomorphicAccentButton"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_margin="4dp"
             android:contentDescription="@string/play_pause"
             android:src="@drawable/ic_play_arrow_24"
-            android:tint="@color/text_primary" />
+            android:tint="@color/white" />
 
-        <!-- Next button -->
+        <!-- Next track button -->
         <ImageButton
             android:id="@+id/miniNextButton"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            style="@style/NeomorphicButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_margin="4dp"
             android:contentDescription="@string/next"
             android:src="@drawable/ic_skip_next_24"
+            android:tint="@color/text_primary" />
+
+        <!-- Fast Forward 30s button -->
+        <ImageButton
+            android:id="@+id/miniFastForwardButton"
+            style="@style/NeomorphicButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_margin="4dp"
+            android:contentDescription="Fast Forward 30s"
+            android:src="@drawable/ic_forward_30_24"
             android:tint="@color/text_primary" />
 
     </LinearLayout>

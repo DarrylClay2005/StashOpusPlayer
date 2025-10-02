@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Stash Audio</string>
+    <string name="app_name">StashWave Player</string>
     
     <!-- Navigation -->
     <string name="nav_open">Open navigation</string>

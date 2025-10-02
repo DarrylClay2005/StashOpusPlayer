@@ -1,0 +1,348 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background_color"
+    tools:context=".ui.YouTubeStreamingActivity">
+
+    <!-- Content scroll area -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- Top Bar -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="@color/primary_color"
+                android:elevation="4dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <ImageButton
+                    android:id="@+id/backButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/back"
+                    android:src="@drawable/ic_arrow_back_24"
+                    app:tint="@color/text_primary" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:text="YouTube Player"
+                    android:textColor="@color/text_primary"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/speedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/button_rounded_background"
+                    android:minWidth="0dp"
+                    android:paddingHorizontal="12dp"
+                    android:text="1x"
+                    android:textColor="@color/text_primary"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/qualityButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/button_rounded_background"
+                    android:minWidth="0dp"
+                    android:paddingHorizontal="12dp"
+                    android:text="Auto"
+                    android:textColor="@color/text_primary"
+                    android:textSize="12sp" />
+
+                <ImageButton
+                    android:id="@+id/fullscreenButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Fullscreen"
+                    android:src="@drawable/ic_fullscreen_24"
+                    app:tint="@color/text_primary" />
+
+                <ImageButton
+                    android:id="@+id/backgroundPlayButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Play in background"
+                    android:src="@drawable/ic_music_note"
+                    app:tint="@color/text_primary" />
+
+            </LinearLayout>
+
+            <!-- Video Player -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                android:layout_margin="16dp"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="8dp">
+
+                <com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
+                    android:id="@+id/youtubePlayerView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
+            </androidx.cardview.widget.CardView>
+
+            <!-- Video Info -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginBottom="16dp"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/videoThumbnail"
+                    android:layout_width="60dp"
+                    android:layout_height="60dp"
+                    android:layout_marginEnd="12dp"
+                    android:background="@drawable/rounded_corners"
+                    android:scaleType="centerCrop"
+                    android:src="@drawable/ic_music_note" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/videoTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:maxLines="2"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        tools:text="Video Title" />
+
+                    <TextView
+                        android:id="@+id/channelTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp"
+                        tools:text="Channel Name" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- Video Description -->
+            <TextView
+                android:id="@+id/videoDescription"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginBottom="24dp"
+                android:background="@drawable/rounded_corners"
+                android:ellipsize="end"
+                android:maxLines="3"
+                android:padding="12dp"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                tools:text="Video description goes here..." />
+
+            <!-- Player Controls -->
+            <LinearLayout
+                android:id="@+id/controlsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/surface_color"
+                android:elevation="4dp"
+                android:orientation="vertical"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="12dp">
+
+                <!-- Progress Bar -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/currentTime"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0:00"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+
+                    <SeekBar
+                        android:id="@+id/progressBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginHorizontal="12dp"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="0"
+                        android:progressTint="@color/accent_color"
+                        android:thumbTint="@color/accent_color" />
+
+                    <TextView
+                        android:id="@+id/totalTime"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0:00"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+
+                </LinearLayout>
+
+                <!-- Control Buttons -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center"
+                    android:orientation="horizontal">
+
+                    <ImageButton
+                        android:id="@+id/seekBackwardButton"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Seek backward 10s"
+                        android:src="@drawable/ic_replay_10_24"
+                        app:tint="@color/text_primary" />
+
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <ImageButton
+                        android:id="@+id/playPauseButton"
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:background="@drawable/circle_button_background"
+                        android:contentDescription="Play/Pause"
+                        android:src="@drawable/ic_play_arrow_24"
+                        app:tint="@color/text_primary" />
+
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <ImageButton
+                        android:id="@+id/seekForwardButton"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Seek forward 10s"
+                        android:src="@drawable/ic_forward_10_24"
+                        app:tint="@color/text_primary" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- Comments Header Row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginTop="16dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/commentsHeader"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Comments"
+                    android:textColor="@color/text_primary"
+                    android:textStyle="bold"
+                    android:textSize="18sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/commentsOrderButton"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Top"
+                    android:paddingHorizontal="12dp" />
+            </LinearLayout>
+
+            <!-- Comments Progress -->
+            <LinearLayout
+                android:id="@+id/commentsProgressContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="12dp"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_marginEnd="12dp" />
+
+                <TextView
+                    android:id="@+id/commentsProgressText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Loading comments…"
+                    android:textColor="@color/text_secondary" />
+            </LinearLayout>
+
+            <!-- Comments List -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/commentsRecycler"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="8dp"
+                android:nestedScrollingEnabled="false"
+                android:clipToPadding="false" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/commentsLoadMoreButton"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Load more"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="24dp"
+                android:visibility="gone" />
+
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- Fullscreen overlay container (initially hidden) -->
+    <FrameLayout
+        android:id="@+id/fullscreenContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:visibility="gone" />
+
+</FrameLayout>

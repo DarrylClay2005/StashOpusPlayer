@@ -1,9 +1,9 @@
-package com.stash.opusplayer.network
+package com.stash.stashwave.network
 
 import android.util.Log
-import com.stash.opusplayer.data.YouTubeVideo
-import com.stash.opusplayer.data.YouTubeSearchResult
-import com.stash.opusplayer.data.AudioFormat
+import com.stash.stashwave.data.YouTubeVideo
+import com.stash.stashwave.data.YouTubeSearchResult
+import com.stash.stashwave.data.AudioFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -15,7 +15,7 @@ import java.net.URLEncoder
 class YouTubeApiService {
     
     companion object {
-        private const val API_KEY = "AIzaSyAOJ55RR8G9FH3ZdOsQGFyuOJItoW6HUOs"
+        private const val API_KEY = "AIzaSyBqWTC-S3vopTEMNTgpCalyqc_GJkUgsAg"
         private const val BASE_URL = "https://www.googleapis.com/youtube/v3"
         private const val TAG = "YouTubeApiService"
     }
@@ -280,6 +280,139 @@ class YouTubeApiService {
         }
     }
     
+    suspend fun getComments(
+        videoId: String,
+        maxResults: Int = 20,
+        pageToken: String? = null,
+        order: String = "relevance"
+): Result<com.stash.stashwave.data.YouTubeCommentsResult> = withContext(Dispatchers.IO) {
+        try {
+            val base = "$BASE_URL/commentThreads"
+            val url = buildString {
+                append(base)
+                append("?part=snippet")
+                append("&videoId=$videoId")
+                append("&maxResults=$maxResults")
+                append("&order=$order")
+                append("&textFormat=html")
+                append("&key=$API_KEY")
+                pageToken?.let { append("&pageToken=$it") }
+            }
+
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("Accept", "application/json")
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(IOException("YouTube API error: ${response.code} - ${response.message}"))
+            }
+
+            val body = response.body?.string() ?: ""
+            val result = parseCommentsResponse(body)
+            Result.success(result)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting comments", e)
+            Result.failure(e)
+        }
+    }
+
+private fun parseCommentsResponse(jsonResponse: String): com.stash.stashwave.data.YouTubeCommentsResult {
+        val json = JSONObject(jsonResponse)
+        val items = json.optJSONArray("items")
+val comments = mutableListOf<com.stash.stashwave.data.YouTubeComment>()
+        if (items != null) {
+            for (i in 0 until items.length()) {
+                val item = items.getJSONObject(i)
+                val snippet = item.getJSONObject("snippet")
+                val topLevelComment = snippet.getJSONObject("topLevelComment")
+                val cSnippet = topLevelComment.getJSONObject("snippet")
+                val authorName = cSnippet.optString("authorDisplayName", "")
+                val authorProfileImageUrl = cSnippet.optString("authorProfileImageUrl", null)
+                val textHtml = cSnippet.optString("textDisplay", "")
+                val likeCount = cSnippet.optInt("likeCount", 0)
+                val publishedAt = cSnippet.optString("publishedAt", "")
+                val replyCount = snippet.optInt("totalReplyCount", 0)
+                val commentId = topLevelComment.optString("id", null)
+                comments.add(
+com.stash.stashwave.data.YouTubeComment(
+                        authorName = authorName,
+                        authorProfileImageUrl = authorProfileImageUrl,
+                        textHtml = textHtml,
+                        likeCount = likeCount,
+                        publishedAt = publishedAt,
+                        replyCount = replyCount,
+                        commentId = commentId,
+                        parentId = null
+                    )
+                )
+            }
+        }
+        val nextPageToken = json.optString("nextPageToken", null)
+return com.stash.stashwave.data.YouTubeCommentsResult(comments, nextPageToken)
+    }
+
+    suspend fun getCommentReplies(
+        parentId: String,
+        maxResults: Int = 20,
+        pageToken: String? = null
+): Result<com.stash.stashwave.data.YouTubeCommentsResult> = withContext(Dispatchers.IO) {
+        try {
+            val base = "$BASE_URL/comments"
+            val url = buildString {
+                append(base)
+                append("?part=snippet")
+                append("&parentId=$parentId")
+                append("&maxResults=$maxResults")
+                append("&textFormat=html")
+                append("&key=$API_KEY")
+                pageToken?.let { append("&pageToken=$it") }
+            }
+            val request = Request.Builder().url(url).addHeader("Accept","application/json").build()
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext Result.failure(IOException("YouTube API error: ${response.code} - ${response.message}"))
+            val body = response.body?.string() ?: ""
+            val result = parseRepliesResponse(body, parentId)
+            Result.success(result)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting replies", e)
+            Result.failure(e)
+        }
+    }
+
+private fun parseRepliesResponse(jsonResponse: String, parentId: String): com.stash.stashwave.data.YouTubeCommentsResult {
+        val json = JSONObject(jsonResponse)
+        val items = json.optJSONArray("items")
+val comments = mutableListOf<com.stash.stashwave.data.YouTubeComment>()
+        if (items != null) {
+            for (i in 0 until items.length()) {
+                val item = items.getJSONObject(i)
+                val snippet = item.getJSONObject("snippet")
+                val authorName = snippet.optString("authorDisplayName", "")
+                val authorProfileImageUrl = snippet.optString("authorProfileImageUrl", null)
+                val textHtml = snippet.optString("textDisplay", "")
+                val likeCount = snippet.optInt("likeCount", 0)
+                val publishedAt = snippet.optString("publishedAt", "")
+                val commentId = item.optString("id", null)
+                comments.add(
+com.stash.stashwave.data.YouTubeComment(
+                        authorName = authorName,
+                        authorProfileImageUrl = authorProfileImageUrl,
+                        textHtml = textHtml,
+                        likeCount = likeCount,
+                        publishedAt = publishedAt,
+                        replyCount = 0,
+                        commentId = commentId,
+                        parentId = parentId
+                    )
+                )
+            }
+        }
+        val nextPageToken = json.optString("nextPageToken", null)
+return com.stash.stashwave.data.YouTubeCommentsResult(comments, nextPageToken)
+    }
+
     private fun formatDuration(isoDuration: String?): String? {
         if (isoDuration == null) return null
         

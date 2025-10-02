@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    
+    <!-- Inset dark shadow -->
+    <item android:top="0dp" android:left="0dp" android:right="0dp" android:bottom="0dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/shadow_inset_dark" />
+            <corners android:radius="24dp" />
+        </shape>
+    </item>
+    
+    <!-- Inset light shadow -->
+    <item android:top="4dp" android:left="4dp" android:right="4dp" android:bottom="4dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/shadow_inset_light" />
+            <corners android:radius="20dp" />
+        </shape>
+    </item>
+    
+    <!-- Content area -->
+    <item android:top="6dp" android:left="6dp" android:right="6dp" android:bottom="6dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/surface_color" />
+            <corners android:radius="18dp" />
+        </shape>
+    </item>
+    
+</layer-list>

@@ -4,24 +4,95 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
+    android:background="@color/background_color"
     android:padding="16dp">
+
+    <!-- Neomorphic Header Card -->
+    <LinearLayout
+        style="@style/NeomorphicCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="16dp">
+
+        <ImageView
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:src="@drawable/ic_favorite"
+            android:layout_marginEnd="12dp"
+            app:tint="@color/accent_color" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Liked Songs"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/searchButton"
+            style="@style/NeomorphicButton"
+            android:layout_width="48dp"
+            android:layout_height="40dp"
+            android:layout_marginEnd="8dp"
+            app:icon="@drawable/ic_search"
+            app:iconTint="@color/secondary_color"
+            app:iconSize="20dp"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp" />
+
+    </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler_view"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingTop="8dp"
         app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
 
-    <TextView
-        android:id="@+id/empty_state_text"
+    <!-- Neomorphic Empty State -->
+    <LinearLayout
+        android:id="@+id/empty_state_container"
+        style="@style/NeomorphicCard"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
+        android:orientation="vertical"
         android:gravity="center"
-        android:text="No favorite songs yet\n\nTap the heart icon on any song to add it to favorites"
-        android:textAppearance="@style/TextAppearance.StashOpus.Body"
-        android:textAlignment="center"
-        android:visibility="gone" />
+        android:padding="32dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:src="@drawable/ic_favorite"
+            android:layout_marginBottom="16dp"
+            app:tint="@color/accent_color"
+            android:alpha="0.6" />
+
+        <TextView
+            android:id="@+id/empty_state_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="No liked songs yet"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Tap the heart icon on any song to add it here"
+            android:textSize="14sp"
+            android:textColor="@color/text_secondary"
+            android:gravity="center" />
+
+    </LinearLayout>
 
 </LinearLayout>

@@ -1,4 +1,4 @@
-package com.stash.opusplayer.data
+package com.stash.stashwave.data
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -6,13 +6,13 @@ import android.database.Cursor
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.preference.PreferenceManager
-import com.stash.opusplayer.data.database.FavoriteEntity
-import com.stash.opusplayer.data.database.MusicDatabase
-import com.stash.opusplayer.data.database.PlaylistDao
-import com.stash.opusplayer.data.database.PlaylistEntity
-import com.stash.opusplayer.data.database.PlaylistTrackEntity
-import com.stash.opusplayer.data.database.PlaylistWithCount
-import com.stash.opusplayer.utils.MetadataExtractor
+import com.stash.stashwave.data.database.FavoriteEntity
+import com.stash.stashwave.data.database.MusicDatabase
+import com.stash.stashwave.data.database.PlaylistDao
+import com.stash.stashwave.data.database.PlaylistEntity
+import com.stash.stashwave.data.database.PlaylistTrackEntity
+import com.stash.stashwave.data.database.PlaylistWithCount
+import com.stash.stashwave.utils.MetadataExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -21,7 +21,7 @@ import java.io.File
 
 class MusicRepository(private val context: Context) {
     
-    private val aiTagger = com.stash.opusplayer.ai.AITagger(context)
+private val aiTagger = com.stash.stashwave.ai.AITagger(context)
     
     private val database = MusicDatabase.getDatabase(context)
     private val favoriteDao = database.favoriteDao()
@@ -172,12 +172,12 @@ private fun isValidAudioFile(path: String): Boolean {
     
     // Enhanced method to get all songs with metadata and favorites status
 suspend fun getAllSongsWithMetadata(): List<Song> = withContext(Dispatchers.IO) {
-        if (com.stash.opusplayer.utils.LibraryScanTracker.isScanInProgress()) {
+        if (com.stash.stashwave.utils.LibraryScanTracker.isScanInProgress()) {
             return@withContext emptyList()
         }
         
         try {
-            com.stash.opusplayer.utils.LibraryScanTracker.startScan("Scanning MediaStore…")
+            com.stash.stashwave.utils.LibraryScanTracker.startScan("Scanning MediaStore…")
             val baseSongs = getAllSongs()
             // For now, we'll just return songs without favorite status since Flow handling is complex
             // This will be enhanced in future updates
@@ -189,18 +189,18 @@ suspend fun getAllSongsWithMetadata(): List<Song> = withContext(Dispatchers.IO) 
                 aiTagger.enhanceSong(withFav)
             }
         } finally {
-            com.stash.opusplayer.utils.LibraryScanTracker.completeScan()
+            com.stash.stashwave.utils.LibraryScanTracker.completeScan()
         }
     }
     
     // Scan custom folders for music files
 suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
-        if (com.stash.opusplayer.utils.LibraryScanTracker.isScanInProgress()) {
+        if (com.stash.stashwave.utils.LibraryScanTracker.isScanInProgress()) {
             return@withContext emptyList()
         }
         
         try {
-            com.stash.opusplayer.utils.LibraryScanTracker.startScan("Scanning custom folders…")
+            com.stash.stashwave.utils.LibraryScanTracker.startScan("Scanning custom folders…")
             val customFolders = getCustomMusicFolders()
             val songs = mutableListOf<Song>()
             
@@ -210,7 +210,7 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
             
             songs.distinctBy { it.path } // Remove duplicates
         } finally {
-            com.stash.opusplayer.utils.LibraryScanTracker.completeScan()
+            com.stash.stashwave.utils.LibraryScanTracker.completeScan()
         }
     }
     
@@ -276,15 +276,17 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
         return favoriteDao.getAllFavorites().map { favorites ->
             favorites.mapNotNull { favorite ->
                 // Convert FavoriteEntity back to Song
-                val file = File(favorite.path)
-                if (file.exists()) {
+                val path = favorite.path
+                val isContent = path.startsWith("content://")
+                val exists = if (isContent) true else File(path).exists()
+                if (exists) {
                     Song(
                         id = favorite.songId,
                         title = favorite.title,
                         artist = favorite.artist,
                         album = favorite.album,
                         duration = 0, // Will be filled by metadata extractor
-                        path = favorite.path,
+                        path = path,
                         isFavorite = true
                     )
                 } else null
@@ -321,18 +323,101 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
 
     // AI-ish genre inference using tags or heuristics; placeholder for external APIs
     suspend fun getSongsByGenreSmart(): Map<String, List<Song>> = withContext(Dispatchers.IO) {
-        val all = getAllSongsWithMetadata()
-        val normalized = all.map { s ->
-            val g = s.genre.trim()
-            if (g.isNotEmpty()) {
-                s.copy(genre = g)
-            } else {
-                // Simple heuristic: infer from file path or album keywords
-                val inferred = inferGenreFromHeuristics(s)
-                s.copy(genre = inferred)
-            }
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        val youTube = com.stash.stashwave.network.YouTubeApiService()
+
+        fun normalizeTitle(name: String): String {
+            return name.lowercase()
+                .replace(Regex("\\(.*?\\)"), "")
+                .replace(Regex("\".*?\""), "")
+                .replace("remastered", "")
+                .replace("official video", "")
+                .replace("official audio", "")
+                .replace("lyrics", "")
+                .replace("feat.", "")
+                .replace("ft.", "")
+                .replace(Regex("[^a-z0-9 ]"), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
         }
-        normalized.groupBy { it.genre.ifBlank { "Unknown" } }
+
+        fun inferFromText(text: String): String? {
+            val t = text.lowercase()
+            val mapping = listOf(
+                "hip hop" to "Hip-Hop", "hip-hop" to "Hip-Hop", "rap" to "Hip-Hop",
+                "r&b" to "R&B", "rnb" to "R&B",
+                "pop" to "Pop",
+                "rock" to "Rock",
+                "metal" to "Metal",
+                "jazz" to "Jazz",
+                "classical" to "Classical", "symphony" to "Classical",
+                "lofi" to "Lo-Fi", "lo-fi" to "Lo-Fi",
+                "house" to "Electronic", "edm" to "Electronic", "electronic" to "Electronic",
+                "trap" to "Hip-Hop", "drill" to "Hip-Hop",
+                "indie" to "Indie",
+                "country" to "Country",
+                "blues" to "Blues",
+                "reggae" to "Reggae",
+                "afrobeat" to "Afrobeats", "afrobeats" to "Afrobeats"
+            )
+            return mapping.firstOrNull { t.contains(it.first) }?.second
+        }
+
+        val all = getAllSongsWithMetadata()
+        val result = mutableMapOf<String, MutableList<Song>>()
+
+        for (s in all) {
+            // 1) Embedded or existing genre
+            val g0 = s.genre.trim()
+            var genre = if (g0.isNotBlank()) g0 else ""
+
+            // 2) Infer from names
+            if (genre.isBlank()) {
+                genre = inferFromText("${s.displayName} ${s.albumName} ${s.artistName}") ?: ""
+            }
+
+            // 3) Cached value
+            if (genre.isBlank()) {
+                val key = "genre_cache_${stableKey(s)}"
+                genre = prefs.getString(key, "") ?: ""
+            }
+
+            // 4) YouTube metadata lookup (best-effort)
+            if (genre.isBlank()) {
+                try {
+                    val q = normalizeTitle("${s.displayName} ${s.artistName} genre")
+                    val yt = youTube.searchVideos(q, maxResults = 1).getOrNull()
+                    val vid = yt?.videos?.firstOrNull()
+                    if (vid != null) {
+                        genre = inferFromText("${vid.title} ${vid.description} ${vid.channelTitle}") ?: ""
+                    }
+                } catch (_: Exception) {}
+            }
+
+            if (genre.isBlank()) {
+                val norm = normalizeTitle(s.displayName)
+                genre = when {
+                    norm.contains("mix") || norm.contains("remix") -> "Dance"
+                    norm.contains("live") -> "Live"
+                    else -> "Unknown"
+                }
+            }
+
+            // Cache best-effort result
+            runCatching {
+                if (genre.isNotBlank() && genre != "Unknown") {
+                    val key = "genre_cache_${stableKey(s)}"
+                    prefs.edit().putString(key, genre).apply()
+                }
+            }
+
+            result.getOrPut(genre) { mutableListOf() }.add(s)
+        }
+
+        // Sort songs in each genre by normalized title to group similar names
+        return@withContext result.mapValues { (_, list) ->
+            list.sortedWith(compareBy({ normalizeTitle(it.displayName) }, { it.displayName.lowercase() }))
+        }
     }
 
     private fun inferGenreFromHeuristics(s: Song): String {
@@ -392,15 +477,15 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
 
     // Combined method to get all songs from both MediaStore and custom folders (full metadata + AI)
     suspend fun getAllSongsFromAllSources(): List<Song> = withContext(Dispatchers.IO) {
-        if (com.stash.opusplayer.utils.LibraryScanTracker.isScanInProgress()) {
+        if (com.stash.stashwave.utils.LibraryScanTracker.isScanInProgress()) {
             return@withContext emptyList()
         }
         
         try {
-            com.stash.opusplayer.utils.LibraryScanTracker.startScan("Scanning your library…")
+            com.stash.stashwave.utils.LibraryScanTracker.startScan("Scanning your library…")
             // Use fast scan first to avoid blocking
             val fast = getAllSongsFromAllSourcesFast()
-            com.stash.opusplayer.utils.LibraryScanTracker.update("Processing metadata…")
+            com.stash.stashwave.utils.LibraryScanTracker.update("Processing metadata…")
             // Then enrich each with metadata and AI
             val enriched = fast.map { s -> metadataExtractor.extractMetadata(s) }
             val ai = aiTagger.enhanceSongs(enriched)
@@ -410,15 +495,15 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
                 val key = stableKey(s)
                 if (!deduped.containsKey(key)) deduped[key] = s
             }
-            com.stash.opusplayer.utils.LibraryScanTracker.update("Finalizing…")
+            com.stash.stashwave.utils.LibraryScanTracker.update("Finalizing…")
             deduped.values.sortedBy { it.displayName }
         } finally {
-            com.stash.opusplayer.utils.LibraryScanTracker.completeScan()
+            com.stash.stashwave.utils.LibraryScanTracker.completeScan()
         }
     }
 
 private suspend fun scanDocumentTrees(): List<Song> = withContext(Dispatchers.IO) {
-        com.stash.opusplayer.utils.LibraryScanTracker.update("Scanning added folders…")
+        com.stash.stashwave.utils.LibraryScanTracker.update("Scanning added folders…")
         val result = mutableListOf<Song>()
         val trees = getCustomMusicFolderTreeUris()
         for (uriStr in trees) {

@@ -1,4 +1,4 @@
-package com.stash.opusplayer.service
+package com.stash.stashwave.service
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -22,9 +22,25 @@ class MediaActionReceiver : BroadcastReceiver() {
             when (action) {
                 "PLAY" -> controller.play()
                 "PAUSE" -> controller.pause()
-                "STOP" -> controller.stop()
+                "STOP" -> {
+                    controller.stop()
+                    controller.clearMediaItems()
+                }
                 "PREVIOUS" -> controller.seekToPrevious()
                 "NEXT" -> controller.seekToNext()
+                "REWIND" -> {
+                    val currentPos = controller.currentPosition
+                    val newPos = (currentPos - 10000).coerceAtLeast(0L)
+                    controller.seekTo(newPos)
+                }
+                "FAST_FORWARD" -> {
+                    val currentPos = controller.currentPosition
+                    val duration = controller.duration
+                    if (duration > 0) {
+                        val newPos = (currentPos + 30000).coerceAtMost(duration)
+                        controller.seekTo(newPos)
+                    }
+                }
             }
             
             MediaController.releaseFuture(controllerFuture)

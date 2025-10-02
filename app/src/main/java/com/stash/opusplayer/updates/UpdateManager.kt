@@ -1,10 +1,10 @@
-package com.stash.opusplayer.updates
+package com.stash.stashwave.updates
 
 import android.app.Activity
 import android.content.Context
 import android.widget.Toast
 import androidx.lifecycle.lifecycleScope
-import com.stash.opusplayer.data.UpdateInfo
+import com.stash.stashwave.data.UpdateInfo
 import kotlinx.coroutines.launch
 import java.io.File
 

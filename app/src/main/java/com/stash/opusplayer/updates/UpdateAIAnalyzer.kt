@@ -1,9 +1,9 @@
-package com.stash.opusplayer.updates
+package com.stash.stashwave.updates
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.stash.opusplayer.data.UpdateInfo
-import com.stash.opusplayer.data.UpdatePriority
+import com.stash.stashwave.data.UpdateInfo
+import com.stash.stashwave.data.UpdatePriority
 import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.math.min

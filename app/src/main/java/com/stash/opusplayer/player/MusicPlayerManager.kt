@@ -1,4 +1,4 @@
-package com.stash.opusplayer.player
+package com.stash.stashwave.player
 
 import android.content.ComponentName
 import android.content.Context
@@ -9,9 +9,9 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
-import com.stash.opusplayer.audio.EqualizerManager
-import com.stash.opusplayer.data.Song
-import com.stash.opusplayer.service.MusicService
+import com.stash.stashwave.audio.EqualizerManager
+import com.stash.stashwave.data.Song
+import com.stash.stashwave.service.MusicService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,6 +45,11 @@ class MusicPlayerManager(private val context: Context) {
     private val _currentIndex = MutableStateFlow(0)
     val currentIndex: StateFlow<Int> = _currentIndex.asStateFlow()
     
+    // Original playlist order (before shuffle)
+    private val _originalPlaylist = MutableStateFlow<List<Song>>(emptyList())
+    private var shuffledIndices: MutableList<Int> = mutableListOf()
+    private var shuffleCurrentIndex = 0
+    
     private val _shuffleMode = MutableStateFlow(false)
     val shuffleMode: StateFlow<Boolean> = _shuffleMode.asStateFlow()
     
@@ -54,6 +59,11 @@ class MusicPlayerManager(private val context: Context) {
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             _playbackState.value = playbackState
+            
+            // Auto-advance to next song when current ends (for shuffle mode)
+            if (playbackState == Player.STATE_ENDED && _shuffleMode.value) {
+                playNextShuffled()
+            }
         }
         
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -62,6 +72,11 @@ class MusicPlayerManager(private val context: Context) {
         
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             updateCurrentSong()
+            
+            // Handle automatic progression for shuffle mode
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && _shuffleMode.value) {
+                playNextShuffled()
+            }
         }
         
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -107,30 +122,51 @@ class MusicPlayerManager(private val context: Context) {
     fun seekTo(position: Long) { runWhenReady { it.seekTo(position) } }
     
     fun skipToNext() {
-        val currentIndex = _currentIndex.value
-        val playlist = _playlist.value
-        
-        if (currentIndex < playlist.size - 1) {
-            playFromPlaylist(currentIndex + 1)
-        } else if (_repeatMode.value == Player.REPEAT_MODE_ALL) {
-            playFromPlaylist(0)
+        if (_shuffleMode.value) {
+            playNextShuffled()
+        } else {
+            val currentIndex = _currentIndex.value
+            val playlist = _playlist.value
+            
+            if (currentIndex < playlist.size - 1) {
+                playFromPlaylist(currentIndex + 1)
+            } else if (_repeatMode.value == Player.REPEAT_MODE_ALL) {
+                playFromPlaylist(0)
+            }
         }
     }
     
     fun skipToPrevious() {
-        val currentIndex = _currentIndex.value
-        
-        if (currentIndex > 0) {
-            playFromPlaylist(currentIndex - 1)
-        } else if (_repeatMode.value == Player.REPEAT_MODE_ALL) {
-            playFromPlaylist(_playlist.value.size - 1)
+        if (_shuffleMode.value) {
+            playPreviousShuffled()
+        } else {
+            val currentIndex = _currentIndex.value
+            
+            if (currentIndex > 0) {
+                playFromPlaylist(currentIndex - 1)
+            } else if (_repeatMode.value == Player.REPEAT_MODE_ALL) {
+                playFromPlaylist(_playlist.value.size - 1)
+            }
         }
     }
     
     fun toggleShuffle() {
         val enabled = !_shuffleMode.value
-        runWhenReady { it.shuffleModeEnabled = enabled }
         _shuffleMode.value = enabled
+        
+        if (enabled) {
+            initializeShuffleIndices()
+        }
+        
+        // Save to preferences
+        try {
+            context.getSharedPreferences("settings", 0)
+                .edit()
+                .putBoolean("playback_shuffle", enabled)
+                .apply()
+        } catch (_: Exception) {}
+        
+        runWhenReady { it.shuffleModeEnabled = enabled }
     }
     
     fun setRepeatMode(repeatMode: Int) {
@@ -146,6 +182,12 @@ class MusicPlayerManager(private val context: Context) {
     
     fun setPlaylist(songs: List<Song>) {
         _playlist.value = songs
+        _originalPlaylist.value = songs
+        
+        if (_shuffleMode.value) {
+            initializeShuffleIndices()
+        }
+        
         val mediaItems = songs.map { song -> createMediaItem(song) }
         runWhenReady { it.setMediaItems(mediaItems) }
     }
@@ -248,6 +290,82 @@ class MusicPlayerManager(private val context: Context) {
         }
     }
     
+    // Shuffle helper methods
+    private fun initializeShuffleIndices() {
+        val playlist = _originalPlaylist.value
+        if (playlist.isEmpty()) return
+        
+        shuffledIndices = (0 until playlist.size).toMutableList()
+        shuffledIndices.shuffle()
+        shuffleCurrentIndex = 0
+        
+        // If currently playing, find the current song in shuffled list
+        val currentSong = _currentSong.value
+        if (currentSong != null) {
+            val currentOriginalIndex = playlist.indexOf(currentSong)
+            if (currentOriginalIndex != -1) {
+                val shuffleIndex = shuffledIndices.indexOf(currentOriginalIndex)
+                if (shuffleIndex != -1) {
+                    shuffleCurrentIndex = shuffleIndex
+                }
+            }
+        }
+    }
+    
+    private fun playNextShuffled() {
+        val playlist = _originalPlaylist.value
+        if (playlist.isEmpty()) return
+        
+        if (shuffledIndices.isEmpty()) {
+            initializeShuffleIndices()
+        }
+        
+        shuffleCurrentIndex = (shuffleCurrentIndex + 1) % shuffledIndices.size
+        
+        if (shuffleCurrentIndex == 0 && _repeatMode.value != Player.REPEAT_MODE_ALL) {
+            // End of shuffle, stop if not repeating
+            return
+        }
+        
+        val nextIndex = shuffledIndices[shuffleCurrentIndex]
+        playFromPlaylist(nextIndex)
+    }
+    
+    private fun playPreviousShuffled() {
+        val playlist = _originalPlaylist.value
+        if (playlist.isEmpty()) return
+        
+        if (shuffledIndices.isEmpty()) {
+            initializeShuffleIndices()
+        }
+        
+        shuffleCurrentIndex = if (shuffleCurrentIndex > 0) {
+            shuffleCurrentIndex - 1
+        } else {
+            shuffledIndices.size - 1
+        }
+        
+        val prevIndex = shuffledIndices[shuffleCurrentIndex]
+        playFromPlaylist(prevIndex)
+    }
+    
+    // Fast forward functionality (skip 30 seconds)
+    fun fastForward() {
+        val currentPos = getCurrentPosition()
+        val duration = getDuration()
+        if (duration > 0) {
+            val newPos = (currentPos + 30000).coerceAtMost(duration)
+            seekTo(newPos)
+        }
+    }
+    
+    // Rewind functionality (skip back 10 seconds)
+    fun rewind() {
+        val currentPos = getCurrentPosition()
+        val newPos = (currentPos - 10000).coerceAtLeast(0L)
+        seekTo(newPos)
+    }
+
     // Get current playback info
     fun getCurrentPosition(): Long = mediaController?.currentPosition ?: 0L
     fun getDuration(): Long = mediaController?.duration ?: 0L

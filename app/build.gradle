@@ -2,18 +2,18 @@ plugins {
     id 'com.android.application'
     id 'kotlin-android'
     id 'kotlin-parcelize'
-    id 'com.google.devtools.ksp' version '1.9.10-1.0.13'
+    id 'org.jetbrains.kotlin.kapt'
 }
 
 // Enable Google Play publishing plugin
 apply plugin: 'com.github.triplet.play'
 
 android {
-    namespace 'com.stash.opusplayer'
+    namespace 'com.stash.stashwave'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.stash.opusplayer"
+        applicationId "com.stash.stashwave"
         minSdk 21
         targetSdk 34
         versionCode 44
@@ -49,9 +49,10 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
-    kotlinOptions {
+kotlinOptions {
         jvmTarget = '1.8'
     }
+
     buildFeatures {
         viewBinding true
         dataBinding true
@@ -72,6 +73,7 @@ android {
     }
 }
 
+
 // Configure Gradle Play Publisher. Credentials path is provided via env var GPP_SERVICE_ACCOUNT_JSON.
 play {
     // Use AAB by default for publishing
@@ -88,6 +90,10 @@ play {
 dependencies {
     // Glide transformations for blurred backdrops, etc.
     implementation 'jp.wasabeef:glide-transformations:4.3.0'
+    // MP3 tag editing (used for embedding artwork into MP3 files)
+    implementation 'com.mpatric:mp3agic:0.9.1'
+    // Generic audio tag editing for MP4/M4A/FLAC/OGG/OPUS/WMA where supported
+    implementation 'org.jaudiotagger:jaudiotagger:2.0.1'
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.core:core-splashscreen:1.0.1'
     implementation 'androidx.appcompat:appcompat:1.6.1'
@@ -130,6 +136,9 @@ dependencies {
     // Video downloading (yt-dlp alternative for Android)
     implementation 'com.github.yausername:youtubedl-android:0.13.0'
     
+    // YouTube Player for direct streaming
+    implementation 'com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0'
+    
     // Additional HTTP client for downloads
     implementation 'com.squareup.okhttp3:okhttp:4.11.0'
     
@@ -163,7 +172,7 @@ dependencies {
     // Room database
     implementation 'androidx.room:room-runtime:2.6.1'
     implementation 'androidx.room:room-ktx:2.6.1'
-    ksp 'androidx.room:room-compiler:2.6.1'
+    kapt 'androidx.room:room-compiler:2.6.1'
     
     // Lifecycle components
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'

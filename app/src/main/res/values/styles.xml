@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Neomorphic Card Style -->
+    <style name="NeomorphicCard">
+        <item name="android:background">@drawable/neomorphic_card_background</item>
+        <item name="android:padding">16dp</item>
+        <item name="android:elevation">0dp</item>
+    </style>
+
+    <!-- Neomorphic Button Style -->
+    <style name="NeomorphicButton" parent="Widget.Material3.Button">
+        <item name="android:background">@drawable/neomorphic_button_background</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:elevation">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="backgroundTint">@null</item>
+    </style>
+
+    <!-- Neomorphic Accent Button Style -->
+    <style name="NeomorphicAccentButton" parent="Widget.Material3.Button">
+        <item name="android:background">@drawable/neomorphic_accent_button</item>
+        <item name="android:textColor">@color/white</item>
+        <item name="android:elevation">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="backgroundTint">@null</item>
+    </style>
+
+    <!-- Circular ImageView Style -->
+    <style name="CircularImageView" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">50%</item>
+    </style>
+
+    <!-- Neomorphic Mini Player Style -->
+    <style name="NeomorphicMiniPlayer">
+        <item name="android:background">@drawable/neomorphic_mini_player_background</item>
+        <item name="android:padding">12dp</item>
+        <item name="android:elevation">0dp</item>
+    </style>
+
+    <!-- Neomorphic Now Playing Style -->
+    <style name="NeomorphicNowPlaying">
+        <item name="android:background">@drawable/neomorphic_now_playing_background</item>
+        <item name="android:padding">24dp</item>
+        <item name="android:elevation">0dp</item>
+    </style>
+
+    <!-- Neomorphic Album Art Container -->
+    <style name="NeomorphicAlbumArt">
+        <item name="android:background">@drawable/neomorphic_album_art_background</item>
+        <item name="android:padding">8dp</item>
+        <item name="android:elevation">0dp</item>
+    </style>
+
+    <!-- Large Neomorphic Button Style -->
+    <style name="NeomorphicButton.Large" parent="NeomorphicButton">
+        <item name="android:padding">8dp</item>
+    </style>
+
+    <!-- Rounded ImageView Style -->
+    <style name="RoundedImageView" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">16dp</item>
+    </style>
+
+</resources>

@@ -1,4 +1,4 @@
-package com.stash.opusplayer.ui.fragments
+package com.stash.stashwave.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -11,9 +11,9 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.core.os.bundleOf
 import com.google.common.util.concurrent.MoreExecutors
-import com.stash.opusplayer.audio.EqualizerManager
-import com.stash.opusplayer.audio.EqualizerPreset
-import com.stash.opusplayer.databinding.FragmentEqualizerBinding
+import com.stash.stashwave.audio.EqualizerManager
+import com.stash.stashwave.audio.EqualizerPreset
+import com.stash.stashwave.databinding.FragmentEqualizerBinding
 import kotlinx.coroutines.launch
 
 class EqualizerFragment : Fragment() {
@@ -41,6 +41,7 @@ class EqualizerFragment : Fragment() {
         initializeEqualizer()
         connectToMediaController()
         setupUI()
+        loadPrefsIntoUI()
         setupListeners()
     }
     
@@ -63,7 +64,7 @@ class EqualizerFragment : Fragment() {
     }
     
     private fun connectToMediaController() {
-        val token = SessionToken(requireContext(), android.content.ComponentName(requireContext(), com.stash.opusplayer.service.MusicService::class.java))
+val token = SessionToken(requireContext(), android.content.ComponentName(requireContext(), com.stash.stashwave.service.MusicService::class.java))
         val future = MediaController.Builder(requireContext(), token).buildAsync()
         future.addListener({
             mediaController = future.get()
@@ -148,6 +149,7 @@ class EqualizerFragment : Fragment() {
     }
     
     private fun setupEffectsControls() {
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
         // Bass Boost
         binding.bassBoostSlider.max = 1000
         binding.bassBoostSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -238,7 +240,29 @@ class EqualizerFragment : Fragment() {
                 }
             }
         }
-    }*/
+    }
+    */
+    
+    private fun loadPrefsIntoUI() {
+        try {
+            val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+            val enabled = prefs.getBoolean("equalizer_enabled", false)
+            binding.equalizerSwitch.isChecked = enabled
+            updateBandControlsEnabled(enabled)
+
+val presetName = prefs.getString("equalizer_preset", com.stash.stashwave.audio.EqualizerPreset.NORMAL.name) ?: com.stash.stashwave.audio.EqualizerPreset.NORMAL.name
+val index = com.stash.stashwave.audio.EqualizerPreset.values().indexOfFirst { it.name == presetName }.coerceAtLeast(0)
+            binding.presetSpinner.setSelection(index)
+
+            val bass = prefs.getInt("bass_boost_strength", 0)
+            binding.bassBoostSlider.progress = bass
+            binding.bassBoostValue.text = "${bass / 10}%"
+
+            val virt = prefs.getInt("virtualizer_strength", 0)
+            binding.virtualizerSlider.progress = virt
+            binding.virtualizerValue.text = "${virt / 10}%"
+        } catch (_: Exception) {}
+    }
     
     private fun updateBandSlidersFromEqualizer() {
         lifecycleScope.launch {

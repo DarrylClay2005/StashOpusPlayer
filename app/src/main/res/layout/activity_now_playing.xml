@@ -38,59 +38,61 @@
         android:background="@drawable/gradient_background"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- Back button -->
+    <!-- Neomorphic Back button -->
     <ImageButton
         android:id="@+id/backButton"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="16dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
+        style="@style/NeomorphicButton"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginStart="20dp"
+        android:layout_marginTop="20dp"
         android:contentDescription="@string/back"
         android:src="@drawable/ic_arrow_back_24"
         android:tint="@color/text_primary"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/statusBarGradient" />
 
-    <!-- Options menu -->
+    <!-- Neomorphic Options menu -->
     <ImageButton
         android:id="@+id/menuButton"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_marginTop="16dp"
-        android:layout_marginEnd="16dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
+        style="@style/NeomorphicButton"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="20dp"
+        android:layout_marginEnd="20dp"
         android:contentDescription="@string/menu"
         android:src="@drawable/ic_more_vert_24"
         android:tint="@color/text_primary"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toBottomOf="@id/statusBarGradient" />
 
-    <!-- Album artwork -->
-    <androidx.cardview.widget.CardView
+    <!-- Neomorphic Album artwork -->
+    <FrameLayout
         android:id="@+id/albumArtCard"
+        style="@style/NeomorphicAlbumArt"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginStart="32dp"
-        android:layout_marginTop="24dp"
-        android:layout_marginEnd="32dp"
-        app:cardCornerRadius="12dp"
-        app:cardElevation="8dp"
+        android:layout_marginStart="40dp"
+        android:layout_marginTop="32dp"
+        android:layout_marginEnd="40dp"
         app:layout_constraintDimensionRatio="1:1"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/backButton">
 
-        <ImageView
+        <com.google.android.material.imageview.ShapeableImageView
             android:id="@+id/albumArtwork"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
+            android:layout_margin="8dp"
             android:contentDescription="@string/album_artwork"
             android:scaleType="centerCrop"
+            android:background="@drawable/circular_background"
             android:src="@drawable/ic_music_note"
+            app:shapeAppearanceOverlay="@style/RoundedImageView"
             tools:src="@drawable/ic_music_note" />
 
-    </androidx.cardview.widget.CardView>
+    </FrameLayout>
 
     <!-- Song info container -->
     <LinearLayout
@@ -164,12 +166,12 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/songInfoContainer">
 
-        <!-- Waveform progress (primary) -->
-        <com.stash.opusplayer.ui.widgets.WaveformProgressView
-            android:id="@+id/waveformView"
+        <!-- Real-time Synth Wave visualization -->
+        <com.stash.stashwave.ui.widgets.SynthWaveView
+            android:id="@+id/synthWaveView"
             android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:layout_marginTop="4dp" />
+            android:layout_height="80dp"
+            android:layout_marginTop="8dp" />
 
         <!-- Legacy SeekBar (hidden, kept for compatibility) -->
         <SeekBar
@@ -226,13 +228,12 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/progressContainer">
 
-        <!-- Shuffle button -->
+        <!-- Neomorphic Shuffle button -->
         <ImageButton
             android:id="@+id/shuffleButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:alpha="0.7"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            style="@style/NeomorphicButton"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
             android:contentDescription="@string/shuffle"
             android:src="@drawable/ic_shuffle"
             android:tint="@color/text_primary" />
@@ -242,34 +243,34 @@
             android:layout_height="1dp"
             android:layout_weight="1" />
 
-        <!-- Previous button -->
+        <!-- Neomorphic Previous button -->
         <ImageButton
             android:id="@+id/previousButton"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            style="@style/NeomorphicButton.Large"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
             android:contentDescription="@string/previous"
             android:src="@drawable/ic_skip_previous_24"
             android:tint="@color/text_primary" />
 
-        <!-- Play/Pause button -->
-        <com.google.android.material.floatingactionbutton.FloatingActionButton
+        <!-- Neomorphic Play/Pause button -->
+        <ImageButton
             android:id="@+id/playPauseButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            style="@style/NeomorphicAccentButton"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
             android:layout_marginStart="16dp"
             android:layout_marginEnd="16dp"
             android:contentDescription="@string/play_pause"
             android:src="@drawable/ic_play_arrow_24"
-            app:backgroundTint="@color/accent_color"
-            app:tint="@android:color/white" />
+            android:tint="@color/white" />
 
-        <!-- Next button -->
+        <!-- Neomorphic Next button -->
         <ImageButton
             android:id="@+id/nextButton"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            style="@style/NeomorphicButton.Large"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
             android:contentDescription="@string/next"
             android:src="@drawable/ic_skip_next_24"
             android:tint="@color/text_primary" />
@@ -279,13 +280,12 @@
             android:layout_height="1dp"
             android:layout_weight="1" />
 
-        <!-- Repeat button -->
+        <!-- Neomorphic Repeat button -->
         <ImageButton
             android:id="@+id/repeatButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:alpha="0.7"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            style="@style/NeomorphicButton"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
             android:contentDescription="@string/repeat"
             android:src="@drawable/ic_repeat"
             android:tint="@color/text_primary" />
@@ -321,13 +321,12 @@
                 android:gravity="center"
                 android:orientation="horizontal">
 
-                <!-- Favorite button -->
+                <!-- Neomorphic Favorite button -->
                 <ImageButton
                     android:id="@+id/favoriteButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:alpha="0.7"
-                    android:background="?attr/selectableItemBackgroundBorderless"
+                    style="@style/NeomorphicButton"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
                     android:contentDescription="@string/favorite"
                     android:src="@drawable/ic_favorite_border"
                     android:tint="@color/text_primary" />
@@ -337,13 +336,12 @@
                     android:layout_height="1dp"
                     android:layout_weight="1" />
 
-                <!-- Queue button -->
+                <!-- Neomorphic Queue button -->
                 <ImageButton
                     android:id="@+id/queueButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:alpha="0.7"
-                    android:background="?attr/selectableItemBackgroundBorderless"
+                    style="@style/NeomorphicButton"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
                     android:contentDescription="@string/queue"
                     android:src="@drawable/ic_queue_music"
                     android:tint="@color/text_primary" />
@@ -353,13 +351,27 @@
                     android:layout_height="1dp"
                     android:layout_weight="1" />
 
-                <!-- Share button -->
+                <!-- Neomorphic Fast Forward button -->
+                <ImageButton
+                    android:id="@+id/fastForwardButton"
+                    style="@style/NeomorphicButton"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:contentDescription="Fast Forward 30s"
+                    android:src="@drawable/ic_forward_30_24"
+                    android:tint="@color/text_primary" />
+
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <!-- Neomorphic Share button -->
                 <ImageButton
                     android:id="@+id/shareButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:alpha="0.7"
-                    android:background="?attr/selectableItemBackgroundBorderless"
+                    style="@style/NeomorphicButton"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
                     android:contentDescription="@string/share"
                     android:src="@drawable/ic_share_24"
                     android:tint="@color/text_primary" />

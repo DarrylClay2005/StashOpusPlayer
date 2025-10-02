@@ -1,4 +1,4 @@
-package com.stash.opusplayer.ui
+package com.stash.stashwave.ui
 
 import android.Manifest
 import android.content.Intent
@@ -23,24 +23,24 @@ import androidx.appcompat.app.AlertDialog
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import com.bumptech.glide.Glide
-import com.stash.opusplayer.BuildConfig
+import com.stash.stashwave.BuildConfig
 import com.google.android.material.navigation.NavigationView
 import com.karumi.dexter.Dexter
 import com.karumi.dexter.MultiplePermissionsReport
 import com.karumi.dexter.PermissionToken
 import com.karumi.dexter.listener.PermissionRequest
 import com.karumi.dexter.listener.multi.MultiplePermissionsListener
-import com.stash.opusplayer.R
-import com.stash.opusplayer.databinding.ActivityMainBinding
-import com.stash.opusplayer.ui.fragments.MusicLibraryFragment
-import com.stash.opusplayer.ui.fragments.EqualizerFragment
-import com.stash.opusplayer.ui.fragments.SettingsFragment
-import com.stash.opusplayer.ui.fragments.PlaylistsFragment
-import com.stash.opusplayer.ui.fragments.YouTubeSearchFragment
-import com.stash.opusplayer.utils.PermissionUtils
-import com.stash.opusplayer.updates.UpdateManager
-import com.stash.opusplayer.player.MusicPlayerManager
-import com.stash.opusplayer.data.Song
+import com.stash.stashwave.R
+import com.stash.stashwave.databinding.ActivityMainBinding
+import com.stash.stashwave.ui.fragments.MusicLibraryFragment
+import com.stash.stashwave.ui.fragments.EqualizerFragment
+import com.stash.stashwave.ui.fragments.SettingsFragment
+import com.stash.stashwave.ui.fragments.PlaylistsFragment
+import com.stash.stashwave.ui.fragments.YouTubeSearchFragment
+import com.stash.stashwave.utils.PermissionUtils
+import com.stash.stashwave.updates.UpdateManager
+import com.stash.stashwave.player.MusicPlayerManager
+import com.stash.stashwave.data.Song
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
     
@@ -77,27 +77,27 @@ installSplashScreen()
         requestNotificationPermissionIfNeeded()
 
         // Observe image download tracker to show top banner
-lifecycleScope.launch {
+        lifecycleScope.launch {
             repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-            com.stash.opusplayer.utils.ImageDownloadTracker.active.collect { count ->
-                val banner = findViewById<android.view.View>(com.stash.opusplayer.R.id.download_banner)
-                val text = findViewById<android.widget.TextView>(com.stash.opusplayer.R.id.download_text)
-                if (count > 0) {
-                    banner.visibility = android.view.View.VISIBLE
-                    text.text = "Downloading images… ($count)"
-                } else {
-                    banner.visibility = android.view.View.GONE
+                com.stash.stashwave.utils.ImageDownloadTracker.active.collect { count ->
+                    val banner = findViewById<android.view.View>(com.stash.stashwave.R.id.download_banner)
+                    val text = findViewById<android.widget.TextView>(com.stash.stashwave.R.id.download_text)
+                    if (count > 0) {
+                        banner.visibility = android.view.View.VISIBLE
+                        text.text = "Downloading images… ($count)"
+                    } else {
+                        banner.visibility = android.view.View.GONE
+                    }
                 }
             }
-        }
         }
 
         // Observe library scanning status
         lifecycleScope.launch {
             repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-                com.stash.opusplayer.utils.LibraryScanTracker.status.collect { msg ->
-                    val banner = findViewById<android.view.View>(com.stash.opusplayer.R.id.scanning_banner)
-                    val text = findViewById<android.widget.TextView>(com.stash.opusplayer.R.id.scanning_text)
+                com.stash.stashwave.utils.LibraryScanTracker.status.collect { msg ->
+                    val banner = findViewById<android.view.View>(com.stash.stashwave.R.id.scanning_banner)
+                    val text = findViewById<android.widget.TextView>(com.stash.stashwave.R.id.scanning_text)
                     if (msg.isNotBlank()) {
                         banner.visibility = android.view.View.VISIBLE
                         text.text = msg
@@ -153,18 +153,18 @@ lifecycleScope.launch {
                     supportActionBar?.title = getString(R.string.menu_music_library)
                     true
                 }
-                R.id.nav_artists -> {
-                    loadFragment(com.stash.opusplayer.ui.fragments.ArtistsFragment())
-                    supportActionBar?.title = getString(R.string.menu_artists)
+                R.id.nav_liked -> {
+loadFragment(com.stash.stashwave.ui.fragments.FavoritesFragment())
+                    supportActionBar?.title = "Liked Songs"
                     true
                 }
                 R.id.nav_genres -> {
-                    loadFragment(com.stash.opusplayer.ui.fragments.GenresFragment())
+loadFragment(com.stash.stashwave.ui.fragments.GenresFragment())
                     supportActionBar?.title = getString(R.string.menu_genres)
                     true
                 }
                 R.id.nav_folders -> {
-                    loadFragment(com.stash.opusplayer.ui.fragments.FoldersFragment())
+loadFragment(com.stash.stashwave.ui.fragments.FoldersFragment())
                     supportActionBar?.title = getString(R.string.menu_folders)
                     true
                 }
@@ -381,8 +381,8 @@ Check for updates anytime from Settings.""")
         }
     }
     
-    fun addToPlaylist(song: com.stash.opusplayer.data.Song) {
-        val repo = com.stash.opusplayer.data.MusicRepository(this)
+fun addToPlaylist(song: com.stash.stashwave.data.Song) {
+val repo = com.stash.stashwave.data.MusicRepository(this)
         lifecycleScope.launch {
             // Fetch current playlists
             val first = repo.getPlaylists().first()
@@ -409,7 +409,7 @@ Check for updates anytime from Settings.""")
         }
     }
 
-    private fun promptCreatePlaylistAndAdd(repo: com.stash.opusplayer.data.MusicRepository, song: com.stash.opusplayer.data.Song) {
+private fun promptCreatePlaylistAndAdd(repo: com.stash.stashwave.data.MusicRepository, song: com.stash.stashwave.data.Song) {
         val edit = android.widget.EditText(this)
         edit.hint = "Playlist name"
         androidx.appcompat.app.AlertDialog.Builder(this)
@@ -429,16 +429,21 @@ Check for updates anytime from Settings.""")
             .show()
     }
     
-    fun toggleFavorite(song: com.stash.opusplayer.data.Song) {
-        // TODO: Implement favorite toggle
+fun toggleFavorite(song: com.stash.stashwave.data.Song) {
         lifecycleScope.launch {
-            val repository = com.stash.opusplayer.data.MusicRepository(this@MainActivity)
-            if (song.isFavorite) {
-                repository.removeFromFavorites(song.id)
-                Toast.makeText(this@MainActivity, "Removed from favorites", Toast.LENGTH_SHORT).show()
-            } else {
-                repository.addToFavorites(song)
-                Toast.makeText(this@MainActivity, "Added to favorites", Toast.LENGTH_SHORT).show()
+            try {
+val repository = com.stash.stashwave.data.MusicRepository(this@MainActivity)
+                val isFavorite = repository.isFavorite(song.id)
+                
+                if (isFavorite) {
+                    repository.removeFromFavorites(song.id)
+                    Toast.makeText(this@MainActivity, "💔 Removed from favorites", Toast.LENGTH_SHORT).show()
+                } else {
+                    repository.addToFavorites(song)
+                    Toast.makeText(this@MainActivity, "❤️ Added to favorites", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Error updating favorites: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }

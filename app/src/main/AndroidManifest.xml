@@ -2,6 +2,29 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <queries>
+        <!-- Seal packages (preferred external downloader) -->
+        <package android:name="com.junkfood.seal" />
+        <package android:name="com.junkfood.seal.beta" />
+        <package android:name="com.junkfood.seal.debug" />
+
+        <!-- Allow resolving handlers for YouTube links -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" android:host="www.youtube.com" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" android:host="m.youtube.com" />
+        </intent>
+
+        <!-- Allow resolving share intents for text URLs -->
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
+
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" 
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
@@ -18,20 +41,20 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:targetApi="33" />
 
     <application
-        android:name=".StashOpusApplication"
+        android:name=".StashWaveApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:theme="@style/Theme.StashOpusPlayer"
+        android:theme="@style/Theme.StashWavePlayer"
         android:usesCleartextTraffic="true"
         tools:targetApi="31">
         
 <activity
             android:name=".ui.MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.StashOpusPlayer.Splash">
+            android:theme="@style/Theme.StashWavePlayer.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -48,7 +71,13 @@
         <activity
             android:name=".ui.NowPlayingActivity"
             android:exported="false"
-            android:theme="@style/Theme.StashOpusPlayer" />
+            android:theme="@style/Theme.StashWavePlayer" />
+        
+        <activity
+            android:name=".ui.YouTubeStreamingActivity"
+            android:exported="false"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:theme="@style/Theme.StashWavePlayer" />
         
         <receiver
             android:name=".service.MediaActionReceiver"

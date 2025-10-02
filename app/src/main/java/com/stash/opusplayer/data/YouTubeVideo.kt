@@ -1,4 +1,4 @@
-package com.stash.opusplayer.data
+package com.stash.stashwave.data
 
 import android.os.Parcelable
 import kotlinx.parcelize.Parcelize
@@ -19,6 +19,17 @@ data class YouTubeVideo(
 ) : Parcelable {
     val formattedUrl: String
         get() = "https://www.youtube.com/watch?v=$id"
+        
+    // Compatibility property for streaming activity
+    val thumbnails: List<YouTubeThumbnail>
+        get() = listOfNotNull(
+            thumbnailUrl.takeIf { it.isNotEmpty() }?.let { 
+                YouTubeThumbnail(it, 320, 180) 
+            },
+            highResThumbnailUrl?.takeIf { it.isNotEmpty() }?.let { 
+                YouTubeThumbnail(it, 1280, 720) 
+            }
+        )
 }
 
 @Parcelize
@@ -26,6 +37,13 @@ data class YouTubeSearchResult(
     val videos: List<YouTubeVideo>,
     val nextPageToken: String?,
     val totalResults: Int
+) : Parcelable
+
+@Parcelize
+data class YouTubeThumbnail(
+    val url: String,
+    val width: Int,
+    val height: Int
 ) : Parcelable
 
 data class DownloadProgress(

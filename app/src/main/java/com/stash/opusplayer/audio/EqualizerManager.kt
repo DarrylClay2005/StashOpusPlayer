@@ -1,10 +1,13 @@
-package com.stash.opusplayer.audio
+package com.stash.stashwave.audio
 
 import android.content.Context
 import android.content.SharedPreferences
 import android.media.audiofx.Equalizer
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Virtualizer
+import android.media.audiofx.PresetReverb
+import android.media.audiofx.LoudnessEnhancer
+import android.media.audiofx.EnvironmentalReverb
 import android.util.Log
 import androidx.preference.PreferenceManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +22,10 @@ class EqualizerManager(private val context: Context) {
         private const val PREF_EQ_PRESET = "equalizer_preset"
         private const val PREF_BASS_BOOST = "bass_boost_strength"
         private const val PREF_VIRTUALIZER = "virtualizer_strength"
+        private const val PREF_REVERB = "reverb_preset"
+        private const val PREF_LOUDNESS_ENHANCER = "loudness_enhancer_gain"
+        private const val PREF_ENV_REVERB_ROOM_SIZE = "env_reverb_room_size"
+        private const val PREF_ENV_REVERB_DECAY_TIME = "env_reverb_decay_time"
         private const val PREF_CUSTOM_BANDS = "custom_eq_bands"
     }
     
@@ -27,6 +34,9 @@ class EqualizerManager(private val context: Context) {
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
     private var virtualizer: Virtualizer? = null
+    private var presetReverb: PresetReverb? = null
+    private var loudnessEnhancer: LoudnessEnhancer? = null
+    private var environmentalReverb: EnvironmentalReverb? = null
     
     private val _isEnabled = MutableStateFlow(false)
     val isEnabled: StateFlow<Boolean> = _isEnabled.asStateFlow()
@@ -42,6 +52,18 @@ class EqualizerManager(private val context: Context) {
     
     private val _virtualizerLevel = MutableStateFlow(0)
     val virtualizerLevel: StateFlow<Int> = _virtualizerLevel.asStateFlow()
+    
+    private val _reverbPreset = MutableStateFlow(0)
+    val reverbPreset: StateFlow<Int> = _reverbPreset.asStateFlow()
+    
+    private val _loudnessGain = MutableStateFlow(0)
+    val loudnessGain: StateFlow<Int> = _loudnessGain.asStateFlow()
+    
+    private val _envReverbRoomSize = MutableStateFlow(0)
+    val envReverbRoomSize: StateFlow<Int> = _envReverbRoomSize.asStateFlow()
+    
+    private val _envReverbDecayTime = MutableStateFlow(0)
+    val envReverbDecayTime: StateFlow<Int> = _envReverbDecayTime.asStateFlow()
     
     fun initialize(audioSessionId: Int) {
         try {
@@ -63,6 +85,34 @@ class EqualizerManager(private val context: Context) {
                 setStrength(prefs.getInt(PREF_VIRTUALIZER, 0).toShort())
             }
             
+            presetReverb = PresetReverb(0, audioSessionId).apply {
+                enabled = prefs.getBoolean(PREF_EQ_ENABLED, false)
+                preset = prefs.getInt(PREF_REVERB, PresetReverb.PRESET_NONE.toInt()).toShort()
+            }
+            
+            // Initialize LoudnessEnhancer for high-resolution and super bass effects
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+                try {
+                    loudnessEnhancer = LoudnessEnhancer(audioSessionId).apply {
+                        enabled = prefs.getBoolean(PREF_EQ_ENABLED, false)
+                        setTargetGain(prefs.getInt(PREF_LOUDNESS_ENHANCER, 0))
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "LoudnessEnhancer not supported on this device", e)
+                }
+            }
+            
+            // Initialize EnvironmentalReverb for advanced reverb effects
+            try {
+                environmentalReverb = EnvironmentalReverb(0, audioSessionId).apply {
+                    enabled = prefs.getBoolean(PREF_EQ_ENABLED, false)
+                    setRoomLevel(prefs.getInt(PREF_ENV_REVERB_ROOM_SIZE, 0).toShort())
+                    decayTime = prefs.getInt(PREF_ENV_REVERB_DECAY_TIME, 1000)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "EnvironmentalReverb not supported on this device", e)
+            }
+            
             loadSettings()
             updateStateFlows()
             
@@ -76,10 +126,16 @@ class EqualizerManager(private val context: Context) {
             equalizer?.release()
             bassBoost?.release()
             virtualizer?.release()
+            presetReverb?.release()
+            loudnessEnhancer?.release()
+            environmentalReverb?.release()
             
             equalizer = null
             bassBoost = null
             virtualizer = null
+            presetReverb = null
+            loudnessEnhancer = null
+            environmentalReverb = null
         } catch (e: Exception) {
             Log.e(TAG, "Error releasing equalizer", e)
         }
@@ -90,6 +146,9 @@ class EqualizerManager(private val context: Context) {
             equalizer?.enabled = enabled
             bassBoost?.enabled = enabled
             virtualizer?.enabled = enabled
+            presetReverb?.enabled = enabled
+            loudnessEnhancer?.enabled = enabled
+            environmentalReverb?.enabled = enabled
             
             _isEnabled.value = enabled
             prefs.edit().putBoolean(PREF_EQ_ENABLED, enabled).apply()
@@ -116,6 +175,18 @@ class EqualizerManager(private val context: Context) {
                     EqualizerPreset.METAL -> applyMetalPreset(eq)
                     EqualizerPreset.BASS_BOOST -> applyBassBoostPreset(eq)
                     EqualizerPreset.VOCAL -> applyVocalPreset(eq)
+                    EqualizerPreset.SURROUND_3D -> applySurround3DPreset(eq)
+                    EqualizerPreset.CONCERT_HALL -> applyConcertHallPreset(eq)
+                    EqualizerPreset.STADIUM -> applyStadiumPreset(eq)
+                    EqualizerPreset.ACOUSTIC -> applyAcousticPreset(eq)
+                    EqualizerPreset.ELECTRONIC -> applyElectronicPreset(eq)
+                    EqualizerPreset.LOUNGE -> applyLoungePreset(eq)
+                    EqualizerPreset.SUPER_BASS_BOOST -> applySuperBassBoostPreset(eq)
+                    EqualizerPreset.SUPER_REVERB -> applySuperReverbPreset(eq)
+                    EqualizerPreset.HIGH_RESOLUTION -> applyHighResolutionPreset(eq)
+                    EqualizerPreset.LOFI -> applyLoFiPreset(eq)
+                    EqualizerPreset.AUTOTUNE -> applyAutotunePreset(eq)
+                    EqualizerPreset.FAN_EFFECT -> applyFanEffectPreset(eq)
                     EqualizerPreset.CUSTOM -> loadCustomBands(eq)
                 }
                 
@@ -166,6 +237,45 @@ class EqualizerManager(private val context: Context) {
         }
     }
     
+    fun setReverbPreset(preset: Int) {
+        try {
+            presetReverb?.preset = preset.toShort()
+            _reverbPreset.value = preset
+            prefs.edit().putInt(PREF_REVERB, preset).apply()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting reverb preset", e)
+        }
+    }
+    
+    fun setLoudnessGain(gain: Int) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+                loudnessEnhancer?.setTargetGain(gain)
+                _loudnessGain.value = gain
+                prefs.edit().putInt(PREF_LOUDNESS_ENHANCER, gain).apply()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting loudness gain", e)
+        }
+    }
+    
+    fun setEnvironmentalReverb(roomSize: Int, decayTime: Int) {
+        try {
+            environmentalReverb?.let { reverb ->
+                reverb.setRoomLevel(roomSize.toShort())
+                reverb.decayTime = decayTime
+                _envReverbRoomSize.value = roomSize
+                _envReverbDecayTime.value = decayTime
+                prefs.edit()
+                    .putInt(PREF_ENV_REVERB_ROOM_SIZE, roomSize)
+                    .putInt(PREF_ENV_REVERB_DECAY_TIME, decayTime)
+                    .apply()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting environmental reverb", e)
+        }
+    }
+    
     fun getBandFrequency(band: Int): Int {
         return try {
             equalizer?.getCenterFreq(band.toShort())?.div(1000) ?: 0
@@ -206,6 +316,12 @@ class EqualizerManager(private val context: Context) {
         setPreset(preset)
         setBassBoost(prefs.getInt(PREF_BASS_BOOST, 0))
         setVirtualizer(prefs.getInt(PREF_VIRTUALIZER, 0))
+        setReverbPreset(prefs.getInt(PREF_REVERB, PresetReverb.PRESET_NONE.toInt()))
+        setLoudnessGain(prefs.getInt(PREF_LOUDNESS_ENHANCER, 0))
+        setEnvironmentalReverb(
+            prefs.getInt(PREF_ENV_REVERB_ROOM_SIZE, 0),
+            prefs.getInt(PREF_ENV_REVERB_DECAY_TIME, 1000)
+        )
     }
     
     private fun updateStateFlows() {
@@ -220,6 +336,21 @@ class EqualizerManager(private val context: Context) {
         
         virtualizer?.let { v ->
             _virtualizerLevel.value = v.roundedStrength.toInt()
+        }
+        
+        presetReverb?.let { r ->
+            _reverbPreset.value = r.preset.toInt()
+        }
+        
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+            loudnessEnhancer?.let { le ->
+                _loudnessGain.value = prefs.getInt(PREF_LOUDNESS_ENHANCER, 0)
+            }
+        }
+        
+        environmentalReverb?.let { er ->
+            _envReverbRoomSize.value = er.getRoomLevel().toInt()
+            _envReverbDecayTime.value = er.decayTime
         }
     }
     
@@ -274,6 +405,105 @@ class EqualizerManager(private val context: Context) {
         applyLevels(eq, levels)
     }
     
+    private fun applySurround3DPreset(eq: Equalizer) {
+        // Enhance spatial frequencies and add depth
+        val levels = intArrayOf(300, 200, 100, 300, 500, 600, 700, 800, 600, 400)
+        applyLevels(eq, levels)
+        // Enable virtualizer for 3D effect
+        setVirtualizer(800)
+    }
+    
+    private fun applyConcertHallPreset(eq: Equalizer) {
+        // Simulate concert hall acoustics with enhanced reverb
+        val levels = intArrayOf(200, 300, 100, 200, 300, 400, 500, 400, 300, 200)
+        applyLevels(eq, levels)
+        setVirtualizer(600)
+    }
+    
+    private fun applyStadiumPreset(eq: Equalizer) {
+        // Large venue sound with powerful bass and clear highs
+        val levels = intArrayOf(800, 600, 400, 200, 100, 200, 400, 600, 800, 900)
+        applyLevels(eq, levels)
+        setBassBoost(700)
+        setVirtualizer(500)
+    }
+    
+    private fun applyAcousticPreset(eq: Equalizer) {
+        // Natural acoustic sound with warm mids
+        val levels = intArrayOf(300, 400, 300, 400, 500, 400, 300, 200, 100, 100)
+        applyLevels(eq, levels)
+        setVirtualizer(300)
+    }
+    
+    private fun applyElectronicPreset(eq: Equalizer) {
+        // Electronic music with enhanced bass and treble
+        val levels = intArrayOf(1000, 800, 600, 200, 100, 200, 600, 800, 1000, 1100)
+        applyLevels(eq, levels)
+        setBassBoost(800)
+        setVirtualizer(700)
+    }
+    
+    private fun applyLoungePreset(eq: Equalizer) {
+        // Smooth, relaxed sound for ambient music
+        val levels = intArrayOf(200, 300, 400, 500, 400, 300, 200, 100, 0, -100)
+        applyLevels(eq, levels)
+        setVirtualizer(400)
+    }
+    
+    private fun applySuperBassBoostPreset(eq: Equalizer) {
+        // Extreme bass enhancement with sub-bass focus
+        val levels = intArrayOf(1500, 1200, 800, 400, 200, 100, 0, 0, 200, 400)
+        applyLevels(eq, levels)
+        setBassBoost(1000) // Maximum bass boost
+        setLoudnessGain(800) // Enhanced loudness for impact
+        setVirtualizer(600)
+    }
+    
+    private fun applySuperReverbPreset(eq: Equalizer) {
+        // Cathedral-like reverb with spatial enhancement
+        val levels = intArrayOf(400, 300, 200, 400, 600, 700, 600, 500, 400, 300)
+        applyLevels(eq, levels)
+        setReverbPreset(PresetReverb.PRESET_LARGEHALL.toInt())
+        setEnvironmentalReverb(800, 5000) // Large room, long decay
+        setVirtualizer(900)
+    }
+    
+    private fun applyHighResolutionPreset(eq: Equalizer) {
+        // Audiophile-grade clarity and detail enhancement
+        val levels = intArrayOf(100, 200, 300, 400, 500, 600, 700, 800, 900, 1000)
+        applyLevels(eq, levels)
+        setLoudnessGain(600) // Enhance dynamic range
+        setVirtualizer(700) // Spatial clarity
+        setBassBoost(300) // Controlled bass
+    }
+    
+    private fun applyLoFiPreset(eq: Equalizer) {
+        // Vintage lo-fi sound with warm, compressed characteristics
+        val levels = intArrayOf(600, 400, 200, 300, 400, 200, -200, -400, -600, -800)
+        applyLevels(eq, levels)
+        setBassBoost(600) // Warm bass
+        setVirtualizer(200) // Reduced spatial to simulate analog
+        setReverbPreset(PresetReverb.PRESET_SMALLROOM.toInt()) // Intimate space
+    }
+    
+    private fun applyAutotunePreset(eq: Equalizer) {
+        // Vocal enhancement with harmonic emphasis
+        val levels = intArrayOf(-200, -100, 200, 600, 800, 700, 500, 300, 100, -100)
+        applyLevels(eq, levels)
+        setVirtualizer(800) // Spatial vocal enhancement
+        setEnvironmentalReverb(300, 1500) // Studio-like reverb
+        setLoudnessGain(400) // Vocal presence
+    }
+    
+    private fun applyFanEffectPreset(eq: Equalizer) {
+        // Simulates the whooshing effect of a fan with modulated frequencies
+        val levels = intArrayOf(800, 600, 400, 600, 800, 600, 400, 200, 400, 600)
+        applyLevels(eq, levels)
+        setVirtualizer(900) // Maximum spatial effect
+        setEnvironmentalReverb(600, 2000) // Medium room with moderate decay
+        setBassBoost(400) // Low-frequency emphasis for whoosh effect
+    }
+    
     private fun applyLevels(eq: Equalizer, levels: IntArray) {
         val numBands = minOf(eq.numberOfBands.toInt(), levels.size)
         for (i in 0 until numBands) {
@@ -314,5 +544,17 @@ enum class EqualizerPreset {
     METAL,
     BASS_BOOST,
     VOCAL,
+    SURROUND_3D,
+    CONCERT_HALL,
+    STADIUM,
+    ACOUSTIC,
+    ELECTRONIC,
+    LOUNGE,
+    SUPER_BASS_BOOST,
+    SUPER_REVERB,
+    HIGH_RESOLUTION,
+    LOFI,
+    AUTOTUNE,
+    FAN_EFFECT,
     CUSTOM
 }

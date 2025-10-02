@@ -1,4 +1,4 @@
-package com.stash.opusplayer.ui.fragments
+package com.stash.stashwave.ui.fragments
 
 import android.app.Activity
 import android.content.Intent
@@ -17,14 +17,14 @@ import androidx.core.widget.addTextChangedListener
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.stash.opusplayer.data.DownloadRequest
-import com.stash.opusplayer.data.YouTubeVideo
-import com.stash.opusplayer.data.AudioFormat
-import com.stash.opusplayer.ui.dialogs.FormatSelectionDialog
-import com.stash.opusplayer.databinding.FragmentYoutubeSearchBinding
-import com.stash.opusplayer.network.YouTubeApiService
-import com.stash.opusplayer.service.VideoDownloadManager
-import com.stash.opusplayer.ui.adapters.YouTubeVideoAdapter
+import com.stash.stashwave.data.DownloadRequest
+import com.stash.stashwave.data.YouTubeVideo
+import com.stash.stashwave.data.AudioFormat
+import com.stash.stashwave.ui.dialogs.FormatSelectionDialog
+import com.stash.stashwave.databinding.FragmentYoutubeSearchBinding
+import com.stash.stashwave.network.YouTubeApiService
+import com.stash.stashwave.service.VideoDownloadManager
+import com.stash.stashwave.ui.adapters.YouTubeVideoAdapter
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -66,6 +66,24 @@ class YouTubeSearchFragment : Fragment() {
         setupSearchInput()
         setupLocationSelector()
         initializeDefaultDownloadPath()
+        setupSealBanner()
+    }
+
+    private fun setupSealBanner() {
+val installed = com.stash.stashwave.integration.SealIntegration.isInstalled(requireContext())
+        if (installed) {
+            binding.sealInfoBanner.visibility = View.VISIBLE
+            binding.sealInfoText.text = "Downloads are handled by Seal and will open there. Tap Download to continue in Seal."
+            binding.sealActionButton.visibility = View.GONE
+        } else {
+            binding.sealInfoBanner.visibility = View.VISIBLE
+            binding.sealInfoText.text = "Install Seal to download videos reliably."
+            binding.sealActionButton.visibility = View.VISIBLE
+            binding.sealActionButton.text = "Install Seal"
+            binding.sealActionButton.setOnClickListener {
+com.stash.stashwave.integration.SealIntegration.promptInstall(requireContext())
+            }
+        }
     }
 
     private fun setupServices() {
@@ -83,17 +101,29 @@ class YouTubeSearchFragment : Fragment() {
     private fun setupRecyclerView() {
         videoAdapter = YouTubeVideoAdapter(
             onVideoClick = { video ->
-                // Open video in browser or YouTube app
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(video.url))
-                startActivity(intent)
+                // Open built-in YouTube player activity
+                try {
+val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingActivity::class.java).apply {
+                        putExtra(com.stash.stashwave.ui.YouTubeStreamingActivity.EXTRA_VIDEO, video)
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "Unable to open player: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             },
             onDownloadClick = { video ->
                 handleDownloadClick(video)
             },
             onPreviewClick = { video ->
-                // Open video in browser for preview
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(video.url))
-                startActivity(intent)
+                // Also route preview to the in-app player for a consistent experience
+                try {
+val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingActivity::class.java).apply {
+                        putExtra(com.stash.stashwave.ui.YouTubeStreamingActivity.EXTRA_VIDEO, video)
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "Unable to open player: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
         )
 
@@ -237,61 +267,51 @@ class YouTubeSearchFragment : Fragment() {
     }
 
     private fun handleDownloadClick(video: YouTubeVideo) {
-        if (currentDownloadPath.isBlank()) {
-            Toast.makeText(
-                requireContext(),
-                "Please select a download location first",
-                Toast.LENGTH_SHORT
-            ).show()
-            return
-        }
-
-        // Show loading state
-        binding.progressContainer.visibility = View.VISIBLE
-        binding.progressText.text = "Loading audio formats..."
-
+        // Pre-cache YouTube thumbnail into our artwork cache so playback shows cover art even if file tags lack artwork
         lifecycleScope.launch {
             try {
-                // Get available audio formats
-                val formatsResult = youTubeApiService.getAudioFormats(video.id)
-                
-                binding.progressContainer.visibility = View.GONE
-                
-                formatsResult.onSuccess { formats ->
-                    if (formats.isNotEmpty()) {
-                        // Show format selection dialog
-                        FormatSelectionDialog.show(
-                            requireContext(),
-                            video,
-                            formats
-                        ) { selectedFormat ->
-                            startDownloadWithFormat(video, selectedFormat)
-                        }
-                    } else {
-                        Toast.makeText(
-                            requireContext(),
-                            "No audio formats available for this video",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                val meta = com.stash.stashwave.utils.MetadataExtractor(requireContext())
+                val b64 = meta.downloadYouTubeThumbnail(video.id)
+                if (b64 != null) {
+                    val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                    val cache = com.stash.stashwave.artwork.ArtworkCache(requireContext())
+                    // Save under a few likely variants so later scans can find it
+                    val variants = listOf(
+                        // Known channel as artist
+                        com.stash.stashwave.data.Song(0L, video.title, video.channelTitle, "YouTube", 0L, ""),
+                        com.stash.stashwave.data.Song(0L, video.title, video.channelTitle, "Unknown Album", 0L, ""),
+                        com.stash.stashwave.data.Song(0L, video.title, video.channelTitle, "", 0L, ""),
+                        // Unknown artist fallback (common after external downloads)
+                        com.stash.stashwave.data.Song(0L, video.title, "Unknown Artist", "YouTube", 0L, ""),
+                        com.stash.stashwave.data.Song(0L, video.title, "Unknown Artist", "Unknown Album", 0L, ""),
+                        com.stash.stashwave.data.Song(0L, video.title, "Unknown Artist", "", 0L, "")
+                    )
+                    variants.forEach { s ->
+                        val f = cache.fileFor(s)
+                        if (!f.exists()) cache.saveJpeg(bytes, f)
                     }
+                    // Also save by title-only key to improve hit rate for unknown tags
+                    val tf = cache.fileForTitleOnly(video.title)
+                    if (!tf.exists()) cache.saveJpeg(bytes, tf)
                 }
-                
-                formatsResult.onFailure { error ->
-                    Toast.makeText(
-                        requireContext(),
-                        "Failed to load audio formats: ${error.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
+            } catch (_: Exception) {}
+        }
+
+        // Sole downloader: delegate to Seal app
+        val url = video.formattedUrl
+        val opened = com.stash.stashwave.integration.SealIntegration.openInSeal(requireContext(), url)
+        if (opened) {
+            Toast.makeText(requireContext(), "Opening Seal to download...", Toast.LENGTH_SHORT).show()
+        } else {
+            // Prompt install if not available
+            androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                .setTitle("Install Seal")
+                .setMessage("This app uses Seal as the downloader. Install Seal to continue?")
+                .setPositiveButton("Install") { _, _ ->
+                    com.stash.stashwave.integration.SealIntegration.promptInstall(requireContext())
                 }
-                
-            } catch (e: Exception) {
-                binding.progressContainer.visibility = View.GONE
-                Toast.makeText(
-                    requireContext(),
-                    "Error loading formats: ${e.message}",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
     }
     
