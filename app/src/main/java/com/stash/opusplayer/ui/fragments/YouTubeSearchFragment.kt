@@ -193,8 +193,11 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
             val takeFlags = resultFlags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             requireContext().contentResolver.takePersistableUriPermission(uri, takeFlags)
 
-            // Store URI string for later use
+            // Store URI string for later use and persist for mover
             currentDownloadPath = uri.toString()
+            requireContext().getSharedPreferences("settings", 0).edit()
+                .putString("seal_last_target_folder_uri", currentDownloadPath)
+                .apply()
             updateLocationDisplay()
             
             Toast.makeText(

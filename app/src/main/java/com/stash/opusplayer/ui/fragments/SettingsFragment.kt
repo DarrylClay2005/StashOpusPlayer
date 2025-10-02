@@ -291,6 +291,21 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         }
         layout.addView(frequencySpinner)
 
+        // Library Rescan
+        val rescanBtn = Button(requireContext()).apply {
+            text = "Rescan Library Now"
+            setOnClickListener {
+                try {
+                    val req = androidx.work.OneTimeWorkRequestBuilder<com.stash.stashwave.work.LibraryRescanWorker>().build()
+                    androidx.work.WorkManager.getInstance(requireContext()).enqueue(req)
+                    Toast.makeText(requireContext(), "Rescan started", Toast.LENGTH_SHORT).show()
+                } catch (_: Exception) {
+                    Toast.makeText(requireContext(), "Failed to start rescan", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        layout.addView(rescanBtn)
+
         // Manual check button
         val checkUpdateButton = Button(requireContext()).apply {
             text = "Check for Updates Now"
@@ -316,6 +331,88 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
             }
         }
         layout.addView(askSealToggle)
+
+        // Post-download mover
+        val moverToggle = CheckBox(requireContext()).apply {
+            text = "Move finished Seal downloads to target folder"
+            val prefs = requireContext().getSharedPreferences("settings", 0)
+            isChecked = prefs.getBoolean("enable_post_download_mover", false)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("enable_post_download_mover", isChecked).apply()
+                if (isChecked) Toast.makeText(requireContext(), "Mover enabled (runs periodically)", Toast.LENGTH_SHORT).show()
+            }
+        }
+        layout.addView(moverToggle)
+
+        val pickSealSourceBtn = Button(requireContext()).apply {
+            text = "Pick Seal download folder (source)"
+            setOnClickListener {
+                try {
+                    (activity as? MainActivity)?.let { act ->
+                        val launcher = registerForActivityResult(
+                            androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
+                        ) { uri ->
+                            if (uri != null) {
+                                try {
+                                    val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                    requireContext().contentResolver.takePersistableUriPermission(uri, flags)
+                                    val prefs = requireContext().getSharedPreferences("settings", 0)
+                                    prefs.edit().putString("seal_source_folder_uri", uri.toString()).apply()
+                                    Toast.makeText(requireContext(), "Source set", Toast.LENGTH_SHORT).show()
+                                } catch (_: Exception) {
+                                    Toast.makeText(requireContext(), "Failed to set source", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                        launcher.launch(null)
+                    }
+                } catch (_: Exception) {
+                    Toast.makeText(requireContext(), "Unable to open folder picker", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        layout.addView(pickSealSourceBtn)
+
+        val pickTargetBtn = Button(requireContext()).apply {
+            text = "Pick target folder (destination)"
+            setOnClickListener {
+                try {
+                    val launcher = registerForActivityResult(
+                        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
+                    ) { uri ->
+                        if (uri != null) {
+                            try {
+                                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                requireContext().contentResolver.takePersistableUriPermission(uri, flags)
+                                val prefs = requireContext().getSharedPreferences("settings", 0)
+                                prefs.edit().putString("seal_last_target_folder_uri", uri.toString()).apply()
+                                Toast.makeText(requireContext(), "Target set", Toast.LENGTH_SHORT).show()
+                            } catch (_: Exception) {
+                                Toast.makeText(requireContext(), "Failed to set target", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                    launcher.launch(null)
+                } catch (_: Exception) {
+                    Toast.makeText(requireContext(), "Unable to open folder picker", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        layout.addView(pickTargetBtn)
+
+        val moveNowBtn = Button(requireContext()).apply {
+            text = "Move finished downloads now"
+            setOnClickListener {
+                try {
+                    val req = androidx.work.OneTimeWorkRequestBuilder<com.stash.stashwave.work.PostDownloadMoverWorker>().build()
+                    androidx.work.WorkManager.getInstance(requireContext()).enqueue(req)
+                    Toast.makeText(requireContext(), "Move started", Toast.LENGTH_SHORT).show()
+                } catch (_: Exception) {
+                    Toast.makeText(requireContext(), "Failed to start mover", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        layout.addView(moveNowBtn)
 
         scrollView.addView(layout)
         return scrollView
