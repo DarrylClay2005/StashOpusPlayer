@@ -34,7 +34,10 @@ class MusicService : MediaSessionService() {
     }
     
     private var mediaSession: MediaSession? = null
-    private lateinit var player: ExoPlayer
+private lateinit var activePlayer: ExoPlayer
+    private var sparePlayer: ExoPlayer? = null
+    private var isCrossfading: Boolean = false
+    private var crossfadeCheckRunnable: Runnable? = null
     private lateinit var equalizerManager: EqualizerManager
     private var presetReverb: PresetReverb? = null
     private var lastAudioSessionId: Int = C.AUDIO_SESSION_ID_UNSET
@@ -65,13 +68,13 @@ class MusicService : MediaSessionService() {
         notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
         
-        initializePlayer()
+initializePlayers()
         initializeEqualizer()
         initializeMediaSession()
         setupPlayerListener()
     }
     
-    private fun initializePlayer() {
+private fun initializePlayers() {
         // Configure a custom HTTP data source with a modern mobile user-agent for broader CDN compatibility
         val httpFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
             .setUserAgent("Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 StashAudio/8.1.6")
@@ -80,9 +83,17 @@ class MusicService : MediaSessionService() {
         val defaultDsFactory = androidx.media3.datasource.DefaultDataSource.Factory(this, httpFactory)
         val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(defaultDsFactory)
 
-        player = ExoPlayer.Builder(this)
+activePlayer = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .build()
+
+        // Prepare spare player for experimental crossfade
+        sparePlayer = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build()
+        try { sparePlayer?.setAudioAttributes(audioAttributes, audioFocusEnabled) } catch (_: Exception) {}
+        try { sparePlayer?.setHandleAudioBecomingNoisy(true) } catch (_: Exception) {}
+        try { sparePlayer?.volume = 0f } catch (_: Exception) {}
 
         // Read persisted phase-2 audio preferences
         try {
@@ -94,9 +105,9 @@ class MusicService : MediaSessionService() {
         } catch (_: Exception) {}
 
         // Apply audio attributes with focus handling preference
-        try { player.setAudioAttributes(audioAttributes, audioFocusEnabled) } catch (_: Exception) {}
-        try { player.setHandleAudioBecomingNoisy(true) } catch (_: Exception) {}
-        try { player.volume = appVolume } catch (_: Exception) {}
+try { activePlayer.setAudioAttributes(audioAttributes, audioFocusEnabled) } catch (_: Exception) {}
+        try { activePlayer.setHandleAudioBecomingNoisy(true) } catch (_: Exception) {}
+        try { activePlayer.volume = appVolume } catch (_: Exception) {}
 
         // Apply persisted playback parameters (speed/pitch/reverb) and playback modes if available
         try {
@@ -106,12 +117,12 @@ class MusicService : MediaSessionService() {
             val savedSpeed = prefs.getFloat("playback_speed", 1.0f)
             if (savedSpeed in 0.25f..2.5f) currentSpeed = savedSpeed
             currentReverb = prefs.getInt("reverb_preset", 0).toShort()
-            player.playbackParameters = PlaybackParameters(currentSpeed, currentPitch)
+activePlayer.playbackParameters = PlaybackParameters(currentSpeed, currentPitch)
             // Apply shuffle and repeat mode
-            val savedShuffle = prefs.getBoolean("playback_shuffle", false)
+val savedShuffle = prefs.getBoolean("playback_shuffle", false)
             val savedRepeat = prefs.getInt("playback_repeat_mode", Player.REPEAT_MODE_OFF)
-            player.shuffleModeEnabled = savedShuffle
-            player.repeatMode = savedRepeat
+            activePlayer.shuffleModeEnabled = savedShuffle
+            activePlayer.repeatMode = savedRepeat
         } catch (_: Exception) { /* ignore */ }
     }
     
@@ -225,7 +236,7 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
             }
         }
         
-        mediaSession = MediaSession.Builder(this, player)
+mediaSession = MediaSession.Builder(this, activePlayer)
             .setSessionActivity(sessionActivityPendingIntent)
             .setCallback(callback)
             .build()
@@ -236,10 +247,10 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
     }
     
     private fun initializeEqualizer() {
-        android.util.Log.d("MusicService", "initializeEqualizer: player.audioSessionId=${'$'}{player.audioSessionId}")
+android.util.Log.d("MusicService", "initializeEqualizer: audioSessionId=${'$'}{activePlayer.audioSessionId}")
         equalizerManager = EqualizerManager(this)
         // Initialize equalizer and reverb when player has a valid audio session
-        val sessionId = player.audioSessionId
+val sessionId = activePlayer.audioSessionId
         if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
             if (sessionId != lastAudioSessionId) {
                 lastAudioSessionId = sessionId
@@ -250,13 +261,13 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
     }
     
     private fun setupPlayerListener() {
-        player.addListener(object : Player.Listener {
+activePlayer.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 updateNotification()
                 
                 // Initialize equalizer when player is ready and has audio session
                 if (playbackState == Player.STATE_READY) {
-                    val sessionId = player.audioSessionId
+val sessionId = activePlayer.audioSessionId
                     if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
                         android.util.Log.d("MusicService", "STATE_READY: initializing EQ for sessionId=${'$'}sessionId")
                         lastAudioSessionId = sessionId
@@ -266,7 +277,8 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
                 }
             }
             
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
+override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
                 if (isPlaying) {
                     startForeground(NOTIFICATION_ID, createNotification())
                 } else {
@@ -282,13 +294,15 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
             
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 updateNotification()
-                // Crossfade (fade-in only, due to single-player constraint)
-                if (crossfadeEnabled && crossfadeDurationMs > 0L) {
+                // If not using polling or user disabled experimental true crossfade, we still do minimal fade-in
+                val prefs = getSharedPreferences("settings", 0)
+                val exp = prefs.getBoolean("experimental_true_crossfade", true)
+                if (!exp && crossfadeEnabled && crossfadeDurationMs > 0L) {
                     startFadeIn(crossfadeDurationMs)
                 }
                 // Defensive: ensure effects are bound after item transitions as some devices
                 // only expose a stable session once the new item is active
-                val sessionId = player.audioSessionId
+                val sessionId = activePlayer.audioSessionId
                 if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
                     android.util.Log.d("MusicService", "onMediaItemTransition: initializing EQ for sessionId=${'$'}sessionId")
                     lastAudioSessionId = sessionId
@@ -315,8 +329,8 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
     }
     
     private fun createNotification(): Notification {
-        val mediaMetadata = player.mediaMetadata
-        val isPlaying = player.isPlaying
+val mediaMetadata = activePlayer.mediaMetadata
+        val isPlaying = activePlayer.isPlaying
         
         val playPauseAction = if (isPlaying) {
             NotificationCompat.Action(
@@ -396,8 +410,8 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
         )
     }
     
-    private fun updateNotification() {
-        if (player.playbackState != Player.STATE_IDLE) {
+private fun updateNotification() {
+        if (activePlayer.playbackState != Player.STATE_IDLE) {
             notificationManager.notify(NOTIFICATION_ID, createNotification())
         }
     }
@@ -405,9 +419,9 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
     private fun getCurrentLargeIcon(): android.graphics.Bitmap? {
         // Attempt to retrieve cached artwork for current media item using minimal overhead.
         // We derive a pseudo Song-like structure from MediaMetadata for cache key stability.
-        val title = player.mediaMetadata.title?.toString() ?: ""
-        val artist = player.mediaMetadata.artist?.toString() ?: ""
-        val album = player.mediaMetadata.albumTitle?.toString() ?: ""
+val title = activePlayer.mediaMetadata.title?.toString() ?: ""
+        val artist = activePlayer.mediaMetadata.artist?.toString() ?: ""
+        val album = activePlayer.mediaMetadata.albumTitle?.toString() ?: ""
         if (title.isBlank() && artist.isBlank() && album.isBlank()) return null
         return try {
             val fakeSong = com.stash.stashwave.data.Song(
@@ -435,10 +449,10 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
         val isAppInForeground = appTasks.isNotEmpty() && 
             appTasks[0].topActivity?.packageName == packageName
         
-        if (!isAppInForeground && !player.isPlaying) {
+if (!isAppInForeground && !activePlayer.isPlaying) {
             // App is in background and music is not playing
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                if (!player.isPlaying) {
+if (!activePlayer.isPlaying) {
                     // Still not playing after delay, stop service
                     stopSelf()
                 }
@@ -451,16 +465,17 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
     }
 
     // Live controls
-    fun setAppVolume(volume: Float) {
+fun setAppVolume(volume: Float) {
         appVolume = volume.coerceIn(0f, 1f)
-        try { player.volume = appVolume } catch (_: Exception) {}
+        try { activePlayer.volume = appVolume } catch (_: Exception) {}
         try { getSharedPreferences("settings", 0).edit().putFloat("app_volume", appVolume).apply() } catch (_: Exception) {}
     }
 
     fun setAudioFocusEnabled(enabled: Boolean) {
         audioFocusEnabled = enabled
         try { getSharedPreferences("settings", 0).edit().putBoolean("audio_focus_enabled", audioFocusEnabled).apply() } catch (_: Exception) {}
-        try { player.setAudioAttributes(audioAttributes, audioFocusEnabled) } catch (_: Exception) {}
+try { activePlayer.setAudioAttributes(audioAttributes, audioFocusEnabled) } catch (_: Exception) {}
+        try { sparePlayer?.setAudioAttributes(audioAttributes, audioFocusEnabled) } catch (_: Exception) {}
     }
 
     fun setCrossfadeEnabled(enabled: Boolean) {
@@ -480,13 +495,13 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
         val startVol = 0f
         val endVol = appVolume
         // Set initial
-        try { player.volume = startVol } catch (_: Exception) {}
+try { activePlayer.volume = startVol } catch (_: Exception) {}
         val runnable = object : Runnable {
             override fun run() {
                 val elapsed = System.currentTimeMillis() - startTime
                 val fraction = (elapsed.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
                 val vol = startVol + (endVol - startVol) * fraction
-                try { player.volume = vol } catch (_: Exception) {}
+try { activePlayer.volume = vol } catch (_: Exception) {}
                 if (fraction < 1f) {
                     mainHandler.postDelayed(this, 16L)
                 }
@@ -496,14 +511,101 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
         mainHandler.post(runnable)
     }
 
+    private fun startCrossfadePolling() {
+        if (crossfadeCheckRunnable != null) return
+        val prefs = getSharedPreferences("settings", 0)
+        val exp = prefs.getBoolean("experimental_true_crossfade", true)
+        if (!exp || !crossfadeEnabled || crossfadeDurationMs <= 0L) return
+        crossfadeCheckRunnable = object : Runnable {
+            override fun run() {
+                try {
+                    val dur = activePlayer.duration
+                    val pos = activePlayer.currentPosition
+                    if (dur > 0 && pos >= 0) {
+                        val remaining = dur - pos
+                        if (!isCrossfading && remaining in 1..(crossfadeDurationMs + 200)) {
+                            startTrueCrossfade()
+                        }
+                    }
+                } catch (_: Exception) {}
+                mainHandler.postDelayed(this, 200L)
+            }
+        }
+        mainHandler.post(crossfadeCheckRunnable!!)
+    }
+
+    private fun stopCrossfadePolling() {
+        crossfadeCheckRunnable?.let { mainHandler.removeCallbacks(it) }
+        crossfadeCheckRunnable = null
+    }
+
+    private fun startTrueCrossfade() {
+        // Determine next media item from active player's playlist
+        val nextIndex = activePlayer.currentMediaItemIndex + 1
+        if (nextIndex >= activePlayer.mediaItemCount) return
+        val nextItem = try { activePlayer.getMediaItemAt(nextIndex) } catch (_: Exception) { null } ?: return
+        val spare = sparePlayer ?: return
+        isCrossfading = true
+        try {
+            spare.stop()
+            spare.clearMediaItems()
+            spare.volume = 0f
+            spare.setAudioAttributes(audioAttributes, audioFocusEnabled)
+            spare.setHandleAudioBecomingNoisy(true)
+            spare.setMediaItem(nextItem)
+            spare.prepare()
+            spare.play()
+        } catch (_: Exception) {
+            isCrossfading = false
+            return
+        }
+        val startTime = System.currentTimeMillis()
+        val fromVol = appVolume
+        val toVol = appVolume
+        fadeRunnable?.let { mainHandler.removeCallbacks(it) }
+        val runnable = object : Runnable {
+            override fun run() {
+                val elapsed = System.currentTimeMillis() - startTime
+                val fraction = (elapsed.toFloat() / crossfadeDurationMs.toFloat()).coerceIn(0f, 1f)
+                val oldVol = fromVol * (1f - fraction)
+                val newVol = toVol * (fraction)
+                try { activePlayer.volume = oldVol } catch (_: Exception) {}
+                try { spare.volume = newVol } catch (_: Exception) {}
+                if (fraction < 1f) {
+                    mainHandler.postDelayed(this, 16L)
+                } else {
+                    // Switch session to spare and swap references
+                    try {
+                        mediaSession?.setPlayer(spare)
+                        try { equalizerManager.initialize(spare.audioSessionId) } catch (_: Exception) {}
+                        try { configureReverbForSession(spare.audioSessionId) } catch (_: Exception) {}
+                    } catch (_: Exception) {}
+                    try { activePlayer.pause() } catch (_: Exception) {}
+try { activePlayer.seekToDefaultPosition(nextIndex) } catch (_: Exception) {}
+                    try { activePlayer.stop() } catch (_: Exception) {}
+                    // Make the old player a new spare
+                    val old = activePlayer
+                    activePlayer = spare
+                    sparePlayer = old
+                    try { sparePlayer?.clearMediaItems() } catch (_: Exception) {}
+                    try { sparePlayer?.volume = 0f } catch (_: Exception) {}
+                    isCrossfading = false
+                    updateNotification()
+                }
+            }
+        }
+        fadeRunnable = runnable
+        mainHandler.post(runnable)
+    }
+
     fun setPlaybackSpeed(speed: Float) {
         currentSpeed = speed
-        try { player.playbackParameters = PlaybackParameters(currentSpeed, currentPitch) } catch (_: Exception) {}
+try { activePlayer.playbackParameters = PlaybackParameters(currentSpeed, currentPitch) } catch (_: Exception) {}
     }
 
     fun setPlaybackPitch(pitch: Float) {
         currentPitch = pitch
-        try { player.playbackParameters = PlaybackParameters(currentSpeed, currentPitch) } catch (_: Exception) {}
+try { activePlayer.playbackParameters = PlaybackParameters(currentSpeed, currentPitch) } catch (_: Exception) {}
     }
 
     fun setReverbPreset(preset: Short) {
@@ -513,7 +615,7 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
                 presetReverb?.preset = preset
                 presetReverb?.enabled = (preset != 0.toShort())
             } else {
-                val sessionId = player.audioSessionId
+val sessionId = activePlayer.audioSessionId
                 if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
                     configureReverbForSession(sessionId)
                 }
@@ -535,7 +637,7 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        try { player.pause() } catch (_: Exception) {}
+try { activePlayer.pause() } catch (_: Exception) {}
         try {
             stopForeground(true)
             stopSelf()
@@ -547,7 +649,7 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
         try { presetReverb?.release() } catch (_: Exception) {}
         equalizerManager.release()
         mediaSession?.run {
-            player.release()
+activePlayer.release()
             release()
             mediaSession = null
         }

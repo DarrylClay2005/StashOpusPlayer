@@ -306,6 +306,26 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         }
         layout.addView(rescanBtn)
 
+        val periodicRescanToggle = CheckBox(requireContext()).apply {
+            text = "Enable daily background rescan"
+            val prefs = requireContext().getSharedPreferences("settings", 0)
+            isChecked = prefs.getBoolean("enable_periodic_rescan", false)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("enable_periodic_rescan", isChecked).apply()
+                val wm = androidx.work.WorkManager.getInstance(requireContext())
+                val tag = "library_rescan_periodic"
+                if (isChecked) {
+                    val req = androidx.work.PeriodicWorkRequestBuilder<com.stash.stashwave.work.LibraryRescanWorker>(java.time.Duration.ofHours(24)).addTag(tag).build()
+                    wm.enqueueUniquePeriodicWork(tag, androidx.work.ExistingPeriodicWorkPolicy.UPDATE, req)
+                    Toast.makeText(requireContext(), "Periodic rescan scheduled", Toast.LENGTH_SHORT).show()
+                } else {
+                    wm.cancelAllWorkByTag(tag)
+                    Toast.makeText(requireContext(), "Periodic rescan disabled", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        layout.addView(periodicRescanToggle)
+
         // Manual check button
         val checkUpdateButton = Button(requireContext()).apply {
             text = "Check for Updates Now"
@@ -865,6 +885,17 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
             isEnabled = cfToggle.isChecked
         }
         layout.addView(cfSeek)
+
+        val trueCfToggle = CheckBox(requireContext()).apply {
+            text = "Experimental: True crossfade (dual player)"
+            val prefs = requireContext().getSharedPreferences("settings", 0)
+            isChecked = prefs.getBoolean("experimental_true_crossfade", true)
+            setOnCheckedChangeListener { _, enabled ->
+                prefs.edit().putBoolean("experimental_true_crossfade", enabled).apply()
+                Toast.makeText(requireContext(), if (enabled) "True crossfade enabled" else "True crossfade disabled", Toast.LENGTH_SHORT).show()
+            }
+        }
+        layout.addView(trueCfToggle)
 
         cfToggle.setOnCheckedChangeListener { _, enabled ->
             prefs.edit().putBoolean("crossfade_enabled", enabled).apply()
