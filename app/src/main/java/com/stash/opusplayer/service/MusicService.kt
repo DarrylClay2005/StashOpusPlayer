@@ -44,6 +44,20 @@ class MusicService : MediaSessionService() {
     private lateinit var notificationManager: NotificationManager
     private var appInForeground = true
     private var stopServiceWhenPaused = false
+
+    // Phase 2: App volume and crossfade controls
+    private var appVolume: Float = 1.0f // 0.0 .. 1.0
+    private var crossfadeEnabled: Boolean = false
+    private var crossfadeDurationMs: Long = 1000L
+    private var audioFocusEnabled: Boolean = true
+
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var fadeRunnable: Runnable? = null
+
+    private var audioAttributes: AudioAttributes = AudioAttributes.Builder()
+        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+        .setUsage(C.USAGE_MEDIA)
+        .build()
     
     override fun onCreate() {
         super.onCreate()
@@ -68,15 +82,21 @@ class MusicService : MediaSessionService() {
 
         player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .setUsage(C.USAGE_MEDIA)
-                    .build(),
-                true
-            )
-            .setHandleAudioBecomingNoisy(true)
             .build()
+
+        // Read persisted phase-2 audio preferences
+        try {
+            val prefs = getSharedPreferences("settings", 0)
+            audioFocusEnabled = prefs.getBoolean("audio_focus_enabled", true)
+            appVolume = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
+            crossfadeEnabled = prefs.getBoolean("crossfade_enabled", false)
+            crossfadeDurationMs = prefs.getLong("crossfade_duration_ms", 1000L).coerceIn(0L, 5000L)
+        } catch (_: Exception) {}
+
+        // Apply audio attributes with focus handling preference
+        try { player.setAudioAttributes(audioAttributes, audioFocusEnabled) } catch (_: Exception) {}
+        try { player.setHandleAudioBecomingNoisy(true) } catch (_: Exception) {}
+        try { player.volume = appVolume } catch (_: Exception) {}
 
         // Apply persisted playback parameters (speed/pitch/reverb) and playback modes if available
         try {
@@ -182,6 +202,23 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
                             val preset = args.getInt("preset", 0).toShort()
                             setReverbPreset(preset)
                         }
+                        // Phase 2 additions
+                        "SET_APP_VOLUME" -> {
+                            val vol = args.getFloat("volume", 1f)
+                            setAppVolume(vol)
+                        }
+                        "SET_CROSSFADE_ENABLED" -> {
+                            val enabled = args.getBoolean("enabled", false)
+                            setCrossfadeEnabled(enabled)
+                        }
+                        "SET_CROSSFADE_DURATION" -> {
+                            val durMs = args.getLong("duration_ms", 1000L)
+                            setCrossfadeDuration(durMs)
+                        }
+                        "SET_AUDIO_FOCUS" -> {
+                            val enabled = args.getBoolean("enabled", true)
+                            setAudioFocusEnabled(enabled)
+                        }
                     }
                 } catch (_: Exception) {}
                 return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -245,6 +282,10 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
             
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 updateNotification()
+                // Crossfade (fade-in only, due to single-player constraint)
+                if (crossfadeEnabled && crossfadeDurationMs > 0L) {
+                    startFadeIn(crossfadeDurationMs)
+                }
                 // Defensive: ensure effects are bound after item transitions as some devices
                 // only expose a stable session once the new item is active
                 val sessionId = player.audioSessionId
@@ -410,6 +451,51 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
     }
 
     // Live controls
+    fun setAppVolume(volume: Float) {
+        appVolume = volume.coerceIn(0f, 1f)
+        try { player.volume = appVolume } catch (_: Exception) {}
+        try { getSharedPreferences("settings", 0).edit().putFloat("app_volume", appVolume).apply() } catch (_: Exception) {}
+    }
+
+    fun setAudioFocusEnabled(enabled: Boolean) {
+        audioFocusEnabled = enabled
+        try { getSharedPreferences("settings", 0).edit().putBoolean("audio_focus_enabled", audioFocusEnabled).apply() } catch (_: Exception) {}
+        try { player.setAudioAttributes(audioAttributes, audioFocusEnabled) } catch (_: Exception) {}
+    }
+
+    fun setCrossfadeEnabled(enabled: Boolean) {
+        crossfadeEnabled = enabled
+        try { getSharedPreferences("settings", 0).edit().putBoolean("crossfade_enabled", crossfadeEnabled).apply() } catch (_: Exception) {}
+    }
+
+    fun setCrossfadeDuration(durationMs: Long) {
+        crossfadeDurationMs = durationMs.coerceIn(0L, 5000L)
+        try { getSharedPreferences("settings", 0).edit().putLong("crossfade_duration_ms", crossfadeDurationMs).apply() } catch (_: Exception) {}
+    }
+
+    private fun startFadeIn(durationMs: Long) {
+        // Cancel any ongoing fade
+        fadeRunnable?.let { mainHandler.removeCallbacks(it) }
+        val startTime = System.currentTimeMillis()
+        val startVol = 0f
+        val endVol = appVolume
+        // Set initial
+        try { player.volume = startVol } catch (_: Exception) {}
+        val runnable = object : Runnable {
+            override fun run() {
+                val elapsed = System.currentTimeMillis() - startTime
+                val fraction = (elapsed.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                val vol = startVol + (endVol - startVol) * fraction
+                try { player.volume = vol } catch (_: Exception) {}
+                if (fraction < 1f) {
+                    mainHandler.postDelayed(this, 16L)
+                }
+            }
+        }
+        fadeRunnable = runnable
+        mainHandler.post(runnable)
+    }
+
     fun setPlaybackSpeed(speed: Float) {
         currentSpeed = speed
         try { player.playbackParameters = PlaybackParameters(currentSpeed, currentPitch) } catch (_: Exception) {}
