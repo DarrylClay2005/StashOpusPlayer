@@ -12,11 +12,8 @@ android {
     namespace 'com.stash.stashwave'
     compileSdk 34
 
-    // Inject secrets from local.properties (not committed)
-    def localProps = new Properties()
-    def lpFile = rootProject.file('local.properties')
-    if (lpFile.exists()) { localProps.load(new FileInputStream(lpFile)) }
-    def YT_KEY = (localProps.getProperty('YOUTUBE_API_KEY') ?: "")
+    // Configuration: API keys should be provided via environment variables or user configuration
+    // No hardcoded API keys in repository
 
     defaultConfig {
         applicationId "com.stash.stashwave"
@@ -59,22 +56,7 @@ kotlinOptions {
         jvmTarget = '1.8'
     }
 
-    // Provide BuildConfig fields for runtime access
-    buildTypes {
-        debug {
-            buildConfigField "String", "YOUTUBE_API_KEY", '"' + YT_KEY + '"'
-        }
-        release {
-            buildConfigField "String", "YOUTUBE_API_KEY", '"' + YT_KEY + '"'
-            minifyEnabled false
-            shrinkResources false
-            debuggable false
-            if (hasReleaseKeystore) {
-                signingConfig signingConfigs.release
-            }
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-        }
-    }
+    // Note: API keys should be configured by users, not hardcoded in the build
 
     buildFeatures {
         viewBinding true

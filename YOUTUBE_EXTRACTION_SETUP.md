@@ -6,6 +6,7 @@ This guide explains how to set up and use the enhanced YouTube extraction system
 
 Your StashOpusPlayer now includes:
 
+✅ **YouTube API Integration**: Configured for external API key setup  
 ✅ **Custom Extraction Service**: Hybrid approach using YouTube API + yt-dlp  
 ✅ **Enhanced Metadata**: Rich video information from official YouTube API  
 ✅ **Improved Reliability**: Fallback mechanisms and error handling  
@@ -24,9 +25,9 @@ The new system uses a **hybrid approach**:
 ## 📱 Android App Changes
 
 ### Modified Files:
-- `YouTubeApiService.kt` - Updated API key
-- `VideoDownloadManager.kt` - Integrated custom extraction service
-- `CustomYouTubeExtractionService.kt` - New hybrid extraction service
+- `YouTubeApiService.kt` - Removed hardcoded API key for security
+- `VideoDownloadManager.kt` - Integrated with Seal app for downloads
+- `CustomYouTubeExtractionService.kt` - Fallback extraction service
 
 ### New Features:
 - Enhanced format selection with real-time availability
@@ -149,9 +150,9 @@ curl -X POST http://localhost:8080/download \
 ### Common Issues:
 
 #### API Key Issues:
-- Ensure the API key `AIzaSyBqWTC-S3vopTEMNTgpCalyqc_GJkUgsAg` is valid
-- Check API quotas in Google Cloud Console
-- Verify YouTube Data API v3 is enabled
+- **Note**: This app no longer uses hardcoded API keys for security
+- For YouTube functionality, we recommend using the Seal integration (see README)
+- Alternatively, configure your own API key externally if needed
 
 #### yt-dlp Issues:
 ```bash

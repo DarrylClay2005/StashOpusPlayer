@@ -38,4 +38,15 @@ tmp/
 # Keystore files (security sensitive)
 *.keystore
 *.jks
+
+# API keys and sensitive configuration
+api_keys.txt
+secrets.txt
+config/secrets.properties
+local.properties.bak
+*.key
+*.secret
+api_config.*
+
+# Other
 DarrylClay2005.github.io/
