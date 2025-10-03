@@ -279,7 +279,7 @@ activePlayer.addListener(object : Player.Listener {
                 // Initialize equalizer when player is ready and has audio session
                 if (playbackState == Player.STATE_READY) {
                     // Ensure current app volume is applied as soon as ready
-                    try { activePlayer.volume = appVolume } catch (_: Exception) {}
+                    try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
                     val sessionId = activePlayer.audioSessionId
                     if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
                         android.util.Log.d("MusicService", "STATE_READY: initializing EQ for sessionId=${'$'}sessionId")
