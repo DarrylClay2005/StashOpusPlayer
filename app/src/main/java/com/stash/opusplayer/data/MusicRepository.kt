@@ -343,7 +343,7 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
     // AI-ish genre inference using tags or heuristics; placeholder for external APIs
     suspend fun getSongsByGenreSmart(): Map<String, List<Song>> = withContext(Dispatchers.IO) {
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-        val youTube = com.stash.stashwave.network.YouTubeApiService()
+        val youTube = com.stash.stashwave.network.YouTubeApiService(context)
 
         fun normalizeTitle(name: String): String {
             return name.lowercase()

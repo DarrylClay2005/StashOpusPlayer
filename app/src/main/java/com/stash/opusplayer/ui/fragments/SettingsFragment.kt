@@ -96,6 +96,27 @@ val repo = com.stash.stashwave.data.MusicRepository(requireContext())
         controllerFuture = null
     }
 
+    private fun restartApp() {
+        try {
+            val pm = requireContext().packageManager
+            val intent = pm.getLaunchIntentForPackage(requireContext().packageName)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(intent)
+                requireActivity().finishAffinity()
+            } else {
+                // Fallback: restart main activity directly
+                startActivity(Intent(requireContext(), MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+                requireActivity().finishAffinity()
+            }
+        } catch (_: Exception) {
+            // Best-effort: just recreate
+            requireActivity().recreate()
+        }
+    }
+
     private fun connectController() {
         try {
 val token = androidx.media3.session.SessionToken(requireContext(), android.content.ComponentName(requireContext(), com.stash.stashwave.service.MusicService::class.java))
@@ -298,6 +319,39 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
             }
         }
         layout.addView(frequencySpinner)
+
+        // YouTube API Key Section
+        addSectionHeader(layout, "YouTube")
+        val apiInfo = TextView(requireContext()).apply {
+            text = "Set your YouTube Data API v3 key to enable search and metadata."
+            textSize = 12f
+        }
+        layout.addView(apiInfo)
+
+        val apiKeyInput = EditText(requireContext()).apply {
+            hint = "Enter your YouTube API key"
+            val prefs = requireContext().getSharedPreferences("settings", 0)
+            val existing = prefs.getString("user_youtube_api_key", "") ?: ""
+            setText(existing)
+        }
+        layout.addView(apiKeyInput)
+
+        val saveApiKeyButton = Button(requireContext()).apply {
+            text = "Save YouTube API Key"
+            setOnClickListener {
+                val key = apiKeyInput.text?.toString()?.trim() ?: ""
+                val prefs = requireContext().getSharedPreferences("settings", 0)
+                prefs.edit().putString("user_youtube_api_key", key).apply()
+                // Prompt to reload app so the key takes effect everywhere
+                androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                    .setTitle("Reload required")
+                    .setMessage("The app will reload to apply your YouTube API key. Continue?")
+                    .setPositiveButton("Reload") { _, _ -> restartApp() }
+                    .setNegativeButton("Later", null)
+                    .show()
+            }
+        }
+        layout.addView(saveApiKeyButton)
 
         // Library Rescan
         val rescanBtn = Button(requireContext()).apply {

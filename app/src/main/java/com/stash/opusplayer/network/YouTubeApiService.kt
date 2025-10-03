@@ -13,18 +13,24 @@ import org.json.JSONObject
 import java.io.IOException
 import java.net.URLEncoder
 
-class YouTubeApiService {
+class YouTubeApiService(private val context: android.content.Context) {
     
     companion object {
         private const val BASE_URL = "https://www.googleapis.com/youtube/v3"
         private const val TAG = "YouTubeApiService"
     }
     
-    private val apiKey: String by lazy { 
-        // API key is loaded from local.properties or environment variable
-        // See YOUTUBE_API_SETUP.md for instructions on obtaining your own API key
-        BuildConfig.YOUTUBE_API_KEY
-    }
+    private val apiKey: String
+        get() {
+            // Allow runtime override from app settings; fallback to BuildConfig value
+            return try {
+                val prefs = context.getSharedPreferences("settings", 0)
+                val override = prefs.getString("user_youtube_api_key", null)
+                if (!override.isNullOrBlank()) override else BuildConfig.YOUTUBE_API_KEY
+            } catch (_: Exception) {
+                BuildConfig.YOUTUBE_API_KEY
+            }
+        }
     
     private val client = OkHttpClient.Builder()
         .build()
@@ -36,8 +42,9 @@ class YouTubeApiService {
     ): Result<YouTubeSearchResult> = withContext(Dispatchers.IO) {
         try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            if (apiKey.isBlank()) {
-                return@withContext Result.failure(IOException("YouTube API key not configured. To enable YouTube search:\n\n1. Get your own free API key: See YOUTUBE_API_SETUP.md\n2. Or use Seal integration for downloads only\n\nFor full YouTube features, configure your API key in local.properties"))
+            val key = apiKey
+            if (key.isBlank()) {
+                return@withContext Result.failure(IOException("YouTube API key not configured. To enable YouTube search:\n\n1. Get your own free API key: See YOUTUBE_API_SETUP.md\n2. Or use Seal integration for downloads only\n\nFor full YouTube features, configure your API key in Settings."))
             }
             val url = buildString {
                 append("$BASE_URL/search")
@@ -45,11 +52,11 @@ class YouTubeApiService {
                 append("&q=$encodedQuery")
                 append("&type=video")
                 append("&maxResults=$maxResults")
-                append("&key=$apiKey")
+                append("&key=$key")
                 pageToken?.let { append("&pageToken=$it") }
             }
             
-            Log.d(TAG, "Searching YouTube for: $query")
+            Log.d(TAG, "Searching YouTube for: $query (pageToken=${pageToken ?: "none"})")
             
             val request = Request.Builder()
                 .url(url)
@@ -72,7 +79,7 @@ class YouTubeApiService {
             }
             
             val result = parseSearchResponse(responseBody)
-            Log.d(TAG, "Found ${result.videos.size} videos")
+            Log.d(TAG, "Found ${result.videos.size} videos; nextPageToken=${result.nextPageToken}")
             Result.success(result)
             
         } catch (e: Exception) {
@@ -83,10 +90,11 @@ class YouTubeApiService {
     
     suspend fun getVideoDetails(videoId: String): Result<YouTubeVideo?> = withContext(Dispatchers.IO) {
         try {
-            if (apiKey.isBlank()) {
-                return@withContext Result.failure(IOException("YouTube API key not configured. To enable video details:\n\n1. Get your own free API key: See YOUTUBE_API_SETUP.md\n2. Add to local.properties: YOUTUBE_API_KEY=your_key_here\n\nFor downloads only, use Seal integration instead"))
+            val key = apiKey
+            if (key.isBlank()) {
+                return@withContext Result.failure(IOException("YouTube API key not configured. To enable video details:\n\n1. Get your own free API key: See YOUTUBE_API_SETUP.md\n2. Set it in Settings > YouTube API Key\n\nFor downloads only, use Seal integration instead"))
             }
-            val url = "$BASE_URL/videos?part=snippet,contentDetails,statistics&id=$videoId&key=$apiKey"
+            val url = "$BASE_URL/videos?part=snippet,contentDetails,statistics&id=$videoId&key=$key"
             
             val request = Request.Builder()
                 .url(url)

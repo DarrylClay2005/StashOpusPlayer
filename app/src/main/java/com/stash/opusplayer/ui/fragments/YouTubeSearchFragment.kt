@@ -36,7 +36,13 @@ class YouTubeSearchFragment : Fragment() {
     private lateinit var youTubeApiService: YouTubeApiService
     private lateinit var videoAdapter: YouTubeVideoAdapter
     private lateinit var downloadManager: VideoDownloadManager
+    private lateinit var linearLayoutManager: LinearLayoutManager
 
+    // Pagination state
+    private val allVideos = mutableListOf<YouTubeVideo>()
+    private var currentQuery: String? = null
+    private var nextPageToken: String? = null
+    private var isLoadingMore: Boolean = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -74,7 +80,7 @@ com.stash.stashwave.integration.SealIntegration.promptInstall(requireContext())
     }
 
     private fun setupServices() {
-        youTubeApiService = YouTubeApiService()
+        youTubeApiService = YouTubeApiService(requireContext())
         downloadManager = VideoDownloadManager(requireContext())
         
         // Observe download progress
@@ -116,7 +122,19 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
 
         binding.resultsRecyclerView.apply {
             adapter = videoAdapter
-            layoutManager = LinearLayoutManager(requireContext())
+            layoutManager = LinearLayoutManager(requireContext()).also { this@YouTubeSearchFragment.linearLayoutManager = it }
+            addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+                override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
+                    super.onScrolled(recyclerView, dx, dy)
+                    if (dy <= 0) return
+                    val total = videoAdapter.itemCount
+                    val lastVisible = this@YouTubeSearchFragment.linearLayoutManager.findLastVisibleItemPosition()
+                    val nearEnd = total > 0 && lastVisible >= total - 5
+                    if (nearEnd && !isLoadingMore && !nextPageToken.isNullOrEmpty() && !currentQuery.isNullOrEmpty()) {
+                        loadMoreResults()
+                    }
+                }
+            })
         }
     }
 
@@ -149,6 +167,11 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
             return
         }
 
+        // Reset pagination state
+        currentQuery = query
+        nextPageToken = null
+        allVideos.clear()
+
         // Hide keyboard
         binding.searchEditText.clearFocus()
 
@@ -166,7 +189,9 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
                     binding.progressContainer.visibility = View.GONE
                     
                     if (searchResult.videos.isNotEmpty()) {
-                        videoAdapter.submitList(searchResult.videos)
+                        allVideos.addAll(searchResult.videos)
+                        nextPageToken = searchResult.nextPageToken
+                        videoAdapter.submitList(allVideos.toList())
                         binding.resultsRecyclerView.visibility = View.VISIBLE
                         binding.emptyStateContainer.visibility = View.GONE
                     } else {
@@ -182,6 +207,36 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
             } catch (e: Exception) {
                 binding.progressContainer.visibility = View.GONE
                 showError("Search failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun loadMoreResults() {
+        val q = currentQuery ?: return
+        val token = nextPageToken ?: return
+        isLoadingMore = true
+
+        // Optional: could show a small footer spinner; for now rely on smooth append
+        lifecycleScope.launch {
+            try {
+                val result = youTubeApiService.searchVideos(q, pageToken = token)
+                result.onSuccess { searchResult ->
+                    nextPageToken = searchResult.nextPageToken
+                    if (searchResult.videos.isNotEmpty()) {
+                        val start = allVideos.size
+                        allVideos.addAll(searchResult.videos)
+                        // submit a new list instance to trigger DiffUtil
+                        videoAdapter.submitList(allVideos.toList())
+                        // Optionally scroll remains natural as user is at end
+                    }
+                }
+                result.onFailure { error ->
+                    Toast.makeText(requireContext(), "Failed to load more: ${error.message}", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "Failed to load more: ${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                isLoadingMore = false
             }
         }
     }

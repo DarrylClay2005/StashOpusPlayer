@@ -47,7 +47,7 @@ class CustomYouTubeExtractionService(private val context: Context) {
         )
     }
 
-    private val youTubeApiService = YouTubeApiService()
+    private val youTubeApiService = YouTubeApiService(context)
     private val ytDlpExtractor = YtDlpExtractor(context)
     private val metadataExtractor = MetadataExtractor(context)
     
