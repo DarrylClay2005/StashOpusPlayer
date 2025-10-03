@@ -65,4 +65,13 @@
     <string name="queue">Queue</string>
     <string name="share">Share</string>
     
+    <!-- Layout switching -->
+    <string name="layout_list">List</string>
+    <string name="layout_two_columns">2 columns</string>
+    <string name="layout_three_columns">3 columns</string>
+    <string name="choose_layout_title">Choose layout</string>
+    <string name="default_songs_layout_title">Default Songs layout</string>
+    <string name="default_folder_layout_title">Default Folder layout</string>
+    <string name="action_change_layout">Change layout</string>
+
 </resources>
