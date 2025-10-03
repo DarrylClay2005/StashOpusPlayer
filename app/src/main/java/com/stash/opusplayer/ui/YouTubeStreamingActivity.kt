@@ -35,7 +35,7 @@ private lateinit var commentsAdapter: com.stash.stashwave.ui.adapters.YouTubeCom
     private var commentsOrder: String = "relevance"
 private val commentsAll = mutableListOf<com.stash.stashwave.data.YouTubeComment>()
     private val expandedParents = mutableSetOf<String>()
-private val youTubeApiService = com.stash.stashwave.network.YouTubeApiService()
+private val youTubeApiService by lazy { com.stash.stashwave.network.YouTubeApiService(this) }
     private var isPlaying = false
     private var currentTime = 0f
     private var duration = 0f
