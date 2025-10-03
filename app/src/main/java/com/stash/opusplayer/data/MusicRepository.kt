@@ -26,6 +26,7 @@ private val aiTagger = com.stash.stashwave.ai.AITagger(context)
     private val database = MusicDatabase.getDatabase(context)
     private val favoriteDao = database.favoriteDao()
     private val playlistDao: PlaylistDao = database.playlistDao()
+    val metadataDao = database.metadataDao()
     private val metadataExtractor = MetadataExtractor(context)
     private val prefs: SharedPreferences = PreferenceManager.getDefaultSharedPreferences(context)
     
@@ -195,6 +196,19 @@ suspend fun getAllSongsWithMetadata(): List<Song> = withContext(Dispatchers.IO) 
             }
         } finally {
             com.stash.stashwave.utils.LibraryScanTracker.completeScan()
+        }
+    }
+    
+    // Silent version for background metadata scanning - does not trigger LibraryScanTracker notifications
+    suspend fun getAllSongsWithMetadataSilent(): List<Song> = withContext(Dispatchers.IO) {
+        val baseSongs = getAllSongs()
+        val favoriteIds = emptySet<Long>()
+        
+        baseSongs.map { song ->
+            val enhancedSong = metadataExtractor.extractMetadata(song)
+            val withFav = enhancedSong.copy(isFavorite = favoriteIds.contains(song.id))
+            // Skip AI tagger for background scanning to improve performance
+            withFav
         }
     }
     
@@ -505,6 +519,21 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
         } finally {
             com.stash.stashwave.utils.LibraryScanTracker.completeScan()
         }
+    }
+    
+    // Silent version for background operations - does not trigger LibraryScanTracker notifications
+    suspend fun getAllSongsFromAllSourcesSilent(): List<Song> = withContext(Dispatchers.IO) {
+        // Use fast scan first to avoid blocking
+        val fast = getAllSongsFromAllSourcesFast()
+        // Then enrich each with metadata (skip AI for background performance)
+        val enriched = fast.map { s -> metadataExtractor.extractMetadata(s) }
+        // Deduplicate using a stable key across sources (MediaStore vs file scans)
+        val deduped = LinkedHashMap<String, Song>()
+        for (s in enriched) {
+            val key = stableKey(s)
+            if (!deduped.containsKey(key)) deduped[key] = s
+        }
+        deduped.values.sortedBy { it.displayName }
     }
 
 private suspend fun scanDocumentTrees(): List<Song> = withContext(Dispatchers.IO) {

@@ -366,15 +366,184 @@
                     android:layout_height="1dp"
                     android:layout_weight="1" />
 
-                <!-- Neomorphic Share button -->
+                <!-- Neomorphic Metadata toggle button -->
                 <ImageButton
-                    android:id="@+id/shareButton"
+                    android:id="@+id/metadataButton"
                     style="@style/NeomorphicButton"
                     android:layout_width="56dp"
                     android:layout_height="56dp"
-                    android:contentDescription="@string/share"
-                    android:src="@drawable/ic_share_24"
+                    android:contentDescription="Show Metadata"
+                    android:src="@drawable/ic_text_bubble_24"
                     android:tint="@color/text_primary" />
+
+            </LinearLayout>
+
+            <!-- Metadata view container -->
+            <LinearLayout
+                android:id="@+id/metadataContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:background="@drawable/circular_background"
+                android:visibility="gone">
+
+                <!-- Metadata header with back button -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="16dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Metadata"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+
+                    <ImageButton
+                        android:id="@+id/metadataBackButton"
+                        style="@style/NeomorphicButton"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:contentDescription="Back to Controls"
+                        android:src="@drawable/ic_arrow_back_24"
+                        android:tint="@color/text_primary" />
+
+                </LinearLayout>
+
+                <!-- Metadata content -->
+                <ScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:maxHeight="200dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <!-- File Information -->
+                        <TextView
+                            android:id="@+id/metadataFileName"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp"
+                            android:textStyle="bold"
+                            android:text="File Name:" />
+
+                        <TextView
+                            android:id="@+id/metadataFileNameValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="12dp"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <!-- Duration -->
+                        <TextView
+                            android:id="@+id/metadataDuration"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp"
+                            android:textStyle="bold"
+                            android:text="Duration:" />
+
+                        <TextView
+                            android:id="@+id/metadataDurationValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="12dp"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <!-- Bitrate -->
+                        <TextView
+                            android:id="@+id/metadataBitrate"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp"
+                            android:textStyle="bold"
+                            android:text="Bitrate:" />
+
+                        <TextView
+                            android:id="@+id/metadataBitrateValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="12dp"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <!-- Sample Rate -->
+                        <TextView
+                            android:id="@+id/metadataSampleRate"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp"
+                            android:textStyle="bold"
+                            android:text="Sample Rate:" />
+
+                        <TextView
+                            android:id="@+id/metadataSampleRateValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="12dp"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <!-- Format -->
+                        <TextView
+                            android:id="@+id/metadataFormat"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp"
+                            android:textStyle="bold"
+                            android:text="Format:" />
+
+                        <TextView
+                            android:id="@+id/metadataFormatValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="12dp"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <!-- File Path -->
+                        <TextView
+                            android:id="@+id/metadataPath"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp"
+                            android:textStyle="bold"
+                            android:text="File Path:" />
+
+                        <TextView
+                            android:id="@+id/metadataPathValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="12dp"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                    </LinearLayout>
+                </ScrollView>
 
             </LinearLayout>
 

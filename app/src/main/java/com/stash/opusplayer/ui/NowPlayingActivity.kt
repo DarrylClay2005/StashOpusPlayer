@@ -211,8 +211,11 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
         // Add 10-second seek functionality to album artwork
         setupAlbumArtworkSeek()
 
-        // Share button
-        binding.shareButton.setOnClickListener { shareCurrentTrack() }
+        // Metadata toggle button
+        binding.metadataButton.setOnClickListener { toggleMetadataView() }
+        
+        // Metadata back button
+        binding.metadataBackButton.setOnClickListener { hideMetadataView() }
 
         // Audio controls have moved to Settings
     }
@@ -578,6 +581,167 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
         val seconds = TimeUnit.MILLISECONDS.toSeconds(milliseconds) - 
                       TimeUnit.MINUTES.toSeconds(minutes)
         return String.format("%d:%02d", minutes, seconds)
+    }
+    
+    private fun toggleMetadataView() {
+        if (binding.metadataContainer.visibility == android.view.View.VISIBLE) {
+            hideMetadataView()
+        } else {
+            showMetadataView()
+        }
+    }
+    
+    private fun showMetadataView() {
+        // Hide secondary controls
+        binding.secondaryControlsContainer.visibility = android.view.View.GONE
+        
+        // Show metadata container
+        binding.metadataContainer.visibility = android.view.View.VISIBLE
+        
+        // Populate metadata
+        populateMetadata()
+    }
+    
+    private fun hideMetadataView() {
+        // Hide metadata container
+        binding.metadataContainer.visibility = android.view.View.GONE
+        
+        // Show secondary controls
+        binding.secondaryControlsContainer.visibility = android.view.View.VISIBLE
+    }
+    
+    private fun populateMetadata() {
+        currentSong?.let { song ->
+            // Set basic info immediately
+            binding.metadataFileNameValue.text = java.io.File(song.path).name
+            binding.metadataDurationValue.text = formatTime(song.duration)
+            binding.metadataPathValue.text = song.path
+            
+            // Default values while loading
+            binding.metadataBitrateValue.text = "Loading..."
+            binding.metadataSampleRateValue.text = "Loading..."
+            binding.metadataFormatValue.text = "Loading..."
+            
+            // Load from cache or extract in background (silently)
+            lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivity)
+                    var metadata = repository.metadataDao.getMetadata(song.path)
+                    
+                    // If not cached or outdated, extract metadata
+                    if (metadata == null || metadata.hasErrors || isMetadataOutdated(metadata)) {
+                        // Schedule background metadata scanning for this file
+                        com.stash.stashwave.work.MetadataScanWorker.scheduleMetadataScan(
+                            this@NowPlayingActivity,
+                            listOf(song.path)
+                        )
+                        
+                        // Try to extract immediately for current display
+                        metadata = extractMetadataQuietly(song.path)
+                    }
+                    
+                    launch(kotlinx.coroutines.Dispatchers.Main) {
+                        metadata?.let { meta ->
+                            // Bitrate
+                            binding.metadataBitrateValue.text = if (meta.bitrate > 0) {
+                                "${meta.bitrate / 1000} kbps"
+                            } else {
+                                "Unknown"
+                            }
+                            
+                            // Sample rate
+                            binding.metadataSampleRateValue.text = if (meta.sampleRate > 0) {
+                                "${meta.sampleRate} Hz"
+                            } else {
+                                "Unknown"
+                            }
+                            
+                            // Format
+                            binding.metadataFormatValue.text = if (meta.format.isNotBlank()) {
+                                meta.format
+                            } else {
+                                song.path.substringAfterLast('.', "Unknown").uppercase()
+                            }
+                        } ?: run {
+                            // Fallback if extraction fails
+                            binding.metadataBitrateValue.text = "Unknown"
+                            binding.metadataSampleRateValue.text = "Unknown"
+                            binding.metadataFormatValue.text = song.path.substringAfterLast('.', "Unknown").uppercase()
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("NowPlayingActivity", "Error loading metadata", e)
+                    launch(kotlinx.coroutines.Dispatchers.Main) {
+                        binding.metadataBitrateValue.text = "Error"
+                        binding.metadataSampleRateValue.text = "Error"
+                        binding.metadataFormatValue.text = "Error"
+                    }
+                }
+            }
+        }
+    }
+    
+    private fun isMetadataOutdated(metadata: com.stash.stashwave.data.MetadataInfo): Boolean {
+        val file = java.io.File(metadata.filePath)
+        if (!file.exists()) return true
+        // Check if file was modified since last scan
+        return file.lastModified() != metadata.lastModified
+    }
+    
+    private suspend fun extractMetadataQuietly(filePath: String): com.stash.stashwave.data.MetadataInfo? {
+        return try {
+            val file = java.io.File(filePath)
+            val retriever = android.media.MediaMetadataRetriever()
+            
+            try {
+                if (filePath.startsWith("content://")) {
+                    retriever.setDataSource(this, android.net.Uri.parse(filePath))
+                } else {
+                    retriever.setDataSource(filePath)
+                }
+                
+                val bitrate = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull() ?: 0
+                val sampleRate = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)?.toIntOrNull() ?: 0
+                val duration = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                val mimeType = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE) ?: ""
+                
+                val format = when {
+                    mimeType.contains("mp3", true) -> "MP3"
+                    mimeType.contains("flac", true) -> "FLAC"
+                    mimeType.contains("opus", true) -> "Opus"
+                    mimeType.contains("ogg", true) -> "OGG"
+                    mimeType.contains("m4a", true) || mimeType.contains("mp4", true) -> "M4A"
+                    mimeType.contains("wav", true) -> "WAV"
+                    mimeType.contains("wma", true) -> "WMA"
+                    else -> filePath.substringAfterLast('.', "Unknown").uppercase()
+                }
+                
+                val metadata = com.stash.stashwave.data.MetadataInfo(
+                    filePath = filePath,
+                    fileName = file.name,
+                    duration = duration,
+                    bitrate = bitrate,
+                    sampleRate = sampleRate,
+                    format = format,
+                    mimeType = mimeType,
+                    fileSize = if (file.exists()) file.length() else 0L,
+                    lastModified = if (file.exists()) file.lastModified() else 0L,
+                    hasErrors = false
+                )
+                
+                // Cache it for next time (silently)
+                val repository = com.stash.stashwave.data.MusicRepository(this)
+                repository.metadataDao.insertMetadata(metadata)
+                
+                metadata
+                
+            } finally {
+                retriever.release()
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("NowPlayingActivity", "Silent metadata extraction failed for $filePath", e)
+            null
+        }
     }
     
     override fun onStop() {
