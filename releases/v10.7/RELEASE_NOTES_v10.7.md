@@ -24,4 +24,14 @@
 2. Choose Reload when prompted
 3. Open the YouTube tab, search for videos, and scroll — more results will load automatically
 
+## 📷 Screenshots
+- Home Library (Phone): screenshot-01-home-library.png
+- YouTube Search (Phone): screenshot-02-youtube-search.png
+- Now Playing — Controls (Phone): screenshot-03-now-playing-controls.png
+- Now Playing — Metadata (Phone): screenshot-04-now-playing-metadata.png
+- Settings — YouTube API Key (Phone): screenshot-05-settings-youtube.png
+- Tablet Portrait set (1600x2560): in screenshots/tablet/portrait/
+- Tablet Landscape set (2560x1600): in screenshots/tablet/landscape/
+- Feature Graphic (1024x500): feature-graphic-1024x500.png
+
 Enjoy the smoother YouTube experience! 🎉
