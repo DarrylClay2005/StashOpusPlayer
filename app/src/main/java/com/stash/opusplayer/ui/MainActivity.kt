@@ -92,13 +92,20 @@ installSplashScreen()
             }
         }
 
-        // Observe library scanning status
+        // Observe library scanning status (filter out background metadata operations)
         lifecycleScope.launch {
             repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
                 com.stash.stashwave.utils.LibraryScanTracker.status.collect { msg ->
                     val banner = findViewById<android.view.View>(com.stash.stashwave.R.id.scanning_banner)
                     val text = findViewById<android.widget.TextView>(com.stash.stashwave.R.id.scanning_text)
-                    if (msg.isNotBlank()) {
+                    
+                    // Filter out background metadata scanning and processing messages
+                    val shouldShow = msg.isNotBlank() && 
+                                   !msg.contains("metadata", ignoreCase = true) &&
+                                   !msg.contains("processing", ignoreCase = true) &&
+                                   !msg.contains("extracting", ignoreCase = true)
+                    
+                    if (shouldShow) {
                         banner.visibility = android.view.View.VISIBLE
                         text.text = msg
                     } else {
@@ -273,7 +280,26 @@ loadFragment(com.stash.stashwave.ui.fragments.FoldersFragment())
             binding.bottomNav.selectedItemId = R.id.nav_songs
             binding.navView.setCheckedItem(R.id.nav_music_library)
         }
+        
+        // Initialize background metadata scanning (silent)
+        initializeBackgroundMetadataScanning()
+        
         hideLoadingOverlay()
+    }
+    
+    private fun initializeBackgroundMetadataScanning() {
+        try {
+            // Schedule periodic metadata scanning (runs every 6 hours when device is idle)
+            com.stash.stashwave.work.MetadataScanWorker.schedulePeriodicMetadataScan(this)
+            
+            // Also do an initial one-time scan for any new files (low priority)
+            lifecycleScope.launch {
+                kotlinx.coroutines.delay(5000) // Wait 5 seconds after app start
+                com.stash.stashwave.work.MetadataScanWorker.scheduleMetadataScan(this@MainActivity)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Failed to initialize background metadata scanning", e)
+        }
     }
     
     override fun onNavigationItemSelected(item: android.view.MenuItem): Boolean {
