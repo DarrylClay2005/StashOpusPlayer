@@ -68,7 +68,10 @@ private lateinit var activePlayer: ExoPlayer
         notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
         
-initializePlayers()
+        // Register preference listeners so audio settings persist and apply instantly
+        registerPreferenceListeners()
+        
+        initializePlayers()
         initializeEqualizer()
         initializeMediaSession()
         setupPlayerListener()
@@ -146,6 +149,10 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
                         "SET_EQ_ENABLED" -> {
                             val enabled = args.getBoolean("enabled", false)
                             equalizerManager.setEnabled(enabled)
+                            // Persist to default prefs so state survives and listeners react
+                            PreferenceManager.getDefaultSharedPreferences(this@MusicService).edit()
+                                .putBoolean("equalizer_enabled", enabled)
+                                .apply()
                         }
                         "SET_EQ_PRESET" -> {
                             val name = args.getString("preset") ?: "NORMAL"
@@ -267,7 +274,9 @@ activePlayer.addListener(object : Player.Listener {
                 
                 // Initialize equalizer when player is ready and has audio session
                 if (playbackState == Player.STATE_READY) {
-val sessionId = activePlayer.audioSessionId
+                    // Ensure current app volume is applied as soon as ready
+                    try { activePlayer.volume = appVolume } catch (_: Exception) {}
+                    val sessionId = activePlayer.audioSessionId
                     if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
                         android.util.Log.d("MusicService", "STATE_READY: initializing EQ for sessionId=${'$'}sessionId")
                         lastAudioSessionId = sessionId
@@ -305,6 +314,8 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
                 // Defensive: ensure effects are bound after item transitions as some devices
                 // only expose a stable session once the new item is active
                 val sessionId = activePlayer.audioSessionId
+                // Re-apply volume on item transitions
+                try { activePlayer.volume = appVolume } catch (_: Exception) {}
                 if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
                     android.util.Log.d("MusicService", "onMediaItemTransition: initializing EQ for sessionId=${'$'}sessionId")
                     lastAudioSessionId = sessionId
@@ -542,9 +553,9 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
     }
 
     private fun startTrueCrossfade() {
-        // Determine next media item from active player's playlist
-        val nextIndex = activePlayer.currentMediaItemIndex + 1
-        if (nextIndex >= activePlayer.mediaItemCount) return
+        // Determine the actual next media item index respecting shuffle and repeat
+        val nextIndex = try { activePlayer.nextMediaItemIndex } catch (_: Exception) { C.INDEX_UNSET }
+        if (nextIndex == C.INDEX_UNSET || nextIndex >= activePlayer.mediaItemCount) return
         val nextItem = try { activePlayer.getMediaItemAt(nextIndex) } catch (_: Exception) { null } ?: return
         val spare = sparePlayer ?: return
         isCrossfading = true
@@ -583,7 +594,7 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
                         try { configureReverbForSession(spare.audioSessionId) } catch (_: Exception) {}
                     } catch (_: Exception) {}
                     try { activePlayer.pause() } catch (_: Exception) {}
-try { activePlayer.seekToDefaultPosition(nextIndex) } catch (_: Exception) {}
+                    try { activePlayer.seekToDefaultPosition(nextIndex) } catch (_: Exception) {}
                     try { activePlayer.stop() } catch (_: Exception) {}
                     // Make the old player a new spare
                     val old = activePlayer
@@ -648,6 +659,8 @@ try { activePlayer.pause() } catch (_: Exception) {}
     }
 
     override fun onDestroy() {
+        // Unregister preference listeners
+        try { unregisterPreferenceListeners() } catch (_: Exception) {}
         try { presetReverb?.release() } catch (_: Exception) {}
         equalizerManager.release()
         mediaSession?.run {
@@ -656,5 +669,58 @@ activePlayer.release()
             mediaSession = null
         }
         super.onDestroy()
+    }
+
+    // Preference listeners to apply audio settings immediately and persistently
+    private var settingsPrefsListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
+    private var defaultPrefsListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
+
+    private fun registerPreferenceListeners() {
+        val settingsPrefs = getSharedPreferences("settings", 0)
+        val defaultPrefs = PreferenceManager.getDefaultSharedPreferences(this)
+
+        settingsPrefsListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+            when (key) {
+                "app_volume" -> {
+                    val v = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
+                    setAppVolume(v)
+                }
+                "audio_focus_enabled" -> setAudioFocusEnabled(prefs.getBoolean("audio_focus_enabled", true))
+                "crossfade_enabled" -> setCrossfadeEnabled(prefs.getBoolean("crossfade_enabled", false))
+                "crossfade_duration_ms" -> setCrossfadeDuration(prefs.getLong("crossfade_duration_ms", 1000L))
+                "reverb_preset" -> setReverbPreset(prefs.getInt("reverb_preset", 0).toShort())
+                "experimental_true_crossfade" -> {
+                    val enabled = prefs.getBoolean("experimental_true_crossfade", true)
+                    if (enabled && activePlayer.isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
+                }
+                "playback_speed" -> setPlaybackSpeed(prefs.getFloat("playback_speed", 1.0f).coerceIn(0.25f, 2.5f))
+                "pitch_semitones" -> {
+                    val semi = prefs.getInt("pitch_semitones", 0)
+                    val pitch = Math.pow(2.0, semi / 12.0).toFloat()
+                    setPlaybackPitch(pitch)
+                }
+            }
+        }
+        defaultPrefsListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+            when (key) {
+                "equalizer_enabled" -> equalizerManager.setEnabled(prefs.getBoolean("equalizer_enabled", false))
+                "equalizer_preset" -> {
+                    val name = prefs.getString("equalizer_preset", com.stash.stashwave.audio.EqualizerPreset.NORMAL.name)
+                    try { equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(name ?: "NORMAL")) } catch (_: Exception) {}
+                }
+                "bass_boost_strength" -> equalizerManager.setBassBoost(prefs.getInt("bass_boost_strength", 0))
+                "virtualizer_strength" -> equalizerManager.setVirtualizer(prefs.getInt("virtualizer_strength", 0))
+                "loudness_enhancer_gain" -> equalizerManager.setLoudnessGain(prefs.getInt("loudness_enhancer_gain", 0))
+            }
+        }
+        settingsPrefs.registerOnSharedPreferenceChangeListener(settingsPrefsListener)
+        defaultPrefs.registerOnSharedPreferenceChangeListener(defaultPrefsListener)
+    }
+
+    private fun unregisterPreferenceListeners() {
+        try { getSharedPreferences("settings", 0).unregisterOnSharedPreferenceChangeListener(settingsPrefsListener) } catch (_: Exception) {}
+        try { PreferenceManager.getDefaultSharedPreferences(this).unregisterOnSharedPreferenceChangeListener(defaultPrefsListener) } catch (_: Exception) {}
+        settingsPrefsListener = null
+        defaultPrefsListener = null
     }
 }
