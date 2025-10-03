@@ -1,12 +1,30 @@
 # StashWave Player (StashOpusPlayer)
 
-[![Version](https://img.shields.io/badge/version-10.5b-blue.svg)](https://github.com/xenus/StashOpusPlayer/releases)
+[![Version](https://img.shields.io/badge/version-10.7-blue.svg)](https://github.com/DarrylClay2005/StashOpusPlayer/releases)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-green.svg)](https://android.com)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
 🎵 **A modern, feature-rich Android music player with precision audio controls, intelligent YouTube integration, and beautiful Material Design 3 interface.**
 
 StashWave Player combines high-quality local music playback with seamless YouTube audio streaming and downloading, enhanced by AI-powered features and comprehensive audio customization tools.
+
+## 📸 Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/feature-graphic-1024x500.png" alt="StashOpusPlayer Feature Graphic" width="820" />
+</p>
+
+| Home Library | YouTube Search |
+| --- | --- |
+| <img src="docs/screenshots/screenshot-01-home-library.png" alt="Home Library" width="400"/> | <img src="docs/screenshots/screenshot-02-youtube-search.png" alt="YouTube Search" width="400"/> |
+
+| Now Playing — Controls | Now Playing — Metadata |
+| --- | --- |
+| <img src="docs/screenshots/screenshot-03-now-playing-controls.png" alt="Now Playing Controls" width="400"/> | <img src="docs/screenshots/screenshot-04-now-playing-metadata.png" alt="Now Playing Metadata" width="400"/> |
+
+| Settings — YouTube API Key |
+| --- |
+| <img src="docs/screenshots/screenshot-05-settings-youtube.png" alt="Settings YouTube API Key" width="400"/> |
 
 ## 🎵 Core Features
 
