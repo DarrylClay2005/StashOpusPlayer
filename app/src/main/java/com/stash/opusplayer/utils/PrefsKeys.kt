@@ -3,10 +3,12 @@ package com.stash.stashwave.utils
 object PrefsKeys {
     // Per-screen overrides
     const val SONGS_VIEW_COLUMNS = "songs_view_columns"              // Int: 1,2,3
+    const val FOLDERS_VIEW_COLUMNS = "folders_view_columns"          // Int: 1,2,3 (top-level Folders)
     const val FOLDER_DETAIL_VIEW_COLUMNS = "folder_detail_view_columns" // Int: 1,2,3
 
     // Defaults in Settings
     const val DEFAULT_SONGS_VIEW_COLUMNS = "default_songs_view_columns"          // Int: 1,2,3
+    const val DEFAULT_FOLDERS_VIEW_COLUMNS = "default_folders_view_columns"      // Int: 1,2,3
     const val DEFAULT_FOLDER_DETAIL_VIEW_COLUMNS = "default_folder_detail_view_columns" // Int: 1,2,3
 
     // Audio
