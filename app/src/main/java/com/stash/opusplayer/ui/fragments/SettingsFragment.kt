@@ -168,6 +168,55 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         }
         layout.addView(backgroundButton)
 
+        // Default Layouts
+        val prefs = requireContext().getSharedPreferences("settings", 0)
+
+        // Default Songs layout
+        val songsLabel = TextView(requireContext()).apply {
+            text = getString(com.stash.stashwave.R.string.default_songs_layout_title)
+            setPadding(0, 16, 0, 8)
+        }
+        layout.addView(songsLabel)
+        val songsSpinner = android.widget.Spinner(requireContext())
+        val entries = listOf(
+            getString(com.stash.stashwave.R.string.layout_list),
+            getString(com.stash.stashwave.R.string.layout_two_columns),
+            getString(com.stash.stashwave.R.string.layout_three_columns)
+        )
+        val adapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, entries).also {
+            it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        songsSpinner.adapter = adapter
+        val savedSongsCols = prefs.getInt(com.stash.stashwave.utils.PrefsKeys.DEFAULT_SONGS_VIEW_COLUMNS, 1)
+        songsSpinner.setSelection(when (savedSongsCols) { 1 -> 0; 2 -> 1; else -> 2 })
+        songsSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val cols = when (position) { 0 -> 1; 1 -> 2; else -> 3 }
+                prefs.edit().putInt(com.stash.stashwave.utils.PrefsKeys.DEFAULT_SONGS_VIEW_COLUMNS, cols).apply()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+        layout.addView(songsSpinner)
+
+        // Default Folder layout (Folder Detail screen)
+        val folderLabel = TextView(requireContext()).apply {
+            text = getString(com.stash.stashwave.R.string.default_folder_layout_title)
+            setPadding(0, 16, 0, 8)
+        }
+        layout.addView(folderLabel)
+        val folderSpinner = android.widget.Spinner(requireContext())
+        folderSpinner.adapter = adapter
+        val savedFolderCols = prefs.getInt(com.stash.stashwave.utils.PrefsKeys.DEFAULT_FOLDER_DETAIL_VIEW_COLUMNS, 1)
+        folderSpinner.setSelection(when (savedFolderCols) { 1 -> 0; 2 -> 1; else -> 2 })
+        folderSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val cols = when (position) { 0 -> 1; 1 -> 2; else -> 3 }
+                prefs.edit().putInt(com.stash.stashwave.utils.PrefsKeys.DEFAULT_FOLDER_DETAIL_VIEW_COLUMNS, cols).apply()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+        layout.addView(folderSpinner)
+
         // Update Settings Section
         addSectionHeader(layout, "Updates")
 

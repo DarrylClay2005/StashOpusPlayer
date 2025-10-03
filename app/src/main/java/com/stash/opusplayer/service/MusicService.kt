@@ -25,6 +25,7 @@ import androidx.preference.PreferenceManager
 import com.stash.stashwave.audio.EqualizerManager
 import com.stash.stashwave.data.Song
 import com.stash.stashwave.ui.MainActivity
+import kotlin.math.pow
 
 class MusicService : MediaSessionService() {
     
@@ -49,7 +50,10 @@ private lateinit var activePlayer: ExoPlayer
     private var stopServiceWhenPaused = false
 
     // Phase 2: App volume and crossfade controls
-    private var appVolume: Float = 1.0f // 0.0 .. 1.0
+    // Store UI-domain volume [0..1]; map to amplitude using a perceptual curve when applying to ExoPlayer
+    private var appVolumeUi: Float = 1.0f
+    private val volumeGamma: Float = 2.0f
+    private fun uiToAmp(v: Float): Float = v.coerceIn(0f, 1f).pow(volumeGamma)
     private var crossfadeEnabled: Boolean = false
     private var crossfadeDurationMs: Long = 1000L
     private var audioFocusEnabled: Boolean = true
@@ -102,7 +106,7 @@ activePlayer = ExoPlayer.Builder(this)
         try {
             val prefs = getSharedPreferences("settings", 0)
             audioFocusEnabled = prefs.getBoolean("audio_focus_enabled", true)
-            appVolume = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
+            appVolumeUi = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
             crossfadeEnabled = prefs.getBoolean("crossfade_enabled", false)
             crossfadeDurationMs = prefs.getLong("crossfade_duration_ms", 1000L).coerceIn(0L, 5000L)
         } catch (_: Exception) {}
@@ -110,7 +114,7 @@ activePlayer = ExoPlayer.Builder(this)
         // Apply audio attributes with focus handling preference
 try { activePlayer.setAudioAttributes(audioAttributes, audioFocusEnabled) } catch (_: Exception) {}
         try { activePlayer.setHandleAudioBecomingNoisy(true) } catch (_: Exception) {}
-        try { activePlayer.volume = appVolume } catch (_: Exception) {}
+        try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
 
         // Apply persisted playback parameters (speed/pitch/reverb) and playback modes if available
         try {
@@ -289,7 +293,7 @@ activePlayer.addListener(object : Player.Listener {
 override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
                 // Ensure app volume is applied when playback starts
-                if (isPlaying) { try { activePlayer.volume = appVolume } catch (_: Exception) {} }
+                if (isPlaying) { try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {} }
                 if (isPlaying) {
                     startForeground(NOTIFICATION_ID, createNotification())
                 } else {
@@ -315,7 +319,7 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
                 // only expose a stable session once the new item is active
                 val sessionId = activePlayer.audioSessionId
                 // Re-apply volume on item transitions
-                try { activePlayer.volume = appVolume } catch (_: Exception) {}
+                try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
                 if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
                     android.util.Log.d("MusicService", "onMediaItemTransition: initializing EQ for sessionId=${'$'}sessionId")
                     lastAudioSessionId = sessionId
@@ -479,9 +483,11 @@ if (!activePlayer.isPlaying) {
 
     // Live controls
 fun setAppVolume(volume: Float) {
-        appVolume = volume.coerceIn(0f, 1f)
-        try { activePlayer.volume = appVolume } catch (_: Exception) {}
-        try { getSharedPreferences("settings", 0).edit().putFloat("app_volume", appVolume).apply() } catch (_: Exception) {}
+        appVolumeUi = volume.coerceIn(0f, 1f)
+        val amp = uiToAmp(appVolumeUi)
+        try { activePlayer.volume = amp } catch (_: Exception) {}
+        try { sparePlayer?.volume = 0f } catch (_: Exception) {}
+        try { getSharedPreferences("settings", 0).edit().putFloat("app_volume", appVolumeUi).apply() } catch (_: Exception) {}
     }
 
     fun setAudioFocusEnabled(enabled: Boolean) {
@@ -506,7 +512,7 @@ try { activePlayer.setAudioAttributes(audioAttributes, audioFocusEnabled) } catc
         fadeRunnable?.let { mainHandler.removeCallbacks(it) }
         val startTime = System.currentTimeMillis()
         val startVol = 0f
-        val endVol = appVolume
+        val endVol = uiToAmp(appVolumeUi)
         // Set initial
 try { activePlayer.volume = startVol } catch (_: Exception) {}
         val runnable = object : Runnable {
@@ -573,8 +579,9 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
             return
         }
         val startTime = System.currentTimeMillis()
-        val fromVol = appVolume
-        val toVol = appVolume
+        val baseAmp = uiToAmp(appVolumeUi)
+        val fromVol = baseAmp
+        val toVol = baseAmp
         fadeRunnable?.let { mainHandler.removeCallbacks(it) }
         val runnable = object : Runnable {
             override fun run() {
