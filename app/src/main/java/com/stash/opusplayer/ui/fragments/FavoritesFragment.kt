@@ -55,18 +55,17 @@ class FavoritesFragment : Fragment() {
                 (activity as? MainActivity)?.playSongsStartingFrom(list, index, "Liked Songs")
             },
             onFavoriteToggle = { song ->
-                // Toggle favorite status
                 (activity as? MainActivity)?.toggleFavorite(song)
-                // Refresh the favorites list after a short delay
                 viewLifecycleOwner.lifecycleScope.launch {
                     delay(500)
                     loadFavorites()
                 }
             },
             onAddToPlaylist = { song ->
-                // Add to current playlist
                 (activity as? MainActivity)?.addToPlaylist(song)
             },
+            onPlayNext = { song -> (activity as? MainActivity)?.playNext(song) },
+            onAddToQueue = { song -> (activity as? MainActivity)?.addToQueueTail(song) },
             metadataExtractor = metadataExtractor
         )
         

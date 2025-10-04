@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Build
+import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -25,6 +26,8 @@ import com.stash.stashwave.audio.EqualizerManager
 import com.stash.stashwave.data.Song
 import com.stash.stashwave.ui.MainActivity
 import kotlin.math.pow
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 
 class MusicService : MediaSessionService() {
     
@@ -81,6 +84,8 @@ private lateinit var activePlayer: ExoPlayer
         initializeEqualizer()
         initializeMediaSession()
         setupPlayerListener()
+        // Attempt to restore last session queue before showing notification
+        restoreQueueStateIfAny()
         setupPlayerNotification()
     }
     
@@ -153,6 +158,9 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
             ): com.google.common.util.concurrent.ListenableFuture<SessionResult> {
                 try {
                     when (customCommand.customAction) {
+                        "CANCEL_CROSSFADE" -> {
+                            cancelCrossfadeAndFocusActive()
+                        }
                         "SET_EQ_ENABLED" -> {
                             val enabled = args.getBoolean("enabled", false)
                             equalizerManager.setEnabled(enabled)
@@ -275,7 +283,7 @@ val sessionId = activePlayer.audioSessionId
     }
     
     private fun setupPlayerListener() {
-activePlayer.addListener(object : Player.Listener {
+        activePlayer.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 // Initialize equalizer when player is ready and has audio session
                 if (playbackState == Player.STATE_READY) {
@@ -300,9 +308,13 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (!isPlaying) {
                     checkAndStopServiceIfNeeded()
                 }
+                // Persist queue periodically
+                try { saveQueueState() } catch (_: Exception) {}
             }
             
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // Persist queue on track change
+                try { saveQueueState() } catch (_: Exception) {}
                 // If not using polling or user disabled experimental true crossfade, we still do minimal fade-in
                 val prefs = getSharedPreferences("settings", 0)
                 val exp = prefs.getBoolean("experimental_true_crossfade", true)
@@ -323,7 +335,109 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
             }
         })
     }
-    
+
+    // Cancel any in-flight crossfade and ensure MediaSession is bound to activePlayer
+    private fun cancelCrossfadeAndFocusActive() {
+        // Stop polling and fades
+        stopCrossfadePolling()
+        fadeRunnable?.let { mainHandler.removeCallbacks(it) }
+        fadeRunnable = null
+        // Stop and reset spare
+        try { sparePlayer?.pause() } catch (_: Exception) {}
+        try { sparePlayer?.stop() } catch (_: Exception) {}
+        try { sparePlayer?.clearMediaItems() } catch (_: Exception) {}
+        isCrossfading = false
+        // Ensure session uses active player
+        try { mediaSession?.setPlayer(activePlayer) } catch (_: Exception) {}
+        try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
+    }
+
+    // Persist/restore queue state
+    private fun saveQueueState() {
+        val prefs = getSharedPreferences("queue_state", 0).edit()
+        try {
+            val count = activePlayer.mediaItemCount
+            val list = mutableListOf<org.json.JSONObject>()
+            for (i in 0 until count) {
+                val mi = try { activePlayer.getMediaItemAt(i) } catch (_: Exception) { null } ?: continue
+                val obj = org.json.JSONObject().apply {
+                    put("uri", mi.localConfiguration?.uri?.toString() ?: "")
+                    val md = mi.mediaMetadata
+                    put("title", md.title ?: "")
+                    put("artist", md.artist ?: "")
+                    put("album", md.albumTitle ?: "")
+                }
+                list.add(obj)
+            }
+            val arr = org.json.JSONArray(list)
+            prefs.putString("items", arr.toString())
+            prefs.putInt("index", activePlayer.currentMediaItemIndex)
+            prefs.putLong("position", try { activePlayer.currentPosition } catch (_: Exception) { 0L })
+            prefs.putBoolean("shuffle", activePlayer.shuffleModeEnabled)
+            prefs.putInt("repeat", activePlayer.repeatMode)
+        } catch (_: Exception) {}
+        prefs.apply()
+    }
+
+    private fun restoreQueueStateIfAny() {
+        val prefs = getSharedPreferences("queue_state", 0)
+        val json = prefs.getString("items", null) ?: return
+        try {
+            val arr = org.json.JSONArray(json)
+            val items = mutableListOf<MediaItem>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val uri = android.net.Uri.parse(obj.optString("uri", ""))
+                val md = MediaMetadata.Builder()
+                    .setTitle(obj.optString("title", ""))
+                    .setArtist(obj.optString("artist", ""))
+                    .setAlbumTitle(obj.optString("album", ""))
+                    .build()
+                val mi = MediaItem.Builder().setUri(uri).setMediaMetadata(md).build()
+                items.add(mi)
+            }
+            if (items.isNotEmpty()) {
+                val index = prefs.getInt("index", 0).coerceIn(0, items.lastIndex)
+                val pos = prefs.getLong("position", 0L).coerceAtLeast(0L)
+                try {
+                    activePlayer.setMediaItems(items, index, pos)
+                    activePlayer.prepare()
+                } catch (_: Exception) {
+                    activePlayer.setMediaItems(items)
+                    activePlayer.seekTo(index, pos)
+                }
+                // Restore shuffle/repeat
+                try { activePlayer.shuffleModeEnabled = prefs.getBoolean("shuffle", activePlayer.shuffleModeEnabled) } catch (_: Exception) {}
+                try { activePlayer.repeatMode = prefs.getInt("repeat", activePlayer.repeatMode) } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun toggleFavoriteForCurrent() {
+        try {
+            val mm = activePlayer.mediaMetadata
+            val title = mm.title?.toString() ?: return
+            val artist = mm.artist?.toString() ?: ""
+            val album = mm.albumTitle?.toString() ?: ""
+            val fallback = com.stash.stashwave.data.Song(
+                id = 0L,
+                title = title,
+                artist = artist,
+                album = album,
+                duration = try { activePlayer.duration.takeIf { it > 0 } ?: 0L } catch (_: Exception) { 0L },
+                path = ""
+            )
+            val repo = com.stash.stashwave.data.MusicRepository(this)
+            // Do DB work off the main thread
+            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val isFav = repo.isFavorite(fallback.id)
+                    if (isFav) repo.removeFromFavorites(fallback.id) else repo.addToFavorites(fallback)
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -366,10 +480,49 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
             }
         }
 
+        val customActionReceiver = object : PlayerNotificationManager.CustomActionReceiver {
+            override fun createCustomActions(context: android.content.Context, instanceId: Int): MutableMap<String, NotificationCompat.Action> {
+                val actions = mutableMapOf<String, NotificationCompat.Action>()
+                actions["REWIND_10"] = NotificationCompat.Action(
+                    R.drawable.ic_replay_10_24,
+                    "-10s",
+                    createContentIntent() // content intent is fine; action will be handled in onCustomAction
+                )
+                actions["FF_30"] = NotificationCompat.Action(
+                    R.drawable.ic_forward_30_24,
+                    "+30s",
+                    createContentIntent()
+                )
+                actions["TOGGLE_FAVORITE"] = NotificationCompat.Action(
+                    R.drawable.ic_favorite_border,
+                    "Favorite",
+                    createContentIntent()
+                )
+                return actions
+            }
+            override fun getCustomActions(player: Player): MutableList<String> {
+                // Show seek +/- and favorite in the notification row
+                return mutableListOf("REWIND_10", "TOGGLE_FAVORITE", "FF_30")
+            }
+            override fun onCustomAction(player: Player, action: String, intent: Intent) {
+                when (action) {
+                    "REWIND_10" -> {
+                        try { player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0)) } catch (_: Exception) {}
+                    }
+                    "FF_30" -> {
+                        val dur = try { player.duration } catch (_: Exception) { 0L }
+                        if (dur > 0) try { player.seekTo((player.currentPosition + 30_000).coerceAtMost(dur)) } catch (_: Exception) {}
+                    }
+                    "TOGGLE_FAVORITE" -> toggleFavoriteForCurrent()
+                }
+            }
+        }
+
         val builder = PlayerNotificationManager.Builder(this, NOTIFICATION_ID, CHANNEL_ID)
             .setMediaDescriptionAdapter(descriptionAdapter)
             .setChannelImportance(NotificationManager.IMPORTANCE_LOW)
             .setSmallIconResourceId(R.drawable.ic_music_note)
+            .setCustomActionReceiver(customActionReceiver)
             .setNotificationListener(object : PlayerNotificationManager.NotificationListener {
                 override fun onNotificationPosted(notificationId: Int, notification: Notification, ongoing: Boolean) {
                     if (ongoing) {
@@ -598,6 +751,7 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
                     isCrossfading = false
                     // Ensure notification manager targets the new active player
                     try { playerNotificationManager?.setPlayer(activePlayer) } catch (_: Exception) {}
+                    try { saveQueueState() } catch (_: Exception) {}
                 }
             }
         }
@@ -653,12 +807,14 @@ try { activePlayer.pause() } catch (_: Exception) {}
     }
 
     override fun onDestroy() {
+        // Persist last-known queue state
+        try { saveQueueState() } catch (_: Exception) {}
         // Unregister preference listeners
         try { unregisterPreferenceListeners() } catch (_: Exception) {}
         try { presetReverb?.release() } catch (_: Exception) {}
         equalizerManager.release()
         mediaSession?.run {
-activePlayer.release()
+            try { activePlayer.release() } catch (_: Exception) {}
             release()
             mediaSession = null
         }

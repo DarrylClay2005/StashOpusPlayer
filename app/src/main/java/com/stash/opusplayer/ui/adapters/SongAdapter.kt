@@ -20,6 +20,8 @@ class SongAdapter(
     private val onSongClick: (Song) -> Unit,
     private val onFavoriteToggle: (Song) -> Unit = {},
     private val onAddToPlaylist: (Song) -> Unit = {},
+    private val onPlayNext: (Song) -> Unit = {},
+    private val onAddToQueue: (Song) -> Unit = {},
     private val metadataExtractor: MetadataExtractor? = null
 ) : ListAdapter<Song, RecyclerView.ViewHolder>(SongDiffCallback()) {
 
@@ -160,7 +162,11 @@ class SongAdapter(
                     true
                 }
                 R.id.action_play_next -> {
-                    android.widget.Toast.makeText(root.context, "Play next feature coming soon!", android.widget.Toast.LENGTH_SHORT).show()
+                    onPlayNext(song)
+                    true
+                }
+                R.id.action_add_to_queue -> {
+                    onAddToQueue(song)
                     true
                 }
                 else -> false

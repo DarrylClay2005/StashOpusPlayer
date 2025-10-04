@@ -88,6 +88,8 @@ class FolderDetailFragment : Fragment() {
             },
             onFavoriteToggle = { song -> (activity as? MainActivity)?.toggleFavorite(song) },
             onAddToPlaylist = { song -> (activity as? MainActivity)?.addToPlaylist(song) },
+            onPlayNext = { song -> (activity as? MainActivity)?.playNext(song) },
+            onAddToQueue = { song -> (activity as? MainActivity)?.addToQueueTail(song) },
             metadataExtractor = metadataExtractor
         )
         binding.recyclerView.adapter = songAdapter

@@ -135,16 +135,31 @@ class MusicPlayerManager(private val context: Context) {
         _currentIndex.value = idx
         _currentSong.value = songs[idx]
         val mediaItems = songs.map { song -> createMediaItem(song) }
-        runWhenReady {
+        runWhenReady { controller ->
+            // First, cancel any in-flight crossfade on the service side to avoid race conditions
             try {
-                it.setMediaItems(mediaItems, idx, /* startPositionMs= */ 0)
+                val cmd = androidx.media3.session.SessionCommand("CANCEL_CROSSFADE", android.os.Bundle.EMPTY)
+                val future = controller.sendCustomCommand(cmd, android.os.Bundle.EMPTY)
+                future.addListener({
+                    try {
+                        controller.setMediaItems(mediaItems, idx, /* startPositionMs= */ 0)
+                    } catch (_: Exception) {
+                        controller.setMediaItems(mediaItems)
+                        controller.seekToDefaultPosition(idx)
+                    }
+                    controller.prepare()
+                    controller.play()
+                }, MoreExecutors.directExecutor())
             } catch (_: Exception) {
-                // Fallback if overloaded method not available
-                it.setMediaItems(mediaItems)
-                it.seekToDefaultPosition(idx)
+                try {
+                    controller.setMediaItems(mediaItems, idx, /* startPositionMs= */ 0)
+                } catch (_: Exception) {
+                    controller.setMediaItems(mediaItems)
+                    controller.seekToDefaultPosition(idx)
+                }
+                controller.prepare()
+                controller.play()
             }
-            it.prepare()
-            it.play()
         }
     }
     
@@ -152,9 +167,52 @@ class MusicPlayerManager(private val context: Context) {
         val currentPlaylist = _playlist.value.toMutableList()
         currentPlaylist.add(song)
         _playlist.value = currentPlaylist
-        
         val mediaItem = createMediaItem(song)
         runWhenReady { it.addMediaItem(mediaItem) }
+    }
+
+    // Add to queue (append)
+    fun addToQueue(song: Song) = addToPlaylist(song)
+
+    // Insert as next item after current index
+    fun insertNext(song: Song) {
+        val list = _playlist.value.toMutableList()
+        val currentIdx = mediaController?.currentMediaItemIndex ?: _currentIndex.value
+        val insertIndex = if (list.isEmpty()) 0 else (currentIdx + 1).coerceIn(0, list.size)
+        list.add(insertIndex, song)
+        _playlist.value = list
+        val mediaItem = createMediaItem(song)
+        runWhenReady { it.addMediaItem(insertIndex, mediaItem) }
+    }
+
+    // Move item within queue
+    fun moveItem(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+        val list = _playlist.value.toMutableList()
+        if (fromIndex !in list.indices || toIndex !in 0..list.size) return
+        val item = list.removeAt(fromIndex)
+        list.add(toIndex, item)
+        _playlist.value = list
+        runWhenReady { it.moveMediaItem(fromIndex, toIndex) }
+        // Adjust current index mirror
+        val current = _currentIndex.value
+        _currentIndex.value = when {
+            current == fromIndex -> toIndex
+            fromIndex < current && toIndex >= current -> current - 1
+            fromIndex > current && toIndex <= current -> current + 1
+            else -> current
+        }
+    }
+
+    // Remove item at index
+    fun removeItem(index: Int) {
+        val list = _playlist.value.toMutableList()
+        if (index !in list.indices) return
+        list.removeAt(index)
+        _playlist.value = list
+        runWhenReady { it.removeMediaItem(index) }
+        val current = _currentIndex.value
+        if (index < current) _currentIndex.value = (current - 1).coerceAtLeast(0)
     }
     
     fun removeFromPlaylist(index: Int) {

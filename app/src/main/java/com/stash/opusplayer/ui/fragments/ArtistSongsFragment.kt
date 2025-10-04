@@ -78,13 +78,13 @@ class ArtistSongsFragment : Fragment() {
                 (activity as? MainActivity)?.playSongsStartingFrom(list, index, "Artist: ${artistName}")
             },
             onFavoriteToggle = { song ->
-                // Toggle favorite status
                 (activity as? MainActivity)?.toggleFavorite(song)
             },
             onAddToPlaylist = { song ->
-                // Add to current playlist
                 (activity as? MainActivity)?.addToPlaylist(song)
             },
+            onPlayNext = { song -> (activity as? MainActivity)?.playNext(song) },
+            onAddToQueue = { song -> (activity as? MainActivity)?.addToQueueTail(song) },
             metadataExtractor = metadataExtractor
         )
         
