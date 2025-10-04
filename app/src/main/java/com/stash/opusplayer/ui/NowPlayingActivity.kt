@@ -212,7 +212,12 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
         setupAlbumArtworkSeek()
 
         // Metadata toggle button
-        binding.metadataButton.setOnClickListener { toggleMetadataView() }
+        binding.metadataButton.setOnClickListener {
+            toggleMetadataView()
+            if (binding.metadataContainer.visibility == android.view.View.VISIBLE) {
+                populateMetadata()
+            }
+        }
         
         // Metadata back button
         binding.metadataBackButton.setOnClickListener { hideMetadataView() }
@@ -336,16 +341,18 @@ else -> com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActiv
     }
     
     private fun setupPlayerManager() {
-        musicPlayerManager = MusicPlayerManager(this).apply {
-            initialize()
-        }
+        musicPlayerManager = (application as com.stash.stashwave.StashWaveApplication).playerManager
         
-        // Observe player state changes
+        // Observe player state changes (shared manager)
         lifecycleScope.launch {
             musicPlayerManager?.currentSong?.collect { song ->
-                song?.let {
-                    currentSong = it
-                    displaySongInfo(it)
+                if (song != null) {
+                    currentSong = song
+                    displaySongInfo(song)
+                } else {
+                    // Fallback to controller metadata to keep art/text fresh
+                    setArtworkFromMetadata()
+                    updateMediaInfo()
                 }
             }
         }
@@ -353,11 +360,7 @@ else -> com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActiv
         lifecycleScope.launch {
             musicPlayerManager?.isPlaying?.collect { isPlaying ->
                 updatePlayPauseButton(isPlaying)
-                if (isPlaying) {
-                    startProgressUpdates()
-                } else {
-                    stopProgressUpdates()
-                }
+                if (isPlaying) startProgressUpdates() else stopProgressUpdates()
             }
         }
     }
@@ -375,6 +378,11 @@ else -> com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActiv
             
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 updateMediaInfo()
+                // Ensure artwork & metadata panel update on every track change
+                setArtworkFromMetadata()
+                if (binding.metadataContainer.visibility == android.view.View.VISIBLE) {
+                    populateMetadata()
+                }
             }
             
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -483,6 +491,39 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
         Glide.with(this)
             .load(R.drawable.ic_music_note)
             .into(binding.albumArtwork)
+    }
+    
+    private fun setArtworkFromMetadata() {
+        try {
+            val controller = mediaController ?: return
+            val title = controller.mediaMetadata.title?.toString() ?: return
+            val artist = controller.mediaMetadata.artist?.toString() ?: ""
+            val album = controller.mediaMetadata.albumTitle?.toString() ?: ""
+            val fakeSong = com.stash.stashwave.data.Song(
+                id = 0L,
+                title = title,
+                artist = artist,
+                album = album,
+                duration = controller.duration.takeIf { it > 0 } ?: 0L,
+                path = ""
+            )
+            val cache = com.stash.stashwave.artwork.ArtworkCache(this)
+            val bmp = cache.loadBitmapIfPresent(fakeSong, 512)
+            if (bmp != null) {
+                Glide.with(this)
+                    .load(bmp)
+                    .centerCrop()
+                    .into(binding.albumArtwork)
+                try {
+                    Glide.with(this)
+                        .load(bmp)
+                        .apply(com.bumptech.glide.request.RequestOptions.bitmapTransform(jp.wasabeef.glide.transformations.BlurTransformation(25, 3)))
+                        .into(binding.backdropImage)
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {
+            // ignore
+        }
     }
     
     private fun updateUIFromController() {
