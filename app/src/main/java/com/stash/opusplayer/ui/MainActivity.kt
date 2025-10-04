@@ -382,8 +382,26 @@ Check for updates anytime from Settings.""")
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        if (intent?.action == "com.stash.stashwave.ACTION_JUMP_TO_SOURCE") {
-            jumpToLastPlaybackSource()
+        when (intent?.action) {
+            "com.stash.stashwave.ACTION_JUMP_TO_SOURCE" -> jumpToLastPlaybackSource()
+            "com.stash.stashwave.ACTION_GO_TO_ARTIST" -> {
+                val name = intent.getStringExtra("artist") ?: return
+                val repo = com.stash.stashwave.data.MusicRepository(this)
+                lifecycleScope.launch {
+                    val songs = repo.getSongsByArtist(name)
+                    val fragment = com.stash.stashwave.ui.fragments.ArtistSongsFragment.newInstance(name, ArrayList(songs))
+                    loadFragment(fragment)
+                }
+            }
+            "com.stash.stashwave.ACTION_GO_TO_ALBUM" -> {
+                val album = intent.getStringExtra("album") ?: return
+                val repo = com.stash.stashwave.data.MusicRepository(this)
+                lifecycleScope.launch {
+                    val songs = repo.getSongsInAlbum(album)
+                    val fragment = com.stash.stashwave.ui.fragments.FolderDetailFragment.newInstance(album, ArrayList(songs))
+                    loadFragment(fragment)
+                }
+            }
         }
     }
 

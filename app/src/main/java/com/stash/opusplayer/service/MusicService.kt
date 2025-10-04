@@ -43,6 +43,11 @@ private lateinit var activePlayer: ExoPlayer
     private var isCrossfading: Boolean = false
     private var crossfadeCheckRunnable: Runnable? = null
     private lateinit var equalizerManager: EqualizerManager
+
+    // Sleep timer state
+    private var sleepTimerHandler: android.os.Handler? = null
+    private var sleepTimerRunnable: Runnable? = null
+    private var sleepTimerEndAtMs: Long = 0L
     private var presetReverb: PresetReverb? = null
     private var lastAudioSessionId: Int = C.AUDIO_SESSION_ID_UNSET
     private var currentSpeed: Float = 1.0f
@@ -162,6 +167,11 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
                         "CANCEL_CROSSFADE" -> {
                             cancelCrossfadeAndFocusActive()
                         }
+                        "SET_SLEEP_TIMER" -> {
+                            val dur = args.getLong("duration_ms", 0L)
+                            setSleepTimer(dur)
+                        }
+                        "CANCEL_SLEEP_TIMER" -> cancelSleepTimer()
                         "SET_EQ_ENABLED" -> {
                             val enabled = args.getBoolean("enabled", false)
                             equalizerManager.setEnabled(enabled)
@@ -562,6 +572,44 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
             mediaSession?.sessionCompatToken?.let { setMediaSessionToken(it) }
             setPlayer(activePlayer)
         }
+    }
+
+    private fun setSleepTimer(durationMs: Long) {
+        cancelSleepTimer()
+        if (durationMs <= 0L) return
+        sleepTimerHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        sleepTimerEndAtMs = System.currentTimeMillis() + durationMs
+        val runnable = Runnable {
+            startFadeOutAndPause(8000L)
+        }
+        sleepTimerRunnable = runnable
+        sleepTimerHandler?.postDelayed(runnable, durationMs)
+    }
+
+    private fun cancelSleepTimer() {
+        sleepTimerRunnable?.let { sleepTimerHandler?.removeCallbacks(it) }
+        sleepTimerRunnable = null
+        sleepTimerHandler = null
+        sleepTimerEndAtMs = 0L
+    }
+
+    private fun startFadeOutAndPause(durationMs: Long) {
+        val startTime = System.currentTimeMillis()
+        val startVol = try { activePlayer.volume } catch (_: Exception) { 1f }
+        val runnable = object : Runnable {
+            override fun run() {
+                val elapsed = System.currentTimeMillis() - startTime
+                val fraction = (elapsed.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                val vol = startVol * (1f - fraction)
+                try { activePlayer.volume = vol } catch (_: Exception) {}
+                if (fraction < 1f) {
+                    mainHandler.postDelayed(this, 16L)
+                } else {
+                    try { activePlayer.pause() } catch (_: Exception) {}
+                }
+            }
+        }
+        mainHandler.post(runnable)
     }
 
     private fun createContentIntent(): PendingIntent {

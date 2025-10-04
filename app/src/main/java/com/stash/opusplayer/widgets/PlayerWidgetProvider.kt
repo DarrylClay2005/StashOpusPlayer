@@ -20,6 +20,9 @@ class PlayerWidgetProvider : AppWidgetProvider() {
     companion object {
         const val ACTION_PLAY_PAUSE = "com.stash.stashwave.widgets.PLAY_PAUSE"
         const val ACTION_NEXT = "com.stash.stashwave.widgets.NEXT"
+        const val ACTION_PREV = "com.stash.stashwave.widgets.PREV"
+        const val ACTION_REWIND_10 = "com.stash.stashwave.widgets.REWIND_10"
+        const val ACTION_FF_10 = "com.stash.stashwave.widgets.FF_10"
         const val ACTION_UPDATE = "com.stash.stashwave.widgets.UPDATE"
     }
 
@@ -28,6 +31,9 @@ class PlayerWidgetProvider : AppWidgetProvider() {
         when (intent.action) {
             ACTION_PLAY_PAUSE -> togglePlayPause(context)
             ACTION_NEXT -> sendNext(context)
+            ACTION_PREV -> sendPrev(context)
+            ACTION_REWIND_10 -> sendSeekDelta(context, -10_000)
+            ACTION_FF_10 -> sendSeekDelta(context, 10_000)
             ACTION_UPDATE -> updateAll(context)
         }
     }
@@ -68,6 +74,9 @@ class PlayerWidgetProvider : AppWidgetProvider() {
             views.setOnClickPendingIntent(R.id.widgetContainer, launchMainPendingIntent(context))
             views.setOnClickPendingIntent(R.id.widgetPlayPause, broadcastPendingIntent(context, ACTION_PLAY_PAUSE))
             views.setOnClickPendingIntent(R.id.widgetNext, broadcastPendingIntent(context, ACTION_NEXT))
+            views.setOnClickPendingIntent(R.id.widgetPrev, broadcastPendingIntent(context, ACTION_PREV))
+            views.setOnClickPendingIntent(R.id.widgetRewind, broadcastPendingIntent(context, ACTION_REWIND_10))
+            views.setOnClickPendingIntent(R.id.widgetFfwd, broadcastPendingIntent(context, ACTION_FF_10))
 
             ids.forEach { id -> appWidgetManager.updateAppWidget(id, views) }
 
@@ -95,6 +104,31 @@ class PlayerWidgetProvider : AppWidgetProvider() {
             controller.seekToNext()
             MediaController.releaseFuture(controllerFuture)
             // Request widget UI refresh
+            context.sendBroadcast(Intent(ACTION_UPDATE).setComponent(ComponentName(context, PlayerWidgetProvider::class.java)))
+        }, MoreExecutors.directExecutor())
+    }
+
+    private fun sendPrev(context: Context) {
+        val sessionToken = SessionToken(context, ComponentName(context, MusicService::class.java))
+        val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+        controllerFuture.addListener({
+            val controller = controllerFuture.get()
+            controller.seekToPrevious()
+            MediaController.releaseFuture(controllerFuture)
+            context.sendBroadcast(Intent(ACTION_UPDATE).setComponent(ComponentName(context, PlayerWidgetProvider::class.java)))
+        }, MoreExecutors.directExecutor())
+    }
+
+    private fun sendSeekDelta(context: Context, deltaMs: Long) {
+        val sessionToken = SessionToken(context, ComponentName(context, MusicService::class.java))
+        val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+        controllerFuture.addListener({
+            val controller = controllerFuture.get()
+            val pos = controller.currentPosition
+            val dur = controller.duration
+            val newPos = if (deltaMs >= 0) (pos + deltaMs).coerceAtMost(if (dur > 0) dur else Long.MAX_VALUE) else (pos + deltaMs).coerceAtLeast(0)
+            controller.seekTo(newPos)
+            MediaController.releaseFuture(controllerFuture)
             context.sendBroadcast(Intent(ACTION_UPDATE).setComponent(ComponentName(context, PlayerWidgetProvider::class.java)))
         }, MoreExecutors.directExecutor())
     }
