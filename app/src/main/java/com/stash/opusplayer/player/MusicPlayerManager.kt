@@ -202,10 +202,24 @@ class MusicPlayerManager(private val context: Context) {
     }
     
     private fun updateCurrentSong() {
-        val currentIndex = mediaController?.currentMediaItemIndex ?: 0
-        if (currentIndex >= 0 && currentIndex < _playlist.value.size) {
-            _currentIndex.value = currentIndex
-            _currentSong.value = _playlist.value[currentIndex]
+        val controller = mediaController ?: return
+        val idx = controller.currentMediaItemIndex
+        val list = _playlist.value
+        if (idx >= 0 && idx < list.size) {
+            _currentIndex.value = idx
+            _currentSong.value = list[idx]
+        } else {
+            // Fallback from controller metadata so UI updates even without local playlist mirror
+            val mm = controller.mediaMetadata
+            val fallback = com.stash.stashwave.data.Song(
+                id = 0L,
+                title = mm.title?.toString() ?: "",
+                artist = mm.artist?.toString() ?: "",
+                album = mm.albumTitle?.toString() ?: "",
+                duration = controller.duration.takeIf { it > 0 } ?: 0L,
+                path = ""
+            )
+            _currentSong.value = fallback
         }
     }
     

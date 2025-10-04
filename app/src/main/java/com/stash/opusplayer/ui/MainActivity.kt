@@ -376,9 +376,7 @@ Check for updates anytime from Settings.""")
     }
     
     private fun setupMusicPlayer() {
-        musicPlayerManager = MusicPlayerManager(this).apply {
-            initialize()
-        }
+        musicPlayerManager = (application as com.stash.stashwave.StashWaveApplication).playerManager
     }
     
     private fun setupMiniPlayer() {

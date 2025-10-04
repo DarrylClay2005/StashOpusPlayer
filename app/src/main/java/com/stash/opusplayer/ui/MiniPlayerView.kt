@@ -135,6 +135,7 @@ class MiniPlayerView @JvmOverloads constructor(
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 updateMediaInfo()
+                setArtworkFromMetadata()
                 if (mediaItem != null) show()
             }
         })
