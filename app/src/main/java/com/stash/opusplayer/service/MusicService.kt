@@ -259,7 +259,7 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
             }
         }
         
-mediaSession = MediaSession.Builder(this, activePlayer)
+        mediaSession = MediaSession.Builder(this, activePlayer)
             .setSessionActivity(sessionActivityPendingIntent)
             .setCallback(callback)
             .build()
