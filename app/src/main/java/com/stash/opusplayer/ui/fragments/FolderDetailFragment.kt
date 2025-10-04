@@ -84,7 +84,7 @@ class FolderDetailFragment : Fragment() {
             onSongClick = { song ->
                 val list = songAdapter.currentList
                 val index = list.indexOfFirst { it.id == song.id }.let { if (it >= 0) it else 0 }
-                (activity as? MainActivity)?.playSongsStartingFrom(list, index)
+                (activity as? MainActivity)?.playSongsStartingFrom(list, index, "Folder: ${folderTitle}")
             },
             onFavoriteToggle = { song -> (activity as? MainActivity)?.toggleFavorite(song) },
             onAddToPlaylist = { song -> (activity as? MainActivity)?.addToPlaylist(song) },

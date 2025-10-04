@@ -400,12 +400,16 @@ Check for updates anytime from Settings.""")
         }
     }
 
-    fun playSongsStartingFrom(songs: List<Song>, startIndex: Int) {
+    fun playSongsStartingFrom(songs: List<Song>, startIndex: Int, sourceLabel: String? = null) {
         lifecycleScope.launch {
             try {
                 val idx = startIndex.coerceIn(0, songs.lastIndex)
                 // Replace queue atomically and start playback from the selected index
                 musicPlayerManager.playQueue(songs, idx)
+                // Show small indicator of the source
+                sourceLabel?.let { label ->
+                    Toast.makeText(this@MainActivity, "Playing from $label", Toast.LENGTH_SHORT).show()
+                }
                 val intent = Intent(this@MainActivity, NowPlayingActivity::class.java).apply {
                     putExtra("song", songs[idx])
                 }
