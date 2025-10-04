@@ -379,6 +379,20 @@ Check for updates anytime from Settings.""")
         musicPlayerManager = (application as com.stash.stashwave.StashWaveApplication).playerManager
     }
     
+    private fun showPlayingBanner(text: String) {
+        try {
+            val banner = findViewById<android.view.View>(R.id.playing_banner)
+            val tv = findViewById<android.widget.TextView>(R.id.playing_text)
+            tv.text = text
+            banner.visibility = android.view.View.VISIBLE
+            // Auto-dismiss after ~2 seconds
+            banner.removeCallbacks(null)
+            banner.postDelayed({
+                try { banner.visibility = android.view.View.GONE } catch (_: Exception) {}
+            }, 2000)
+        } catch (_: Exception) {}
+    }
+    
     private fun setupMiniPlayer() {
         miniPlayerView = binding.miniPlayer
         miniPlayerView.initialize(this, musicPlayerManager)
@@ -406,16 +420,14 @@ Check for updates anytime from Settings.""")
                 val idx = startIndex.coerceIn(0, songs.lastIndex)
                 // Replace queue atomically and start playback from the selected index
                 musicPlayerManager.playQueue(songs, idx)
-                // Show small indicator of the source
-                sourceLabel?.let { label ->
-                    Toast.makeText(this@MainActivity, "Playing from $label", Toast.LENGTH_SHORT).show()
-                }
+                // Show top banner indicator of the source
+                sourceLabel?.let { label -> showPlayingBanner("Playing from $label") }
                 val intent = Intent(this@MainActivity, NowPlayingActivity::class.java).apply {
                     putExtra("song", songs[idx])
                 }
                 startActivity(intent)
             } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Error starting playback: ${e.message}", Toast.LENGTH_SHORT).show()
+                showPlayingBanner("Error starting playback")
             }
         }
     }
