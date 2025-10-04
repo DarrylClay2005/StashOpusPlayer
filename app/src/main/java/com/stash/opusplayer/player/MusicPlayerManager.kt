@@ -126,6 +126,27 @@ class MusicPlayerManager(private val context: Context) {
         val mediaItems = songs.map { song -> createMediaItem(song) }
         runWhenReady { it.setMediaItems(mediaItems) }
     }
+
+    // Atomically replace the queue and start playing from index
+    fun playQueue(songs: List<Song>, startIndex: Int) {
+        if (songs.isEmpty()) return
+        val idx = startIndex.coerceIn(0, songs.lastIndex)
+        _playlist.value = songs
+        _currentIndex.value = idx
+        _currentSong.value = songs[idx]
+        val mediaItems = songs.map { song -> createMediaItem(song) }
+        runWhenReady {
+            try {
+                it.setMediaItems(mediaItems, idx, /* startPositionMs= */ 0)
+            } catch (_: Exception) {
+                // Fallback if overloaded method not available
+                it.setMediaItems(mediaItems)
+                it.seekToDefaultPosition(idx)
+            }
+            it.prepare()
+            it.play()
+        }
+    }
     
     fun addToPlaylist(song: Song) {
         val currentPlaylist = _playlist.value.toMutableList()

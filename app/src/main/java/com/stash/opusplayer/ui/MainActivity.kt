@@ -404,8 +404,8 @@ Check for updates anytime from Settings.""")
         lifecycleScope.launch {
             try {
                 val idx = startIndex.coerceIn(0, songs.lastIndex)
-                musicPlayerManager.setPlaylist(songs)
-                musicPlayerManager.playFromPlaylist(idx)
+                // Replace queue atomically and start playback from the selected index
+                musicPlayerManager.playQueue(songs, idx)
                 val intent = Intent(this@MainActivity, NowPlayingActivity::class.java).apply {
                     putExtra("song", songs[idx])
                 }
