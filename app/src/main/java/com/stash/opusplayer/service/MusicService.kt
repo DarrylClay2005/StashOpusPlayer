@@ -500,6 +500,12 @@ try { activePlayer.setAudioAttributes(audioAttributes, audioFocusEnabled) } catc
     fun setCrossfadeEnabled(enabled: Boolean) {
         crossfadeEnabled = enabled
         try { getSharedPreferences("settings", 0).edit().putBoolean("crossfade_enabled", crossfadeEnabled).apply() } catch (_: Exception) {}
+        // Apply immediately if playback is active
+        if (crossfadeEnabled && activePlayer.isPlaying) {
+            startCrossfadePolling()
+        } else {
+            stopCrossfadePolling()
+        }
     }
 
     fun setCrossfadeDuration(durationMs: Long) {

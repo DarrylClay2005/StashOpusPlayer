@@ -134,18 +134,33 @@ class NowPlayingActivity : AppCompatActivity() {
             popup.menuInflater.inflate(R.menu.now_playing_menu, popup.menu)
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
-                    R.id.action_share -> {
-                        shareCurrentTrack()
-                        true
-                    }
-                    R.id.action_embed_artwork -> {
-                        embedArtworkIntoFile()
+                    R.id.action_share -> { shareCurrentTrack(); true }
+                    R.id.action_embed_artwork -> { embedArtworkIntoFile(); true }
+                    R.id.action_toggle_crossfade -> {
+                        // Quick toggle
+                        val prefs = getSharedPreferences("settings", 0)
+                        val current = prefs.getBoolean("crossfade_enabled", false)
+                        val next = !current
+                        prefs.edit().putBoolean("crossfade_enabled", next).apply()
+                        // Notify service via command as well
+                        try {
+                            mediaController?.sendCustomCommand(
+                                androidx.media3.session.SessionCommand("SET_CROSSFADE_ENABLED", android.os.Bundle.EMPTY),
+                                androidx.core.os.bundleOf("enabled" to next)
+                            )
+                        } catch (_: Exception) {}
+                        android.widget.Toast.makeText(this, if (next) "Crossfade ON" else "Crossfade OFF", android.widget.Toast.LENGTH_SHORT).show()
                         true
                     }
                     else -> false
                 }
             }
             popup.show()
+        }
+
+        // Queue button — show current playlist and allow jumping
+        binding.queueButton.setOnClickListener {
+            showQueueDialog()
         }
         
         // Seek bar (hidden) handlers retained for compatibility
@@ -643,6 +658,27 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
         populateMetadata()
     }
     
+    private fun showQueueDialog() {
+        val mgr = (application as? com.stash.stashwave.StashWaveApplication)?.playerManager
+        val list = mgr?.playlist?.value ?: emptyList()
+        if (list.isEmpty()) {
+            android.widget.Toast.makeText(this, "Queue is empty", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val currentIndex = mgr.currentIndex.value
+        val titles = list.mapIndexed { index, s ->
+            val mark = if (index == currentIndex) "• " else ""
+            "$mark${s.displayName} — ${s.artistName}"
+        }.toTypedArray()
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Queue (${list.size})")
+            .setItems(titles) { _, which ->
+                mgr.playFromPlaylist(which)
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
     private fun hideMetadataView() {
         // Hide metadata container
         binding.metadataContainer.visibility = android.view.View.GONE
