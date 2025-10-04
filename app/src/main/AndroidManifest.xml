@@ -73,6 +73,16 @@
             android:name=".ui.NowPlayingActivity"
             android:exported="false"
             android:theme="@style/Theme.StashWavePlayer" />
+
+        <activity
+            android:name=".ui.QueueActivity"
+            android:exported="false"
+            android:theme="@style/Theme.StashWavePlayer" />
+
+        <activity
+            android:name=".ui.MetadataActivity"
+            android:exported="false"
+            android:theme="@style/Theme.StashWavePlayer" />
         
         <activity
             android:name=".ui.YouTubeStreamingActivity"

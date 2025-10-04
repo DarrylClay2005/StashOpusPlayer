@@ -158,9 +158,11 @@ class NowPlayingActivity : AppCompatActivity() {
             popup.show()
         }
 
-        // Queue button — show current playlist and allow jumping
+        // Queue button — open full-screen queue
         binding.queueButton.setOnClickListener {
-            showQueueDialog()
+            try {
+                startActivity(android.content.Intent(this, QueueActivity::class.java))
+            } catch (_: Exception) {}
         }
         
         // Seek bar (hidden) handlers retained for compatibility
@@ -226,12 +228,11 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
         // Add 10-second seek functionality to album artwork
         setupAlbumArtworkSeek()
 
-        // Metadata toggle button
+        // Metadata button now opens full-screen metadata screen
         binding.metadataButton.setOnClickListener {
-            toggleMetadataView()
-            if (binding.metadataContainer.visibility == android.view.View.VISIBLE) {
-                populateMetadata()
-            }
+            try {
+                startActivity(android.content.Intent(this, MetadataActivity::class.java))
+            } catch (_: Exception) {}
         }
         
         // Metadata back button
@@ -665,7 +666,7 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
             android.widget.Toast.makeText(this, "Queue is empty", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
-        val currentIndex = mgr.currentIndex.value
+        val currentIndex = mgr?.currentIndex?.value ?: 0
         val titles = list.mapIndexed { index, s ->
             val mark = if (index == currentIndex) "• " else ""
             "$mark${s.displayName} — ${s.artistName}"
@@ -673,7 +674,7 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
         androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Queue (${list.size})")
             .setItems(titles) { _, which ->
-                mgr.playFromPlaylist(which)
+                mgr?.playFromPlaylist(which)
             }
             .setNegativeButton("Close", null)
             .show()
