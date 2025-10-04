@@ -31,23 +31,32 @@ android {
         applicationId "com.stash.stashwave"
         minSdk 21
         targetSdk 34
-        versionCode 112
-        versionName "10.7.6"
+        versionCode 113
+        versionName "10.7.7"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
         // Inject YouTube API key into BuildConfig
         buildConfigField "String", "YOUTUBE_API_KEY", "\"${youtubeApiKey}\""
     }
 
-    def hasReleaseKeystore = file('../release-key.keystore').exists()
+    // Load release keystore from local.properties if available
+    def releaseStoreFile = localProperties.getProperty('RELEASE_STORE_FILE', '')
+    def releaseStorePassword = localProperties.getProperty('RELEASE_STORE_PASSWORD', '')
+    def releaseKeyAlias = localProperties.getProperty('RELEASE_KEY_ALIAS', '')
+    def releaseKeyPassword = localProperties.getProperty('RELEASE_KEY_PASSWORD', '')
+
+    def hasReleaseKeystore = (releaseStoreFile != null && releaseStoreFile.length() > 0 && file(releaseStoreFile).exists() &&
+            releaseStorePassword != null && releaseStorePassword.length() > 0 &&
+            releaseKeyAlias != null && releaseKeyAlias.length() > 0 &&
+            releaseKeyPassword != null && releaseKeyPassword.length() > 0)
 
     signingConfigs {
         if (hasReleaseKeystore) {
             release {
-                keyAlias 'release-key'
-                keyPassword 'stash123'
-                storeFile file('../release-key.keystore')
-                storePassword 'stash123'
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
             }
         }
     }
