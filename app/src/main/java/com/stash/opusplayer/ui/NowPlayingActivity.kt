@@ -197,6 +197,10 @@ class NowPlayingActivity : AppCompatActivity() {
                         }
                         true
                     }
+                    R.id.action_show_replaygain_info -> {
+                        showReplayGainInfo()
+                        true
+                    }
                     else -> false
                 }
             }
@@ -284,6 +288,62 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
         binding.metadataBackButton.setOnClickListener { hideMetadataView() }
 
         // Audio controls have moved to Settings
+    }
+    
+    private fun showReplayGainInfo() {
+        try {
+            val controller = mediaController ?: return
+            val uri = controller.currentMediaItem?.localConfiguration?.uri ?: return
+            val info = com.stash.stashwave.utils.ReplayGainUtil.parseWithCache(this, uri.toString())
+            // Read settings to compute effective values similarly to service
+            val prefs = getSharedPreferences("settings", 0)
+            val enabled = prefs.getBoolean("replaygain_enabled", false)
+            val mode = prefs.getString("replaygain_mode", "track") ?: "track"
+            val preamp = prefs.getFloat("replaygain_preamp_db", 0f)
+            val fallback = prefs.getFloat("replaygain_fallback_db", 0f)
+            val preventClip = prefs.getBoolean("replaygain_prevent_clipping", true)
+            val allowBoost = prefs.getBoolean("replaygain_allow_boost", false)
+
+            // Compute applied values
+            val gainDb = when (mode) {
+                "album" -> info?.albumGainDb
+                else -> info?.trackGainDb
+            }
+            val peak = when (mode) {
+                "album" -> info?.albumPeak ?: info?.trackPeak
+                else -> info?.trackPeak ?: info?.albumPeak
+            } ?: 1f
+            var targetDb = (gainDb ?: fallback) + preamp
+            if (preventClip && peak > 0f) {
+                val maxDb = 20f * (kotlin.math.log10(1f / peak))
+                if (targetDb > maxDb) targetDb = maxDb
+            }
+            val ampDbForPlayer = if (allowBoost) targetDb.coerceAtMost(0f) else targetDb.coerceAtMost(0f)
+            val amp = Math.pow(10.0, (ampDbForPlayer / 20f).toDouble()).toFloat()
+            val remainingBoostDb = if (allowBoost) (targetDb - ampDbForPlayer) else 0f
+            val leMb = if (remainingBoostDb > 0.05f) (remainingBoostDb * 100f).toInt() else 0
+
+            val sb = StringBuilder()
+            sb.appendLine("ReplayGain enabled: ${enabled}")
+            sb.appendLine("Mode: ${mode}")
+            sb.appendLine("Tag track gain: ${info?.trackGainDb?.let { String.format("%.2f dB", it) } ?: "(none)"}")
+            sb.appendLine("Tag album gain: ${info?.albumGainDb?.let { String.format("%.2f dB", it) } ?: "(none)"}")
+            sb.appendLine("Tag peak: ${info?.trackPeak ?: info?.albumPeak ?: "(none)"}")
+            sb.appendLine("Preamp: ${String.format("%.1f dB", preamp)}  Fallback: ${String.format("%.1f dB", fallback)}")
+            sb.appendLine("Prevent clipping: ${preventClip}  Allow boost: ${allowBoost}")
+            sb.appendLine("")
+            sb.appendLine("Computed target: ${String.format("%.2f dB", targetDb)}")
+            sb.appendLine("Player volume factor: ${String.format("%.3f", amp)}")
+            if (allowBoost) sb.appendLine("LoudnessEnhancer boost: ${leMb} mB")
+
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("ReplayGain info")
+                .setMessage(sb.toString())
+                .setPositiveButton("OK", null)
+                .show()
+        } catch (_: Exception) {
+            android.widget.Toast.makeText(this, "Failed to load ReplayGain info", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
     
     private fun showLyrics() {

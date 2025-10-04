@@ -35,5 +35,10 @@
         android:id="@+id/action_go_to_artist"
         android:title="Go to Artist"
         android:visible="true" />
+
+    <item
+        android:id="@+id/action_show_replaygain_info"
+        android:title="Show ReplayGain Info"
+        android:visible="true" />
 </menu>
 

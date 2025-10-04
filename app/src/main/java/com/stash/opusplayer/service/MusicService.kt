@@ -16,6 +16,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.PlaybackParameters
 import android.media.audiofx.PresetReverb
+import android.media.audiofx.LoudnessEnhancer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
@@ -27,6 +28,7 @@ import com.stash.stashwave.audio.EqualizerManager
 import com.stash.stashwave.data.Song
 import com.stash.stashwave.ui.MainActivity
 import kotlin.math.pow
+import kotlin.math.log10
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
@@ -68,6 +70,22 @@ private lateinit var activePlayer: ExoPlayer
     private var crossfadeEnabled: Boolean = false
     private var crossfadeDurationMs: Long = 1000L
     private var audioFocusEnabled: Boolean = true
+
+    // Playback enhancements
+    private var skipSilenceEnabled: Boolean = false
+    private var exactSeeks: Boolean = true
+
+    // ReplayGain settings
+    private var rgEnabled: Boolean = false
+    private var rgMode: String = "track" // "track" or "album"
+    private var rgPreampDb: Float = 0f
+    private var rgFallbackDb: Float = 0f
+    private var rgPreventClipping: Boolean = true
+    private var rgAllowBoost: Boolean = false
+
+    // ReplayGain LoudnessEnhancer (separate from EQ stack)
+    private var rgLoudness: LoudnessEnhancer? = null
+    private var lastRgSessionId: Int = C.AUDIO_SESSION_ID_UNSET
 
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var fadeRunnable: Runnable? = null
@@ -123,12 +141,23 @@ activePlayer = ExoPlayer.Builder(this)
             appVolumeUi = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
             crossfadeEnabled = prefs.getBoolean("crossfade_enabled", false)
             crossfadeDurationMs = prefs.getLong("crossfade_duration_ms", 1000L).coerceIn(0L, 5000L)
+            skipSilenceEnabled = prefs.getBoolean("skip_silence_enabled", false)
+            exactSeeks = prefs.getBoolean("exact_seeks", true)
+            // ReplayGain
+            rgEnabled = prefs.getBoolean("replaygain_enabled", false)
+            rgMode = prefs.getString("replaygain_mode", "track") ?: "track"
+            rgPreampDb = prefs.getFloat("replaygain_preamp_db", 0f)
+            rgFallbackDb = prefs.getFloat("replaygain_fallback_db", 0f)
+            rgPreventClipping = prefs.getBoolean("replaygain_prevent_clipping", true)
+            rgAllowBoost = prefs.getBoolean("replaygain_allow_boost", false)
         } catch (_: Exception) {}
 
         // Apply audio attributes with focus handling preference
 try { activePlayer.setAudioAttributes(audioAttributes, audioFocusEnabled) } catch (_: Exception) {}
         try { activePlayer.setHandleAudioBecomingNoisy(true) } catch (_: Exception) {}
         try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
+        try { activePlayer.setSkipSilenceEnabled(skipSilenceEnabled) } catch (_: Exception) {}
+        try { activePlayer.setPauseAtEndOfMediaItems(false) } catch (_: Exception) {}
 
         // Apply persisted playback parameters (speed/pitch/reverb) and playback modes if available
         try {
@@ -306,7 +335,11 @@ val sessionId = activePlayer.audioSessionId
                         lastAudioSessionId = sessionId
                         equalizerManager.initialize(sessionId)
                         configureReverbForSession(sessionId)
+                        // Ensure ReplayGain loudness enhancer is bound to this session
+                        ensureReplayGainLoudness(sessionId)
                     }
+                    // Apply ReplayGain for current item (async parse)
+                    if (rgEnabled) applyReplayGainForCurrent()
                 }
             }
             
@@ -336,6 +369,8 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
                     sendBroadcast(Intent(com.stash.stashwave.widgets.PlayerWidgetProvider.ACTION_UPDATE)
                         .setComponent(ComponentName(this@MusicService, com.stash.stashwave.widgets.PlayerWidgetProvider::class.java)))
                 } catch (_: Exception) {}
+                // Prefetch neighbor artwork to reduce flashes
+                try { prefetchNeighborArtwork() } catch (_: Exception) {}
                 // If not using polling or user disabled experimental true crossfade, we still do minimal fade-in
                 val prefs = getSharedPreferences("settings", 0)
                 val exp = prefs.getBoolean("experimental_true_crossfade", true)
@@ -352,7 +387,10 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
                     lastAudioSessionId = sessionId
                     try { equalizerManager.initialize(sessionId) } catch (_: Exception) {}
                     try { configureReverbForSession(sessionId) } catch (_: Exception) {}
+                    try { ensureReplayGainLoudness(sessionId) } catch (_: Exception) {}
                 }
+                // Apply ReplayGain for new item
+                if (rgEnabled) applyReplayGainForCurrent()
             }
         })
     }
@@ -651,21 +689,22 @@ val title = activePlayer.mediaMetadata.title?.toString() ?: ""
     fun getEqualizerManager(): EqualizerManager = equalizerManager
     
     private fun checkAndStopServiceIfNeeded() {
-        // If app is not in foreground and music is paused, consider stopping service
-        val activityManager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
-        val appTasks = activityManager.getRunningTasks(1)
-        
-        val isAppInForeground = appTasks.isNotEmpty() && 
-            appTasks[0].topActivity?.packageName == packageName
-        
-if (!isAppInForeground && !activePlayer.isPlaying) {
-            // App is in background and music is not playing
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-if (!activePlayer.isPlaying) {
-                    // Still not playing after delay, stop service
-                    stopSelf()
-                }
-            }, 30000) // 30 second grace period
+        try {
+            // If app is not in foreground and music is paused, consider stopping service
+            val activityManager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
+            val appTasks = activityManager.getRunningTasks(1)
+            val isAppInForeground = appTasks.isNotEmpty() &&
+                appTasks[0].topActivity?.packageName == packageName
+            if (!isAppInForeground && !activePlayer.isPlaying) {
+                // App is in background and music is not playing
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    try {
+                        if (!activePlayer.isPlaying) stopSelf()
+                    } catch (_: Exception) {}
+                }, 30000) // 30 second grace period
+            }
+        } catch (_: Exception) {
+            // Ignore environment restrictions
         }
     }
     
@@ -776,6 +815,9 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
             isCrossfading = false
             return
         }
+        // Apply enhancement flags to spare as well
+        try { spare.setSkipSilenceEnabled(skipSilenceEnabled) } catch (_: Exception) {}
+        try { spare.setPauseAtEndOfMediaItems(false) } catch (_: Exception) {}
         val startTime = System.currentTimeMillis()
         val baseAmp = uiToAmp(appVolumeUi)
         val fromVol = baseAmp
@@ -821,6 +863,7 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
     fun setPlaybackSpeed(speed: Float) {
         currentSpeed = speed
 try { activePlayer.playbackParameters = PlaybackParameters(currentSpeed, currentPitch) } catch (_: Exception) {}
+        // ReplayGain unaffected by speed
     }
 
     fun setPlaybackPitch(pitch: Float) {
@@ -843,7 +886,7 @@ val sessionId = activePlayer.audioSessionId
         } catch (_: Exception) {}
         try { getSharedPreferences("settings", 0).edit().putInt("reverb_preset", preset.toInt()).apply() } catch (_: Exception) {}
     }
-    
+
     private fun configureReverbForSession(sessionId: Int) {
         try {
             try { presetReverb?.release() } catch (_: Exception) {}
@@ -855,6 +898,83 @@ val sessionId = activePlayer.audioSessionId
             // Device may not support PresetReverb; ignore gracefully
         }
     }
+
+    // ReplayGain support
+    private fun ensureReplayGainLoudness(sessionId: Int) {
+        if (!rgAllowBoost) return // We only need LE if positive boost is allowed
+        try {
+            if (lastRgSessionId == sessionId && rgLoudness != null) return
+            lastRgSessionId = sessionId
+            try { rgLoudness?.release() } catch (_: Exception) {}
+            rgLoudness = LoudnessEnhancer(sessionId).apply {
+                enabled = true
+                setTargetGain(0)
+            }
+        } catch (_: Exception) {
+            // Device may not support LoudnessEnhancer; ignore
+            rgLoudness = null
+        }
+    }
+
+    private fun clearReplayGainBoost() {
+        try { rgLoudness?.setTargetGain(0) } catch (_: Exception) {}
+        // Reset player volume to app volume only
+        try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
+    }
+
+    private fun applyReplayGainForCurrent() {
+        try {
+            val uri = activePlayer.currentMediaItem?.localConfiguration?.uri ?: return
+            // Compute asynchronously to avoid blocking the main thread
+            GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val info = com.stash.stashwave.utils.ReplayGainUtil.parseWithCache(this@MusicService, uri.toString())
+                val pair = computeReplayGainFor(info)
+                val amp = pair.first
+                val leMb = pair.second
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    try { activePlayer.volume = (uiToAmp(appVolumeUi) * amp).coerceIn(0f, 1f) } catch (_: Exception) {}
+                    if (rgAllowBoost && leMb != 0) {
+                        try { ensureReplayGainLoudness(activePlayer.audioSessionId) } catch (_: Exception) {}
+                        try { rgLoudness?.setTargetGain(leMb) } catch (_: Exception) {}
+                    } else {
+                        try { rgLoudness?.setTargetGain(0) } catch (_: Exception) {}
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    // Returns Pair(ampMultiplierForPlayerVolume, positiveBoostMillibelsForLoudnessEnhancer)
+    private fun computeReplayGainFor(info: com.stash.stashwave.utils.ReplayGainUtil.Info?): Pair<Float, Int> {
+        if (!rgEnabled) return 1f to 0
+        val gainDbFromTag = when (rgMode) {
+            "album" -> info?.albumGainDb
+            else -> info?.trackGainDb
+        }
+        val peak = when (rgMode) {
+            "album" -> info?.albumPeak ?: info?.trackPeak
+            else -> info?.trackPeak ?: info?.albumPeak
+        } ?: 1f
+
+        // Choose db to apply
+        var targetDb = (gainDbFromTag ?: rgFallbackDb) + rgPreampDb
+
+        // Prevent clipping if requested
+        if (rgPreventClipping && peak > 0f) {
+            // Ensure amp * peak <= 1 => 10^(db/20) <= 1/peak => db <= 20*log10(1/peak)
+            val maxDb = 20f * (log10(1f / peak))
+            if (targetDb > maxDb) targetDb = maxDb
+        }
+
+        // Split into player volume part (<= 0 dB) and optional positive boost via LE
+        val ampDbForPlayer = if (rgAllowBoost) targetDb.coerceAtMost(0f) else targetDb.coerceAtMost(0f)
+        val amp = dbToAmp(ampDbForPlayer)
+        val remainingBoostDb = if (rgAllowBoost) (targetDb - ampDbForPlayer) else 0f
+        val leMb = if (remainingBoostDb > 0.05f) (remainingBoostDb * 100f).toInt() else 0
+        return amp to leMb
+    }
+
+    private fun dbToAmp(db: Float): Float = 10f.pow(db / 20f)
 
     override fun onTaskRemoved(rootIntent: Intent?) {
 try { activePlayer.pause() } catch (_: Exception) {}
@@ -893,10 +1013,31 @@ try { activePlayer.pause() } catch (_: Exception) {}
                 "app_volume" -> {
                     val v = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
                     setAppVolume(v)
+                    if (rgEnabled) applyReplayGainForCurrent()
                 }
                 "audio_focus_enabled" -> setAudioFocusEnabled(prefs.getBoolean("audio_focus_enabled", true))
                 "crossfade_enabled" -> setCrossfadeEnabled(prefs.getBoolean("crossfade_enabled", false))
                 "crossfade_duration_ms" -> setCrossfadeDuration(prefs.getLong("crossfade_duration_ms", 1000L))
+                "skip_silence_enabled" -> {
+                    skipSilenceEnabled = prefs.getBoolean("skip_silence_enabled", false)
+                    try { activePlayer.setSkipSilenceEnabled(skipSilenceEnabled) } catch (_: Exception) {}
+                    try { sparePlayer?.setSkipSilenceEnabled(skipSilenceEnabled) } catch (_: Exception) {}
+                }
+                "exact_seeks" -> {
+                    exactSeeks = prefs.getBoolean("exact_seeks", true)
+                    // SeekParameters API not applied in this build; stored for future use
+                }
+                // ReplayGain
+                "replaygain_enabled", "replaygain_mode", "replaygain_preamp_db", "replaygain_fallback_db",
+                "replaygain_prevent_clipping", "replaygain_allow_boost" -> {
+                    rgEnabled = prefs.getBoolean("replaygain_enabled", rgEnabled)
+                    rgMode = prefs.getString("replaygain_mode", rgMode) ?: rgMode
+                    rgPreampDb = prefs.getFloat("replaygain_preamp_db", rgPreampDb)
+                    rgFallbackDb = prefs.getFloat("replaygain_fallback_db", rgFallbackDb)
+                    rgPreventClipping = prefs.getBoolean("replaygain_prevent_clipping", rgPreventClipping)
+                    rgAllowBoost = prefs.getBoolean("replaygain_allow_boost", rgAllowBoost)
+                    if (rgEnabled) applyReplayGainForCurrent() else clearReplayGainBoost()
+                }
                 "reverb_preset" -> setReverbPreset(prefs.getInt("reverb_preset", 0).toShort())
                 "experimental_true_crossfade" -> {
                     val enabled = prefs.getBoolean("experimental_true_crossfade", true)
@@ -931,5 +1072,31 @@ try { activePlayer.pause() } catch (_: Exception) {}
         try { PreferenceManager.getDefaultSharedPreferences(this).unregisterOnSharedPreferenceChangeListener(defaultPrefsListener) } catch (_: Exception) {}
         settingsPrefsListener = null
         defaultPrefsListener = null
+    }
+
+    private fun prefetchNeighborArtwork() {
+        try {
+            val idx = activePlayer.currentMediaItemIndex
+            val count = activePlayer.mediaItemCount
+            if (count <= 0) return
+            val targets = listOf(idx - 1, idx + 1).filter { it in 0 until count }
+            for (i in targets) {
+                val mi = try { activePlayer.getMediaItemAt(i) } catch (_: Exception) { null } ?: continue
+                val title = mi.mediaMetadata.title?.toString() ?: ""
+                val artist = mi.mediaMetadata.artist?.toString() ?: ""
+                val album = mi.mediaMetadata.albumTitle?.toString() ?: ""
+                if (title.isBlank() && artist.isBlank() && album.isBlank()) continue
+                try {
+                    val fakeSong = com.stash.stashwave.data.Song(0L, title, artist, album, 0L, "")
+                    val cache = com.stash.stashwave.artwork.ArtworkCache(this)
+                    val bmp = cache.loadBitmapIfPresent(fakeSong, 256)
+                    if (bmp == null) {
+                        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            try { com.stash.stashwave.artwork.OnlineArtworkFetcher(this@MusicService).getOrFetch(fakeSong) } catch (_: Exception) {}
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
     }
 }

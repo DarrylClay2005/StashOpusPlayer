@@ -708,6 +708,133 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
         }
         layout.addView(moreEffectsBtn)
 
+        // --- Playback Enhancements ---
+        val enhanceHeader = TextView(requireContext()).apply {
+            text = "Playback Enhancements"
+            textSize = 18f
+            setPadding(0, 24, 0, 8)
+        }
+        layout.addView(enhanceHeader)
+
+        val settingsPrefs = requireContext().getSharedPreferences("settings", 0)
+
+        // Skip silence toggle
+        val skipSilenceToggle = CheckBox(requireContext()).apply {
+            text = "Skip silence during playback"
+            isChecked = settingsPrefs.getBoolean("skip_silence_enabled", false)
+            setOnCheckedChangeListener { _, checked ->
+                settingsPrefs.edit().putBoolean("skip_silence_enabled", checked).apply()
+            }
+        }
+        layout.addView(skipSilenceToggle)
+
+        // Gapless / seek accuracy
+        val exactSeekToggle = CheckBox(requireContext()).apply {
+            text = "Use exact seeks (better for gapless)"
+            isChecked = settingsPrefs.getBoolean("exact_seeks", true)
+            setOnCheckedChangeListener { _, checked ->
+                settingsPrefs.edit().putBoolean("exact_seeks", checked).apply()
+            }
+        }
+        layout.addView(exactSeekToggle)
+
+        // ReplayGain section
+        val rgHeader = TextView(requireContext()).apply {
+            text = "ReplayGain Normalization"
+            textSize = 18f
+            setPadding(0, 24, 0, 8)
+        }
+        layout.addView(rgHeader)
+
+        val rgEnable = CheckBox(requireContext()).apply {
+            text = "Enable ReplayGain normalization"
+            isChecked = settingsPrefs.getBoolean("replaygain_enabled", false)
+            setOnCheckedChangeListener { _, checked ->
+                settingsPrefs.edit().putBoolean("replaygain_enabled", checked).apply()
+                Toast.makeText(requireContext(), if (checked) "ReplayGain enabled" else "ReplayGain disabled", Toast.LENGTH_SHORT).show()
+            }
+        }
+        layout.addView(rgEnable)
+
+        // Mode selector (Track vs Album)
+        val modeLabel = TextView(requireContext()).apply {
+            text = "ReplayGain mode"
+            setPadding(0, 8, 0, 4)
+        }
+        layout.addView(modeLabel)
+        val modeGroup = RadioGroup(requireContext()).apply { orientation = RadioGroup.HORIZONTAL }
+        val trackRb = RadioButton(requireContext()).apply { text = "Track" }
+        val albumRb = RadioButton(requireContext()).apply { text = "Album" }
+        modeGroup.addView(trackRb)
+        modeGroup.addView(albumRb)
+        val savedMode = settingsPrefs.getString("replaygain_mode", "track") ?: "track"
+        if (savedMode == "album") albumRb.isChecked = true else trackRb.isChecked = true
+        modeGroup.setOnCheckedChangeListener { _, checkedId ->
+            val mode = if (checkedId == albumRb.id) "album" else "track"
+            settingsPrefs.edit().putString("replaygain_mode", mode).apply()
+        }
+        layout.addView(modeGroup)
+
+        // Preamp slider (-12 to +12 dB)
+        val preampLabel = TextView(requireContext()).apply { text = "Preamp (dB)" }
+        layout.addView(preampLabel)
+        val preampValue = TextView(requireContext())
+        layout.addView(preampValue)
+        val preampSeek = SeekBar(requireContext()).apply {
+            max = 240 // -12..+12 mapped to 0..240
+            progress = ((settingsPrefs.getFloat("replaygain_preamp_db", 0f) + 12f) * 10f).toInt().coerceIn(0, 240)
+        }
+        preampValue.text = String.format("%.1f dB", preampSeek.progress / 10f - 12f)
+        preampSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                val db = p / 10f - 12f
+                preampValue.text = String.format("%.1f dB", db)
+                if (fromUser) settingsPrefs.edit().putFloat("replaygain_preamp_db", db).apply()
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+        layout.addView(preampSeek)
+
+        // Fallback gain when no tags (-12..+12 dB)
+        val fallbackLabel = TextView(requireContext()).apply { text = "Fallback gain (dB) for files without tags" }
+        layout.addView(fallbackLabel)
+        val fallbackValue = TextView(requireContext())
+        layout.addView(fallbackValue)
+        val fallbackSeek = SeekBar(requireContext()).apply {
+            max = 240
+            progress = ((settingsPrefs.getFloat("replaygain_fallback_db", 0f) + 12f) * 10f).toInt().coerceIn(0, 240)
+        }
+        fallbackValue.text = String.format("%.1f dB", fallbackSeek.progress / 10f - 12f)
+        fallbackSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                val db = p / 10f - 12f
+                fallbackValue.text = String.format("%.1f dB", db)
+                if (fromUser) settingsPrefs.edit().putFloat("replaygain_fallback_db", db).apply()
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+        layout.addView(fallbackSeek)
+
+        val preventClipToggle = CheckBox(requireContext()).apply {
+            text = "Prevent clipping"
+            isChecked = settingsPrefs.getBoolean("replaygain_prevent_clipping", true)
+            setOnCheckedChangeListener { _, checked ->
+                settingsPrefs.edit().putBoolean("replaygain_prevent_clipping", checked).apply()
+            }
+        }
+        layout.addView(preventClipToggle)
+
+        val allowBoostToggle = CheckBox(requireContext()).apply {
+            text = "Allow positive gain (uses Loudness Enhancer if supported)"
+            isChecked = settingsPrefs.getBoolean("replaygain_allow_boost", false)
+            setOnCheckedChangeListener { _, checked ->
+                settingsPrefs.edit().putBoolean("replaygain_allow_boost", checked).apply()
+            }
+        }
+        layout.addView(allowBoostToggle)
+
         val prefs = requireContext().getSharedPreferences("settings", 0)
         val savedSemitones = prefs.getInt("pitch_semitones", 0)
 
