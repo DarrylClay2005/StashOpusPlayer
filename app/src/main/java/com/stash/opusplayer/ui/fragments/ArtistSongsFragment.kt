@@ -73,8 +73,9 @@ class ArtistSongsFragment : Fragment() {
     private fun setupRecyclerView() {
         songAdapter = SongAdapter(
             onSongClick = { song ->
-                // Play the artist song
-                (activity as? MainActivity)?.playMusic(song)
+                val list = songAdapter.currentList
+                val index = list.indexOfFirst { it.id == song.id }.let { if (it >= 0) it else 0 }
+                (activity as? MainActivity)?.playSongsStartingFrom(list, index)
             },
             onFavoriteToggle = { song ->
                 // Toggle favorite status

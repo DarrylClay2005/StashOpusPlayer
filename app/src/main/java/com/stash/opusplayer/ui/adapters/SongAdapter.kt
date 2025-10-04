@@ -130,7 +130,6 @@ class SongAdapter(
                     .placeholder(R.drawable.ic_music_note)
                     .error(R.drawable.ic_music_note)
                     .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
-                    .override(256, 256)
                     .centerCrop()
                     .into(artworkView)
                 return

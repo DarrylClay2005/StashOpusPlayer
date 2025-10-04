@@ -20,12 +20,12 @@
         android:padding="14dp"
         android:gravity="center_vertical">
 
-    <ImageView
+    <com.google.android.material.imageview.ShapeableImageView
         android:id="@+id/song_artwork"
         android:layout_width="56dp"
         android:layout_height="56dp"
         android:scaleType="centerCrop"
-        android:background="@drawable/rounded_corner_bg"
+        app:shapeAppearanceOverlay="@style/CircularImageView"
         android:src="@drawable/ic_music_note" />
 
     <LinearLayout
