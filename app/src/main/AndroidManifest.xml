@@ -111,6 +111,9 @@
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
                 <action android:name="com.stash.stashwave.widgets.PLAY_PAUSE" />
                 <action android:name="com.stash.stashwave.widgets.NEXT" />
+                <action android:name="com.stash.stashwave.widgets.PREV" />
+                <action android:name="com.stash.stashwave.widgets.REWIND_10" />
+                <action android:name="com.stash.stashwave.widgets.FF_10" />
                 <action android:name="com.stash.stashwave.widgets.UPDATE" />
             </intent-filter>
             <meta-data

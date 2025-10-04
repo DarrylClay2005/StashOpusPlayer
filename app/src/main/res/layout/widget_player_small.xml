@@ -44,6 +44,22 @@
     </LinearLayout>
 
     <ImageButton
+        android:id="@+id/widgetRewind"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:background="@android:color/transparent"
+        android:src="@drawable/ic_replay_10_24"
+        android:contentDescription="-10s" />
+
+    <ImageButton
+        android:id="@+id/widgetPrev"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:background="@android:color/transparent"
+        android:src="@drawable/ic_skip_previous_24"
+        android:contentDescription="Previous" />
+
+    <ImageButton
         android:id="@+id/widgetPlayPause"
         android:layout_width="40dp"
         android:layout_height="40dp"
@@ -53,10 +69,18 @@
 
     <ImageButton
         android:id="@+id/widgetNext"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
         android:background="@android:color/transparent"
         android:src="@drawable/ic_skip_next_24"
         android:contentDescription="Next" />
+
+    <ImageButton
+        android:id="@+id/widgetFfwd"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:background="@android:color/transparent"
+        android:src="@drawable/ic_forward_30_24"
+        android:contentDescription="+10s" />
 
 </LinearLayout>

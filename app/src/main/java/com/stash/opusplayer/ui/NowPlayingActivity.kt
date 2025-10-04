@@ -167,6 +167,36 @@ class NowPlayingActivity : AppCompatActivity() {
                         showLyrics()
                         true
                     }
+                    R.id.action_sleep_timer -> {
+                        showSleepTimerDialog()
+                        true
+                    }
+                    R.id.action_go_to_album -> {
+                        currentSong?.let { s ->
+                            try {
+                                val intent = Intent(this, MainActivity::class.java).apply {
+                                    action = "com.stash.stashwave.ACTION_GO_TO_ALBUM"
+                                    putExtra("album", s.albumName)
+                                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                }
+                                startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
+                        true
+                    }
+                    R.id.action_go_to_artist -> {
+                        currentSong?.let { s ->
+                            try {
+                                val intent = Intent(this, MainActivity::class.java).apply {
+                                    action = "com.stash.stashwave.ACTION_GO_TO_ARTIST"
+                                    putExtra("artist", s.artistName)
+                                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                }
+                                startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
+                        true
+                    }
                     else -> false
                 }
             }
@@ -308,6 +338,50 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
         }
         dialog.setOnDismissListener { handler.removeCallbacksAndMessages(null) }
         handler.post(runnable)
+    }
+
+    private fun showSleepTimerDialog() {
+        val options = arrayOf("End of track", "15 minutes", "30 minutes", "45 minutes", "60 minutes", "Cancel timer")
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Sleep Timer")
+            .setItems(options) { dialog, which ->
+                when (which) {
+                    0 -> { // End of track
+                        val dur = (mediaController?.duration ?: 0L)
+                        val pos = (mediaController?.currentPosition ?: 0L)
+                        val remain = if (dur > 0L) (dur - pos).coerceAtLeast(0L) else 0L
+                        if (remain > 0L) sendSleepTimerCommand(remain) else android.widget.Toast.makeText(this, "Unknown track length", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    1 -> sendSleepTimerCommand(15 * 60_000L)
+                    2 -> sendSleepTimerCommand(30 * 60_000L)
+                    3 -> sendSleepTimerCommand(45 * 60_000L)
+                    4 -> sendSleepTimerCommand(60 * 60_000L)
+                    5 -> cancelSleepTimerCommand()
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun sendSleepTimerCommand(durationMs: Long) {
+        try {
+            val extras = android.os.Bundle().apply { putLong("duration_ms", durationMs) }
+            mediaController?.sendCustomCommand(
+                androidx.media3.session.SessionCommand("SET_SLEEP_TIMER", android.os.Bundle.EMPTY),
+                extras
+            )
+            android.widget.Toast.makeText(this, "Sleep timer set", android.widget.Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
+    }
+
+    private fun cancelSleepTimerCommand() {
+        try {
+            mediaController?.sendCustomCommand(
+                androidx.media3.session.SessionCommand("CANCEL_SLEEP_TIMER", android.os.Bundle.EMPTY),
+                android.os.Bundle.EMPTY
+            )
+            android.widget.Toast.makeText(this, "Sleep timer canceled", android.widget.Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
     }
 
     private fun shareCurrentTrack() {
