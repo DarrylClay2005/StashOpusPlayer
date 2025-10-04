@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.ComponentName
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
@@ -303,6 +304,11 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
                 // Ensure app volume is applied when playback starts
                 if (isPlaying) { try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {} }
+                // Notify widget to update
+                try {
+                    sendBroadcast(Intent(com.stash.stashwave.widgets.PlayerWidgetProvider.ACTION_UPDATE)
+                        .setComponent(ComponentName(this@MusicService, com.stash.stashwave.widgets.PlayerWidgetProvider::class.java)))
+                } catch (_: Exception) {}
                 // Notification foreground/updates are handled by PlayerNotificationManager
                 // Check if app is in background and no active activities when paused
                 if (!isPlaying) {
@@ -315,6 +321,11 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 // Persist queue on track change
                 try { saveQueueState() } catch (_: Exception) {}
+                // Request widget refresh
+                try {
+                    sendBroadcast(Intent(com.stash.stashwave.widgets.PlayerWidgetProvider.ACTION_UPDATE)
+                        .setComponent(ComponentName(this@MusicService, com.stash.stashwave.widgets.PlayerWidgetProvider::class.java)))
+                } catch (_: Exception) {}
                 // If not using polling or user disabled experimental true crossfade, we still do minimal fade-in
                 val prefs = getSharedPreferences("settings", 0)
                 val exp = prefs.getBoolean("experimental_true_crossfade", true)

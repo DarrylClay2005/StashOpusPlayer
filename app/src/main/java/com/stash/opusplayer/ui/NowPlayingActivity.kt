@@ -152,6 +152,17 @@ class NowPlayingActivity : AppCompatActivity() {
                         android.widget.Toast.makeText(this, if (next) "Crossfade ON" else "Crossfade OFF", android.widget.Toast.LENGTH_SHORT).show()
                         true
                     }
+                    R.id.action_jump_to_source -> {
+                        // Ask MainActivity to navigate to the last playback source
+                        try {
+                            val intent = Intent(this, MainActivity::class.java).apply {
+                                action = "com.stash.stashwave.ACTION_JUMP_TO_SOURCE"
+                                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                            }
+                            startActivity(intent)
+                        } catch (_: Exception) {}
+                        true
+                    }
                     else -> false
                 }
             }

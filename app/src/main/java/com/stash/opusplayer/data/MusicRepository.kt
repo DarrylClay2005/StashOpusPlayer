@@ -237,6 +237,8 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
         return scanFolderRecursivelyFast(folderPath)
     }
 
+    suspend fun getSongsInFolder(folderPath: String): List<Song> = scanFolderRecursivelyFast(folderPath)
+
     // Fast disk scan: avoids heavy metadata until later, filters by extension
     private suspend fun scanFolderRecursivelyFast(folderPath: String): List<Song> = withContext(Dispatchers.IO) {
         val songs = mutableListOf<Song>()

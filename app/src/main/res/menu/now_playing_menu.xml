@@ -12,5 +12,9 @@
         android:id="@+id/action_toggle_crossfade"
         android:title="Toggle Crossfade"
         android:visible="true" />
+    <item
+        android:id="@+id/action_jump_to_source"
+        android:title="Jump to Source"
+        android:visible="true" />
 </menu>
 
