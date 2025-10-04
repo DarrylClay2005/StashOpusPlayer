@@ -59,6 +59,9 @@ android {
             debuggable false
             if (hasReleaseKeystore) {
                 signingConfig signingConfigs.release
+            } else {
+                // Fallback: sign release with debug keystore to avoid invalid package installs
+                signingConfig signingConfigs.debug
             }
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
