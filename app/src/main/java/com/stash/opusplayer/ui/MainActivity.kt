@@ -401,6 +401,22 @@ Check for updates anytime from Settings.""")
             }
         }
     }
+
+    fun playSongsStartingFrom(songs: List<Song>, startIndex: Int) {
+        lifecycleScope.launch {
+            try {
+                val idx = startIndex.coerceIn(0, songs.lastIndex)
+                musicPlayerManager.setPlaylist(songs)
+                musicPlayerManager.playFromPlaylist(idx)
+                val intent = Intent(this@MainActivity, NowPlayingActivity::class.java).apply {
+                    putExtra("song", songs[idx])
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Error starting playback: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     
 fun addToPlaylist(song: com.stash.stashwave.data.Song) {
 val repo = com.stash.stashwave.data.MusicRepository(this)

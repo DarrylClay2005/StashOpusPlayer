@@ -81,7 +81,11 @@ class FolderDetailFragment : Fragment() {
 
     private fun setupRecycler() {
         songAdapter = SongAdapter(
-            onSongClick = { song -> (activity as? MainActivity)?.playMusic(song) },
+            onSongClick = { song ->
+                val list = songAdapter.currentList
+                val index = list.indexOfFirst { it.id == song.id }.let { if (it >= 0) it else 0 }
+                (activity as? MainActivity)?.playSongsStartingFrom(list, index)
+            },
             onFavoriteToggle = { song -> (activity as? MainActivity)?.toggleFavorite(song) },
             onAddToPlaylist = { song -> (activity as? MainActivity)?.addToPlaylist(song) },
             metadataExtractor = metadataExtractor
