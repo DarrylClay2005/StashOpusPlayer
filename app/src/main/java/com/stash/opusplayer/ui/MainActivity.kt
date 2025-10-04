@@ -483,6 +483,13 @@ val repository = com.stash.stashwave.data.MusicRepository(this@MainActivity)
         }
     }
     
+    override fun onResume() {
+        super.onResume()
+        if (::miniPlayerView.isInitialized) {
+            try { miniPlayerView.resync() } catch (_: Exception) {}
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         if (::miniPlayerView.isInitialized) {
