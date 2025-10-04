@@ -134,18 +134,80 @@ class NowPlayingActivity : AppCompatActivity() {
             popup.menuInflater.inflate(R.menu.now_playing_menu, popup.menu)
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
-                    R.id.action_share -> {
-                        shareCurrentTrack()
+                    R.id.action_share -> { shareCurrentTrack(); true }
+                    R.id.action_embed_artwork -> { embedArtworkIntoFile(); true }
+                    R.id.action_toggle_crossfade -> {
+                        // Quick toggle
+                        val prefs = getSharedPreferences("settings", 0)
+                        val current = prefs.getBoolean("crossfade_enabled", false)
+                        val next = !current
+                        prefs.edit().putBoolean("crossfade_enabled", next).apply()
+                        // Notify service via command as well
+                        try {
+                            mediaController?.sendCustomCommand(
+                                androidx.media3.session.SessionCommand("SET_CROSSFADE_ENABLED", android.os.Bundle.EMPTY),
+                                androidx.core.os.bundleOf("enabled" to next)
+                            )
+                        } catch (_: Exception) {}
+                        android.widget.Toast.makeText(this, if (next) "Crossfade ON" else "Crossfade OFF", android.widget.Toast.LENGTH_SHORT).show()
                         true
                     }
-                    R.id.action_embed_artwork -> {
-                        embedArtworkIntoFile()
+                    R.id.action_jump_to_source -> {
+                        // Ask MainActivity to navigate to the last playback source
+                        try {
+                            val intent = Intent(this, MainActivity::class.java).apply {
+                                action = "com.stash.stashwave.ACTION_JUMP_TO_SOURCE"
+                                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                            }
+                            startActivity(intent)
+                        } catch (_: Exception) {}
+                        true
+                    }
+                    R.id.action_show_lyrics -> {
+                        showLyrics()
+                        true
+                    }
+                    R.id.action_sleep_timer -> {
+                        showSleepTimerDialog()
+                        true
+                    }
+                    R.id.action_go_to_album -> {
+                        currentSong?.let { s ->
+                            try {
+                                val intent = Intent(this, MainActivity::class.java).apply {
+                                    action = "com.stash.stashwave.ACTION_GO_TO_ALBUM"
+                                    putExtra("album", s.albumName)
+                                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                }
+                                startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
+                        true
+                    }
+                    R.id.action_go_to_artist -> {
+                        currentSong?.let { s ->
+                            try {
+                                val intent = Intent(this, MainActivity::class.java).apply {
+                                    action = "com.stash.stashwave.ACTION_GO_TO_ARTIST"
+                                    putExtra("artist", s.artistName)
+                                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                }
+                                startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
                         true
                     }
                     else -> false
                 }
             }
             popup.show()
+        }
+
+        // Queue button — open full-screen queue
+        binding.queueButton.setOnClickListener {
+            try {
+                startActivity(android.content.Intent(this, QueueActivity::class.java))
+            } catch (_: Exception) {}
         }
         
         // Seek bar (hidden) handlers retained for compatibility
@@ -211,8 +273,12 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
         // Add 10-second seek functionality to album artwork
         setupAlbumArtworkSeek()
 
-        // Metadata toggle button
-        binding.metadataButton.setOnClickListener { toggleMetadataView() }
+        // Metadata button now opens full-screen metadata screen
+        binding.metadataButton.setOnClickListener {
+            try {
+                startActivity(android.content.Intent(this, MetadataActivity::class.java))
+            } catch (_: Exception) {}
+        }
         
         // Metadata back button
         binding.metadataBackButton.setOnClickListener { hideMetadataView() }
@@ -220,6 +286,104 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
         // Audio controls have moved to Settings
     }
     
+    private fun showLyrics() {
+        val song = currentSong ?: return
+        // Try to find a .lrc next to the file path when path is a file
+        val path = song.path
+        var lrcContent: String? = null
+        try {
+            if (!path.startsWith("content://")) {
+                val file = java.io.File(path)
+                val lrc = java.io.File(file.parentFile, file.nameWithoutExtension + ".lrc")
+                if (lrc.exists()) {
+                    lrcContent = lrc.readText()
+                }
+            }
+        } catch (_: Exception) {}
+        if (lrcContent.isNullOrBlank()) {
+            android.widget.Toast.makeText(this, "No lyrics file found", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val lines = com.stash.stashwave.utils.LrcParser.parse(lrcContent)
+        if (lines.isEmpty()) {
+            android.widget.Toast.makeText(this, "No timed lyrics found", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this).create()
+        val container = android.widget.ScrollView(this)
+        val tv = android.widget.TextView(this).apply {
+            setPadding(32, 32, 32, 32)
+            textSize = 16f
+        }
+        container.addView(tv)
+        dialog.setView(container)
+        dialog.setTitle("Lyrics")
+        dialog.setButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE, "Close") { d, _ -> d.dismiss() }
+        dialog.show()
+        // Update every 500ms to highlight current line
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val runnable = object : Runnable {
+            override fun run() {
+                val pos = mediaController?.currentPosition ?: 0L
+                val idx = lines.indexOfLast { it.timeMs <= pos }.coerceAtLeast(0)
+                val display = buildString {
+                    lines.forEachIndexed { i, l ->
+                        if (i == idx) append("\u25CF ") else append("  ")
+                        append(l.text).append('\n')
+                    }
+                }
+                tv.text = display
+                handler.postDelayed(this, 500)
+            }
+        }
+        dialog.setOnDismissListener { handler.removeCallbacksAndMessages(null) }
+        handler.post(runnable)
+    }
+
+    private fun showSleepTimerDialog() {
+        val options = arrayOf("End of track", "15 minutes", "30 minutes", "45 minutes", "60 minutes", "Cancel timer")
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Sleep Timer")
+            .setItems(options) { dialog, which ->
+                when (which) {
+                    0 -> { // End of track
+                        val dur = (mediaController?.duration ?: 0L)
+                        val pos = (mediaController?.currentPosition ?: 0L)
+                        val remain = if (dur > 0L) (dur - pos).coerceAtLeast(0L) else 0L
+                        if (remain > 0L) sendSleepTimerCommand(remain) else android.widget.Toast.makeText(this, "Unknown track length", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    1 -> sendSleepTimerCommand(15 * 60_000L)
+                    2 -> sendSleepTimerCommand(30 * 60_000L)
+                    3 -> sendSleepTimerCommand(45 * 60_000L)
+                    4 -> sendSleepTimerCommand(60 * 60_000L)
+                    5 -> cancelSleepTimerCommand()
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun sendSleepTimerCommand(durationMs: Long) {
+        try {
+            val extras = android.os.Bundle().apply { putLong("duration_ms", durationMs) }
+            mediaController?.sendCustomCommand(
+                androidx.media3.session.SessionCommand("SET_SLEEP_TIMER", android.os.Bundle.EMPTY),
+                extras
+            )
+            android.widget.Toast.makeText(this, "Sleep timer set", android.widget.Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
+    }
+
+    private fun cancelSleepTimerCommand() {
+        try {
+            mediaController?.sendCustomCommand(
+                androidx.media3.session.SessionCommand("CANCEL_SLEEP_TIMER", android.os.Bundle.EMPTY),
+                android.os.Bundle.EMPTY
+            )
+            android.widget.Toast.makeText(this, "Sleep timer canceled", android.widget.Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
+    }
+
     private fun shareCurrentTrack() {
         val song = currentSong ?: return
         val text = "${song.displayName} — ${song.artistName}"
@@ -336,16 +500,18 @@ else -> com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActiv
     }
     
     private fun setupPlayerManager() {
-        musicPlayerManager = MusicPlayerManager(this).apply {
-            initialize()
-        }
+        musicPlayerManager = (application as com.stash.stashwave.StashWaveApplication).playerManager
         
-        // Observe player state changes
+        // Observe player state changes (shared manager)
         lifecycleScope.launch {
             musicPlayerManager?.currentSong?.collect { song ->
-                song?.let {
-                    currentSong = it
-                    displaySongInfo(it)
+                if (song != null) {
+                    currentSong = song
+                    displaySongInfo(song)
+                } else {
+                    // Fallback to controller metadata to keep art/text fresh
+                    setArtworkFromMetadata()
+                    updateMediaInfo()
                 }
             }
         }
@@ -353,11 +519,7 @@ else -> com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActiv
         lifecycleScope.launch {
             musicPlayerManager?.isPlaying?.collect { isPlaying ->
                 updatePlayPauseButton(isPlaying)
-                if (isPlaying) {
-                    startProgressUpdates()
-                } else {
-                    stopProgressUpdates()
-                }
+                if (isPlaying) startProgressUpdates() else stopProgressUpdates()
             }
         }
     }
@@ -375,6 +537,11 @@ else -> com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActiv
             
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 updateMediaInfo()
+                // Ensure artwork & metadata panel update on every track change
+                setArtworkFromMetadata()
+                if (binding.metadataContainer.visibility == android.view.View.VISIBLE) {
+                    populateMetadata()
+                }
             }
             
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -483,6 +650,39 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
         Glide.with(this)
             .load(R.drawable.ic_music_note)
             .into(binding.albumArtwork)
+    }
+    
+    private fun setArtworkFromMetadata() {
+        try {
+            val controller = mediaController ?: return
+            val title = controller.mediaMetadata.title?.toString() ?: return
+            val artist = controller.mediaMetadata.artist?.toString() ?: ""
+            val album = controller.mediaMetadata.albumTitle?.toString() ?: ""
+            val fakeSong = com.stash.stashwave.data.Song(
+                id = 0L,
+                title = title,
+                artist = artist,
+                album = album,
+                duration = controller.duration.takeIf { it > 0 } ?: 0L,
+                path = ""
+            )
+            val cache = com.stash.stashwave.artwork.ArtworkCache(this)
+            val bmp = cache.loadBitmapIfPresent(fakeSong, 512)
+            if (bmp != null) {
+                Glide.with(this)
+                    .load(bmp)
+                    .centerCrop()
+                    .into(binding.albumArtwork)
+                try {
+                    Glide.with(this)
+                        .load(bmp)
+                        .apply(com.bumptech.glide.request.RequestOptions.bitmapTransform(jp.wasabeef.glide.transformations.BlurTransformation(25, 3)))
+                        .into(binding.backdropImage)
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {
+            // ignore
+        }
     }
     
     private fun updateUIFromController() {
@@ -602,6 +802,27 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
         populateMetadata()
     }
     
+    private fun showQueueDialog() {
+        val mgr = (application as? com.stash.stashwave.StashWaveApplication)?.playerManager
+        val list = mgr?.playlist?.value ?: emptyList()
+        if (list.isEmpty()) {
+            android.widget.Toast.makeText(this, "Queue is empty", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val currentIndex = mgr?.currentIndex?.value ?: 0
+        val titles = list.mapIndexed { index, s ->
+            val mark = if (index == currentIndex) "• " else ""
+            "$mark${s.displayName} — ${s.artistName}"
+        }.toTypedArray()
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Queue (${list.size})")
+            .setItems(titles) { _, which ->
+                mgr?.playFromPlaylist(which)
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
     private fun hideMetadataView() {
         // Hide metadata container
         binding.metadataContainer.visibility = android.view.View.GONE

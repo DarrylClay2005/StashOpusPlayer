@@ -4,6 +4,11 @@ import android.app.Application
 
 class StashWaveApplication : Application() {
     
+    // Shared player manager for the whole app
+    val playerManager: com.stash.stashwave.player.MusicPlayerManager by lazy {
+        com.stash.stashwave.player.MusicPlayerManager(this).apply { initialize() }
+    }
+    
     override fun onCreate() {
         super.onCreate()
         instance = this

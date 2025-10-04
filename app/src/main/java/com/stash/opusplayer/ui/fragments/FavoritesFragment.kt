@@ -50,22 +50,22 @@ class FavoritesFragment : Fragment() {
     private fun setupRecyclerView() {
         songAdapter = SongAdapter(
             onSongClick = { song ->
-                // Play the favorite song
-                (activity as? MainActivity)?.playMusic(song)
+                val list = songAdapter.currentList
+                val index = list.indexOfFirst { it.id == song.id }.let { if (it >= 0) it else 0 }
+                (activity as? MainActivity)?.playSongsStartingFrom(list, index, "Liked Songs")
             },
             onFavoriteToggle = { song ->
-                // Toggle favorite status
                 (activity as? MainActivity)?.toggleFavorite(song)
-                // Refresh the favorites list after a short delay
                 viewLifecycleOwner.lifecycleScope.launch {
                     delay(500)
                     loadFavorites()
                 }
             },
             onAddToPlaylist = { song ->
-                // Add to current playlist
                 (activity as? MainActivity)?.addToPlaylist(song)
             },
+            onPlayNext = { song -> (activity as? MainActivity)?.playNext(song) },
+            onAddToQueue = { song -> (activity as? MainActivity)?.addToQueueTail(song) },
             metadataExtractor = metadataExtractor
         )
         

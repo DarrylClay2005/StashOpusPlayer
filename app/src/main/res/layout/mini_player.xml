@@ -30,14 +30,14 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/miniProgressBar">
 
-        <ImageView
+        <com.google.android.material.imageview.ShapeableImageView
             android:id="@+id/miniAlbumArt"
             android:layout_width="44dp"
             android:layout_height="44dp"
             android:layout_gravity="center"
             android:contentDescription="@string/album_artwork"
             android:scaleType="centerCrop"
-            android:background="@drawable/circular_background"
+            app:shapeAppearanceOverlay="@style/CircularImageView"
             android:src="@drawable/ic_music_note" />
 
     </FrameLayout>

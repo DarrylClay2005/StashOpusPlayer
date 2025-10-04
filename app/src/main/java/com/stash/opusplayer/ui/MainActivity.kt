@@ -58,7 +58,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
-installSplashScreen()
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -370,15 +369,108 @@ Check for updates anytime from Settings.""")
     
     fun getUpdateManager() = updateManager
 
+    // Persist the last playback source for Jump-to-Source navigation
+    fun setLastPlaybackSource(type: String, arg: String = "") {
+        val prefs = getSharedPreferences("playback_source", 0)
+        prefs.edit().putString("type", type).putString("arg", arg).apply()
+    }
+
     // Called by fragments once they have loaded their initial content
     fun notifyContentLoaded() {
         hideLoadingOverlay()
     }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        when (intent?.action) {
+            "com.stash.stashwave.ACTION_JUMP_TO_SOURCE" -> jumpToLastPlaybackSource()
+            "com.stash.stashwave.ACTION_GO_TO_ARTIST" -> {
+                val name = intent.getStringExtra("artist") ?: return
+                val repo = com.stash.stashwave.data.MusicRepository(this)
+                lifecycleScope.launch {
+                    val songs = repo.getSongsByArtist(name)
+                    val fragment = com.stash.stashwave.ui.fragments.ArtistSongsFragment.newInstance(name, ArrayList(songs))
+                    loadFragment(fragment)
+                }
+            }
+            "com.stash.stashwave.ACTION_GO_TO_ALBUM" -> {
+                val album = intent.getStringExtra("album") ?: return
+                val repo = com.stash.stashwave.data.MusicRepository(this)
+                lifecycleScope.launch {
+                    val songs = repo.getSongsInAlbum(album)
+                    val fragment = com.stash.stashwave.ui.fragments.FolderDetailFragment.newInstance(album, ArrayList(songs))
+                    loadFragment(fragment)
+                }
+            }
+        }
+    }
+
+    private fun jumpToLastPlaybackSource() {
+        val prefs = getSharedPreferences("playback_source", 0)
+        val type = prefs.getString("type", null) ?: return
+        val arg = prefs.getString("arg", "") ?: ""
+        when (type) {
+            "songs" -> {
+                // Navigate to MusicLibraryFragment
+                loadFragment(com.stash.stashwave.ui.fragments.MusicLibraryFragment())
+            }
+            "artist" -> {
+                // If we have the artist name and currently cached songs, build the fragment
+                val repo = com.stash.stashwave.data.MusicRepository(this)
+                lifecycleScope.launch {
+                    val songs = repo.getSongsByArtist(arg)
+                    val fragment = com.stash.stashwave.ui.fragments.ArtistSongsFragment.newInstance(arg, ArrayList(songs))
+                    loadFragment(fragment)
+                }
+            }
+            "folder" -> {
+                val repo = com.stash.stashwave.data.MusicRepository(this)
+                lifecycleScope.launch {
+                    val songs = repo.getSongsInFolder(arg)
+                    val fragment = com.stash.stashwave.ui.fragments.FolderDetailFragment.newInstance(arg, ArrayList(songs))
+                    loadFragment(fragment)
+                }
+            }
+            "playlist" -> {
+                val id = arg.toLongOrNull()
+                if (id != null) {
+                    loadFragment(com.stash.stashwave.ui.fragments.PlaylistDetailFragment.newInstance(id))
+                }
+            }
+            "favorites" -> {
+                loadFragment(com.stash.stashwave.ui.fragments.FavoritesFragment())
+            }
+            else -> {
+                // Default to library
+                loadFragment(com.stash.stashwave.ui.fragments.MusicLibraryFragment())
+            }
+        }
+    }
     
     private fun setupMusicPlayer() {
-        musicPlayerManager = MusicPlayerManager(this).apply {
-            initialize()
-        }
+        musicPlayerManager = (application as com.stash.stashwave.StashWaveApplication).playerManager
+    }
+    
+    private var playingBannerDismissRunnable: Runnable? = null
+
+    private fun showPlayingBanner(text: String) {
+        try {
+            val banner = findViewById<android.view.View>(R.id.playing_banner)
+            val tv = findViewById<android.widget.TextView>(R.id.playing_text)
+            val btn = findViewById<com.google.android.material.button.MaterialButton>(R.id.playing_action_button)
+            tv.text = text
+            btn.setOnClickListener {
+                try { startActivity(Intent(this, QueueActivity::class.java)) } catch (_: Exception) {}
+            }
+            banner.visibility = android.view.View.VISIBLE
+            // Cancel any previous dismissal and schedule a new one (keep visible during rapid switching)
+            playingBannerDismissRunnable?.let { banner.removeCallbacks(it) }
+            val runnable = Runnable {
+                try { banner.visibility = android.view.View.GONE } catch (_: Exception) {}
+            }
+            playingBannerDismissRunnable = runnable
+            banner.postDelayed(runnable, 2500) // ~2.5 seconds for better readability
+        } catch (_: Exception) {}
     }
     
     private fun setupMiniPlayer() {
@@ -401,8 +493,36 @@ Check for updates anytime from Settings.""")
             }
         }
     }
+
+    fun playSongsStartingFrom(songs: List<Song>, startIndex: Int, sourceLabel: String? = null) {
+        lifecycleScope.launch {
+            try {
+                val idx = startIndex.coerceIn(0, songs.lastIndex)
+                // Replace queue atomically and start playback from the selected index
+                musicPlayerManager.playQueue(songs, idx)
+                // Persist source hint for Jump-to-Source
+                sourceLabel?.let { label ->
+                    when {
+                        label.startsWith("Artist:") -> setLastPlaybackSource("artist", label.removePrefix("Artist:").trim())
+                        label.startsWith("Folder:") -> setLastPlaybackSource("folder", label.removePrefix("Folder:").trim())
+                        label.startsWith("PlaylistId:") -> setLastPlaybackSource("playlist", label.removePrefix("PlaylistId:").trim())
+                        label.equals("Liked Songs", true) -> setLastPlaybackSource("favorites", "")
+                        label.equals("Songs", true) -> setLastPlaybackSource("songs", "")
+                        else -> setLastPlaybackSource("unknown", label)
+                    }
+                    showPlayingBanner("Playing from $label")
+                }
+                val intent = Intent(this@MainActivity, NowPlayingActivity::class.java).apply {
+                    putExtra("song", songs[idx])
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                showPlayingBanner("Error starting playback")
+            }
+        }
+    }
     
-fun addToPlaylist(song: com.stash.stashwave.data.Song) {
+    fun addToPlaylist(song: com.stash.stashwave.data.Song) {
 val repo = com.stash.stashwave.data.MusicRepository(this)
         lifecycleScope.launch {
             // Fetch current playlists
@@ -450,6 +570,20 @@ private fun promptCreatePlaylistAndAdd(repo: com.stash.stashwave.data.MusicRepos
             .show()
     }
     
+fun playNext(song: com.stash.stashwave.data.Song) {
+        try {
+            musicPlayerManager.insertNext(song)
+            Toast.makeText(this, "Will play next", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
+    }
+
+    fun addToQueueTail(song: com.stash.stashwave.data.Song) {
+        try {
+            musicPlayerManager.addToQueue(song)
+            Toast.makeText(this, "Added to queue", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
+    }
+
 fun toggleFavorite(song: com.stash.stashwave.data.Song) {
         lifecycleScope.launch {
             try {
@@ -469,6 +603,13 @@ val repository = com.stash.stashwave.data.MusicRepository(this@MainActivity)
         }
     }
     
+    override fun onResume() {
+        super.onResume()
+        if (::miniPlayerView.isInitialized) {
+            try { miniPlayerView.resync() } catch (_: Exception) {}
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         if (::miniPlayerView.isInitialized) {
