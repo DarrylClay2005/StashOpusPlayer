@@ -78,9 +78,11 @@ val metadataExtractor = com.stash.stashwave.utils.MetadataExtractor(requireConte
                 }
             },
             onAddToPlaylist = { song ->
-                // Add to current playlist
+                // Add to playlist
                 (activity as? MainActivity)?.addToPlaylist(song)
             },
+            onPlayNext = { song -> (activity as? MainActivity)?.playNext(song) },
+            onAddToQueue = { song -> (activity as? MainActivity)?.addToQueueTail(song) },
             metadataExtractor = metadataExtractor
         )
         

@@ -67,6 +67,8 @@ class PlaylistDetailFragment : Fragment() {
             },
             onFavoriteToggle = { song -> (activity as? MainActivity)?.toggleFavorite(song) },
             onAddToPlaylist = { _ -> },
+            onPlayNext = { song -> (activity as? MainActivity)?.playNext(song) },
+            onAddToQueue = { song -> (activity as? MainActivity)?.addToQueueTail(song) },
             metadataExtractor = metadataExtractor
         )
         binding.recyclerView.layoutManager = LinearLayoutManager(requireContext())

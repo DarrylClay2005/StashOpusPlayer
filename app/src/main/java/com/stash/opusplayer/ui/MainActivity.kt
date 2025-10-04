@@ -440,7 +440,7 @@ Check for updates anytime from Settings.""")
         }
     }
     
-fun addToPlaylist(song: com.stash.stashwave.data.Song) {
+    fun addToPlaylist(song: com.stash.stashwave.data.Song) {
 val repo = com.stash.stashwave.data.MusicRepository(this)
         lifecycleScope.launch {
             // Fetch current playlists
@@ -488,6 +488,20 @@ private fun promptCreatePlaylistAndAdd(repo: com.stash.stashwave.data.MusicRepos
             .show()
     }
     
+fun playNext(song: com.stash.stashwave.data.Song) {
+        try {
+            musicPlayerManager.insertNext(song)
+            Toast.makeText(this, "Will play next", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
+    }
+
+    fun addToQueueTail(song: com.stash.stashwave.data.Song) {
+        try {
+            musicPlayerManager.addToQueue(song)
+            Toast.makeText(this, "Added to queue", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
+    }
+
 fun toggleFavorite(song: com.stash.stashwave.data.Song) {
         lifecycleScope.launch {
             try {

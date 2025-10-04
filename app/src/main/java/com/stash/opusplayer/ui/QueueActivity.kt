@@ -36,6 +36,28 @@ class QueueActivity : AppCompatActivity() {
         recycler.adapter = adapter
         recycler.addItemDecoration(DividerItemDecoration(this, DividerItemDecoration.VERTICAL))
 
+        // Enable drag-and-drop reordering and swipe-to-remove
+        val touchHelper = androidx.recyclerview.widget.ItemTouchHelper(object : androidx.recyclerview.widget.ItemTouchHelper.SimpleCallback(
+            androidx.recyclerview.widget.ItemTouchHelper.UP or androidx.recyclerview.widget.ItemTouchHelper.DOWN,
+            androidx.recyclerview.widget.ItemTouchHelper.START or androidx.recyclerview.widget.ItemTouchHelper.END
+        ) {
+            override fun onMove(rv: RecyclerView, vh: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder): Boolean {
+                val from = vh.bindingAdapterPosition
+                val to = target.bindingAdapterPosition
+                adapter.onItemMoved(from, to)
+                val mgr = (application as com.stash.stashwave.StashWaveApplication).playerManager
+                mgr.moveItem(from, to)
+                return true
+            }
+            override fun onSwiped(vh: RecyclerView.ViewHolder, dir: Int) {
+                val pos = vh.bindingAdapterPosition
+                val mgr = (application as com.stash.stashwave.StashWaveApplication).playerManager
+                mgr.removeItem(pos)
+            }
+            override fun isLongPressDragEnabled(): Boolean = true
+        })
+        touchHelper.attachToRecyclerView(recycler)
+
         val mgr = (application as com.stash.stashwave.StashWaveApplication).playerManager
         lifecycleScope.launch {
             mgr.playlist.collectLatest { list ->
@@ -64,6 +86,14 @@ class QueueActivity : AppCompatActivity() {
         fun updateCurrent(current: Int) {
             currentIndex = current
             notifyDataSetChanged()
+        }
+        fun onItemMoved(from: Int, to: Int) {
+            if (from !in items.indices || to !in items.indices) return
+            val mutable = items.toMutableList()
+            val item = mutable.removeAt(from)
+            mutable.add(to, item)
+            items = mutable
+            notifyItemMoved(from, to)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): QueueViewHolder {
