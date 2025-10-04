@@ -63,7 +63,7 @@ class PlaylistDetailFragment : Fragment() {
             onSongClick = { song ->
                 val list = adapter.currentList
                 val index = list.indexOfFirst { it.id == song.id }.let { if (it >= 0) it else 0 }
-                (activity as? MainActivity)?.playSongsStartingFrom(list, index)
+                (activity as? MainActivity)?.playSongsStartingFrom(list, index, "Playlist")
             },
             onFavoriteToggle = { song -> (activity as? MainActivity)?.toggleFavorite(song) },
             onAddToPlaylist = { _ -> },

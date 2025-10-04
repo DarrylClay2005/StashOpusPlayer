@@ -66,7 +66,7 @@ val metadataExtractor = com.stash.stashwave.utils.MetadataExtractor(requireConte
             onSongClick = { song ->
                 val list = songAdapter.currentList
                 val index = list.indexOfFirst { it.id == song.id }.let { if (it >= 0) it else 0 }
-                (activity as? MainActivity)?.playSongsStartingFrom(list, index)
+                (activity as? MainActivity)?.playSongsStartingFrom(list, index, "Songs")
             },
             onFavoriteToggle = { song ->
                 // Toggle favorite status

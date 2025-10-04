@@ -52,7 +52,7 @@ class FavoritesFragment : Fragment() {
             onSongClick = { song ->
                 val list = songAdapter.currentList
                 val index = list.indexOfFirst { it.id == song.id }.let { if (it >= 0) it else 0 }
-                (activity as? MainActivity)?.playSongsStartingFrom(list, index)
+                (activity as? MainActivity)?.playSongsStartingFrom(list, index, "Liked Songs")
             },
             onFavoriteToggle = { song ->
                 // Toggle favorite status
