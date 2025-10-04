@@ -58,7 +58,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
-installSplashScreen()
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -370,9 +369,64 @@ Check for updates anytime from Settings.""")
     
     fun getUpdateManager() = updateManager
 
+    // Persist the last playback source for Jump-to-Source navigation
+    fun setLastPlaybackSource(type: String, arg: String = "") {
+        val prefs = getSharedPreferences("playback_source", 0)
+        prefs.edit().putString("type", type).putString("arg", arg).apply()
+    }
+
     // Called by fragments once they have loaded their initial content
     fun notifyContentLoaded() {
         hideLoadingOverlay()
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        if (intent?.action == "com.stash.stashwave.ACTION_JUMP_TO_SOURCE") {
+            jumpToLastPlaybackSource()
+        }
+    }
+
+    private fun jumpToLastPlaybackSource() {
+        val prefs = getSharedPreferences("playback_source", 0)
+        val type = prefs.getString("type", null) ?: return
+        val arg = prefs.getString("arg", "") ?: ""
+        when (type) {
+            "songs" -> {
+                // Navigate to MusicLibraryFragment
+                loadFragment(com.stash.stashwave.ui.fragments.MusicLibraryFragment())
+            }
+            "artist" -> {
+                // If we have the artist name and currently cached songs, build the fragment
+                val repo = com.stash.stashwave.data.MusicRepository(this)
+                lifecycleScope.launch {
+                    val songs = repo.getSongsByArtist(arg)
+                    val fragment = com.stash.stashwave.ui.fragments.ArtistSongsFragment.newInstance(arg, ArrayList(songs))
+                    loadFragment(fragment)
+                }
+            }
+            "folder" -> {
+                val repo = com.stash.stashwave.data.MusicRepository(this)
+                lifecycleScope.launch {
+                    val songs = repo.getSongsInFolder(arg)
+                    val fragment = com.stash.stashwave.ui.fragments.FolderDetailFragment.newInstance(arg, ArrayList(songs))
+                    loadFragment(fragment)
+                }
+            }
+            "playlist" -> {
+                val id = arg.toLongOrNull()
+                if (id != null) {
+                    loadFragment(com.stash.stashwave.ui.fragments.PlaylistDetailFragment.newInstance(id))
+                }
+            }
+            "favorites" -> {
+                loadFragment(com.stash.stashwave.ui.fragments.FavoritesFragment())
+            }
+            else -> {
+                // Default to library
+                loadFragment(com.stash.stashwave.ui.fragments.MusicLibraryFragment())
+            }
+        }
     }
     
     private fun setupMusicPlayer() {
@@ -428,8 +482,18 @@ Check for updates anytime from Settings.""")
                 val idx = startIndex.coerceIn(0, songs.lastIndex)
                 // Replace queue atomically and start playback from the selected index
                 musicPlayerManager.playQueue(songs, idx)
-                // Show top banner indicator of the source
-                sourceLabel?.let { label -> showPlayingBanner("Playing from $label") }
+                // Persist source hint for Jump-to-Source
+                sourceLabel?.let { label ->
+                    when {
+                        label.startsWith("Artist:") -> setLastPlaybackSource("artist", label.removePrefix("Artist:").trim())
+                        label.startsWith("Folder:") -> setLastPlaybackSource("folder", label.removePrefix("Folder:").trim())
+                        label.startsWith("PlaylistId:") -> setLastPlaybackSource("playlist", label.removePrefix("PlaylistId:").trim())
+                        label.equals("Liked Songs", true) -> setLastPlaybackSource("favorites", "")
+                        label.equals("Songs", true) -> setLastPlaybackSource("songs", "")
+                        else -> setLastPlaybackSource("unknown", label)
+                    }
+                    showPlayingBanner("Playing from $label")
+                }
                 val intent = Intent(this@MainActivity, NowPlayingActivity::class.java).apply {
                     putExtra("song", songs[idx])
                 }
