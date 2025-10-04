@@ -5,9 +5,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.ComponentName
 import android.os.Build
 import androidx.core.app.NotificationCompat
-import androidx.media.app.NotificationCompat as MediaNotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -20,11 +20,15 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import androidx.media3.session.MediaSessionService
+import androidx.media3.ui.PlayerNotificationManager
 import com.stash.stashwave.R
 import androidx.preference.PreferenceManager
 import com.stash.stashwave.audio.EqualizerManager
 import com.stash.stashwave.data.Song
 import com.stash.stashwave.ui.MainActivity
+import kotlin.math.pow
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 
 class MusicService : MediaSessionService() {
     
@@ -39,6 +43,11 @@ private lateinit var activePlayer: ExoPlayer
     private var isCrossfading: Boolean = false
     private var crossfadeCheckRunnable: Runnable? = null
     private lateinit var equalizerManager: EqualizerManager
+
+    // Sleep timer state
+    private var sleepTimerHandler: android.os.Handler? = null
+    private var sleepTimerRunnable: Runnable? = null
+    private var sleepTimerEndAtMs: Long = 0L
     private var presetReverb: PresetReverb? = null
     private var lastAudioSessionId: Int = C.AUDIO_SESSION_ID_UNSET
     private var currentSpeed: Float = 1.0f
@@ -48,8 +57,14 @@ private lateinit var activePlayer: ExoPlayer
     private var appInForeground = true
     private var stopServiceWhenPaused = false
 
+    // Media3 notification manager that binds actions directly to the MediaSession/Player
+    private var playerNotificationManager: PlayerNotificationManager? = null
+
     // Phase 2: App volume and crossfade controls
-    private var appVolume: Float = 1.0f // 0.0 .. 1.0
+    // Store UI-domain volume [0..1]; map to amplitude using a perceptual curve when applying to ExoPlayer
+    private var appVolumeUi: Float = 1.0f
+    private val volumeGamma: Float = 2.0f
+    private fun uiToAmp(v: Float): Float = v.coerceIn(0f, 1f).pow(volumeGamma)
     private var crossfadeEnabled: Boolean = false
     private var crossfadeDurationMs: Long = 1000L
     private var audioFocusEnabled: Boolean = true
@@ -75,6 +90,9 @@ private lateinit var activePlayer: ExoPlayer
         initializeEqualizer()
         initializeMediaSession()
         setupPlayerListener()
+        // Attempt to restore last session queue before showing notification
+        restoreQueueStateIfAny()
+        setupPlayerNotification()
     }
     
 private fun initializePlayers() {
@@ -102,7 +120,7 @@ activePlayer = ExoPlayer.Builder(this)
         try {
             val prefs = getSharedPreferences("settings", 0)
             audioFocusEnabled = prefs.getBoolean("audio_focus_enabled", true)
-            appVolume = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
+            appVolumeUi = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
             crossfadeEnabled = prefs.getBoolean("crossfade_enabled", false)
             crossfadeDurationMs = prefs.getLong("crossfade_duration_ms", 1000L).coerceIn(0L, 5000L)
         } catch (_: Exception) {}
@@ -110,7 +128,7 @@ activePlayer = ExoPlayer.Builder(this)
         // Apply audio attributes with focus handling preference
 try { activePlayer.setAudioAttributes(audioAttributes, audioFocusEnabled) } catch (_: Exception) {}
         try { activePlayer.setHandleAudioBecomingNoisy(true) } catch (_: Exception) {}
-        try { activePlayer.volume = appVolume } catch (_: Exception) {}
+        try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
 
         // Apply persisted playback parameters (speed/pitch/reverb) and playback modes if available
         try {
@@ -146,6 +164,14 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
             ): com.google.common.util.concurrent.ListenableFuture<SessionResult> {
                 try {
                     when (customCommand.customAction) {
+                        "CANCEL_CROSSFADE" -> {
+                            cancelCrossfadeAndFocusActive()
+                        }
+                        "SET_SLEEP_TIMER" -> {
+                            val dur = args.getLong("duration_ms", 0L)
+                            setSleepTimer(dur)
+                        }
+                        "CANCEL_SLEEP_TIMER" -> cancelSleepTimer()
                         "SET_EQ_ENABLED" -> {
                             val enabled = args.getBoolean("enabled", false)
                             equalizerManager.setEnabled(enabled)
@@ -243,7 +269,7 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
             }
         }
         
-mediaSession = MediaSession.Builder(this, activePlayer)
+        mediaSession = MediaSession.Builder(this, activePlayer)
             .setSessionActivity(sessionActivityPendingIntent)
             .setCallback(callback)
             .build()
@@ -268,14 +294,12 @@ val sessionId = activePlayer.audioSessionId
     }
     
     private fun setupPlayerListener() {
-activePlayer.addListener(object : Player.Listener {
+        activePlayer.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                updateNotification()
-                
                 // Initialize equalizer when player is ready and has audio session
                 if (playbackState == Player.STATE_READY) {
                     // Ensure current app volume is applied as soon as ready
-                    try { activePlayer.volume = appVolume } catch (_: Exception) {}
+                    try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
                     val sessionId = activePlayer.audioSessionId
                     if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
                         android.util.Log.d("MusicService", "STATE_READY: initializing EQ for sessionId=${'$'}sessionId")
@@ -289,22 +313,29 @@ activePlayer.addListener(object : Player.Listener {
 override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
                 // Ensure app volume is applied when playback starts
-                if (isPlaying) { try { activePlayer.volume = appVolume } catch (_: Exception) {} }
-                if (isPlaying) {
-                    startForeground(NOTIFICATION_ID, createNotification())
-                } else {
-                    // Keep notification visible while paused
-                    @Suppress("DEPRECATION")
-                    stopForeground(false)
-                    notificationManager.notify(NOTIFICATION_ID, createNotification())
-                    
-                    // Check if app is in background and no active activities
+                if (isPlaying) { try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {} }
+                // Notify widget to update
+                try {
+                    sendBroadcast(Intent(com.stash.stashwave.widgets.PlayerWidgetProvider.ACTION_UPDATE)
+                        .setComponent(ComponentName(this@MusicService, com.stash.stashwave.widgets.PlayerWidgetProvider::class.java)))
+                } catch (_: Exception) {}
+                // Notification foreground/updates are handled by PlayerNotificationManager
+                // Check if app is in background and no active activities when paused
+                if (!isPlaying) {
                     checkAndStopServiceIfNeeded()
                 }
+                // Persist queue periodically
+                try { saveQueueState() } catch (_: Exception) {}
             }
             
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                updateNotification()
+                // Persist queue on track change
+                try { saveQueueState() } catch (_: Exception) {}
+                // Request widget refresh
+                try {
+                    sendBroadcast(Intent(com.stash.stashwave.widgets.PlayerWidgetProvider.ACTION_UPDATE)
+                        .setComponent(ComponentName(this@MusicService, com.stash.stashwave.widgets.PlayerWidgetProvider::class.java)))
+                } catch (_: Exception) {}
                 // If not using polling or user disabled experimental true crossfade, we still do minimal fade-in
                 val prefs = getSharedPreferences("settings", 0)
                 val exp = prefs.getBoolean("experimental_true_crossfade", true)
@@ -315,7 +346,7 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
                 // only expose a stable session once the new item is active
                 val sessionId = activePlayer.audioSessionId
                 // Re-apply volume on item transitions
-                try { activePlayer.volume = appVolume } catch (_: Exception) {}
+                try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
                 if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
                     android.util.Log.d("MusicService", "onMediaItemTransition: initializing EQ for sessionId=${'$'}sessionId")
                     lastAudioSessionId = sessionId
@@ -325,7 +356,109 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
             }
         })
     }
-    
+
+    // Cancel any in-flight crossfade and ensure MediaSession is bound to activePlayer
+    private fun cancelCrossfadeAndFocusActive() {
+        // Stop polling and fades
+        stopCrossfadePolling()
+        fadeRunnable?.let { mainHandler.removeCallbacks(it) }
+        fadeRunnable = null
+        // Stop and reset spare
+        try { sparePlayer?.pause() } catch (_: Exception) {}
+        try { sparePlayer?.stop() } catch (_: Exception) {}
+        try { sparePlayer?.clearMediaItems() } catch (_: Exception) {}
+        isCrossfading = false
+        // Ensure session uses active player
+        try { mediaSession?.setPlayer(activePlayer) } catch (_: Exception) {}
+        try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
+    }
+
+    // Persist/restore queue state
+    private fun saveQueueState() {
+        val prefs = getSharedPreferences("queue_state", 0).edit()
+        try {
+            val count = activePlayer.mediaItemCount
+            val list = mutableListOf<org.json.JSONObject>()
+            for (i in 0 until count) {
+                val mi = try { activePlayer.getMediaItemAt(i) } catch (_: Exception) { null } ?: continue
+                val obj = org.json.JSONObject().apply {
+                    put("uri", mi.localConfiguration?.uri?.toString() ?: "")
+                    val md = mi.mediaMetadata
+                    put("title", md.title ?: "")
+                    put("artist", md.artist ?: "")
+                    put("album", md.albumTitle ?: "")
+                }
+                list.add(obj)
+            }
+            val arr = org.json.JSONArray(list)
+            prefs.putString("items", arr.toString())
+            prefs.putInt("index", activePlayer.currentMediaItemIndex)
+            prefs.putLong("position", try { activePlayer.currentPosition } catch (_: Exception) { 0L })
+            prefs.putBoolean("shuffle", activePlayer.shuffleModeEnabled)
+            prefs.putInt("repeat", activePlayer.repeatMode)
+        } catch (_: Exception) {}
+        prefs.apply()
+    }
+
+    private fun restoreQueueStateIfAny() {
+        val prefs = getSharedPreferences("queue_state", 0)
+        val json = prefs.getString("items", null) ?: return
+        try {
+            val arr = org.json.JSONArray(json)
+            val items = mutableListOf<MediaItem>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val uri = android.net.Uri.parse(obj.optString("uri", ""))
+                val md = MediaMetadata.Builder()
+                    .setTitle(obj.optString("title", ""))
+                    .setArtist(obj.optString("artist", ""))
+                    .setAlbumTitle(obj.optString("album", ""))
+                    .build()
+                val mi = MediaItem.Builder().setUri(uri).setMediaMetadata(md).build()
+                items.add(mi)
+            }
+            if (items.isNotEmpty()) {
+                val index = prefs.getInt("index", 0).coerceIn(0, items.lastIndex)
+                val pos = prefs.getLong("position", 0L).coerceAtLeast(0L)
+                try {
+                    activePlayer.setMediaItems(items, index, pos)
+                    activePlayer.prepare()
+                } catch (_: Exception) {
+                    activePlayer.setMediaItems(items)
+                    activePlayer.seekTo(index, pos)
+                }
+                // Restore shuffle/repeat
+                try { activePlayer.shuffleModeEnabled = prefs.getBoolean("shuffle", activePlayer.shuffleModeEnabled) } catch (_: Exception) {}
+                try { activePlayer.repeatMode = prefs.getInt("repeat", activePlayer.repeatMode) } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun toggleFavoriteForCurrent() {
+        try {
+            val mm = activePlayer.mediaMetadata
+            val title = mm.title?.toString() ?: return
+            val artist = mm.artist?.toString() ?: ""
+            val album = mm.albumTitle?.toString() ?: ""
+            val fallback = com.stash.stashwave.data.Song(
+                id = 0L,
+                title = title,
+                artist = artist,
+                album = album,
+                duration = try { activePlayer.duration.takeIf { it > 0 } ?: 0L } catch (_: Exception) { 0L },
+                path = ""
+            )
+            val repo = com.stash.stashwave.data.MusicRepository(this)
+            // Do DB work off the main thread
+            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val isFav = repo.isFavorite(fallback.id)
+                    if (isFav) repo.removeFromFavorites(fallback.id) else repo.addToFavorites(fallback)
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -340,65 +473,145 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
             notificationManager.createNotificationChannel(channel)
         }
     }
-    
-    private fun createNotification(): Notification {
-val mediaMetadata = activePlayer.mediaMetadata
-        val isPlaying = activePlayer.isPlaying
-        
-        val playPauseAction = if (isPlaying) {
-            NotificationCompat.Action(
-                R.drawable.ic_pause_24,
-                "Pause",
-                createMediaActionPendingIntent("PAUSE")
-            )
-        } else {
-            NotificationCompat.Action(
-                R.drawable.ic_play_arrow_24,
-                "Play",
-                createMediaActionPendingIntent("PLAY")
-            )
+
+    private fun setupPlayerNotification() {
+        val descriptionAdapter = object : PlayerNotificationManager.MediaDescriptionAdapter {
+            override fun getCurrentContentTitle(player: Player): CharSequence {
+                return player.mediaMetadata.title ?: "Unknown Title"
+            }
+
+            override fun createCurrentContentIntent(player: Player): PendingIntent? {
+                return createContentIntent()
+            }
+
+            override fun getCurrentContentText(player: Player): CharSequence? {
+                return player.mediaMetadata.artist
+            }
+
+            override fun getCurrentSubText(player: Player): CharSequence? {
+                return player.mediaMetadata.albumTitle
+            }
+
+            override fun getCurrentLargeIcon(
+                player: Player,
+                callback: PlayerNotificationManager.BitmapCallback
+            ): android.graphics.Bitmap? {
+                // Try synchronous cache hit; for cache miss we skip to avoid blocking
+                return getCurrentLargeIcon()
+            }
         }
-        
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(mediaMetadata.title ?: "Unknown Title")
-            .setContentText(mediaMetadata.artist ?: "Unknown Artist")
-            .setSubText(mediaMetadata.albumTitle ?: "Unknown Album")
-            .setLargeIcon(getCurrentLargeIcon())
-            .setSmallIcon(R.drawable.ic_music_note)
-            .setContentIntent(createContentIntent())
-            .setDeleteIntent(createMediaActionPendingIntent("STOP"))
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOnlyAlertOnce(true)
-            .setShowWhen(false)
-            .addAction(
-                R.drawable.ic_skip_previous_24,
-                "Previous",
-                createMediaActionPendingIntent("PREVIOUS")
-            )
-            .addAction(
-                R.drawable.ic_replay_10_24,
-                "Rewind",
-                createMediaActionPendingIntent("REWIND")
-            )
-            .addAction(playPauseAction)
-            .addAction(
-                R.drawable.ic_forward_30_24,
-                "Fast Forward",
-                createMediaActionPendingIntent("FAST_FORWARD")
-            )
-            .addAction(
-                R.drawable.ic_skip_next_24,
-                "Next",
-                createMediaActionPendingIntent("NEXT")
-            )
-            .setStyle(
-                MediaNotificationCompat.MediaStyle()
-                    .setShowActionsInCompactView(1, 2, 3)
-                    .setMediaSession(mediaSession?.sessionCompatToken)
-            )
-            .build()
+
+        val customActionReceiver = object : PlayerNotificationManager.CustomActionReceiver {
+            override fun createCustomActions(context: android.content.Context, instanceId: Int): MutableMap<String, NotificationCompat.Action> {
+                val actions = mutableMapOf<String, NotificationCompat.Action>()
+                actions["REWIND_10"] = NotificationCompat.Action(
+                    R.drawable.ic_replay_10_24,
+                    "-10s",
+                    createContentIntent() // content intent is fine; action will be handled in onCustomAction
+                )
+                actions["FF_30"] = NotificationCompat.Action(
+                    R.drawable.ic_forward_30_24,
+                    "+30s",
+                    createContentIntent()
+                )
+                actions["TOGGLE_FAVORITE"] = NotificationCompat.Action(
+                    R.drawable.ic_favorite_border,
+                    "Favorite",
+                    createContentIntent()
+                )
+                return actions
+            }
+            override fun getCustomActions(player: Player): MutableList<String> {
+                // Show seek +/- and favorite in the notification row
+                return mutableListOf("REWIND_10", "TOGGLE_FAVORITE", "FF_30")
+            }
+            override fun onCustomAction(player: Player, action: String, intent: Intent) {
+                when (action) {
+                    "REWIND_10" -> {
+                        try { player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0)) } catch (_: Exception) {}
+                    }
+                    "FF_30" -> {
+                        val dur = try { player.duration } catch (_: Exception) { 0L }
+                        if (dur > 0) try { player.seekTo((player.currentPosition + 30_000).coerceAtMost(dur)) } catch (_: Exception) {}
+                    }
+                    "TOGGLE_FAVORITE" -> toggleFavoriteForCurrent()
+                }
+            }
+        }
+
+        val builder = PlayerNotificationManager.Builder(this, NOTIFICATION_ID, CHANNEL_ID)
+            .setMediaDescriptionAdapter(descriptionAdapter)
+            .setChannelImportance(NotificationManager.IMPORTANCE_LOW)
+            .setSmallIconResourceId(R.drawable.ic_music_note)
+            .setCustomActionReceiver(customActionReceiver)
+            .setNotificationListener(object : PlayerNotificationManager.NotificationListener {
+                override fun onNotificationPosted(notificationId: Int, notification: Notification, ongoing: Boolean) {
+                    if (ongoing) {
+                        startForeground(notificationId, notification)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        stopForeground(false)
+                        notificationManager.notify(notificationId, notification)
+                        // If paused and app is backgrounded, consider stopping service later
+                        checkAndStopServiceIfNeeded()
+                    }
+                }
+
+                override fun onNotificationCancelled(notificationId: Int, dismissedByUser: Boolean) {
+                    stopForeground(true)
+                    stopSelf()
+                }
+            })
+
+        playerNotificationManager = builder.build().apply {
+            setUsePreviousAction(true)
+            setUseRewindAction(true)
+            setUsePlayPauseActions(true)
+            setUseFastForwardAction(true)
+            setUseNextAction(true)
+            mediaSession?.sessionCompatToken?.let { setMediaSessionToken(it) }
+            setPlayer(activePlayer)
+        }
     }
-    
+
+    private fun setSleepTimer(durationMs: Long) {
+        cancelSleepTimer()
+        if (durationMs <= 0L) return
+        sleepTimerHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        sleepTimerEndAtMs = System.currentTimeMillis() + durationMs
+        val runnable = Runnable {
+            startFadeOutAndPause(8000L)
+        }
+        sleepTimerRunnable = runnable
+        sleepTimerHandler?.postDelayed(runnable, durationMs)
+    }
+
+    private fun cancelSleepTimer() {
+        sleepTimerRunnable?.let { sleepTimerHandler?.removeCallbacks(it) }
+        sleepTimerRunnable = null
+        sleepTimerHandler = null
+        sleepTimerEndAtMs = 0L
+    }
+
+    private fun startFadeOutAndPause(durationMs: Long) {
+        val startTime = System.currentTimeMillis()
+        val startVol = try { activePlayer.volume } catch (_: Exception) { 1f }
+        val runnable = object : Runnable {
+            override fun run() {
+                val elapsed = System.currentTimeMillis() - startTime
+                val fraction = (elapsed.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                val vol = startVol * (1f - fraction)
+                try { activePlayer.volume = vol } catch (_: Exception) {}
+                if (fraction < 1f) {
+                    mainHandler.postDelayed(this, 16L)
+                } else {
+                    try { activePlayer.pause() } catch (_: Exception) {}
+                }
+            }
+        }
+        mainHandler.post(runnable)
+    }
+
     private fun createContentIntent(): PendingIntent {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -411,23 +624,6 @@ val mediaMetadata = activePlayer.mediaMetadata
         )
     }
     
-    private fun createMediaActionPendingIntent(action: String): PendingIntent {
-        val intent = Intent(this, MediaActionReceiver::class.java).apply {
-            this.action = action
-        }
-        return PendingIntent.getBroadcast(
-            this,
-            action.hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-    
-private fun updateNotification() {
-        if (activePlayer.playbackState != Player.STATE_IDLE) {
-            notificationManager.notify(NOTIFICATION_ID, createNotification())
-        }
-    }
     
     private fun getCurrentLargeIcon(): android.graphics.Bitmap? {
         // Attempt to retrieve cached artwork for current media item using minimal overhead.
@@ -479,9 +675,11 @@ if (!activePlayer.isPlaying) {
 
     // Live controls
 fun setAppVolume(volume: Float) {
-        appVolume = volume.coerceIn(0f, 1f)
-        try { activePlayer.volume = appVolume } catch (_: Exception) {}
-        try { getSharedPreferences("settings", 0).edit().putFloat("app_volume", appVolume).apply() } catch (_: Exception) {}
+        appVolumeUi = volume.coerceIn(0f, 1f)
+        val amp = uiToAmp(appVolumeUi)
+        try { activePlayer.volume = amp } catch (_: Exception) {}
+        try { sparePlayer?.volume = 0f } catch (_: Exception) {}
+        try { getSharedPreferences("settings", 0).edit().putFloat("app_volume", appVolumeUi).apply() } catch (_: Exception) {}
     }
 
     fun setAudioFocusEnabled(enabled: Boolean) {
@@ -494,6 +692,12 @@ try { activePlayer.setAudioAttributes(audioAttributes, audioFocusEnabled) } catc
     fun setCrossfadeEnabled(enabled: Boolean) {
         crossfadeEnabled = enabled
         try { getSharedPreferences("settings", 0).edit().putBoolean("crossfade_enabled", crossfadeEnabled).apply() } catch (_: Exception) {}
+        // Apply immediately if playback is active
+        if (crossfadeEnabled && activePlayer.isPlaying) {
+            startCrossfadePolling()
+        } else {
+            stopCrossfadePolling()
+        }
     }
 
     fun setCrossfadeDuration(durationMs: Long) {
@@ -506,7 +710,7 @@ try { activePlayer.setAudioAttributes(audioAttributes, audioFocusEnabled) } catc
         fadeRunnable?.let { mainHandler.removeCallbacks(it) }
         val startTime = System.currentTimeMillis()
         val startVol = 0f
-        val endVol = appVolume
+        val endVol = uiToAmp(appVolumeUi)
         // Set initial
 try { activePlayer.volume = startVol } catch (_: Exception) {}
         val runnable = object : Runnable {
@@ -573,8 +777,9 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
             return
         }
         val startTime = System.currentTimeMillis()
-        val fromVol = appVolume
-        val toVol = appVolume
+        val baseAmp = uiToAmp(appVolumeUi)
+        val fromVol = baseAmp
+        val toVol = baseAmp
         fadeRunnable?.let { mainHandler.removeCallbacks(it) }
         val runnable = object : Runnable {
             override fun run() {
@@ -603,7 +808,9 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
                     try { sparePlayer?.clearMediaItems() } catch (_: Exception) {}
                     try { sparePlayer?.volume = 0f } catch (_: Exception) {}
                     isCrossfading = false
-                    updateNotification()
+                    // Ensure notification manager targets the new active player
+                    try { playerNotificationManager?.setPlayer(activePlayer) } catch (_: Exception) {}
+                    try { saveQueueState() } catch (_: Exception) {}
                 }
             }
         }
@@ -659,12 +866,14 @@ try { activePlayer.pause() } catch (_: Exception) {}
     }
 
     override fun onDestroy() {
+        // Persist last-known queue state
+        try { saveQueueState() } catch (_: Exception) {}
         // Unregister preference listeners
         try { unregisterPreferenceListeners() } catch (_: Exception) {}
         try { presetReverb?.release() } catch (_: Exception) {}
         equalizerManager.release()
         mediaSession?.run {
-activePlayer.release()
+            try { activePlayer.release() } catch (_: Exception) {}
             release()
             mediaSession = null
         }

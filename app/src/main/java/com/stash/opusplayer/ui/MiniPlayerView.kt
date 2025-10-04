@@ -58,11 +58,15 @@ class MiniPlayerView @JvmOverloads constructor(
     private fun setupUI() {
         // Click on mini player opens full screen player
         binding.root.setOnClickListener {
-            currentSong?.let { song ->
-                val intent = Intent(context, NowPlayingActivity::class.java).apply {
-                    putExtra("song", song)
-                }
+            val intent = Intent(context, NowPlayingActivity::class.java).apply {
+                currentSong?.let { putExtra("song", it) }
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
                 context.startActivity(intent)
+            } catch (_: Exception) {
+                // best-effort fallback without extras
+                try { context.startActivity(Intent(context, NowPlayingActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
             }
         }
 
@@ -135,6 +139,7 @@ class MiniPlayerView @JvmOverloads constructor(
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 updateMediaInfo()
+                setArtworkFromMetadata()
                 if (mediaItem != null) show()
             }
         })
@@ -281,6 +286,8 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(context)
                 .into(binding.miniAlbumArt)
         }
     }
+
+    fun resync() { resyncFromController() }
 
     private fun resyncFromController() {
         try {

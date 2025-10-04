@@ -39,6 +39,7 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" 
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:targetApi="33" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".StashWaveApplication"
@@ -72,17 +73,22 @@
             android:name=".ui.NowPlayingActivity"
             android:exported="false"
             android:theme="@style/Theme.StashWavePlayer" />
+
+        <activity
+            android:name=".ui.QueueActivity"
+            android:exported="false"
+            android:theme="@style/Theme.StashWavePlayer" />
+
+        <activity
+            android:name=".ui.MetadataActivity"
+            android:exported="false"
+            android:theme="@style/Theme.StashWavePlayer" />
         
         <activity
             android:name=".ui.YouTubeStreamingActivity"
             android:exported="false"
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:theme="@style/Theme.StashWavePlayer" />
-        
-        <receiver
-            android:name=".service.MediaActionReceiver"
-            android:enabled="true"
-            android:exported="false" />
         
         <service
             android:name=".service.MusicService"
@@ -92,7 +98,28 @@
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
         </service>
+
+        <!-- Home screen widget provider -->
+        <receiver
+            android:name=".widgets.PlayerWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.stash.stashwave.widgets.PLAY_PAUSE" />
+                <action android:name="com.stash.stashwave.widgets.NEXT" />
+                <action android:name="com.stash.stashwave.widgets.PREV" />
+                <action android:name="com.stash.stashwave.widgets.REWIND_10" />
+                <action android:name="com.stash.stashwave.widgets.FF_10" />
+                <action android:name="com.stash.stashwave.widgets.UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/player_widget_info" />
+        </receiver>
         
         <!-- FileProvider for update installations -->
         <provider

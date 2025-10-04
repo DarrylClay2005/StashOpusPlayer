@@ -121,6 +121,21 @@ class UpdateDownloader(private val context: Context) {
     
     fun installUpdate(updateFile: File) {
         try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val pm = context.packageManager
+                val canInstall = pm.canRequestPackageInstalls()
+                if (!canInstall) {
+                    val settingsIntent = Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    try {
+                        context.startActivity(settingsIntent)
+                        android.widget.Toast.makeText(context, "Enable 'Allow from this source', then tap Install again.", android.widget.Toast.LENGTH_LONG).show()
+                    } catch (_: Exception) {}
+                    return
+                }
+            }
             val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 FileProvider.getUriForFile(
                     context,

@@ -237,6 +237,8 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
         return scanFolderRecursivelyFast(folderPath)
     }
 
+    suspend fun getSongsInFolder(folderPath: String): List<Song> = scanFolderRecursivelyFast(folderPath)
+
     // Fast disk scan: avoids heavy metadata until later, filters by extension
     private suspend fun scanFolderRecursivelyFast(folderPath: String): List<Song> = withContext(Dispatchers.IO) {
         val songs = mutableListOf<Song>()
@@ -313,6 +315,11 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
         }
     }
     
+    suspend fun getSongsInAlbum(album: String): List<Song> = withContext(Dispatchers.IO) {
+        val allSongs = getAllSongsWithMetadata()
+        allSongs.filter { it.albumName == album }
+    }
+
     // Artist/Producer organization
     suspend fun getSongsByArtist(): Map<String, List<Song>> = withContext(Dispatchers.IO) {
         val allSongs = getAllSongsWithMetadata()

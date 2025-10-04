@@ -94,12 +94,54 @@
                 android:text="Downloading content…"/>
         </LinearLayout>
 
+        <!-- Playing from banner -->
+        <LinearLayout
+            android:id="@+id/playing_banner"
+            style="@style/NeomorphicCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_below="@id/download_banner"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="8dp"
+            android:padding="12dp"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_marginEnd="8dp"
+                android:src="@drawable/ic_playlist_play"
+                android:tint="@color/text_primary"/>
+
+            <TextView
+                android:id="@+id/playing_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:text="Playing from …"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/playing_action_button"
+                style="@style/NeomorphicButton"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="Queue"
+                android:textSize="12sp"
+                app:icon="@drawable/ic_queue_music"
+                app:iconTint="@color/text_primary"
+                app:iconSize="16dp"
+                app:iconPadding="8dp" />
+        </LinearLayout>
+
         <!-- Main content container -->
         <FrameLayout
             android:id="@+id/main_content"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_below="@id/download_banner"
+            android:layout_below="@id/playing_banner"
             android:layout_above="@id/mini_player" />
 
         <!-- Neomorphic Bottom Navigation -->

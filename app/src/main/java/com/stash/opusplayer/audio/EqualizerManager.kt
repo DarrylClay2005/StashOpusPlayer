@@ -160,6 +160,8 @@ class EqualizerManager(private val context: Context) {
     fun setPreset(preset: EqualizerPreset) {
         try {
             equalizer?.let { eq ->
+                // Reset all auxiliary effects to sane defaults before applying the preset
+                resetEffectsToDefaults()
                 when (preset) {
                     EqualizerPreset.NORMAL -> {
                         // Reset all bands to 0
@@ -362,6 +364,16 @@ class EqualizerManager(private val context: Context) {
             }
             _bandLevels.value = bands
         }
+    }
+    
+    private fun resetEffectsToDefaults() {
+        try {
+            setBassBoost(0)
+            setVirtualizer(0)
+            setReverbPreset(PresetReverb.PRESET_NONE.toInt())
+            setLoudnessGain(0)
+            setEnvironmentalReverb(0, 1000)
+        } catch (_: Exception) {}
     }
     
     // Preset implementations
