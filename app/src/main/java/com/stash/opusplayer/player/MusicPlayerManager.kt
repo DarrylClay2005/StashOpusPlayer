@@ -181,11 +181,20 @@ class MusicPlayerManager(private val context: Context) {
     
     // Helper methods
     private fun createMediaItem(song: Song): MediaItem {
-        val metadata = MediaMetadata.Builder()
+        val metaBuilder = MediaMetadata.Builder()
             .setTitle(song.displayName)
             .setArtist(song.artistName)
             .setAlbumTitle(song.albumName)
-            .build()
+        // Provide artwork to the system media controls if embedded art is available
+        try {
+            if (!song.albumArt.isNullOrEmpty()) {
+                val bytes = android.util.Base64.decode(song.albumArt, android.util.Base64.DEFAULT)
+                if (bytes != null && bytes.isNotEmpty()) {
+                    metaBuilder.setArtworkData(bytes, "image/jpeg")
+                }
+            }
+        } catch (_: Exception) {}
+        val metadata = metaBuilder.build()
         
         val uri = resolveSongUri(song)
         return MediaItem.Builder()
