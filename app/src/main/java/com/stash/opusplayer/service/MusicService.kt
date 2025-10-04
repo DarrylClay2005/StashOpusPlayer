@@ -6,8 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Build
-import androidx.core.app.NotificationCompat
-import androidx.media.app.NotificationCompat as MediaNotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -20,6 +18,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import androidx.media3.session.MediaSessionService
+import androidx.media3.ui.PlayerNotificationManager
 import com.stash.stashwave.R
 import androidx.preference.PreferenceManager
 import com.stash.stashwave.audio.EqualizerManager
@@ -48,6 +47,9 @@ private lateinit var activePlayer: ExoPlayer
     private lateinit var notificationManager: NotificationManager
     private var appInForeground = true
     private var stopServiceWhenPaused = false
+
+    // Media3 notification manager that binds actions directly to the MediaSession/Player
+    private var playerNotificationManager: PlayerNotificationManager? = null
 
     // Phase 2: App volume and crossfade controls
     // Store UI-domain volume [0..1]; map to amplitude using a perceptual curve when applying to ExoPlayer
@@ -79,6 +81,7 @@ private lateinit var activePlayer: ExoPlayer
         initializeEqualizer()
         initializeMediaSession()
         setupPlayerListener()
+        setupPlayerNotification()
     }
     
 private fun initializePlayers() {
@@ -274,8 +277,6 @@ val sessionId = activePlayer.audioSessionId
     private fun setupPlayerListener() {
 activePlayer.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                updateNotification()
-                
                 // Initialize equalizer when player is ready and has audio session
                 if (playbackState == Player.STATE_READY) {
                     // Ensure current app volume is applied as soon as ready
@@ -294,21 +295,14 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
                 // Ensure app volume is applied when playback starts
                 if (isPlaying) { try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {} }
-                if (isPlaying) {
-                    startForeground(NOTIFICATION_ID, createNotification())
-                } else {
-                    // Keep notification visible while paused
-                    @Suppress("DEPRECATION")
-                    stopForeground(false)
-                    notificationManager.notify(NOTIFICATION_ID, createNotification())
-                    
-                    // Check if app is in background and no active activities
+                // Notification foreground/updates are handled by PlayerNotificationManager
+                // Check if app is in background and no active activities when paused
+                if (!isPlaying) {
                     checkAndStopServiceIfNeeded()
                 }
             }
             
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                updateNotification()
                 // If not using polling or user disabled experimental true crossfade, we still do minimal fade-in
                 val prefs = getSharedPreferences("settings", 0)
                 val exp = prefs.getBoolean("experimental_true_crossfade", true)
@@ -344,66 +338,68 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
             notificationManager.createNotificationChannel(channel)
         }
     }
-    
-    private fun createNotification(): Notification {
-val mediaMetadata = activePlayer.mediaMetadata
-        val isPlaying = activePlayer.isPlaying
-        
-        val playPauseAction = if (isPlaying) {
-            NotificationCompat.Action(
-                R.drawable.ic_pause_24,
-                "Pause",
-                createMediaActionPendingIntent("PAUSE")
-            )
-        } else {
-            NotificationCompat.Action(
-                R.drawable.ic_play_arrow_24,
-                "Play",
-                createMediaActionPendingIntent("PLAY")
-            )
+
+    private fun setupPlayerNotification() {
+        val descriptionAdapter = object : PlayerNotificationManager.MediaDescriptionAdapter {
+            override fun getCurrentContentTitle(player: Player): CharSequence {
+                return player.mediaMetadata.title ?: "Unknown Title"
+            }
+
+            override fun createCurrentContentIntent(player: Player): PendingIntent? {
+                return createContentIntent()
+            }
+
+            override fun getCurrentContentText(player: Player): CharSequence? {
+                return player.mediaMetadata.artist
+            }
+
+            override fun getCurrentSubText(player: Player): CharSequence? {
+                return player.mediaMetadata.albumTitle
+            }
+
+            override fun getCurrentLargeIcon(
+                player: Player,
+                callback: PlayerNotificationManager.BitmapCallback
+            ): android.graphics.Bitmap? {
+                // Try synchronous cache hit; for cache miss we skip to avoid blocking
+                return getCurrentLargeIcon()
+            }
         }
-        
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(mediaMetadata.title ?: "Unknown Title")
-            .setContentText(mediaMetadata.artist ?: "Unknown Artist")
-            .setSubText(mediaMetadata.albumTitle ?: "Unknown Album")
-            .setLargeIcon(getCurrentLargeIcon())
-            .setSmallIcon(R.drawable.ic_music_note)
-            .setContentIntent(createContentIntent())
-            .setDeleteIntent(createMediaActionPendingIntent("STOP"))
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOnlyAlertOnce(true)
-            .setShowWhen(false)
-            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .addAction(
-                R.drawable.ic_skip_previous_24,
-                "Previous",
-                createMediaActionPendingIntent("PREVIOUS")
-            )
-            .addAction(
-                R.drawable.ic_replay_10_24,
-                "Rewind",
-                createMediaActionPendingIntent("REWIND")
-            )
-            .addAction(playPauseAction)
-            .addAction(
-                R.drawable.ic_forward_30_24,
-                "Fast Forward",
-                createMediaActionPendingIntent("FAST_FORWARD")
-            )
-            .addAction(
-                R.drawable.ic_skip_next_24,
-                "Next",
-                createMediaActionPendingIntent("NEXT")
-            )
-            .setStyle(
-                MediaNotificationCompat.MediaStyle()
-                    .setShowActionsInCompactView(1, 2, 3)
-                    .setMediaSession(mediaSession?.sessionCompatToken)
-            )
-            .build()
+
+        val builder = PlayerNotificationManager.Builder(this, NOTIFICATION_ID, CHANNEL_ID)
+            .setMediaDescriptionAdapter(descriptionAdapter)
+            .setChannelImportance(NotificationManager.IMPORTANCE_LOW)
+            .setSmallIconResourceId(R.drawable.ic_music_note)
+            .setNotificationListener(object : PlayerNotificationManager.NotificationListener {
+                override fun onNotificationPosted(notificationId: Int, notification: Notification, ongoing: Boolean) {
+                    if (ongoing) {
+                        startForeground(notificationId, notification)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        stopForeground(false)
+                        notificationManager.notify(notificationId, notification)
+                        // If paused and app is backgrounded, consider stopping service later
+                        checkAndStopServiceIfNeeded()
+                    }
+                }
+
+                override fun onNotificationCancelled(notificationId: Int, dismissedByUser: Boolean) {
+                    stopForeground(true)
+                    stopSelf()
+                }
+            })
+
+        playerNotificationManager = builder.build().apply {
+            setUsePreviousAction(true)
+            setUseRewindAction(true)
+            setUsePlayPauseActions(true)
+            setUseFastForwardAction(true)
+            setUseNextAction(true)
+            mediaSession?.sessionCompatToken?.let { setMediaSessionToken(it) }
+            setPlayer(activePlayer)
+        }
     }
-    
+
     private fun createContentIntent(): PendingIntent {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -416,23 +412,6 @@ val mediaMetadata = activePlayer.mediaMetadata
         )
     }
     
-    private fun createMediaActionPendingIntent(action: String): PendingIntent {
-        val intent = Intent(this, MediaActionReceiver::class.java).apply {
-            this.action = action
-        }
-        return PendingIntent.getBroadcast(
-            this,
-            action.hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-    
-private fun updateNotification() {
-        if (activePlayer.playbackState != Player.STATE_IDLE) {
-            notificationManager.notify(NOTIFICATION_ID, createNotification())
-        }
-    }
     
     private fun getCurrentLargeIcon(): android.graphics.Bitmap? {
         // Attempt to retrieve cached artwork for current media item using minimal overhead.
@@ -617,7 +596,8 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
                     try { sparePlayer?.clearMediaItems() } catch (_: Exception) {}
                     try { sparePlayer?.volume = 0f } catch (_: Exception) {}
                     isCrossfading = false
-                    updateNotification()
+                    // Ensure notification manager targets the new active player
+                    try { playerNotificationManager?.setPlayer(activePlayer) } catch (_: Exception) {}
                 }
             }
         }

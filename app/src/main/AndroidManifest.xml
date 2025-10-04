@@ -90,11 +90,6 @@
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:theme="@style/Theme.StashWavePlayer" />
         
-        <receiver
-            android:name=".service.MediaActionReceiver"
-            android:enabled="true"
-            android:exported="false" />
-        
         <service
             android:name=".service.MusicService"
             android:enabled="true"
@@ -102,6 +97,9 @@
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </service>
         

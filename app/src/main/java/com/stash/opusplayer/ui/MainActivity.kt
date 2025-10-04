@@ -379,17 +379,25 @@ Check for updates anytime from Settings.""")
         musicPlayerManager = (application as com.stash.stashwave.StashWaveApplication).playerManager
     }
     
+    private var playingBannerDismissRunnable: Runnable? = null
+
     private fun showPlayingBanner(text: String) {
         try {
             val banner = findViewById<android.view.View>(R.id.playing_banner)
             val tv = findViewById<android.widget.TextView>(R.id.playing_text)
+            val btn = findViewById<com.google.android.material.button.MaterialButton>(R.id.playing_action_button)
             tv.text = text
+            btn.setOnClickListener {
+                try { startActivity(Intent(this, QueueActivity::class.java)) } catch (_: Exception) {}
+            }
             banner.visibility = android.view.View.VISIBLE
-            // Auto-dismiss after ~2 seconds
-            banner.removeCallbacks(null)
-            banner.postDelayed({
+            // Cancel any previous dismissal and schedule a new one (keep visible during rapid switching)
+            playingBannerDismissRunnable?.let { banner.removeCallbacks(it) }
+            val runnable = Runnable {
                 try { banner.visibility = android.view.View.GONE } catch (_: Exception) {}
-            }, 2000)
+            }
+            playingBannerDismissRunnable = runnable
+            banner.postDelayed(runnable, 2500) // ~2.5 seconds for better readability
         } catch (_: Exception) {}
     }
     

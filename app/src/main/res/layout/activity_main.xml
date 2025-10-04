@@ -102,7 +102,9 @@
             android:layout_height="wrap_content"
             android:layout_below="@id/download_banner"
             android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:layout_marginTop="8dp"
+            android:padding="12dp"
             android:visibility="gone">
 
             <ImageView
@@ -114,11 +116,24 @@
 
             <TextView
                 android:id="@+id/playing_text"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:textColor="@color/text_primary"
                 android:textSize="16sp"
                 android:text="Playing from …"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/playing_action_button"
+                style="@style/NeomorphicButton"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="Queue"
+                android:textSize="12sp"
+                app:icon="@drawable/ic_queue_music"
+                app:iconTint="@color/text_primary"
+                app:iconSize="16dp"
+                app:iconPadding="8dp" />
         </LinearLayout>
 
         <!-- Main content container -->
