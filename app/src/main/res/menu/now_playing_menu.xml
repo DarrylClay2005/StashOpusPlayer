@@ -16,5 +16,9 @@
         android:id="@+id/action_jump_to_source"
         android:title="Jump to Source"
         android:visible="true" />
+    <item
+        android:id="@+id/action_show_lyrics"
+        android:title="Show Lyrics"
+        android:visible="true" />
 </menu>
 

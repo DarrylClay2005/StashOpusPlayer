@@ -163,6 +163,10 @@ class NowPlayingActivity : AppCompatActivity() {
                         } catch (_: Exception) {}
                         true
                     }
+                    R.id.action_show_lyrics -> {
+                        showLyrics()
+                        true
+                    }
                     else -> false
                 }
             }
@@ -252,6 +256,60 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
         // Audio controls have moved to Settings
     }
     
+    private fun showLyrics() {
+        val song = currentSong ?: return
+        // Try to find a .lrc next to the file path when path is a file
+        val path = song.path
+        var lrcContent: String? = null
+        try {
+            if (!path.startsWith("content://")) {
+                val file = java.io.File(path)
+                val lrc = java.io.File(file.parentFile, file.nameWithoutExtension + ".lrc")
+                if (lrc.exists()) {
+                    lrcContent = lrc.readText()
+                }
+            }
+        } catch (_: Exception) {}
+        if (lrcContent.isNullOrBlank()) {
+            android.widget.Toast.makeText(this, "No lyrics file found", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val lines = com.stash.stashwave.utils.LrcParser.parse(lrcContent)
+        if (lines.isEmpty()) {
+            android.widget.Toast.makeText(this, "No timed lyrics found", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this).create()
+        val container = android.widget.ScrollView(this)
+        val tv = android.widget.TextView(this).apply {
+            setPadding(32, 32, 32, 32)
+            textSize = 16f
+        }
+        container.addView(tv)
+        dialog.setView(container)
+        dialog.setTitle("Lyrics")
+        dialog.setButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE, "Close") { d, _ -> d.dismiss() }
+        dialog.show()
+        // Update every 500ms to highlight current line
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val runnable = object : Runnable {
+            override fun run() {
+                val pos = mediaController?.currentPosition ?: 0L
+                val idx = lines.indexOfLast { it.timeMs <= pos }.coerceAtLeast(0)
+                val display = buildString {
+                    lines.forEachIndexed { i, l ->
+                        if (i == idx) append("\u25CF ") else append("  ")
+                        append(l.text).append('\n')
+                    }
+                }
+                tv.text = display
+                handler.postDelayed(this, 500)
+            }
+        }
+        dialog.setOnDismissListener { handler.removeCallbacksAndMessages(null) }
+        handler.post(runnable)
+    }
+
     private fun shareCurrentTrack() {
         val song = currentSong ?: return
         val text = "${song.displayName} — ${song.artistName}"
