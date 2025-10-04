@@ -142,21 +142,6 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
         )
         
         val callback = object : MediaSession.Callback {
-            override fun onPlay(session: MediaSession, controller: MediaSession.ControllerInfo) {
-                try { activePlayer.play() } catch (_: Exception) {}
-            }
-            override fun onPause(session: MediaSession, controller: MediaSession.ControllerInfo) {
-                try { activePlayer.pause() } catch (_: Exception) {}
-            }
-            override fun onSeekTo(session: MediaSession, controller: MediaSession.ControllerInfo, pos: Long) {
-                try { activePlayer.seekTo(pos) } catch (_: Exception) {}
-            }
-            override fun onSkipToNext(session: MediaSession, controller: MediaSession.ControllerInfo) {
-                try { activePlayer.seekToNextMediaItem() } catch (_: Exception) {}
-            }
-            override fun onSkipToPrevious(session: MediaSession, controller: MediaSession.ControllerInfo) {
-                try { activePlayer.seekToPreviousMediaItem() } catch (_: Exception) {}
-            }
             override fun onCustomCommand(
                 session: MediaSession,
                 controller: MediaSession.ControllerInfo,
