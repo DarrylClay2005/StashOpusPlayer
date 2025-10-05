@@ -186,6 +186,39 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
         } catch (_: Exception) {}
     }
     
+    private fun runAudioTestMaxVolume() {
+        try {
+            android.util.Log.w("MusicService", "AUDIO_TEST_MAX_VOLUME: disabling effects and maxing volume")
+            val settings = getSharedPreferences("settings", 0)
+            settings.edit()
+                .putFloat("app_volume", 1.0f)
+                .putBoolean("crossfade_enabled", false)
+                .putLong("crossfade_duration_ms", 0L)
+                .putBoolean("skip_silence_enabled", false)
+                .putBoolean("replaygain_enabled", false)
+                .putInt("reverb_preset", 0)
+                .putBoolean("audio_focus_enabled", true)
+                .apply()
+            // Disable EQ in default prefs as well
+            PreferenceManager.getDefaultSharedPreferences(this).edit()
+                .putBoolean("equalizer_enabled", false)
+                .apply()
+            // Apply live
+            setAppVolume(1.0f)
+            setCrossfadeEnabled(false)
+            setCrossfadeDuration(0L)
+            skipSilenceEnabled = false
+            try { activePlayer.setSkipSilenceEnabled(false) } catch (_: Exception) {}
+            try { sparePlayer?.setSkipSilenceEnabled(false) } catch (_: Exception) {}
+            try { equalizerManager.setEnabled(false) } catch (_: Exception) {}
+            setReverbPreset(0)
+            rgEnabled = false
+            clearReplayGainBoost()
+            setAudioFocusEnabled(true)
+            try { activePlayer.volume = 1f } catch (_: Exception) {}
+        } catch (_: Exception) {}
+    }
+    
     private fun initializeMediaSession() {
         val sessionActivityPendingIntent = PendingIntent.getActivity(
             this,
@@ -302,6 +335,9 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
                             val enabled = args.getBoolean("enabled", true)
                             setAudioFocusEnabled(enabled)
                         }
+                        "AUDIO_TEST_MAX_VOLUME" -> {
+                            runAudioTestMaxVolume()
+                        }
                     }
                 } catch (_: Exception) {}
                 return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -338,7 +374,11 @@ val sessionId = activePlayer.audioSessionId
                 // Initialize equalizer when player is ready and has audio session
                 if (playbackState == Player.STATE_READY) {
                     // Ensure current app volume is applied as soon as ready
-                    try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
+                    try {
+                        val base = uiToAmp(appVolumeUi)
+                        android.util.Log.d("MusicService", "STATE_READY: set base volume=${base}")
+                        activePlayer.volume = base
+                    } catch (_: Exception) {}
                     val sessionId = activePlayer.audioSessionId
                     if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
                         android.util.Log.d("MusicService", "STATE_READY: initializing EQ for sessionId=${'$'}sessionId")
@@ -723,9 +763,10 @@ val title = activePlayer.mediaMetadata.title?.toString() ?: ""
     }
 
     // Live controls
-fun setAppVolume(volume: Float) {
+    fun setAppVolume(volume: Float) {
         appVolumeUi = volume.coerceIn(0f, 1f)
         val amp = uiToAmp(appVolumeUi)
+        try { android.util.Log.d("MusicService", "setAppVolume ui=${appVolumeUi} amp=${amp}") } catch (_: Exception) {}
         try { activePlayer.volume = amp } catch (_: Exception) {}
         try { sparePlayer?.volume = 0f } catch (_: Exception) {}
         try { getSharedPreferences("settings", 0).edit().putFloat("app_volume", appVolumeUi).apply() } catch (_: Exception) {}
@@ -942,7 +983,9 @@ val sessionId = activePlayer.audioSessionId
                 val amp = pair.first
                 val leMb = pair.second
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    try { activePlayer.volume = (uiToAmp(appVolumeUi) * amp).coerceIn(0f, 1f) } catch (_: Exception) {}
+                    val vol = (uiToAmp(appVolumeUi) * amp).coerceIn(0f, 1f)
+                    try { android.util.Log.d("MusicService", "applyReplayGainForCurrent: ui=${appVolumeUi} rgAmp=${amp} -> vol=${vol} le=${leMb}mB") } catch (_: Exception) {}
+                    try { activePlayer.volume = vol } catch (_: Exception) {}
                     if (rgAllowBoost && leMb != 0) {
                         try { ensureReplayGainLoudness(activePlayer.audioSessionId) } catch (_: Exception) {}
                         try { rgLoudness?.setTargetGain(leMb) } catch (_: Exception) {}

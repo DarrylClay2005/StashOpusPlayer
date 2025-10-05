@@ -750,6 +750,39 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
         }
         layout.addView(exactSeekToggle)
 
+        // Audio Test: Max Volume
+        val audioTestBtn = Button(requireContext()).apply {
+            text = "Audio Test: Max Volume"
+            setOnClickListener {
+                try {
+                    // Trigger service to disable all processing and set volume to max
+                    mediaController?.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("AUDIO_TEST_MAX_VOLUME", android.os.Bundle.EMPTY),
+                        android.os.Bundle.EMPTY
+                    )
+                    // Update local prefs mirrors for immediate UI consistency
+                    val sp = requireContext().getSharedPreferences("settings", 0)
+                    sp.edit()
+                        .putFloat("app_volume", 1.0f)
+                        .putBoolean("crossfade_enabled", false)
+                        .putLong("crossfade_duration_ms", 0L)
+                        .putBoolean("skip_silence_enabled", false)
+                        .putBoolean("replaygain_enabled", false)
+                        .putInt("reverb_preset", 0)
+                        .apply()
+                    androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext()).edit()
+                        .putBoolean("equalizer_enabled", false)
+                        .apply()
+                    // Update visible controls
+                    volSeekRef?.progress = 100
+                    cfToggleRef?.isChecked = false
+                    cfSeekRef?.apply { isEnabled = false; progress = 0 }
+                    android.widget.Toast.makeText(requireContext(), "Set to max volume with all effects disabled", android.widget.Toast.LENGTH_LONG).show()
+                } catch (_: Exception) {}
+            }
+        }
+        layout.addView(audioTestBtn)
+
         // ReplayGain section
         val rgHeader = TextView(requireContext()).apply {
             text = "ReplayGain Normalization"
