@@ -1035,16 +1035,49 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
         }
         layout.addView(volHeader)
 
-        val volLabel = TextView(requireContext())
-        layout.addView(volLabel)
-        volLabelRef = volLabel
-
         val savedVol = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
+        val volLabel = TextView(requireContext()).apply {
+            setPadding(12, 6, 12, 6)
+            setTextColor(ContextCompat.getColor(requireContext(), com.stash.stashwave.R.color.text_primary))
+            background = ContextCompat.getDrawable(requireContext(), com.stash.stashwave.R.drawable.duration_background)
+            textSize = 12f
+        }
         fun updateVolLabel(v: Float) {
             val gamma = 2.0
             val amp = Math.pow(v.toDouble(), gamma).toFloat()
             volLabel.text = "Volume: ${'$'}{(v * 100).toInt()}% (effective ${'$'}{(amp * 100).toInt()}%)"
         }
+
+        // Volume row with badge + Reset
+        val volRow = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        volRow.addView(volLabel)
+        val volSpacer = Space(requireContext()).apply { layoutParams = LinearLayout.LayoutParams(0, 1, 1f) }
+        volRow.addView(volSpacer)
+        val volReset = Button(requireContext()).apply {
+            text = "Reset"
+            textSize = 12f
+            setOnClickListener {
+                val def = 1.0f
+                prefs.edit().putFloat("app_volume", def).apply()
+                volSeekRef?.progress = 100
+                updateVolLabel(def)
+                mediaController?.let { controller ->
+                    try {
+                        controller.sendCustomCommand(
+                            androidx.media3.session.SessionCommand("SET_APP_VOLUME", android.os.Bundle.EMPTY),
+                            androidx.core.os.bundleOf("volume" to def)
+                        )
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+        volRow.addView(volReset)
+        layout.addView(volRow)
+        volLabelRef = volLabel
+
         updateVolLabel(savedVol)
 
         val volSeek = SeekBar(requireContext()).apply {
@@ -1102,11 +1135,38 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
         cfToggleRef = cfToggle
 
         val cfLabel = TextView(requireContext())
-        layout.addView(cfLabel)
-        cfLabelRef = cfLabel
         val savedCf = prefs.getLong("crossfade_duration_ms", 1000L).coerceIn(0L, 5000L)
         fun updateCfLabel(ms: Long) { cfLabel.text = "Crossfade duration: ${'$'}{ms} ms" }
         updateCfLabel(savedCf)
+        // Crossfade row with badge + Reset
+        val cfRow = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        cfRow.addView(cfLabel)
+        cfLabelRef = cfLabel
+        val cfSpacer = Space(requireContext()).apply { layoutParams = LinearLayout.LayoutParams(0, 1, 1f) }
+        cfRow.addView(cfSpacer)
+        val cfReset = Button(requireContext()).apply {
+            text = "Reset"
+            textSize = 12f
+            setOnClickListener {
+                val defMs = 1000L
+                prefs.edit().putLong("crossfade_duration_ms", defMs).apply()
+                cfSeekRef?.progress = defMs.toInt()
+                updateCfLabel(defMs)
+                mediaController?.let { controller ->
+                    try {
+                        controller.sendCustomCommand(
+                            androidx.media3.session.SessionCommand("SET_CROSSFADE_DURATION", android.os.Bundle.EMPTY),
+                            androidx.core.os.bundleOf("duration_ms" to defMs)
+                        )
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+        cfRow.addView(cfReset)
+        layout.addView(cfRow)
 
         val cfSeek = SeekBar(requireContext()).apply {
             max = 5000

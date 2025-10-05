@@ -15,6 +15,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.PlaybackParameters
+import androidx.media3.exoplayer.SeekParameters
 import android.media.audiofx.PresetReverb
 import android.media.audiofx.LoudnessEnhancer
 import androidx.media3.session.MediaSession
@@ -158,6 +159,7 @@ try { activePlayer.setAudioAttributes(audioAttributes, audioFocusEnabled) } catc
         try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
         try { activePlayer.setSkipSilenceEnabled(skipSilenceEnabled) } catch (_: Exception) {}
         try { activePlayer.setPauseAtEndOfMediaItems(false) } catch (_: Exception) {}
+        applySeekParameters()
 
         // Apply persisted playback parameters (speed/pitch/reverb) and playback modes if available
         try {
@@ -174,6 +176,14 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
             activePlayer.shuffleModeEnabled = savedShuffle
             activePlayer.repeatMode = savedRepeat
         } catch (_: Exception) { /* ignore */ }
+    }
+    
+    private fun applySeekParameters() {
+        try {
+            val params = if (exactSeeks) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC
+            try { activePlayer.setSeekParameters(params) } catch (_: Exception) {}
+            try { sparePlayer?.setSeekParameters(params) } catch (_: Exception) {}
+        } catch (_: Exception) {}
     }
     
     private fun initializeMediaSession() {
@@ -1025,7 +1035,7 @@ try { activePlayer.pause() } catch (_: Exception) {}
                 }
                 "exact_seeks" -> {
                     exactSeeks = prefs.getBoolean("exact_seeks", true)
-                    // SeekParameters API not applied in this build; stored for future use
+                    applySeekParameters()
                 }
                 // ReplayGain
                 "replaygain_enabled", "replaygain_mode", "replaygain_preamp_db", "replaygain_fallback_db",
