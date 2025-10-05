@@ -142,8 +142,13 @@ class MusicPlayerManager(private val context: Context) {
                 val future = controller.sendCustomCommand(cmd, android.os.Bundle.EMPTY)
                 future.addListener({
                     try {
+                        // Hard-reset playback to avoid race conditions during replacement
+                        try { controller.pause() } catch (_: Exception) {}
+                        try { controller.stop() } catch (_: Exception) {}
+                        try { controller.clearMediaItems() } catch (_: Exception) {}
                         controller.setMediaItems(mediaItems, idx, /* startPositionMs= */ 0)
                     } catch (_: Exception) {
+                        try { controller.clearMediaItems() } catch (_: Exception) {}
                         controller.setMediaItems(mediaItems)
                         controller.seekToDefaultPosition(idx)
                     }
@@ -152,8 +157,12 @@ class MusicPlayerManager(private val context: Context) {
                 }, MoreExecutors.directExecutor())
             } catch (_: Exception) {
                 try {
+                    try { controller.pause() } catch (_: Exception) {}
+                    try { controller.stop() } catch (_: Exception) {}
+                    try { controller.clearMediaItems() } catch (_: Exception) {}
                     controller.setMediaItems(mediaItems, idx, /* startPositionMs= */ 0)
                 } catch (_: Exception) {
+                    try { controller.clearMediaItems() } catch (_: Exception) {}
                     controller.setMediaItems(mediaItems)
                     controller.seekToDefaultPosition(idx)
                 }
