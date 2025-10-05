@@ -1220,6 +1220,24 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
         }
         layout.addView(trueCfToggle)
 
+        // Crossfade polling toggle (disable to avoid background races)
+        val cfPollingToggle = CheckBox(requireContext()).apply {
+            text = "Enable crossfade polling (disable if you see track switch issues)"
+            val prefs = requireContext().getSharedPreferences("settings", 0)
+            isChecked = prefs.getBoolean("crossfade_polling_enabled", true)
+            setOnCheckedChangeListener { _, enabled ->
+                prefs.edit().putBoolean("crossfade_polling_enabled", enabled).apply()
+                // Inform service immediately
+                try {
+                    mediaController?.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("SET_CROSSFADE_POLLING_ENABLED", android.os.Bundle.EMPTY),
+                        androidx.core.os.bundleOf("enabled" to enabled)
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+        layout.addView(cfPollingToggle)
+
         cfToggle.setOnCheckedChangeListener { _, enabled ->
             prefs.edit().putBoolean("crossfade_enabled", enabled).apply()
             cfSeek.isEnabled = enabled
