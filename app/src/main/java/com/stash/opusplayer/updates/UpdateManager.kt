@@ -117,6 +117,7 @@ class UpdateManager(private val context: Context) {
     private fun showDownloadProgressDialog(activity: Activity, updateInfo: UpdateInfo) {
         val dialogBuilder = androidx.appcompat.app.AlertDialog.Builder(activity)
         val progressBar = android.widget.ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal)
+        progressBar.id = android.R.id.progress
         progressBar.max = 100
         progressBar.progress = 0
         

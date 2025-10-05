@@ -235,6 +235,15 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         val updateManager = (activity as? MainActivity)?.getUpdateManager()
         val updatePrefs = updateManager?.getUpdatePreferences()
 
+        // Manual check button
+        val manualUpdateBtn = Button(requireContext()).apply {
+            text = "Check for updates now"
+            setOnClickListener {
+                try { (activity as? MainActivity)?.getUpdateManager()?.checkForUpdates(requireActivity(), forceCheck = true) } catch (_: Exception) {}
+            }
+        }
+        layout.addView(manualUpdateBtn)
+
         // Auto-check updates toggle
         val autoCheckToggle = CheckBox(requireContext()).apply {
             text = "Automatically check for updates"
@@ -782,6 +791,21 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
             }
         }
         layout.addView(audioTestBtn)
+
+        // Quick Bug Report
+        val bugReportBtn = Button(requireContext()).apply {
+            text = "Quick Bug Report"
+            setOnClickListener {
+                try {
+                    mediaController?.sendCustomCommand(
+                        androidx.media3.session.SessionCommand("DUMP_PLAYBACK_STATE", android.os.Bundle.EMPTY),
+                        android.os.Bundle.EMPTY
+                    )
+                    android.widget.Toast.makeText(requireContext(), "Playback state dumped to logcat", android.widget.Toast.LENGTH_SHORT).show()
+                } catch (_: Exception) {}
+            }
+        }
+        layout.addView(bugReportBtn)
 
         // ReplayGain section
         val rgHeader = TextView(requireContext()).apply {
