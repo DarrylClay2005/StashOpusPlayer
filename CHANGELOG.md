@@ -1,5 +1,19 @@
 # Changelog
 
+## 10.7.27 - 2025-10-05
+
+- Preferences: Service now reacts to crossfade_polling_enabled via a settings listener (no custom command required).
+- Cleanup: Removed redundant custom commands for playback speed and pitch; rely on MediaController playbackParameters + persisted prefs.
+- Build: Prepare to build APK/AAB using Nobara system SDK.
+
+## 10.7.26 - 2025-10-05
+
+- Fix: Playback controls (Next/Previous) now use direct MediaController transport controls and work reliably.
+- Fix: Media session notification stability via robust client-side queue replacement (setMediaItems + prepare + play).
+- Fix: Update dialog crash (Material 3) by switching to Material Components overlay for theme compatibility.
+- Improvement: Allowlisted MediaSession custom commands (EQ, crossfade, sleep timer, etc.) for in-session control from Settings/Equalizer.
+- Diagnostics: Added detailed logging for playback state, errors, and queue operations.
+
 ## 8.0.5 - 2025-09-16
 
 ### 🚀 Major YouTube Audio Extraction Overhaul

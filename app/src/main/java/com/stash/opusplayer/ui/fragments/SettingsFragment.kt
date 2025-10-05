@@ -945,12 +945,6 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
                     val current = controller.playbackParameters
                     controller.playbackParameters = androidx.media3.common.PlaybackParameters(current.speed, pitch)
                 } catch (_: Exception) {}
-                try {
-                    controller.sendCustomCommand(
-                        androidx.media3.session.SessionCommand("SET_PITCH", android.os.Bundle.EMPTY),
-                        androidx.core.os.bundleOf("pitch" to pitch)
-                    )
-                } catch (_: Exception) {}
             }
         }
 
@@ -1000,12 +994,6 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
                 try {
                     val cur = controller.playbackParameters
                     controller.playbackParameters = androidx.media3.common.PlaybackParameters(sp, cur.pitch)
-                } catch (_: Exception) {}
-                try {
-                    controller.sendCustomCommand(
-                        androidx.media3.session.SessionCommand("SET_SPEED", android.os.Bundle.EMPTY),
-                        androidx.core.os.bundleOf("speed" to sp)
-                    )
                 } catch (_: Exception) {}
             }
         }

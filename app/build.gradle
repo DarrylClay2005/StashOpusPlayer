@@ -31,8 +31,8 @@ android {
         applicationId "com.stash.stashwave"
         minSdk 21
         targetSdk 34
-        versionCode 130
-        versionName "10.7.24"
+        versionCode 133
+        versionName "10.7.27"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
         // Inject YouTube API key into BuildConfig

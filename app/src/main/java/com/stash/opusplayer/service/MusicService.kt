@@ -23,6 +23,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import androidx.media3.session.MediaSessionService
 import androidx.media3.ui.PlayerNotificationManager
+import androidx.media3.session.SessionCommands
 import com.stash.stashwave.R
 import androidx.preference.PreferenceManager
 import com.stash.stashwave.audio.EqualizerManager
@@ -229,6 +230,7 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
             val albums = args.getStringArrayList("albums") ?: arrayListOf()
             val index = args.getInt("index", 0).coerceAtLeast(0)
             if (uris.isEmpty()) return
+            android.util.Log.w("MusicService", "REPLACE_QUEUE_AND_PLAY: items=${uris.size} index=$index first=${uris.firstOrNull()}")
             cancelCrossfadeAndFocusActive()
             try { activePlayer.pause() } catch (_: Exception) {}
             try { activePlayer.stop() } catch (_: Exception) {}
@@ -247,20 +249,29 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
             if (index < items.size) {
                 try {
                     activePlayer.setMediaItems(items, index, 0)
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    android.util.Log.e("MusicService", "setMediaItems(index) failed", e)
                     activePlayer.setMediaItems(items)
                     activePlayer.seekToDefaultPosition(index)
                 }
             } else {
                 activePlayer.setMediaItems(items)
             }
-            activePlayer.prepare()
-            activePlayer.play()
+            try {
+                android.util.Log.d("MusicService", "prepare+play: count=${items.size} idx=$index")
+                activePlayer.prepare()
+                activePlayer.playWhenReady = true
+                activePlayer.play()
+            } catch (e: Exception) {
+                android.util.Log.e("MusicService", "prepare/play failed", e)
+            }
             // Persist
             try { saveQueueState() } catch (_: Exception) {}
             // Ensure polling according to current settings
             if (crossfadePollingEnabled && crossfadeEnabled && crossfadeDurationMs > 0L) startCrossfadePolling() else stopCrossfadePolling()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "REPLACE_QUEUE_AND_PLAY failed", e)
+        }
     }
     
     private fun dumpPlaybackState() {
@@ -300,6 +311,38 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
         )
         
         val callback = object : MediaSession.Callback {
+            override fun onConnect(
+                session: MediaSession,
+                controller: MediaSession.ControllerInfo
+            ): MediaSession.ConnectionResult {
+                val sessionCommands = SessionCommands.Builder().apply {
+                    listOf(
+                        "CANCEL_CROSSFADE",
+                        "SET_SLEEP_TIMER",
+                        "CANCEL_SLEEP_TIMER",
+                        "SET_EQ_ENABLED",
+                        "SET_EQ_PRESET",
+                        "SET_EQ_BAND",
+                        "SET_BASS_BOOST",
+                        "SET_VIRTUALIZER",
+                        "SET_SPEED",
+                        "SET_PITCH",
+                        "SET_REVERB",
+                        "SET_APP_VOLUME",
+                        "SET_CROSSFADE_ENABLED",
+                        "SET_CROSSFADE_DURATION",
+                        "SET_AUDIO_FOCUS",
+                        "AUDIO_TEST_MAX_VOLUME",
+                        "REPLACE_QUEUE_AND_PLAY",
+                        "SET_CROSSFADE_POLLING_ENABLED",
+                        "SKIP_TO_NEXT",
+                        "SKIP_TO_PREVIOUS",
+                        "DUMP_PLAYBACK_STATE"
+                    ).forEach { add(SessionCommand(it, android.os.Bundle.EMPTY)) }
+                }.build()
+                val playerCommands = Player.Commands.Builder().addAllCommands().build()
+                return MediaSession.ConnectionResult.accept(sessionCommands, playerCommands)
+            }
             override fun onCustomCommand(
                 session: MediaSession,
                 controller: MediaSession.ControllerInfo,
@@ -464,6 +507,12 @@ val sessionId = activePlayer.audioSessionId
     private fun setupPlayerListener() {
         activePlayer.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
+                try {
+                    android.util.Log.d(
+                        "MusicService",
+                        "onPlaybackStateChanged state=$playbackState playWhenReady=${activePlayer.playWhenReady} isPlaying=${activePlayer.isPlaying} idx=${activePlayer.currentMediaItemIndex} count=${activePlayer.mediaItemCount} vol=${activePlayer.volume}"
+                    )
+                } catch (_: Exception) {}
                 // Initialize equalizer when player is ready and has audio session
                 if (playbackState == Player.STATE_READY) {
                     // Ensure current app volume is applied as soon as ready
@@ -494,8 +543,14 @@ val sessionId = activePlayer.audioSessionId
                     }
                 }
             }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                try {
+                    android.util.Log.e("MusicService", "onPlayerError: code=${error.errorCode} msg=${error.message}", error)
+                } catch (_: Exception) {}
+            }
             
-override fun onIsPlayingChanged(isPlaying: Boolean) {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
                 // Ensure app volume is applied when playback starts
                 if (isPlaying) { try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {} }
@@ -514,6 +569,7 @@ override fun onIsPlayingChanged(isPlaying: Boolean) {
             }
             
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                try { android.util.Log.d("MusicService", "onMediaItemTransition reason=$reason idx=${activePlayer.currentMediaItemIndex}") } catch (_: Exception) {}
                 // Persist queue on track change
                 try { saveQueueState() } catch (_: Exception) {}
                 // Request widget refresh
@@ -1197,6 +1253,10 @@ try { activePlayer.pause() } catch (_: Exception) {}
                 "experimental_true_crossfade" -> {
                     val enabled = prefs.getBoolean("experimental_true_crossfade", true)
                     if (enabled && activePlayer.isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
+                }
+                "crossfade_polling_enabled" -> {
+                    crossfadePollingEnabled = prefs.getBoolean("crossfade_polling_enabled", true)
+                    if (crossfadePollingEnabled && activePlayer.isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
                 }
                 "playback_speed" -> setPlaybackSpeed(prefs.getFloat("playback_speed", 1.0f).coerceIn(0.25f, 2.5f))
                 "pitch_semitones" -> {
