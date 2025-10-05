@@ -2,8 +2,12 @@ name: Build and Attach Release Artifacts
 
 on:
   release:
-    types: [published]
+    types: [published, edited]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag name to attach artifacts to (for manual runs)
+        required: true
 
 permissions:
   contents: write
@@ -36,6 +40,7 @@ jobs:
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           files: |
             app/build/outputs/apk/release/app-release.apk
             app/build/outputs/bundle/release/app-release.aab
