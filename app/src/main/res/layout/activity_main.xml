@@ -30,10 +30,10 @@
             android:background="@drawable/gradient_overlay" />
 
         <!-- Toolbar -->
-        <com.google.android.material.appbar.MaterialToolbar
+        <androidx.appcompat.widget.Toolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
+            android:layout_height="56dp"
             android:background="@color/transparent"
             android:elevation="0dp"
             app:titleTextColor="@color/text_primary"
@@ -123,17 +123,14 @@
                 android:textSize="16sp"
                 android:text="Playing from …"/>
 
-            <com.google.android.material.button.MaterialButton
+            <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/playing_action_button"
                 style="@style/NeomorphicButton"
                 android:layout_width="wrap_content"
                 android:layout_height="36dp"
                 android:text="Queue"
-                android:textSize="12sp"
-                app:icon="@drawable/ic_queue_music"
-                app:iconTint="@color/text_primary"
-                app:iconSize="16dp"
-                app:iconPadding="8dp" />
+                android:textSize="12sp" />
+                
         </LinearLayout>
 
         <!-- Main content container -->
@@ -153,6 +150,7 @@
             android:background="@drawable/neomorphic_navigation_background"
             android:paddingTop="8dp"
             android:paddingBottom="16dp"
+            android:theme="@style/ThemeOverlay.MaterialComponents"
             app:menu="@menu/bottom_nav_menu"
             app:itemIconTint="@color/text_primary"
             app:itemTextColor="@color/text_primary"
@@ -177,6 +175,7 @@
         android:layout_gravity="start"
         android:fitsSystemWindows="true"
         android:background="@color/surface_color"
+        android:theme="@style/ThemeOverlay.MaterialComponents"
         app:menu="@menu/drawer_menu"
         app:headerLayout="@layout/nav_header_main"
         app:itemTextColor="@color/text_primary"

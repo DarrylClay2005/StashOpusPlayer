@@ -52,10 +52,10 @@
         android:usesCleartextTraffic="true"
         tools:targetApi="31">
         
-<activity
+        <activity
             android:name=".ui.MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.StashWavePlayer.Splash">
+            android:theme="@style/Theme.StashWavePlayer">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

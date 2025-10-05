@@ -290,6 +290,40 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
         // Audio controls have moved to Settings
     }
     
+    private fun showReplayGainBadgeIfEnabled() {
+        try {
+            val prefs = getSharedPreferences("settings", 0)
+            if (!prefs.getBoolean("replaygain_enabled", false)) return
+            val controller = mediaController ?: return
+            val uri = controller.currentMediaItem?.localConfiguration?.uri ?: return
+            lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val info = com.stash.stashwave.utils.ReplayGainUtil.parseWithCache(this@NowPlayingActivity, uri.toString())
+                val mode = prefs.getString("replaygain_mode", "track") ?: "track"
+                val preamp = prefs.getFloat("replaygain_preamp_db", 0f)
+                val fallback = prefs.getFloat("replaygain_fallback_db", 0f)
+                val preventClip = prefs.getBoolean("replaygain_prevent_clipping", true)
+                val allowBoost = prefs.getBoolean("replaygain_allow_boost", false)
+
+                val gainDb = when (mode) { "album" -> info?.albumGainDb; else -> info?.trackGainDb }
+                val peak = when (mode) { "album" -> info?.albumPeak ?: info?.trackPeak; else -> info?.trackPeak ?: info?.albumPeak } ?: 1f
+                var targetDb = (gainDb ?: fallback) + preamp
+                if (preventClip && peak > 0f) {
+                    val maxDb = 20f * (kotlin.math.log10(1f / peak))
+                    if (targetDb > maxDb) targetDb = maxDb
+                }
+                val text = "ReplayGain: " + String.format("%.2f dB", targetDb)
+                launch(kotlinx.coroutines.Dispatchers.Main) {
+                    try {
+                        binding.replayGainLabel.text = text
+                        binding.replayGainLabel.visibility = android.view.View.VISIBLE
+                        binding.replayGainLabel.removeCallbacks(null)
+                        binding.replayGainLabel.postDelayed({ binding.replayGainLabel.visibility = android.view.View.GONE }, 2500)
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
+    }
+    
     private fun showReplayGainInfo() {
         try {
             val controller = mediaController ?: return
@@ -602,6 +636,8 @@ else -> com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActiv
                 if (binding.metadataContainer.visibility == android.view.View.VISIBLE) {
                     populateMetadata()
                 }
+                // Show RG badge (brief) if enabled
+                showReplayGainBadgeIfEnabled()
             }
             
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -682,6 +718,8 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
         tryAutoEmbedArtworkIfEnabled(song, cached, embedded)
         
         updateFavoriteButton(song.isFavorite)
+        // Attempt to show RG badge if enabled and controller ready
+        showReplayGainBadgeIfEnabled()
     }
     
     private fun tryAutoEmbedArtworkIfEnabled(song: Song, cached: android.graphics.Bitmap?, embedded: android.graphics.Bitmap?) {
