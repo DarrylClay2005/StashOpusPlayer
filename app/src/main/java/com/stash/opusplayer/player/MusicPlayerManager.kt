@@ -117,8 +117,7 @@ class MusicPlayerManager(private val context: Context) {
     
     // Playlist management
     fun playSong(song: Song) {
-        setPlaylist(listOf(song))
-        playFromPlaylist(0)
+        playQueue(listOf(song), 0)
     }
     
     fun setPlaylist(songs: List<Song>) {
