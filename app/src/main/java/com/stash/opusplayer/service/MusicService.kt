@@ -71,6 +71,7 @@ private lateinit var activePlayer: ExoPlayer
     private var crossfadeEnabled: Boolean = false
     private var crossfadeDurationMs: Long = 1000L
     private var audioFocusEnabled: Boolean = true
+    private var crossfadePollingEnabled: Boolean = true
 
     // Playback enhancements
     private var skipSilenceEnabled: Boolean = false
@@ -144,6 +145,7 @@ activePlayer = ExoPlayer.Builder(this)
             crossfadeDurationMs = prefs.getLong("crossfade_duration_ms", 1000L).coerceIn(0L, 5000L)
             skipSilenceEnabled = prefs.getBoolean("skip_silence_enabled", false)
             exactSeeks = prefs.getBoolean("exact_seeks", true)
+            crossfadePollingEnabled = prefs.getBoolean("crossfade_polling_enabled", true)
             // ReplayGain
             rgEnabled = prefs.getBoolean("replaygain_enabled", false)
             rgMode = prefs.getString("replaygain_mode", "track") ?: "track"
@@ -216,6 +218,48 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
             clearReplayGainBoost()
             setAudioFocusEnabled(true)
             try { activePlayer.volume = 1f } catch (_: Exception) {}
+        } catch (_: Exception) {}
+    }
+    
+    private fun replaceQueueAndPlay(args: android.os.Bundle) {
+        try {
+            val uris = args.getStringArrayList("uris") ?: arrayListOf()
+            val titles = args.getStringArrayList("titles") ?: arrayListOf()
+            val artists = args.getStringArrayList("artists") ?: arrayListOf()
+            val albums = args.getStringArrayList("albums") ?: arrayListOf()
+            val index = args.getInt("index", 0).coerceAtLeast(0)
+            if (uris.isEmpty()) return
+            cancelCrossfadeAndFocusActive()
+            try { activePlayer.pause() } catch (_: Exception) {}
+            try { activePlayer.stop() } catch (_: Exception) {}
+            try { activePlayer.clearMediaItems() } catch (_: Exception) {}
+            val items = mutableListOf<MediaItem>()
+            for (i in uris.indices) {
+                val md = MediaMetadata.Builder()
+                    .setTitle(titles.getOrNull(i) ?: "")
+                    .setArtist(artists.getOrNull(i) ?: "")
+                    .setAlbumTitle(albums.getOrNull(i) ?: "")
+                    .build()
+                items.add(
+                    MediaItem.Builder().setUri(android.net.Uri.parse(uris[i])).setMediaMetadata(md).build()
+                )
+            }
+            if (index < items.size) {
+                try {
+                    activePlayer.setMediaItems(items, index, 0)
+                } catch (_: Exception) {
+                    activePlayer.setMediaItems(items)
+                    activePlayer.seekToDefaultPosition(index)
+                }
+            } else {
+                activePlayer.setMediaItems(items)
+            }
+            activePlayer.prepare()
+            activePlayer.play()
+            // Persist
+            try { saveQueueState() } catch (_: Exception) {}
+            // Ensure polling according to current settings
+            if (crossfadePollingEnabled && crossfadeEnabled && crossfadeDurationMs > 0L) startCrossfadePolling() else stopCrossfadePolling()
         } catch (_: Exception) {}
     }
     
@@ -338,6 +382,24 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
                         "AUDIO_TEST_MAX_VOLUME" -> {
                             runAudioTestMaxVolume()
                         }
+                        "REPLACE_QUEUE_AND_PLAY" -> {
+                            replaceQueueAndPlay(args)
+                        }
+                        "SET_CROSSFADE_POLLING_ENABLED" -> {
+                            crossfadePollingEnabled = args.getBoolean("enabled", true)
+                            getSharedPreferences("settings", 0).edit().putBoolean("crossfade_polling_enabled", crossfadePollingEnabled).apply()
+                            if (crossfadePollingEnabled && activePlayer.isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
+                        }
+                        "SKIP_TO_NEXT" -> {
+                            cancelCrossfadeAndFocusActive()
+                            try { activePlayer.seekToNextMediaItem() } catch (_: Exception) {}
+                            try { activePlayer.playWhenReady = true } catch (_: Exception) {}
+                        }
+                        "SKIP_TO_PREVIOUS" -> {
+                            cancelCrossfadeAndFocusActive()
+                            try { activePlayer.seekToPreviousMediaItem() } catch (_: Exception) {}
+                            try { activePlayer.playWhenReady = true } catch (_: Exception) {}
+                        }
                     }
                 } catch (_: Exception) {}
                 return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -390,6 +452,15 @@ val sessionId = activePlayer.audioSessionId
                     }
                     // Apply ReplayGain for current item (async parse)
                     if (rgEnabled) applyReplayGainForCurrent()
+                }
+                if (playbackState == Player.STATE_ENDED) {
+                    // Defensive auto-advance if something prevented Exo from moving to next
+                    val mode = try { activePlayer.repeatMode } catch (_: Exception) { Player.REPEAT_MODE_OFF }
+                    val hasNext = try { activePlayer.hasNextMediaItem() } catch (_: Exception) { false }
+                    if (mode != Player.REPEAT_MODE_ONE && hasNext) {
+                        try { activePlayer.seekToNextMediaItem() } catch (_: Exception) {}
+                        return
+                    }
                 }
             }
             
@@ -822,7 +893,7 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
         if (crossfadeCheckRunnable != null) return
         val prefs = getSharedPreferences("settings", 0)
         val exp = prefs.getBoolean("experimental_true_crossfade", true)
-        if (!exp || !crossfadeEnabled || crossfadeDurationMs <= 0L) return
+        if (!crossfadePollingEnabled || !exp || !crossfadeEnabled || crossfadeDurationMs <= 0L) return
         crossfadeCheckRunnable = object : Runnable {
             override fun run() {
                 try {

@@ -82,11 +82,25 @@ class MiniPlayerView @JvmOverloads constructor(
         }
 
         binding.miniPreviousButton.setOnClickListener {
-            mediaController?.seekToPrevious()
+            try {
+                mediaController?.sendCustomCommand(
+                    androidx.media3.session.SessionCommand("SKIP_TO_PREVIOUS", android.os.Bundle.EMPTY),
+                    android.os.Bundle.EMPTY
+                )
+            } catch (_: Exception) {
+                mediaController?.seekToPrevious()
+            }
         }
-
+        
         binding.miniNextButton.setOnClickListener {
-            mediaController?.seekToNext()
+            try {
+                mediaController?.sendCustomCommand(
+                    androidx.media3.session.SessionCommand("SKIP_TO_NEXT", android.os.Bundle.EMPTY),
+                    android.os.Bundle.EMPTY
+                )
+            } catch (_: Exception) {
+                mediaController?.seekToNext()
+            }
         }
 
         binding.miniFastForwardButton.setOnClickListener {

@@ -136,38 +136,62 @@ class MusicPlayerManager(private val context: Context) {
         _currentSong.value = songs[idx]
         val mediaItems = songs.map { song -> createMediaItem(song) }
         runWhenReady { controller ->
-            // First, cancel any in-flight crossfade on the service side to avoid race conditions
+            // Prefer server-side queue replacement for robustness
             try {
-                val cmd = androidx.media3.session.SessionCommand("CANCEL_CROSSFADE", android.os.Bundle.EMPTY)
-                val future = controller.sendCustomCommand(cmd, android.os.Bundle.EMPTY)
+                val uris = java.util.ArrayList<String>()
+                val titles = java.util.ArrayList<String>()
+                val artists = java.util.ArrayList<String>()
+                val albums = java.util.ArrayList<String>()
+                songs.forEach { s ->
+                    val u = resolveSongUri(s).toString()
+                    uris.add(u)
+                    titles.add(s.displayName)
+                    artists.add(s.artistName)
+                    albums.add(s.albumName)
+                }
+                val extras = android.os.Bundle().apply {
+                    putStringArrayList("uris", uris)
+                    putStringArrayList("titles", titles)
+                    putStringArrayList("artists", artists)
+                    putStringArrayList("albums", albums)
+                    putInt("index", idx)
+                }
+                val cmd = androidx.media3.session.SessionCommand("REPLACE_QUEUE_AND_PLAY", android.os.Bundle.EMPTY)
+                val fut = controller.sendCustomCommand(cmd, extras)
+                fut.addListener({ /* done */ }, MoreExecutors.directExecutor())
+                return@runWhenReady
+            } catch (_: Exception) {
+                // Fallback to client-side reset if server command unsupported
+            }
+            // Fallback path (client-side)
+            try {
+                val cancel = androidx.media3.session.SessionCommand("CANCEL_CROSSFADE", android.os.Bundle.EMPTY)
+                val future = controller.sendCustomCommand(cancel, android.os.Bundle.EMPTY)
                 future.addListener({
                     try {
-                        // Hard-reset playback to avoid race conditions during replacement
                         try { controller.pause() } catch (_: Exception) {}
                         try { controller.stop() } catch (_: Exception) {}
                         try { controller.clearMediaItems() } catch (_: Exception) {}
-                        controller.setMediaItems(mediaItems, idx, /* startPositionMs= */ 0)
+                        controller.setMediaItems(mediaItems, idx, 0)
                     } catch (_: Exception) {
                         try { controller.clearMediaItems() } catch (_: Exception) {}
                         controller.setMediaItems(mediaItems)
                         controller.seekToDefaultPosition(idx)
                     }
-                    controller.prepare()
-                    controller.play()
+                    controller.prepare(); controller.play()
                 }, MoreExecutors.directExecutor())
             } catch (_: Exception) {
                 try {
                     try { controller.pause() } catch (_: Exception) {}
                     try { controller.stop() } catch (_: Exception) {}
                     try { controller.clearMediaItems() } catch (_: Exception) {}
-                    controller.setMediaItems(mediaItems, idx, /* startPositionMs= */ 0)
+                    controller.setMediaItems(mediaItems, idx, 0)
                 } catch (_: Exception) {
                     try { controller.clearMediaItems() } catch (_: Exception) {}
                     controller.setMediaItems(mediaItems)
                     controller.seekToDefaultPosition(idx)
                 }
-                controller.prepare()
-                controller.play()
+                controller.prepare(); controller.play()
             }
         }
     }
