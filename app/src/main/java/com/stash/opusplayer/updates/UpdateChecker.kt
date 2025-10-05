@@ -49,29 +49,58 @@ class UpdateChecker(private val context: Context) {
             // Update last check timestamp
             prefs.edit().putLong(PREF_LAST_CHECK, System.currentTimeMillis()).apply()
             
-            // Fetch latest release from GitHub
-            val response = apiService.getLatestRelease(
-                GitHubApiService.REPO_OWNER,
-                GitHubApiService.REPO_NAME
-            )
-            
-            if (!response.isSuccessful || response.body() == null) {
-                return@withContext UpdateCheckResult.Error("Failed to fetch updates: ${response.message()}")
+            // Decide between stable-only or include prereleases based on user preference
+            val includeBeta = prefs.getBoolean(PREF_BETA_UPDATES, false)
+
+            val release = try {
+                if (includeBeta) {
+                    // Pick the first non-draft release (may be prerelease)
+                    val all = apiService.getAllReleases(
+                        GitHubApiService.REPO_OWNER,
+                        GitHubApiService.REPO_NAME
+                    )
+                    if (all.isSuccessful) {
+                        all.body()?.firstOrNull { !it.draft }
+                    } else null
+                } else {
+                    val latest = apiService.getLatestRelease(
+                        GitHubApiService.REPO_OWNER,
+                        GitHubApiService.REPO_NAME
+                    )
+                    if (latest.isSuccessful) latest.body() else null
+                }
+            } catch (e: Exception) {
+                null
             }
-            
-            val latestRelease = response.body()!!
+
+            // Fallback: if above failed or no APK asset, scan all releases for first usable APK
+            val chosen = release ?: run {
+                val all = apiService.getAllReleases(
+                    GitHubApiService.REPO_OWNER,
+                    GitHubApiService.REPO_NAME
+                )
+                if (all.isSuccessful) {
+                    all.body()?.firstOrNull { r ->
+                        !r.draft && (includeBeta || !r.prerelease) && r.assets.any { it.name.endsWith(".apk") }
+                    }
+                } else null
+            }
+
+            if (chosen == null) {
+                return@withContext UpdateCheckResult.Error("Failed to fetch updates: no releases found")
+            }
+
             val currentVersion = BuildConfig.VERSION_NAME
-            
-            // AI Analysis: Determine if this update is worth showing to user
-            val updateInfo = createUpdateInfo(latestRelease, currentVersion)
+
+            // Build UpdateInfo using a robust asset selector
+            val updateInfo = createUpdateInfoWithBestAsset(chosen, currentVersion)
             val shouldShow = aiAnalyzer.shouldShowUpdateToUser(updateInfo, prefs)
-            
+
             if (!shouldShow) {
                 return@withContext UpdateCheckResult.UpdateAvailableButHidden(updateInfo)
             }
-            
+
             if (updateInfo.isUpdateAvailable) {
-                // AI Enhancement: Customize notification based on user behavior
                 val notificationStrategy = aiAnalyzer.getOptimalNotificationStrategy(updateInfo, prefs)
                 UpdateCheckResult.UpdateAvailable(updateInfo, notificationStrategy)
             } else {
@@ -103,16 +132,18 @@ class UpdateChecker(private val context: Context) {
         }
     }
     
-    private fun createUpdateInfo(release: GitHubRelease, currentVersion: String): UpdateInfo {
-        val releaseApk = release.releaseApk
-        
+    private fun createUpdateInfoWithBestAsset(release: GitHubRelease, currentVersion: String): UpdateInfo {
+        val apk = release.assets.firstOrNull { it.name.endsWith(".apk") && it.name.contains("release", ignoreCase = true) }
+            ?: release.assets.firstOrNull { it.name.endsWith(".apk") }
+        val fileSize = apk?.fileSizeMB ?: "Unknown"
+        val url = apk?.downloadUrl ?: ""
         return UpdateInfo(
             currentVersion = currentVersion,
             latestVersion = release.versionName,
             versionName = release.name,
             releaseNotes = cleanReleaseNotes(release.body),
-            downloadUrl = releaseApk?.downloadUrl ?: "",
-            fileSize = releaseApk?.fileSizeMB ?: "Unknown",
+            downloadUrl = url,
+            fileSize = fileSize,
             publishedDate = release.publishedAt,
             isForced = isForceUpdate(release),
             isCritical = isCriticalUpdate(release)

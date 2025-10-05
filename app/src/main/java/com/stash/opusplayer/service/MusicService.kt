@@ -263,6 +263,34 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
         } catch (_: Exception) {}
     }
     
+    private fun dumpPlaybackState() {
+        try {
+            val sb = StringBuilder()
+            val p = activePlayer
+            val idx = try { p.currentMediaItemIndex } catch (_: Exception) { -1 }
+            val count = try { p.mediaItemCount } catch (_: Exception) { 0 }
+            val isPlaying = try { p.isPlaying } catch (_: Exception) { false }
+            val ps = try { p.playbackState } catch (_: Exception) { -1 }
+            val shuffle = try { p.shuffleModeEnabled } catch (_: Exception) { false }
+            val repeat = try { p.repeatMode } catch (_: Exception) { Player.REPEAT_MODE_OFF }
+            val hasNext = try { p.hasNextMediaItem() } catch (_: Exception) { false }
+            val pos = try { p.currentPosition } catch (_: Exception) { 0L }
+            val dur = try { p.duration } catch (_: Exception) { 0L }
+            val vol = try { p.volume } catch (_: Exception) { -1f }
+            sb.appendLine("--- DUMP_PLAYBACK_STATE ---")
+            sb.appendLine("playing=$isPlaying state=$ps idx=$idx/$count hasNext=$hasNext pos=$pos dur=$dur")
+            sb.appendLine("shuffle=$shuffle repeat=$repeat exactSeeks=$exactSeeks seekParams=${try { p.seekParameters } catch (_: Exception) { null }}")
+            sb.appendLine("appVolumeUi=$appVolumeUi activeVol=$vol skipSilence=$skipSilenceEnabled crossfadeEnabled=$crossfadeEnabled cfDur=$crossfadeDurationMs cfPolling=$crossfadePollingEnabled rgEnabled=$rgEnabled allowBoost=$rgAllowBoost")
+            try {
+                val titles = (0 until count).mapNotNull { i ->
+                    try { p.getMediaItemAt(i).mediaMetadata.title?.toString() ?: "" } catch (_: Exception) { null }
+                }
+                sb.appendLine("queueTitles=${titles.joinToString(prefix="[", postfix="]")}")
+            } catch (_: Exception) {}
+            android.util.Log.w("MusicService", sb.toString())
+        } catch (_: Exception) {}
+    }
+    
     private fun initializeMediaSession() {
         val sessionActivityPendingIntent = PendingIntent.getActivity(
             this,
@@ -399,6 +427,9 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
                             cancelCrossfadeAndFocusActive()
                             try { activePlayer.seekToPreviousMediaItem() } catch (_: Exception) {}
                             try { activePlayer.playWhenReady = true } catch (_: Exception) {}
+                        }
+                        "DUMP_PLAYBACK_STATE" -> {
+                            dumpPlaybackState()
                         }
                     }
                 } catch (_: Exception) {}

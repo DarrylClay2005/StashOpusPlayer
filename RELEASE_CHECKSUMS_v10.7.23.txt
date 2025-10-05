@@ -1,0 +1,2 @@
+7e47761b7404fe4f9fc6e31ba5aee64ca89084343985b5404c3bebf10c655994  app/build/outputs/apk/release/app-release.apk
+6345841ffecf43bd1663157fbbbd7621af75ba3464cebadedaab634d120defd4  app/build/outputs/bundle/release/app-release.aab
