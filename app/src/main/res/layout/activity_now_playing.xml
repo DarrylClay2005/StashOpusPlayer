@@ -151,6 +151,23 @@
             android:textSize="14sp"
             tools:text="Album Name" />
 
+        <!-- ReplayGain badge -->
+        <TextView
+            android:id="@+id/replayGainLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:layout_gravity="center"
+            android:background="@drawable/duration_background"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:visibility="gone"
+            tools:text="ReplayGain: -5.2 dB" />
+
     </LinearLayout>
 
     <!-- Progress container -->
