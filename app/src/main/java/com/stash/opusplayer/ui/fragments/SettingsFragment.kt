@@ -23,7 +23,7 @@ class SettingsFragment : Fragment() {
                     uri, flags
                 )
                 // Save to repository prefs
-val repo = com.stash.stashwave.data.MusicRepository(requireContext())
+                val repo = com.stash.stashwave.data.MusicRepository(requireContext())
                 repo.addCustomMusicFolderTreeUri(uri.toString())
                 Toast.makeText(requireContext(), "Folder added. Pull-to-refresh Folders tab to rescan.", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
@@ -31,6 +31,14 @@ val repo = com.stash.stashwave.data.MusicRepository(requireContext())
             }
         }
     }
+
+    // Refs for live-updating labels/sliders
+    private var volSeekRef: SeekBar? = null
+    private var volLabelRef: TextView? = null
+    private var cfSeekRef: SeekBar? = null
+    private var cfLabelRef: TextView? = null
+    private var cfToggleRef: CheckBox? = null
+    private var settingsListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     // MediaController for applying pitch changes from Settings
     private var mediaController: androidx.media3.session.MediaController? = null
@@ -94,6 +102,10 @@ val repo = com.stash.stashwave.data.MusicRepository(requireContext())
         mediaController = null
         controllerFuture?.let { androidx.media3.session.MediaController.releaseFuture(it) }
         controllerFuture = null
+        // Unregister settings listener
+        try { requireContext().getSharedPreferences("settings", 0).unregisterOnSharedPreferenceChangeListener(settingsListener) } catch (_: Exception) {}
+        settingsListener = null
+        volSeekRef = null; volLabelRef = null; cfSeekRef = null; cfLabelRef = null; cfToggleRef = null
     }
 
     private fun restartApp() {
@@ -1025,9 +1037,14 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
 
         val volLabel = TextView(requireContext())
         layout.addView(volLabel)
+        volLabelRef = volLabel
 
         val savedVol = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
-        fun updateVolLabel(v: Float) { volLabel.text = "Volume: ${'$'}{(v * 100).toInt()}%" }
+        fun updateVolLabel(v: Float) {
+            val gamma = 2.0
+            val amp = Math.pow(v.toDouble(), gamma).toFloat()
+            volLabel.text = "Volume: ${'$'}{(v * 100).toInt()}% (effective ${'$'}{(amp * 100).toInt()}%)"
+        }
         updateVolLabel(savedVol)
 
         val volSeek = SeekBar(requireContext()).apply {
@@ -1035,6 +1052,7 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
             progress = (savedVol * 100f).toInt()
         }
         layout.addView(volSeek)
+        volSeekRef = volSeek
 
         fun applyAppVolume(progress: Int) {
             val v = (progress / 100f).coerceIn(0f, 1f)
@@ -1081,11 +1099,13 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
             isChecked = prefs.getBoolean("crossfade_enabled", false)
         }
         layout.addView(cfToggle)
+        cfToggleRef = cfToggle
 
         val cfLabel = TextView(requireContext())
         layout.addView(cfLabel)
+        cfLabelRef = cfLabel
         val savedCf = prefs.getLong("crossfade_duration_ms", 1000L).coerceIn(0L, 5000L)
-        fun updateCfLabel(ms: Long) { cfLabel.text = "Crossfade duration: ${'$'}{ms}ms" }
+        fun updateCfLabel(ms: Long) { cfLabel.text = "Crossfade duration: ${'$'}{ms} ms" }
         updateCfLabel(savedCf)
 
         val cfSeek = SeekBar(requireContext()).apply {
@@ -1094,6 +1114,7 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
             isEnabled = cfToggle.isChecked
         }
         layout.addView(cfSeek)
+        cfSeekRef = cfSeek
 
         val trueCfToggle = CheckBox(requireContext()).apply {
             text = "Experimental: True crossfade (dual player)"
@@ -1136,6 +1157,31 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
+
+        // Listen to external changes to keep labels accurate
+        try {
+            val sp = requireContext().getSharedPreferences("settings", 0)
+            settingsListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefsChanged, key ->
+                when (key) {
+                    "app_volume" -> {
+                        val v = prefsChanged.getFloat("app_volume", savedVol).coerceIn(0f, 1f)
+                        volSeekRef?.progress = (v * 100f).toInt()
+                        updateVolLabel(v)
+                    }
+                    "crossfade_enabled" -> {
+                        val en = prefsChanged.getBoolean("crossfade_enabled", cfToggleRef?.isChecked ?: false)
+                        cfToggleRef?.isChecked = en
+                        cfSeekRef?.isEnabled = en
+                    }
+                    "crossfade_duration_ms" -> {
+                        val ms = prefsChanged.getLong("crossfade_duration_ms", savedCf).coerceIn(0L, 5000L)
+                        cfSeekRef?.progress = ms.toInt()
+                        updateCfLabel(ms)
+                    }
+                }
+            }
+            sp.registerOnSharedPreferenceChangeListener(settingsListener)
+        } catch (_: Exception) {}
 
         scrollView.addView(layout)
         return scrollView
