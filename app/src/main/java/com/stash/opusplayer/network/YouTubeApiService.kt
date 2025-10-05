@@ -41,11 +41,12 @@ class YouTubeApiService(private val context: android.content.Context) {
         pageToken: String? = null
     ): Result<YouTubeSearchResult> = withContext(Dispatchers.IO) {
         try {
-            val encodedQuery = URLEncoder.encode(query, "UTF-8")
             val key = apiKey
             if (key.isBlank()) {
-                return@withContext Result.failure(IOException("YouTube API key not configured. To enable YouTube search:\n\n1. Get your own free API key: See YOUTUBE_API_SETUP.md\n2. Or use Seal integration for downloads only\n\nFor full YouTube features, configure your API key in Settings."))
+                // Fallback: use yt-dlp search when no API key is configured
+                return@withContext searchVideosFallback(query, maxResults)
             }
+            val encodedQuery = URLEncoder.encode(query, "UTF-8")
             val url = buildString {
                 append("$BASE_URL/search")
                 append("?part=snippet")
@@ -56,7 +57,7 @@ class YouTubeApiService(private val context: android.content.Context) {
                 pageToken?.let { append("&pageToken=$it") }
             }
             
-            Log.d(TAG, "Searching YouTube for: $query (pageToken=${pageToken ?: "none"})")
+            Log.d(TAG, "Searching YouTube API for: $query (pageToken=${pageToken ?: "none"})")
             
             val request = Request.Builder()
                 .url(url)
@@ -67,15 +68,14 @@ class YouTubeApiService(private val context: android.content.Context) {
             
             if (!response.isSuccessful) {
                 Log.e(TAG, "YouTube API error: ${response.code} - ${response.message}")
-                return@withContext Result.failure(
-                    IOException("YouTube API error: ${response.code} - ${response.message}")
-                )
+                // Fallback to yt-dlp search if API call fails
+                return@withContext searchVideosFallback(query, maxResults)
             }
             
             val responseBody = response.body?.string()
             if (responseBody == null) {
                 Log.e(TAG, "Empty response from YouTube API")
-                return@withContext Result.failure(IOException("Empty response from YouTube API"))
+                return@withContext searchVideosFallback(query, maxResults)
             }
             
             val result = parseSearchResponse(responseBody)
@@ -84,6 +84,62 @@ class YouTubeApiService(private val context: android.content.Context) {
             
         } catch (e: Exception) {
             Log.e(TAG, "Error searching YouTube", e)
+            // Final fallback
+            searchVideosFallback(query, maxResults)
+        }
+    }
+
+    private suspend fun searchVideosFallback(query: String, maxResults: Int): Result<YouTubeSearchResult> = withContext(Dispatchers.IO) {
+        try {
+            // Initialize yt-dlp via our extractor
+            val extractor = com.stash.stashwave.utils.YtDlpExtractor(context)
+            if (!extractor.initialize()) {
+                return@withContext Result.failure(IOException("yt-dlp initialization failed"))
+            }
+            // Use ytsearch to get JSON entries
+            val request = com.yausername.youtubedl_android.YoutubeDLRequest("ytsearch${maxResults}:$query").apply {
+                addOption("-j") // dump JSON for each entry
+                addOption("--no-playlist")
+                addOption("--default-search", "ytsearch")
+                addOption("--ignore-errors")
+            }
+            val resp = com.yausername.youtubedl_android.YoutubeDL.getInstance().execute(request)
+            val out = resp.out
+            if (out.isNullOrBlank()) {
+                return@withContext Result.failure(IOException("Empty result from yt-dlp search"))
+            }
+            val videos = mutableListOf<com.stash.stashwave.data.YouTubeVideo>()
+            out.lineSequence().forEach { line ->
+                val t = line.trim()
+                if (t.isBlank()) return@forEach
+                try {
+                    val json = org.json.JSONObject(t)
+                    val videoId = json.optString("id", null) ?: return@forEach
+                    val title = json.optString("title", "")
+                    val uploader = json.optString("uploader", "")
+                    val thumb = json.optString("thumbnail", "")
+                    val publishedAt = json.optString("upload_date", "")
+                    val url = "https://www.youtube.com/watch?v=$videoId"
+                    videos.add(
+                        com.stash.stashwave.data.YouTubeVideo(
+                            id = videoId,
+                            title = title,
+                            description = "",
+                            channelTitle = uploader,
+                            channelId = "",
+                            thumbnailUrl = thumb,
+                            highResThumbnailUrl = thumb,
+                            duration = null,
+                            viewCount = null,
+                            publishedAt = publishedAt,
+                            url = url
+                        )
+                    )
+                } catch (_: Exception) {}
+            }
+            Result.success(com.stash.stashwave.data.YouTubeSearchResult(videos, null, videos.size))
+        } catch (e: Exception) {
+            Log.e(TAG, "yt-dlp fallback search failed", e)
             Result.failure(e)
         }
     }

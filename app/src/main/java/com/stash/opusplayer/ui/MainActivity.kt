@@ -117,7 +117,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 // Removed custom loading overlay; using Android SplashScreen API instead
         
         // Check for updates on app start (AI will decide if/when to show)
-        updateManager.checkForUpdates(this)
+        // Check for updates on app start (AI will decide if/when to show)
+        // Defer a bit to avoid competing with first render and permission prompts
+        lifecycleScope.launch {
+            kotlinx.coroutines.delay(2000)
+            updateManager.checkForUpdates(this@MainActivity)
+        }
         
         // Defer loading content until permissions are granted
         if (savedInstanceState != null) {
