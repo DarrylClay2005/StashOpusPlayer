@@ -262,7 +262,7 @@ loadFragment(com.stash.opusplayer.ui.fragments.FoldersFragment())
             ThemeManager.broadcastChange(this, false)
                 
         } catch (e: Exception) {
-            Toast.makeText(this, "Failed to set background image", Toast.LENGTH_SHORT).show()
+            showPlayingBanner("Failed to set background image")
         }
     }
     
@@ -285,11 +285,7 @@ loadFragment(com.stash.opusplayer.ui.fragments.FoldersFragment())
                         // Permissions granted, proceed to load default content
                         loadDefaultContentIfNeeded()
                     } else {
-                        Toast.makeText(
-                            this@MainActivity,
-                            "Audio permission is required to show your music library.",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        showPlayingBanner("Audio permission is required to show your music library.")
                         // Load a safe screen (Settings) so app doesn't crash
                         loadFragment(SettingsFragment())
                         supportActionBar?.title = getString(R.string.menu_settings)
@@ -594,7 +590,7 @@ Check for updates anytime from Settings.""")
     
     private var playingBannerDismissRunnable: Runnable? = null
 
-    private fun showPlayingBanner(text: String) {
+    fun showPlayingBanner(text: String) {
         try {
             val banner = findViewById<android.view.View>(R.id.playing_banner)
             val tv = findViewById<android.widget.TextView>(R.id.playing_text)
@@ -630,7 +626,7 @@ Check for updates anytime from Settings.""")
                 }
                 startActivity(intent)
             } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Error playing song: ${e.message}", Toast.LENGTH_SHORT).show()
+                showPlayingBanner("Error playing song: ${e.message}")
             }
         }
     }
@@ -679,7 +675,7 @@ val repo = com.stash.opusplayer.data.MusicRepository(this)
                             if (which < names.size) {
                                 val playlistId = ids[which]
                                 repo.addSongToPlaylist(playlistId, song)
-                                Toast.makeText(this@MainActivity, "Added to ${names[which]}", Toast.LENGTH_SHORT).show()
+                                showPlayingBanner("Added to ${names[which]}")
                             } else {
                                 // create new
                                 promptCreatePlaylistAndAdd(repo, song)
@@ -703,7 +699,7 @@ val repo = com.stash.opusplayer.data.MusicRepository(this)
                     lifecycleScope.launch {
                         val id = repo.createPlaylist(name)
                         repo.addSongToPlaylist(id, song)
-                        Toast.makeText(this@MainActivity, "Added to $name", Toast.LENGTH_SHORT).show()
+                        showPlayingBanner("Added to $name")
                     }
                 }
             }
@@ -714,14 +710,14 @@ val repo = com.stash.opusplayer.data.MusicRepository(this)
     fun playNext(song: com.stash.opusplayer.data.Song) {
         try {
             musicPlayerManager.insertNext(song)
-            Toast.makeText(this, "Will play next", Toast.LENGTH_SHORT).show()
+            showPlayingBanner("Will play next")
         } catch (_: Exception) {}
     }
 
     fun addToQueueTail(song: com.stash.opusplayer.data.Song) {
         try {
             musicPlayerManager.addToQueue(song)
-            Toast.makeText(this, "Added to queue", Toast.LENGTH_SHORT).show()
+            showPlayingBanner("Added to queue")
         } catch (_: Exception) {}
     }
 
@@ -733,13 +729,13 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@MainActivity)
                 
                 if (isFavorite) {
                     repository.removeFromFavorites(song.id)
-                    Toast.makeText(this@MainActivity, "💔 Removed from favorites", Toast.LENGTH_SHORT).show()
+                    showPlayingBanner("💔 Removed from favorites")
                 } else {
                     repository.addToFavorites(song)
-                    Toast.makeText(this@MainActivity, "❤️ Added to favorites", Toast.LENGTH_SHORT).show()
+                    showPlayingBanner("❤️ Added to favorites")
                 }
             } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Error updating favorites: ${e.message}", Toast.LENGTH_SHORT).show()
+                showPlayingBanner("Error updating favorites: ${e.message}")
             }
         }
     }

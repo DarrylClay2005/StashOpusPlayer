@@ -40,6 +40,27 @@ class NowPlayingActivity : AppCompatActivity() {
     private var currentSong: Song? = null
     private var isUserSeeking = false
     
+    private val feedbackHandler = Handler(Looper.getMainLooper())
+    private var feedbackRunnable: Runnable? = null
+    
+    private fun showVisualFeedback(message: String) {
+        feedbackRunnable?.let { feedbackHandler.removeCallbacks(it) }
+        binding.feedbackOverlay.apply {
+            text = message
+            visibility = android.view.View.VISIBLE
+            alpha = 1.0f
+        }
+        feedbackRunnable = Runnable {
+            binding.feedbackOverlay.animate()
+                .alpha(0f)
+                .setDuration(500)
+                .withEndAction {
+                    binding.feedbackOverlay.visibility = android.view.View.GONE
+                }.start()
+        }
+        feedbackHandler.postDelayed(feedbackRunnable!!, 1500)
+    }
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityNowPlayingBinding.inflate(layoutInflater)
@@ -58,7 +79,7 @@ class NowPlayingActivity : AppCompatActivity() {
                     if (controller.duration > 0) {
                         val targetPosition = (seekPosition * controller.duration).toLong()
                         controller.seekTo(targetPosition)
-                        android.widget.Toast.makeText(this, "Seeking to ${formatTime(targetPosition)}", android.widget.Toast.LENGTH_SHORT).show()
+                        showVisualFeedback("${formatTime(targetPosition)}")
                     }
                 }
             }
@@ -133,9 +154,6 @@ class NowPlayingActivity : AppCompatActivity() {
                 val enabled = !controller.shuffleModeEnabled
                 controller.shuffleModeEnabled = enabled
                 updateShuffleButton(enabled)
-                // Show feedback to user
-                val message = if (enabled) "Shuffle enabled" else "Shuffle disabled"
-                android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
                 // Persist shuffle state
                 try { getSharedPreferences("settings", 0).edit().putBoolean("playback_shuffle", enabled).apply() } catch (_: Exception) {}
             }
@@ -150,15 +168,6 @@ class NowPlayingActivity : AppCompatActivity() {
                 }
                 controller.repeatMode = nextMode
                 updateRepeatButton(nextMode)
-                
-                // Show feedback to user
-                val message = when (nextMode) {
-                    Player.REPEAT_MODE_OFF -> "Repeat off"
-                    Player.REPEAT_MODE_ALL -> "Repeat all"
-                    Player.REPEAT_MODE_ONE -> "Repeat one"
-                    else -> "Repeat mode changed"
-                }
-                android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
                 
                 // Persist repeat mode
                 try { getSharedPreferences("settings", 0).edit().putInt("playback_repeat_mode", nextMode).apply() } catch (_: Exception) {}
@@ -186,7 +195,7 @@ class NowPlayingActivity : AppCompatActivity() {
                                 androidx.core.os.bundleOf("enabled" to next)
                             )
                         } catch (_: Exception) {}
-                        android.widget.Toast.makeText(this, if (next) "Crossfade ON" else "Crossfade OFF", android.widget.Toast.LENGTH_SHORT).show()
+                        // Visual feedback will be shown through menu item state change
                         true
                     }
                     R.id.action_jump_to_source -> {
@@ -297,10 +306,10 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
                         
                         if (isFavorite) {
                             repository.removeFromFavorites(song.id)
-                            android.widget.Toast.makeText(this@NowPlayingActivity, "💔 Removed from favorites", android.widget.Toast.LENGTH_SHORT).show()
+                            showVisualFeedback("💔 Removed from favorites")
                         } else {
                             repository.addToFavorites(song)
-                            android.widget.Toast.makeText(this@NowPlayingActivity, "❤️ Added to favorites", android.widget.Toast.LENGTH_SHORT).show()
+                            showVisualFeedback("❤️ Added to favorites")
                         }
                         
                         // Update UI
@@ -309,7 +318,7 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
                         
                     } catch (e: Exception) {
                         android.util.Log.e("NowPlayingActivity", "Error toggling favorite", e)
-                        android.widget.Toast.makeText(this@NowPlayingActivity, "Error updating favorites", android.widget.Toast.LENGTH_SHORT).show()
+                        showVisualFeedback("Error updating favorites")
                     }
                 }
             }
@@ -323,7 +332,7 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
                 if (duration > 0) {
                     val newPos = (currentPos + 30000).coerceAtMost(duration)
                     controller.seekTo(newPos)
-                    android.widget.Toast.makeText(this, "⏩ +30s", android.widget.Toast.LENGTH_SHORT).show()
+                    showVisualFeedback("⏩ +30s")
                 }
             }
         }
@@ -430,7 +439,7 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
                 .setPositiveButton("OK", null)
                 .show()
         } catch (_: Exception) {
-            android.widget.Toast.makeText(this, "Failed to load ReplayGain info", android.widget.Toast.LENGTH_SHORT).show()
+            showVisualFeedback("Failed to load ReplayGain info")
         }
     }
     
@@ -449,12 +458,12 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
             }
         } catch (_: Exception) {}
         if (lrcContent.isNullOrBlank()) {
-            android.widget.Toast.makeText(this, "No lyrics file found", android.widget.Toast.LENGTH_SHORT).show()
+            showVisualFeedback("No lyrics file found")
             return
         }
         val lines = com.stash.opusplayer.utils.LrcParser.parse(lrcContent)
         if (lines.isEmpty()) {
-            android.widget.Toast.makeText(this, "No timed lyrics found", android.widget.Toast.LENGTH_SHORT).show()
+            showVisualFeedback("No timed lyrics found")
             return
         }
         val dialog = androidx.appcompat.app.AlertDialog.Builder(this).create()
@@ -498,7 +507,7 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
                 androidx.media3.session.SessionCommand("SET_AB_ENABLED", android.os.Bundle.EMPTY),
                 androidx.core.os.bundleOf("enabled" to next)
             )
-            android.widget.Toast.makeText(this, if (next) "A-B Repeat ON" else "A-B Repeat OFF", android.widget.Toast.LENGTH_SHORT).show()
+            showVisualFeedback(if (next) "A-B Repeat ON" else "A-B Repeat OFF")
         } catch (_: Exception) {}
     }
 
@@ -511,7 +520,7 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
                 extras
             )
             val label = if (action == "SET_AB_A") "Set A" else "Set B"
-            android.widget.Toast.makeText(this, "$label at ${formatTime(pos)}", android.widget.Toast.LENGTH_SHORT).show()
+            showVisualFeedback("$label at ${formatTime(pos)}")
         } catch (_: Exception) {}
     }
 
@@ -521,7 +530,7 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
                 androidx.media3.session.SessionCommand("CLEAR_AB", android.os.Bundle.EMPTY),
                 android.os.Bundle.EMPTY
             )
-            android.widget.Toast.makeText(this, "A-B points cleared", android.widget.Toast.LENGTH_SHORT).show()
+            showVisualFeedback("A-B points cleared")
         } catch (_: Exception) {}
     }
 
@@ -535,7 +544,7 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
                         val dur = (mediaController?.duration ?: 0L)
                         val pos = (mediaController?.currentPosition ?: 0L)
                         val remain = if (dur > 0L) (dur - pos).coerceAtLeast(0L) else 0L
-                        if (remain > 0L) sendSleepTimerCommand(remain) else android.widget.Toast.makeText(this, "Unknown track length", android.widget.Toast.LENGTH_SHORT).show()
+                        if (remain > 0L) sendSleepTimerCommand(remain) else showVisualFeedback("Unknown track length")
                     }
                     1 -> sendSleepTimerCommand(15 * 60_000L)
                     2 -> sendSleepTimerCommand(30 * 60_000L)
@@ -555,7 +564,7 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
                 androidx.media3.session.SessionCommand("SET_SLEEP_TIMER", android.os.Bundle.EMPTY),
                 extras
             )
-            android.widget.Toast.makeText(this, "Sleep timer set", android.widget.Toast.LENGTH_SHORT).show()
+            showVisualFeedback("Sleep timer set")
         } catch (_: Exception) {}
     }
 
@@ -565,7 +574,7 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
                 androidx.media3.session.SessionCommand("CANCEL_SLEEP_TIMER", android.os.Bundle.EMPTY),
                 android.os.Bundle.EMPTY
             )
-            android.widget.Toast.makeText(this, "Sleep timer canceled", android.widget.Toast.LENGTH_SHORT).show()
+            showVisualFeedback("Sleep timer canceled")
         } catch (_: Exception) {}
     }
 
@@ -618,7 +627,7 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
         val artBitmap = metadataExtractor.loadCachedArtwork(this, song)
             ?: metadataExtractor.decodeAlbumArt(song.albumArt)
         if (artBitmap == null) {
-            android.widget.Toast.makeText(this, "No artwork available to embed", android.widget.Toast.LENGTH_LONG).show()
+            showVisualFeedback("No artwork available")
             return
         }
         val baos = java.io.ByteArrayOutputStream()
@@ -632,9 +641,9 @@ else -> com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActi
             }
             launch(kotlinx.coroutines.Dispatchers.Main) {
                 if (ok) {
-                    android.widget.Toast.makeText(this@NowPlayingActivity, "Artwork embedded", android.widget.Toast.LENGTH_SHORT).show()
+                    showVisualFeedback("Artwork embedded ✓")
                 } else {
-                    android.widget.Toast.makeText(this@NowPlayingActivity, "Failed to embed artwork", android.widget.Toast.LENGTH_LONG).show()
+                    showVisualFeedback("Failed to embed artwork")
                 }
             }
         }
@@ -655,7 +664,7 @@ else -> com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActi
                             val currentPos = controller.currentPosition
                             val newPos = (currentPos - 10000).coerceAtLeast(0)
                             controller.seekTo(newPos)
-                            android.widget.Toast.makeText(this, "⏪ -10s", android.widget.Toast.LENGTH_SHORT).show()
+                            showVisualFeedback("-10s")
                         }
                         touchX > rightThird -> {
                             // Right side - seek forward 10 seconds
@@ -663,7 +672,7 @@ else -> com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActi
                             val duration = controller.duration
                             val newPos = (currentPos + 10000).coerceAtMost(duration)
                             controller.seekTo(newPos)
-                            android.widget.Toast.makeText(this, "⏩ +10s", android.widget.Toast.LENGTH_SHORT).show()
+                            showVisualFeedback("+10s")
                         }
                         // Middle third - do nothing (avoid accidental seeks)
                     }
@@ -740,7 +749,7 @@ else -> com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActi
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 try {
                     android.util.Log.e("NowPlayingActivity", "Player error: code=${error.errorCode} msg=${error.message}", error)
-                    android.widget.Toast.makeText(this@NowPlayingActivity, "Playback error: ${'$'}{error.errorCode}", android.widget.Toast.LENGTH_LONG).show()
+                    showVisualFeedback("Playback error")
                 } catch (_: Exception) {}
             }
             
@@ -1026,7 +1035,7 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
         val mgr = (application as? com.stash.opusplayer.StashWaveApplication)?.playerManager
         val list = mgr?.playlist?.value ?: emptyList()
         if (list.isEmpty()) {
-            android.widget.Toast.makeText(this, "Queue is empty", android.widget.Toast.LENGTH_SHORT).show()
+            showVisualFeedback("Queue is empty")
             return
         }
         val currentIndex = mgr?.currentIndex?.value ?: 0

@@ -66,6 +66,7 @@ class FavoritesFragment : Fragment() {
             },
             onPlayNext = { song -> (activity as? MainActivity)?.playNext(song) },
             onAddToQueue = { song -> (activity as? MainActivity)?.addToQueueTail(song) },
+            onShowFeedback = { message -> (activity as? MainActivity)?.showPlayingBanner(message) },
             metadataExtractor = metadataExtractor
         )
         
@@ -148,22 +149,14 @@ class FavoritesFragment : Fragment() {
                 binding.emptyStateText.text = "No favorites found for \"$query\"\n\n💡 Try different keywords or add more songs to favorites!"
                 binding.emptyStateContainer.visibility = View.VISIBLE
                 
-                // Show helpful toast
-                android.widget.Toast.makeText(
-                    requireContext(),
-                    "No results for \"$query\" in favorites",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                // Show visual feedback via parent activity
+                (activity as? MainActivity)?.showPlayingBanner("No results for \"$query\" in favorites")
             } else {
                 binding.recyclerView.visibility = View.VISIBLE
                 binding.emptyStateContainer.visibility = View.GONE
                 
-                // Show results count
-                android.widget.Toast.makeText(
-                    requireContext(),
-                    "Found ${filteredSongs.size} favorite${if (filteredSongs.size != 1) "s" else ""}",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                // Show results count via parent activity
+                (activity as? MainActivity)?.showPlayingBanner("Found ${filteredSongs.size} favorite${if (filteredSongs.size != 1) "s" else ""}")
             }
         }
     }

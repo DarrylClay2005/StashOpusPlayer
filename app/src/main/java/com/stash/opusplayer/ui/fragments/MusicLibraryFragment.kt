@@ -85,6 +85,7 @@ val metadataExtractor = com.stash.opusplayer.utils.MetadataExtractor(requireCont
             },
             onPlayNext = { song -> (activity as? MainActivity)?.playNext(song) },
             onAddToQueue = { song -> (activity as? MainActivity)?.addToQueueTail(song) },
+            onShowFeedback = { message -> (activity as? MainActivity)?.showPlayingBanner(message) },
             metadataExtractor = metadataExtractor
         )
         
@@ -216,8 +217,8 @@ val metadataExtractor = com.stash.opusplayer.utils.MetadataExtractor(requireCont
                 }
                 .start()
                 
-            // Show loading toast
-            android.widget.Toast.makeText(requireContext(), "Loading liked songs...", android.widget.Toast.LENGTH_SHORT).show()
+            // Show visual feedback via parent activity
+            (activity as? MainActivity)?.showPlayingBanner("Loading liked songs...")
             
             // Navigate to Liked Songs fragment
             (activity as? MainActivity)?.let { mainActivity ->
@@ -284,22 +285,14 @@ val favoritesFragment = com.stash.opusplayer.ui.fragments.FavoritesFragment()
                 binding.emptyStateText.text = "No songs found for \"$query\""
                 binding.emptyStateContainer.visibility = View.VISIBLE
                 
-                // Show helpful toast
-                android.widget.Toast.makeText(
-                    requireContext(),
-                    "No results for \"$query\". Try different keywords.",
-                    android.widget.Toast.LENGTH_LONG
-                ).show()
+                // Show visual feedback via parent activity
+                (activity as? MainActivity)?.showPlayingBanner("No results for \"$query\". Try different keywords.")
             } else {
                 binding.recyclerView.visibility = View.VISIBLE
                 binding.emptyStateContainer.visibility = View.GONE
                 
-                // Show results count
-                android.widget.Toast.makeText(
-                    requireContext(),
-                    "Found ${filteredSongs.size} song${if (filteredSongs.size != 1) "s" else ""}",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                // Show results count via parent activity
+                (activity as? MainActivity)?.showPlayingBanner("Found ${filteredSongs.size} song${if (filteredSongs.size != 1) "s" else ""}")
             }
         }
     }
@@ -323,11 +316,7 @@ val favoritesFragment = com.stash.opusplayer.ui.fragments.FavoritesFragment()
                     else -> allSongs
                 }
                 songAdapter.submitList(sorted)
-                android.widget.Toast.makeText(
-                    requireContext(),
-                    "Sorted by ${sortOptions[which]}",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                (activity as? MainActivity)?.showPlayingBanner("Sorted by ${sortOptions[which]}")
             }
             .setNegativeButton(getString(R.string.cancel), null)
             .show()

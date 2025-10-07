@@ -147,8 +147,8 @@ class MiniPlayerView @JvmOverloads constructor(
                     if (duration > 0) {
                         val newPos = (currentPos + 30000).coerceAtMost(duration)
                         controller.seekTo(newPos)
-                        // Show visual feedback for seek
-                        android.widget.Toast.makeText(context, "+30s", android.widget.Toast.LENGTH_SHORT).show()
+                        // Show visual feedback for seek via parent activity
+                        showVisualFeedbackViaParent("+30s")
                     }
                 } ?: run {
                     // Fallback to player manager
@@ -156,7 +156,7 @@ class MiniPlayerView @JvmOverloads constructor(
                         val currentPos = manager.currentPosition.value
                         val newPos = currentPos + 30000
                         manager.seekTo(newPos)
-                        android.widget.Toast.makeText(context, "+30s", android.widget.Toast.LENGTH_SHORT).show()
+                        showVisualFeedbackViaParent("+30s")
                     }
                 }
             } catch (e: Exception) {
@@ -476,7 +476,7 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
                                     manager.seekTo(newPos)
                                 }
                             }
-                            android.widget.Toast.makeText(context, "⏪ -10s", android.widget.Toast.LENGTH_SHORT).show()
+                            showVisualFeedbackViaParent("⏪ -10s")
                         }
                         else -> {
                             // Right side - seek forward 10 seconds
@@ -492,7 +492,7 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
                                     manager.seekTo(newPos)
                                 }
                             }
-                            android.widget.Toast.makeText(context, "⏩ +10s", android.widget.Toast.LENGTH_SHORT).show()
+                            showVisualFeedbackViaParent("⏩ +10s")
                         }
                     }
                 } catch (e: Exception) {
@@ -540,6 +540,20 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
         }
     }
 
+    private fun showVisualFeedbackViaParent(message: String) {
+        try {
+            // Try to use the parent activity's visual feedback system
+            val activity = context as? MainActivity
+            activity?.showPlayingBanner(message)
+        } catch (e: Exception) {
+            // Fallback to a simple visual indicator within the mini player itself
+            binding.miniSongTitle.text = message
+            postDelayed({ 
+                updateMediaInfo() // Restore original title
+            }, 1500)
+        }
+    }
+    
     fun release() {
         stopProgressUpdates()
         stopSpinningAnimation()

@@ -69,6 +69,7 @@ class PlaylistDetailFragment : Fragment() {
             onAddToPlaylist = { _ -> },
             onPlayNext = { song -> (activity as? MainActivity)?.playNext(song) },
             onAddToQueue = { song -> (activity as? MainActivity)?.addToQueueTail(song) },
+            onShowFeedback = { message -> (activity as? MainActivity)?.showPlayingBanner(message) },
             metadataExtractor = metadataExtractor
         )
         binding.recyclerView.layoutManager = LinearLayoutManager(requireContext())

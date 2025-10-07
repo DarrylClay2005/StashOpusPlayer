@@ -22,6 +22,7 @@ class SongAdapter(
     private val onAddToPlaylist: (Song) -> Unit = {},
     private val onPlayNext: (Song) -> Unit = {},
     private val onAddToQueue: (Song) -> Unit = {},
+    private val onShowFeedback: (String) -> Unit = {},
     private val metadataExtractor: MetadataExtractor? = null
 ) : ListAdapter<Song, RecyclerView.ViewHolder>(SongDiffCallback()) {
 
@@ -157,7 +158,7 @@ class SongAdapter(
                     true
                 }
                 R.id.action_add_to_playlist -> {
-                    android.widget.Toast.makeText(root.context, "Opening playlists...", android.widget.Toast.LENGTH_SHORT).show()
+                    onShowFeedback("Opening playlists...")
                     onAddToPlaylist(song)
                     true
                 }
