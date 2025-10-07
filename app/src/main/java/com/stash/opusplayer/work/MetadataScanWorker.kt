@@ -1,13 +1,13 @@
-package com.stash.stashwave.work
+package com.stash.opusplayer.work
 
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
 import androidx.work.*
-import com.stash.stashwave.data.MetadataDao
-import com.stash.stashwave.data.MetadataInfo
-import com.stash.stashwave.data.MusicRepository
+import com.stash.opusplayer.data.MetadataDao
+import com.stash.opusplayer.data.MetadataInfo
+import com.stash.opusplayer.data.MusicRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File

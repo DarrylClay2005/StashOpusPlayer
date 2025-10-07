@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.fragments
+package com.stash.opusplayer.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -9,9 +9,9 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.stash.stashwave.data.MusicRepository
-import com.stash.stashwave.databinding.FragmentFoldersBinding
-import com.stash.stashwave.ui.adapters.FolderAdapter
+import com.stash.opusplayer.data.MusicRepository
+import com.stash.opusplayer.databinding.FragmentFoldersBinding
+import com.stash.opusplayer.ui.adapters.FolderAdapter
 import kotlinx.coroutines.launch
 import java.io.File
 import android.net.Uri
@@ -41,10 +41,10 @@ class FoldersFragment : Fragment() {
         repository = MusicRepository(requireContext())
         // Resolve initial columns from prefs
         val prefs = requireContext().getSharedPreferences("settings", 0)
-        currentColumns = com.stash.stashwave.utils.PrefsUtils.resolveColumnsForScreen(
+        currentColumns = com.stash.opusplayer.utils.PrefsUtils.resolveColumnsForScreen(
             prefs,
-            com.stash.stashwave.utils.PrefsKeys.FOLDERS_VIEW_COLUMNS,
-            com.stash.stashwave.utils.PrefsKeys.DEFAULT_FOLDERS_VIEW_COLUMNS,
+            com.stash.opusplayer.utils.PrefsKeys.FOLDERS_VIEW_COLUMNS,
+            com.stash.opusplayer.utils.PrefsKeys.DEFAULT_FOLDERS_VIEW_COLUMNS,
             1
         )
         setupRecyclerView()
@@ -57,7 +57,7 @@ class FoldersFragment : Fragment() {
         adapter = FolderAdapter { info ->
             val fragment = FolderDetailFragment.newInstance(info.path, ArrayList(info.songs))
             parentFragmentManager.beginTransaction()
-                .replace(com.stash.stashwave.R.id.main_content, fragment)
+                .replace(com.stash.opusplayer.R.id.main_content, fragment)
                 .addToBackStack(null)
                 .commit()
         }.also {
@@ -78,7 +78,7 @@ class FoldersFragment : Fragment() {
             }
             currentColumns = when (currentColumns) { 1 -> 2; 2 -> 3; else -> 1 }
             val prefs = requireContext().getSharedPreferences("settings", 0)
-            prefs.edit().putInt(com.stash.stashwave.utils.PrefsKeys.FOLDERS_VIEW_COLUMNS, currentColumns).apply()
+            prefs.edit().putInt(com.stash.opusplayer.utils.PrefsKeys.FOLDERS_VIEW_COLUMNS, currentColumns).apply()
             applyColumns(currentColumns)
             updateLayoutButtonIcon()
             try { binding.recyclerView.scrollToPosition(firstPos) } catch (_: Exception) {}
@@ -86,13 +86,13 @@ class FoldersFragment : Fragment() {
         binding.layoutButton.setOnLongClickListener { v ->
             try { v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) } catch (_: Exception) {}
             val choices = arrayOf(
-                getString(com.stash.stashwave.R.string.layout_list),
-                getString(com.stash.stashwave.R.string.layout_two_columns),
-                getString(com.stash.stashwave.R.string.layout_three_columns)
+                getString(com.stash.opusplayer.R.string.layout_list),
+                getString(com.stash.opusplayer.R.string.layout_two_columns),
+                getString(com.stash.opusplayer.R.string.layout_three_columns)
             )
             val selectedIndex = when (currentColumns) { 1 -> 0; 2 -> 1; else -> 2 }
             androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                .setTitle(com.stash.stashwave.R.string.choose_layout_title)
+                .setTitle(com.stash.opusplayer.R.string.choose_layout_title)
                 .setSingleChoiceItems(choices, selectedIndex) { dialog, which ->
                     val newCols = when (which) { 0 -> 1; 1 -> 2; else -> 3 }
                     if (newCols != currentColumns) {
@@ -104,21 +104,21 @@ class FoldersFragment : Fragment() {
                         }
                         currentColumns = newCols
                         val prefs = requireContext().getSharedPreferences("settings", 0)
-                        prefs.edit().putInt(com.stash.stashwave.utils.PrefsKeys.FOLDERS_VIEW_COLUMNS, currentColumns).apply()
+                        prefs.edit().putInt(com.stash.opusplayer.utils.PrefsKeys.FOLDERS_VIEW_COLUMNS, currentColumns).apply()
                         applyColumns(currentColumns)
                         updateLayoutButtonIcon()
                         try { binding.recyclerView.scrollToPosition(firstPos2) } catch (_: Exception) {}
                     }
                     dialog.dismiss()
                 }
-                .setNegativeButton(com.stash.stashwave.R.string.cancel, null)
+                .setNegativeButton(com.stash.opusplayer.R.string.cancel, null)
                 .show()
             true
         }
     }
 
     private fun updateLayoutButtonIcon() {
-        val iconRes = if (currentColumns == 1) com.stash.stashwave.R.drawable.ic_view_list else com.stash.stashwave.R.drawable.ic_view_grid
+        val iconRes = if (currentColumns == 1) com.stash.opusplayer.R.drawable.ic_view_list else com.stash.opusplayer.R.drawable.ic_view_grid
         try { binding.layoutButton.setIconResource(iconRes) } catch (_: Exception) {}
     }
 
@@ -130,8 +130,8 @@ class FoldersFragment : Fragment() {
         } else {
             binding.recyclerView.layoutManager = GridLayoutManager(requireContext(), cols)
             adapter.setColumns(cols)
-            val spacing = resources.getDimensionPixelSize(com.stash.stashwave.R.dimen.grid_spacing)
-            gridDecoration = com.stash.stashwave.ui.widgets.GridSpacingItemDecoration(cols, spacing, true)
+            val spacing = resources.getDimensionPixelSize(com.stash.opusplayer.R.dimen.grid_spacing)
+            gridDecoration = com.stash.opusplayer.ui.widgets.GridSpacingItemDecoration(cols, spacing, true)
             binding.recyclerView.addItemDecoration(gridDecoration!!)
         }
     }
@@ -188,5 +188,5 @@ b.recyclerView.visibility = View.GONE
 data class FolderInfo(
     val path: String,
     val songCount: Int,
-    val songs: List<com.stash.stashwave.data.Song>
+    val songs: List<com.stash.opusplayer.data.Song>
 )

@@ -1,4 +1,4 @@
-package com.stash.stashwave.work
+package com.stash.opusplayer.work
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -12,9 +12,9 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.stash.stashwave.data.Song
-import com.stash.stashwave.utils.FfmpegEmbedder
-import com.stash.stashwave.artwork.ArtworkCache
+import com.stash.opusplayer.data.Song
+import com.stash.opusplayer.utils.FfmpegEmbedder
+import com.stash.opusplayer.artwork.ArtworkCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -63,9 +63,9 @@ class AutoEmbedWorker(appContext: Context, params: WorkerParameters) : Coroutine
                             // Fallback to TagEditor
                             val ext = file.extension.lowercase()
                             if (ext == "mp3") {
-                                com.stash.stashwave.utils.TagEditor.embedArtworkMp3(applicationContext, file.absolutePath, artBytes)
+                                com.stash.opusplayer.utils.TagEditor.embedArtworkMp3(applicationContext, file.absolutePath, artBytes)
                             } else {
-                                com.stash.stashwave.utils.TagEditor.embedArtworkAny(applicationContext, file.absolutePath, artBytes)
+                                com.stash.opusplayer.utils.TagEditor.embedArtworkAny(applicationContext, file.absolutePath, artBytes)
                             }
                         }
                         if (ok) {

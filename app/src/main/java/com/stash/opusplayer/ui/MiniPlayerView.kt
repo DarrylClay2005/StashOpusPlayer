@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui
+package com.stash.opusplayer.ui
 
 import android.content.ComponentName
 import android.content.Context
@@ -16,12 +16,15 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.bumptech.glide.Glide
 import com.google.common.util.concurrent.MoreExecutors
-import com.stash.stashwave.R
-import com.stash.stashwave.data.Song
-import com.stash.stashwave.databinding.MiniPlayerBinding
-import com.stash.stashwave.player.MusicPlayerManager
-import com.stash.stashwave.service.MusicService
-import com.stash.stashwave.utils.MetadataExtractor
+import com.stash.opusplayer.R
+import com.stash.opusplayer.data.Song
+import com.stash.opusplayer.databinding.MiniPlayerBinding
+import com.stash.opusplayer.player.MusicPlayerManager
+import com.stash.opusplayer.service.MusicService
+import com.stash.opusplayer.utils.MetadataExtractor
+import com.stash.opusplayer.ui.appearance.AppearancePreferences
+import android.animation.ObjectAnimator
+import android.view.animation.LinearInterpolator
 import kotlinx.coroutines.launch
 
 class MiniPlayerView @JvmOverloads constructor(
@@ -40,6 +43,7 @@ class MiniPlayerView @JvmOverloads constructor(
     
     private var currentSong: Song? = null
     private var lifecycleOwner: LifecycleOwner? = null
+    private var spinningAnimator: ObjectAnimator? = null
 
     init {
         binding = MiniPlayerBinding.inflate(LayoutInflater.from(context), this, true)
@@ -70,49 +74,98 @@ class MiniPlayerView @JvmOverloads constructor(
             }
         }
 
-        // Control button listeners
-        binding.miniPlayPauseButton.setOnClickListener {
-            mediaController?.let { controller ->
-                if (controller.isPlaying) {
-                    controller.pause()
-                } else {
-                    controller.play()
+        // Control button listeners with improved responsiveness and visual feedback
+        binding.miniPlayPauseButton.setOnClickListener { view ->
+            // Add visual feedback
+            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
+                .withEndAction {
+                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                }.start()
+            
+            // Immediate action with fallback
+            try {
+                mediaController?.let { controller ->
+                    if (controller.isPlaying) {
+                        controller.pause()
+                    } else {
+                        controller.play()
+                    }
+                } ?: run {
+                    // Fallback to player manager if controller not ready
+                    musicPlayerManager?.let { manager ->
+                        if (manager.isPlaying.value) {
+                            manager.pause()
+                        } else {
+                            manager.play()
+                        }
+                    }
                 }
+            } catch (e: Exception) {
+                android.util.Log.w("MiniPlayerView", "Play/pause action failed", e)
             }
         }
 
-        binding.miniPreviousButton.setOnClickListener {
+        binding.miniPreviousButton.setOnClickListener { view ->
+            // Add visual feedback
+            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
+                .withEndAction {
+                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                }.start()
+            
             try {
-                mediaController?.sendCustomCommand(
-                    androidx.media3.session.SessionCommand("SKIP_TO_PREVIOUS", android.os.Bundle.EMPTY),
-                    android.os.Bundle.EMPTY
-                )
-            } catch (_: Exception) {
-                mediaController?.seekToPrevious()
+                mediaController?.seekToPrevious() ?: musicPlayerManager?.skipToPrevious()
+            } catch (e: Exception) {
+                android.util.Log.w("MiniPlayerView", "Previous action failed", e)
             }
         }
         
-        binding.miniNextButton.setOnClickListener {
+        binding.miniNextButton.setOnClickListener { view ->
+            // Add visual feedback
+            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
+                .withEndAction {
+                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                }.start()
+            
             try {
-                mediaController?.sendCustomCommand(
-                    androidx.media3.session.SessionCommand("SKIP_TO_NEXT", android.os.Bundle.EMPTY),
-                    android.os.Bundle.EMPTY
-                )
-            } catch (_: Exception) {
-                mediaController?.seekToNext()
+                mediaController?.seekToNext() ?: musicPlayerManager?.skipToNext()
+            } catch (e: Exception) {
+                android.util.Log.w("MiniPlayerView", "Next action failed", e)
             }
         }
 
-        binding.miniFastForwardButton.setOnClickListener {
-            mediaController?.let { controller ->
-                val currentPos = controller.currentPosition
-                val duration = controller.duration
-                if (duration > 0) {
-                    val newPos = (currentPos + 30000).coerceAtMost(duration)
-                    controller.seekTo(newPos)
+        binding.miniFastForwardButton.setOnClickListener { view ->
+            // Add visual feedback
+            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
+                .withEndAction {
+                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                }.start()
+            
+            try {
+                mediaController?.let { controller ->
+                    val currentPos = controller.currentPosition
+                    val duration = controller.duration
+                    if (duration > 0) {
+                        val newPos = (currentPos + 30000).coerceAtMost(duration)
+                        controller.seekTo(newPos)
+                        // Show visual feedback for seek
+                        android.widget.Toast.makeText(context, "+30s", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                } ?: run {
+                    // Fallback to player manager
+                    musicPlayerManager?.let { manager ->
+                        val currentPos = manager.currentPosition.value
+                        val newPos = currentPos + 30000
+                        manager.seekTo(newPos)
+                        android.widget.Toast.makeText(context, "+30s", android.widget.Toast.LENGTH_SHORT).show()
+                    }
                 }
+            } catch (e: Exception) {
+                android.util.Log.w("MiniPlayerView", "Fast forward action failed", e)
             }
         }
+        
+        // Add rewind functionality to album artwork
+        setupAlbumArtworkSeekGesture()
     }
 
     private fun connectToMediaController() {
@@ -152,9 +205,21 @@ class MiniPlayerView @JvmOverloads constructor(
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                updateMediaInfo()
-                setArtworkFromMetadata()
-                if (mediaItem != null) show()
+                // Force UI update with retry mechanism
+                post {
+                    updateMediaInfo()
+                    setArtworkFromMetadata()
+                    if (mediaItem != null) {
+                        show()
+                        // Double-check after a short delay to ensure UI is updated
+                        postDelayed({
+                            if (mediaItem == mediaController?.currentMediaItem) {
+                                updateMediaInfo()
+                                setArtworkFromMetadata()
+                            }
+                        }, 200)
+                    }
+                }
             }
         })
     }
@@ -200,6 +265,10 @@ class MiniPlayerView @JvmOverloads constructor(
         binding.miniSongTitle.text = song.displayName
         binding.miniArtistName.text = song.artistName
         
+        // Check if spinning animation is enabled
+        val appearancePrefs = AppearancePreferences.fromPrefs(context)
+        updateSpinningAnimation(appearancePrefs.miniPlayerSpinningArt)
+        
         // Load album artwork (prefer cached, fallback to embedded/online)
         val cached = metadataExtractor.loadCachedArtwork(context, song)
         val embedded = metadataExtractor.decodeAlbumArt(song.albumArt)
@@ -223,7 +292,7 @@ class MiniPlayerView @JvmOverloads constructor(
         val allowOnline = prefs.getBoolean("fetch_artwork_online", true)
         if (allowOnline) {
             lifecycleOwner?.lifecycleScope?.launch {
-val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(context)
+val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
                 val file = fetcher.getOrFetch(song)
                 if (file != null && song == currentSong) {
                     Glide.with(context)
@@ -267,7 +336,7 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(context)
                 path = ""
             )
             
-            val cache = com.stash.stashwave.artwork.ArtworkCache(context)
+            val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
             val bmp = cache.loadBitmapIfPresent(fakeSong, 256)
             
             if (bmp != null) {
@@ -371,8 +440,133 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(context)
         }
     }
 
+    private fun setupAlbumArtworkSeekGesture() {
+        binding.miniAlbumArt.setOnTouchListener { view, event ->
+            if (event.action == android.view.MotionEvent.ACTION_UP) {
+                val viewWidth = view.width
+                val touchX = event.x
+                val leftHalf = viewWidth / 2f
+                
+                // Add ripple effect
+                view.animate()
+                    .scaleX(0.95f)
+                    .scaleY(0.95f)
+                    .setDuration(150)
+                    .withEndAction {
+                        view.animate()
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .setDuration(150)
+                            .start()
+                    }
+                    .start()
+                
+                try {
+                    when {
+                        touchX < leftHalf -> {
+                            // Left side - seek backward 10 seconds
+                            mediaController?.let { controller ->
+                                val currentPos = controller.currentPosition
+                                val newPos = (currentPos - 10000).coerceAtLeast(0)
+                                controller.seekTo(newPos)
+                            } ?: run {
+                                musicPlayerManager?.let { manager ->
+                                    val currentPos = manager.currentPosition.value
+                                    val newPos = (currentPos - 10000).coerceAtLeast(0)
+                                    manager.seekTo(newPos)
+                                }
+                            }
+                            android.widget.Toast.makeText(context, "⏪ -10s", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        else -> {
+                            // Right side - seek forward 10 seconds
+                            mediaController?.let { controller ->
+                                val currentPos = controller.currentPosition
+                                val duration = controller.duration
+                                val newPos = (currentPos + 10000).coerceAtMost(if (duration > 0) duration else currentPos + 10000)
+                                controller.seekTo(newPos)
+                            } ?: run {
+                                musicPlayerManager?.let { manager ->
+                                    val currentPos = manager.currentPosition.value
+                                    val newPos = currentPos + 10000
+                                    manager.seekTo(newPos)
+                                }
+                            }
+                            android.widget.Toast.makeText(context, "⏩ +10s", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("MiniPlayerView", "Seek gesture failed", e)
+                }
+            }
+            true // Consume the touch event
+        }
+    }
+
+    /**
+     * Apply appearance preferences to the mini player
+     */
+    fun applyAppearancePreferences(prefs: AppearancePreferences) {
+        try {
+            // Show/hide album art
+            binding.miniAlbumArtCard.visibility = if (prefs.miniPlayerShowArt) VISIBLE else GONE
+            
+            // Show/hide artist name
+            binding.miniArtistName.visibility = if (prefs.miniPlayerShowArtist) VISIBLE else GONE
+            
+            // Apply compact mode
+            if (prefs.miniPlayerCompactMode) {
+                val compactPadding = (4 * resources.displayMetrics.density).toInt()
+                setPadding(compactPadding, compactPadding, compactPadding, compactPadding)
+                binding.miniSongTitle.maxLines = 1
+                binding.miniArtistName.maxLines = 1
+            } else {
+                val normalPadding = (8 * resources.displayMetrics.density).toInt()
+                setPadding(normalPadding, normalPadding, normalPadding, normalPadding)
+                binding.miniSongTitle.maxLines = 2
+                binding.miniArtistName.maxLines = 1
+            }
+            
+            // Apply colors
+            setBackgroundColor(prefs.backgroundColor)
+            binding.miniSongTitle.setTextColor(prefs.textPrimaryColor)
+            binding.miniArtistName.setTextColor(prefs.textSecondaryColor)
+            
+            // Update spinning animation based on preference
+            updateSpinningAnimation(prefs.miniPlayerSpinningArt && mediaController?.isPlaying == true)
+            
+        } catch (e: Exception) {
+            android.util.Log.e("MiniPlayerView", "Error applying appearance preferences", e)
+        }
+    }
+
     fun release() {
         stopProgressUpdates()
+        stopSpinningAnimation()
         mediaController?.release()
+    }
+    
+    private fun updateSpinningAnimation(enabled: Boolean) {
+        if (enabled && mediaController?.isPlaying == true) {
+            startSpinningAnimation()
+        } else {
+            stopSpinningAnimation()
+        }
+    }
+    
+    private fun startSpinningAnimation() {
+        stopSpinningAnimation()
+        spinningAnimator = ObjectAnimator.ofFloat(binding.miniAlbumArt, "rotation", 0f, 360f).apply {
+            duration = 10000 // 10 seconds for one full rotation
+            repeatCount = ObjectAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            start()
+        }
+    }
+    
+    private fun stopSpinningAnimation() {
+        spinningAnimator?.cancel()
+        spinningAnimator = null
+        binding.miniAlbumArt.rotation = 0f
     }
 }

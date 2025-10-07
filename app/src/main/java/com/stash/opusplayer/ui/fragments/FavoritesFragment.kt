@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.fragments
+package com.stash.opusplayer.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -9,12 +9,12 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.appcompat.app.AlertDialog
-import com.stash.stashwave.databinding.FragmentFavoritesBinding
-import com.stash.stashwave.data.MusicRepository
-import com.stash.stashwave.data.Song
-import com.stash.stashwave.ui.MainActivity
-import com.stash.stashwave.ui.adapters.SongAdapter
-import com.stash.stashwave.utils.MetadataExtractor
+import com.stash.opusplayer.databinding.FragmentFavoritesBinding
+import com.stash.opusplayer.data.MusicRepository
+import com.stash.opusplayer.data.Song
+import com.stash.opusplayer.ui.MainActivity
+import com.stash.opusplayer.ui.adapters.SongAdapter
+import com.stash.opusplayer.utils.MetadataExtractor
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 

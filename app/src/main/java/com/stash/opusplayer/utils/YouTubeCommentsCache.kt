@@ -1,8 +1,8 @@
-package com.stash.stashwave.utils
+package com.stash.opusplayer.utils
 
 object YouTubeCommentsCache {
     private data class Key(val videoId: String, val order: String)
-data class Entry(val comments: List<com.stash.stashwave.data.YouTubeComment>, val nextPageToken: String?)
+data class Entry(val comments: List<com.stash.opusplayer.data.YouTubeComment>, val nextPageToken: String?)
 
     private val maxEntries = 32
     private val map = object : LinkedHashMap<Key, Entry>(maxEntries, 0.75f, true) {

@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.adapters
+package com.stash.opusplayer.ui.adapters
 
 import android.text.Spanned
 import android.view.LayoutInflater
@@ -6,9 +6,9 @@ import android.view.ViewGroup
 import androidx.core.text.HtmlCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
-import com.stash.stashwave.R
-import com.stash.stashwave.data.YouTubeComment
-import com.stash.stashwave.databinding.ItemYoutubeCommentBinding
+import com.stash.opusplayer.R
+import com.stash.opusplayer.data.YouTubeComment
+import com.stash.opusplayer.databinding.ItemYoutubeCommentBinding
 
 class YouTubeCommentsAdapter(
     private val onViewReplies: (YouTubeComment) -> Unit = {}

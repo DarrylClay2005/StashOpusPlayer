@@ -24,6 +24,18 @@
             android:textStyle="bold" />
 
         <com.google.android.material.button.MaterialButton
+            android:id="@+id/sortButton"
+            style="@style/NeomorphicButton"
+            android:layout_width="48dp"
+            android:layout_height="40dp"
+            android:layout_marginEnd="8dp"
+            app:icon="@drawable/ic_sort"
+            app:iconTint="@color/secondary_color"
+            app:iconSize="20dp"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp" />
+
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/layoutButton"
             style="@style/NeomorphicButton"
             android:layout_width="48dp"

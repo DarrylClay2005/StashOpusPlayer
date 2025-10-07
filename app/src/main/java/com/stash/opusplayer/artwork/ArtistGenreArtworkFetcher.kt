@@ -1,4 +1,4 @@
-package com.stash.stashwave.artwork
+package com.stash.opusplayer.artwork
 
 import android.content.Context
 import android.util.Log
@@ -57,7 +57,7 @@ class ArtistGenreArtworkFetcher(private val context: Context) {
         if (out.exists()) return@withContext out
         if (!allow) return@withContext null
 
-        com.stash.stashwave.utils.ImageDownloadTracker.begin()
+        com.stash.opusplayer.utils.ImageDownloadTracker.begin()
         try {
             // Try Last.fm if API key exists (disabled)
             val apiKey: String? = null // Last.fm disabled
@@ -84,7 +84,7 @@ class ArtistGenreArtworkFetcher(private val context: Context) {
 
             return@withContext null
         } finally {
-            com.stash.stashwave.utils.ImageDownloadTracker.end()
+            com.stash.opusplayer.utils.ImageDownloadTracker.end()
         }
     }
 
@@ -94,7 +94,7 @@ class ArtistGenreArtworkFetcher(private val context: Context) {
         if (out.exists()) return@withContext out
         if (!allow) return@withContext null
 
-        com.stash.stashwave.utils.ImageDownloadTracker.begin()
+        com.stash.opusplayer.utils.ImageDownloadTracker.begin()
         try {
             // Wikipedia: try "<Genre> (music)"
             val title = if (name.contains("(music)", true)) name else "$name (music)"
@@ -111,7 +111,7 @@ class ArtistGenreArtworkFetcher(private val context: Context) {
             }
             return@withContext null
         } finally {
-            com.stash.stashwave.utils.ImageDownloadTracker.end()
+            com.stash.opusplayer.utils.ImageDownloadTracker.end()
         }
     }
 

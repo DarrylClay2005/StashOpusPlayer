@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.fragments
+package com.stash.opusplayer.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -7,8 +7,8 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.stash.stashwave.databinding.FragmentPlaylistsBinding
-import com.stash.stashwave.data.MusicRepository
+import com.stash.opusplayer.databinding.FragmentPlaylistsBinding
+import com.stash.opusplayer.data.MusicRepository
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -40,7 +40,7 @@ class PlaylistsFragment : Fragment() {
     private fun setupRecycler() {
         adapter = PlaylistsAdapter { playlistId ->
             parentFragmentManager.beginTransaction()
-                .replace(com.stash.stashwave.R.id.main_content, PlaylistDetailFragment.newInstance(playlistId))
+                .replace(com.stash.opusplayer.R.id.main_content, PlaylistDetailFragment.newInstance(playlistId))
                 .addToBackStack(null)
                 .commit()
         }
@@ -91,20 +91,20 @@ class PlaylistsFragment : Fragment() {
 // Adapter for playlists list
 private class PlaylistsAdapter(
     val onClick: (Long) -> Unit
-) : androidx.recyclerview.widget.ListAdapter<com.stash.stashwave.data.database.PlaylistWithCount, PlaylistsViewHolder>(
-    object : androidx.recyclerview.widget.DiffUtil.ItemCallback<com.stash.stashwave.data.database.PlaylistWithCount>() {
+) : androidx.recyclerview.widget.ListAdapter<com.stash.opusplayer.data.database.PlaylistWithCount, PlaylistsViewHolder>(
+    object : androidx.recyclerview.widget.DiffUtil.ItemCallback<com.stash.opusplayer.data.database.PlaylistWithCount>() {
         override fun areItemsTheSame(
-oldItem: com.stash.stashwave.data.database.PlaylistWithCount,
-newItem: com.stash.stashwave.data.database.PlaylistWithCount
+oldItem: com.stash.opusplayer.data.database.PlaylistWithCount,
+newItem: com.stash.opusplayer.data.database.PlaylistWithCount
         ): Boolean = oldItem.id == newItem.id
         override fun areContentsTheSame(
-oldItem: com.stash.stashwave.data.database.PlaylistWithCount,
-newItem: com.stash.stashwave.data.database.PlaylistWithCount
+oldItem: com.stash.opusplayer.data.database.PlaylistWithCount,
+newItem: com.stash.opusplayer.data.database.PlaylistWithCount
         ): Boolean = oldItem == newItem
     }
 ) {
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PlaylistsViewHolder {
-        val row = com.stash.stashwave.databinding.ItemPlaylistBinding.inflate(
+        val row = com.stash.opusplayer.databinding.ItemPlaylistBinding.inflate(
             LayoutInflater.from(parent.context), parent, false
         )
         return PlaylistsViewHolder(row, onClick)
@@ -115,10 +115,10 @@ newItem: com.stash.stashwave.data.database.PlaylistWithCount
 }
 
 private class PlaylistsViewHolder(
-    private val binding: com.stash.stashwave.databinding.ItemPlaylistBinding,
+    private val binding: com.stash.opusplayer.databinding.ItemPlaylistBinding,
     private val onClick: (Long) -> Unit
 ) : androidx.recyclerview.widget.RecyclerView.ViewHolder(binding.root) {
-fun bind(item: com.stash.stashwave.data.database.PlaylistWithCount) {
+fun bind(item: com.stash.opusplayer.data.database.PlaylistWithCount) {
         binding.playlistName.text = item.name
         binding.playlistCount.text = "${item.songCount} song${if (item.songCount == 1) "" else "s"}"
         binding.root.setOnClickListener { onClick(item.id) }

@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui
+package com.stash.opusplayer.ui
 
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -19,9 +19,9 @@ import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.options.IFramePlayerOptions
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.utils.loadOrCueVideo
-import com.stash.stashwave.R
-import com.stash.stashwave.databinding.ActivityYoutubeStreamingBinding
-import com.stash.stashwave.data.YouTubeVideo
+import com.stash.opusplayer.R
+import com.stash.opusplayer.databinding.ActivityYoutubeStreamingBinding
+import com.stash.opusplayer.data.YouTubeVideo
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -30,12 +30,12 @@ class YouTubeStreamingActivity : AppCompatActivity() {
     private lateinit var binding: ActivityYoutubeStreamingBinding
     private var youTubePlayer: YouTubePlayer? = null
     private lateinit var ytPrefs: android.content.SharedPreferences
-private lateinit var commentsAdapter: com.stash.stashwave.ui.adapters.YouTubeCommentsAdapter
+private lateinit var commentsAdapter: com.stash.opusplayer.ui.adapters.YouTubeCommentsAdapter
     private var commentsNextPageToken: String? = null
     private var commentsOrder: String = "relevance"
-private val commentsAll = mutableListOf<com.stash.stashwave.data.YouTubeComment>()
+private val commentsAll = mutableListOf<com.stash.opusplayer.data.YouTubeComment>()
     private val expandedParents = mutableSetOf<String>()
-private val youTubeApiService by lazy { com.stash.stashwave.network.YouTubeApiService(this) }
+private val youTubeApiService by lazy { com.stash.opusplayer.network.YouTubeApiService(this) }
     private var isPlaying = false
     private var currentTime = 0f
     private var duration = 0f
@@ -395,7 +395,7 @@ private val youTubeApiService by lazy { com.stash.stashwave.network.YouTubeApiSe
     }
 
     private fun setupCommentsUI() {
-commentsAdapter = com.stash.stashwave.ui.adapters.YouTubeCommentsAdapter(
+commentsAdapter = com.stash.opusplayer.ui.adapters.YouTubeCommentsAdapter(
             onViewReplies = { comment ->
                 comment.commentId?.let { showRepliesDialog(it) }
             }
@@ -480,7 +480,7 @@ commentsAdapter = com.stash.stashwave.ui.adapters.YouTubeCommentsAdapter(
         val videoId = currentVideo?.id ?: return
         // Check cache on first page
         if (pageToken == null) {
-com.stash.stashwave.utils.YouTubeCommentsCache.get(videoId, commentsOrder)?.let { entry ->
+com.stash.opusplayer.utils.YouTubeCommentsCache.get(videoId, commentsOrder)?.let { entry ->
                 commentsAll.clear()
                 commentsAll.addAll(entry.comments)
                 commentsAdapter.submitList(commentsAll.toList())
@@ -504,8 +504,8 @@ com.stash.stashwave.utils.YouTubeCommentsCache.get(videoId, commentsOrder)?.let 
                         commentsAll.addAll(res.comments)
                         commentsAdapter.submitList(commentsAll.toList())
                         if (pageToken == null) {
-                            com.stash.stashwave.utils.YouTubeCommentsCache.put(videoId, commentsOrder,
-                                com.stash.stashwave.utils.YouTubeCommentsCache.Entry(commentsAll.toList(), res.nextPageToken))
+                            com.stash.opusplayer.utils.YouTubeCommentsCache.put(videoId, commentsOrder,
+                                com.stash.opusplayer.utils.YouTubeCommentsCache.Entry(commentsAll.toList(), res.nextPageToken))
                         }
                     } else if (commentsAll.isEmpty()) {
                         binding.commentsProgressContainer.visibility = View.VISIBLE
@@ -547,23 +547,23 @@ com.stash.stashwave.utils.YouTubeCommentsCache.get(videoId, commentsOrder)?.let 
             try {
                 binding.playPauseButton.isEnabled = false
                 Toast.makeText(this@YouTubeStreamingActivity, "Preparing background audio…", Toast.LENGTH_SHORT).show()
-val extractor = com.stash.stashwave.utils.YtDlpExtractor(this@YouTubeStreamingActivity)
+val extractor = com.stash.opusplayer.utils.YtDlpExtractor(this@YouTubeStreamingActivity)
                 val url = extractor.getBestAudioStreamUrl(video.formattedUrl)
                 if (url.isNullOrBlank()) {
                     // Prefetch thumbnail into cache before delegating to Seal
                     try {
-                        val meta = com.stash.stashwave.utils.MetadataExtractor(this@YouTubeStreamingActivity)
+                        val meta = com.stash.opusplayer.utils.MetadataExtractor(this@YouTubeStreamingActivity)
                         val b64 = meta.downloadYouTubeThumbnail(video.id)
                         if (b64 != null) {
                             val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                            val cache = com.stash.stashwave.artwork.ArtworkCache(this@YouTubeStreamingActivity)
+                            val cache = com.stash.opusplayer.artwork.ArtworkCache(this@YouTubeStreamingActivity)
                             val variants = listOf(
-                                com.stash.stashwave.data.Song(0L, video.title, video.channelTitle, "YouTube", 0L, ""),
-                                com.stash.stashwave.data.Song(0L, video.title, video.channelTitle, "Unknown Album", 0L, ""),
-                                com.stash.stashwave.data.Song(0L, video.title, video.channelTitle, "", 0L, ""),
-                                com.stash.stashwave.data.Song(0L, video.title, "Unknown Artist", "YouTube", 0L, ""),
-                                com.stash.stashwave.data.Song(0L, video.title, "Unknown Artist", "Unknown Album", 0L, ""),
-                                com.stash.stashwave.data.Song(0L, video.title, "Unknown Artist", "", 0L, "")
+                                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "YouTube", 0L, ""),
+                                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "Unknown Album", 0L, ""),
+                                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "", 0L, ""),
+                                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "YouTube", 0L, ""),
+                                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "Unknown Album", 0L, ""),
+                                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "", 0L, "")
                             )
                             variants.forEach { s ->
                                 val f = cache.fileFor(s)
@@ -576,7 +576,7 @@ val extractor = com.stash.stashwave.utils.YtDlpExtractor(this@YouTubeStreamingAc
                     } catch (_: Exception) {}
 
 // Fallback: if Seal is installed, open there so user can use background playback
-val opened = com.stash.stashwave.integration.SealIntegration.openInSeal(this@YouTubeStreamingActivity, video.formattedUrl)
+val opened = com.stash.opusplayer.integration.SealIntegration.openInSeal(this@YouTubeStreamingActivity, video.formattedUrl)
                     if (!opened) {
                         Toast.makeText(this@YouTubeStreamingActivity, "Unable to resolve audio stream", Toast.LENGTH_LONG).show()
                     } else {
@@ -595,7 +595,7 @@ val opened = com.stash.stashwave.integration.SealIntegration.openInSeal(this@You
                     .setMediaMetadata(meta)
                     .build()
 
-                val token = androidx.media3.session.SessionToken(this@YouTubeStreamingActivity, android.content.ComponentName(this@YouTubeStreamingActivity, com.stash.stashwave.service.MusicService::class.java))
+                val token = androidx.media3.session.SessionToken(this@YouTubeStreamingActivity, android.content.ComponentName(this@YouTubeStreamingActivity, com.stash.opusplayer.service.MusicService::class.java))
                 val future = androidx.media3.session.MediaController.Builder(this@YouTubeStreamingActivity, token).buildAsync()
                 future.addListener({
                     try {

@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.adapters
+package com.stash.opusplayer.ui.adapters
 
 import android.view.LayoutInflater
 import android.view.View
@@ -7,11 +7,11 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
-import com.stash.stashwave.R
-import com.stash.stashwave.data.DownloadProgress
-import com.stash.stashwave.data.DownloadStatus
-import com.stash.stashwave.data.YouTubeVideo
-import com.stash.stashwave.databinding.ItemYoutubeVideoBinding
+import com.stash.opusplayer.R
+import com.stash.opusplayer.data.DownloadProgress
+import com.stash.opusplayer.data.DownloadStatus
+import com.stash.opusplayer.data.YouTubeVideo
+import com.stash.opusplayer.databinding.ItemYoutubeVideoBinding
 import java.text.NumberFormat
 import java.util.*
 

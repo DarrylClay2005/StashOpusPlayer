@@ -184,7 +184,7 @@
         app:layout_constraintTop_toBottomOf="@id/songInfoContainer">
 
         <!-- Real-time Synth Wave visualization -->
-        <com.stash.stashwave.ui.widgets.SynthWaveView
+        <com.stash.opusplayer.ui.widgets.SynthWaveView
             android:id="@+id/synthWaveView"
             android:layout_width="match_parent"
             android:layout_height="80dp"

@@ -1,4 +1,4 @@
-package com.stash.stashwave.audio
+package com.stash.opusplayer.audio
 
 import android.content.Context
 import android.content.SharedPreferences

@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.fragments
+package com.stash.opusplayer.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -7,11 +7,11 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.stash.stashwave.data.Song
-import com.stash.stashwave.databinding.FragmentArtistSongsBinding
-import com.stash.stashwave.ui.MainActivity
-import com.stash.stashwave.ui.adapters.SongAdapter
-import com.stash.stashwave.utils.MetadataExtractor
+import com.stash.opusplayer.data.Song
+import com.stash.opusplayer.databinding.FragmentArtistSongsBinding
+import com.stash.opusplayer.ui.MainActivity
+import com.stash.opusplayer.ui.adapters.SongAdapter
+import com.stash.opusplayer.utils.MetadataExtractor
 import kotlinx.coroutines.launch
 
 class ArtistSongsFragment : Fragment() {
@@ -67,7 +67,27 @@ class ArtistSongsFragment : Fragment() {
         
         metadataExtractor = MetadataExtractor(requireContext())
         setupRecyclerView()
-        loadSongs()
+        
+        // If no songs were provided, fetch quickly by artist and schedule background metadata scan
+        if (songs.isEmpty() && artistName.isNotBlank()) {
+            binding.emptyStateText.text = "Loading songs…"
+            binding.emptyStateText.visibility = View.VISIBLE
+            viewLifecycleOwner.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                try {
+                    val repo = com.stash.opusplayer.data.MusicRepository(requireContext())
+                    val quick = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { repo.getSongsByArtistDirect(artistName) }
+                    songs = quick
+                    // Schedule background metadata scan for these files (best-effort)
+                    runCatching {
+                        val paths = quick.map { it.path }
+                        com.stash.opusplayer.work.MetadataScanWorker.scheduleMetadataScan(requireContext(), paths, forceRescan = false)
+                    }
+                } catch (_: Exception) { }
+                loadSongs()
+            }
+        } else {
+            loadSongs()
+        }
     }
     
     private fun setupRecyclerView() {
@@ -103,6 +123,7 @@ class ArtistSongsFragment : Fragment() {
             binding.emptyStateText.visibility = View.GONE
         } else {
             binding.recyclerView.visibility = View.GONE
+            binding.emptyStateText.text = "No songs found for this artist"
             binding.emptyStateText.visibility = View.VISIBLE
         }
     }

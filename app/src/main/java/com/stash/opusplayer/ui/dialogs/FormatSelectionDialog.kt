@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.dialogs
+package com.stash.opusplayer.ui.dialogs
 
 import android.app.Dialog
 import android.content.Context
@@ -7,11 +7,11 @@ import android.view.LayoutInflater
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.bumptech.glide.Glide
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.stash.stashwave.R
-import com.stash.stashwave.data.AudioFormat
-import com.stash.stashwave.data.YouTubeVideo
-import com.stash.stashwave.databinding.DialogFormatSelectionBinding
-import com.stash.stashwave.ui.adapters.AudioFormatAdapter
+import com.stash.opusplayer.R
+import com.stash.opusplayer.data.AudioFormat
+import com.stash.opusplayer.data.YouTubeVideo
+import com.stash.opusplayer.databinding.DialogFormatSelectionBinding
+import com.stash.opusplayer.ui.adapters.AudioFormatAdapter
 
 class FormatSelectionDialog(
     context: Context,

@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.fragments
+package com.stash.opusplayer.ui.fragments
 
 import android.app.Activity
 import android.content.Intent
@@ -17,14 +17,14 @@ import androidx.core.widget.addTextChangedListener
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.stash.stashwave.data.DownloadRequest
-import com.stash.stashwave.data.YouTubeVideo
-import com.stash.stashwave.data.AudioFormat
-import com.stash.stashwave.ui.dialogs.FormatSelectionDialog
-import com.stash.stashwave.databinding.FragmentYoutubeSearchBinding
-import com.stash.stashwave.network.YouTubeApiService
-import com.stash.stashwave.service.VideoDownloadManager
-import com.stash.stashwave.ui.adapters.YouTubeVideoAdapter
+import com.stash.opusplayer.data.DownloadRequest
+import com.stash.opusplayer.data.YouTubeVideo
+import com.stash.opusplayer.data.AudioFormat
+import com.stash.opusplayer.ui.dialogs.FormatSelectionDialog
+import com.stash.opusplayer.databinding.FragmentYoutubeSearchBinding
+import com.stash.opusplayer.network.YouTubeApiService
+import com.stash.opusplayer.service.VideoDownloadManager
+import com.stash.opusplayer.ui.adapters.YouTubeVideoAdapter
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -63,7 +63,7 @@ class YouTubeSearchFragment : Fragment() {
     }
 
     private fun setupSealBanner() {
-val installed = com.stash.stashwave.integration.SealIntegration.isInstalled(requireContext())
+val installed = com.stash.opusplayer.integration.SealIntegration.isInstalled(requireContext())
         if (installed) {
             binding.sealInfoBanner.visibility = View.VISIBLE
             binding.sealInfoText.text = "Downloads are handled by Seal and will open there. Tap Download to continue in Seal."
@@ -74,7 +74,7 @@ val installed = com.stash.stashwave.integration.SealIntegration.isInstalled(requ
             binding.sealActionButton.visibility = View.VISIBLE
             binding.sealActionButton.text = "Install Seal"
             binding.sealActionButton.setOnClickListener {
-com.stash.stashwave.integration.SealIntegration.promptInstall(requireContext())
+com.stash.opusplayer.integration.SealIntegration.promptInstall(requireContext())
             }
         }
     }
@@ -96,8 +96,8 @@ com.stash.stashwave.integration.SealIntegration.promptInstall(requireContext())
             onVideoClick = { video ->
                 // Open built-in YouTube player activity
                 try {
-val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingActivity::class.java).apply {
-                        putExtra(com.stash.stashwave.ui.YouTubeStreamingActivity.EXTRA_VIDEO, video)
+val intent = Intent(requireContext(), com.stash.opusplayer.ui.YouTubeStreamingActivity::class.java).apply {
+                        putExtra(com.stash.opusplayer.ui.YouTubeStreamingActivity.EXTRA_VIDEO, video)
                     }
                     startActivity(intent)
                 } catch (e: Exception) {
@@ -110,8 +110,8 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
             onPreviewClick = { video ->
                 // Also route preview to the in-app player for a consistent experience
                 try {
-val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingActivity::class.java).apply {
-                        putExtra(com.stash.stashwave.ui.YouTubeStreamingActivity.EXTRA_VIDEO, video)
+val intent = Intent(requireContext(), com.stash.opusplayer.ui.YouTubeStreamingActivity::class.java).apply {
+                        putExtra(com.stash.opusplayer.ui.YouTubeStreamingActivity.EXTRA_VIDEO, video)
                     }
                     startActivity(intent)
                 } catch (e: Exception) {
@@ -245,21 +245,21 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
         // Pre-cache YouTube thumbnail into our artwork cache so playback shows cover art even if file tags lack artwork
         lifecycleScope.launch {
             try {
-                val meta = com.stash.stashwave.utils.MetadataExtractor(requireContext())
+                val meta = com.stash.opusplayer.utils.MetadataExtractor(requireContext())
                 val b64 = meta.downloadYouTubeThumbnail(video.id)
                 if (b64 != null) {
                     val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                    val cache = com.stash.stashwave.artwork.ArtworkCache(requireContext())
+                    val cache = com.stash.opusplayer.artwork.ArtworkCache(requireContext())
                     // Save under a few likely variants so later scans can find it
                     val variants = listOf(
                         // Known channel as artist
-                        com.stash.stashwave.data.Song(0L, video.title, video.channelTitle, "YouTube", 0L, ""),
-                        com.stash.stashwave.data.Song(0L, video.title, video.channelTitle, "Unknown Album", 0L, ""),
-                        com.stash.stashwave.data.Song(0L, video.title, video.channelTitle, "", 0L, ""),
+                        com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "YouTube", 0L, ""),
+                        com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "Unknown Album", 0L, ""),
+                        com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "", 0L, ""),
                         // Unknown artist fallback (common after external downloads)
-                        com.stash.stashwave.data.Song(0L, video.title, "Unknown Artist", "YouTube", 0L, ""),
-                        com.stash.stashwave.data.Song(0L, video.title, "Unknown Artist", "Unknown Album", 0L, ""),
-                        com.stash.stashwave.data.Song(0L, video.title, "Unknown Artist", "", 0L, "")
+                        com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "YouTube", 0L, ""),
+                        com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "Unknown Album", 0L, ""),
+                        com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "", 0L, "")
                     )
                     variants.forEach { s ->
                         val f = cache.fileFor(s)
@@ -274,7 +274,7 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
 
         // Simple handoff to Seal without trying to set download location
         val ytUrl = if (video.url.startsWith("http")) video.url else video.formattedUrl
-        val opened = com.stash.stashwave.integration.SealIntegration.openInSeal(requireContext(), ytUrl)
+        val opened = com.stash.opusplayer.integration.SealIntegration.openInSeal(requireContext(), ytUrl)
         if (opened) {
             Toast.makeText(requireContext(), "Opening Seal to download…", Toast.LENGTH_SHORT).show()
         } else {
@@ -283,7 +283,7 @@ val intent = Intent(requireContext(), com.stash.stashwave.ui.YouTubeStreamingAct
                 .setTitle("Install Seal")
                 .setMessage("This app uses Seal as the downloader. Install Seal to continue?")
                 .setPositiveButton("Install") { _, _ ->
-                    com.stash.stashwave.integration.SealIntegration.promptInstall(requireContext())
+                    com.stash.opusplayer.integration.SealIntegration.promptInstall(requireContext())
                 }
                 .setNegativeButton("Cancel", null)
                 .show()

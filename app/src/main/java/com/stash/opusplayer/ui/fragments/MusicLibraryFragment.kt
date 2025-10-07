@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.fragments
+package com.stash.opusplayer.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -12,11 +12,12 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.appcompat.app.AlertDialog
-import com.stash.stashwave.databinding.FragmentMusicLibraryBinding
-import com.stash.stashwave.data.MusicRepository
-import com.stash.stashwave.data.Song
-import com.stash.stashwave.ui.MainActivity
-import com.stash.stashwave.ui.adapters.SongAdapter
+import com.stash.opusplayer.R
+import com.stash.opusplayer.databinding.FragmentMusicLibraryBinding
+import com.stash.opusplayer.data.MusicRepository
+import com.stash.opusplayer.data.Song
+import com.stash.opusplayer.ui.MainActivity
+import com.stash.opusplayer.ui.adapters.SongAdapter
 import kotlinx.coroutines.*
 
 class MusicLibraryFragment : Fragment() {
@@ -46,21 +47,22 @@ class MusicLibraryFragment : Fragment() {
         musicRepository = MusicRepository(requireContext())
         // Resolve initial columns from prefs
         val prefs = requireContext().getSharedPreferences("settings", 0)
-        currentColumns = com.stash.stashwave.utils.PrefsUtils.resolveColumnsForScreen(
+        currentColumns = com.stash.opusplayer.utils.PrefsUtils.resolveColumnsForScreen(
             prefs,
-            com.stash.stashwave.utils.PrefsKeys.SONGS_VIEW_COLUMNS,
-            com.stash.stashwave.utils.PrefsKeys.DEFAULT_SONGS_VIEW_COLUMNS,
+            com.stash.opusplayer.utils.PrefsKeys.SONGS_VIEW_COLUMNS,
+            com.stash.opusplayer.utils.PrefsKeys.DEFAULT_SONGS_VIEW_COLUMNS,
             1
         )
         setupRecyclerView()
         setupLayoutToggle()
         setupSearchButton()
+        setupSortButton()
         setupLikedButton()
         loadSongs()
     }
     
     private fun setupRecyclerView() {
-val metadataExtractor = com.stash.stashwave.utils.MetadataExtractor(requireContext())
+val metadataExtractor = com.stash.opusplayer.utils.MetadataExtractor(requireContext())
         
         songAdapter = SongAdapter(
             onSongClick = { song ->
@@ -109,7 +111,7 @@ val metadataExtractor = com.stash.stashwave.utils.MetadataExtractor(requireConte
             }
             // Persist per-screen override
             val prefs = requireContext().getSharedPreferences("settings", 0)
-            prefs.edit().putInt(com.stash.stashwave.utils.PrefsKeys.SONGS_VIEW_COLUMNS, currentColumns).apply()
+            prefs.edit().putInt(com.stash.opusplayer.utils.PrefsKeys.SONGS_VIEW_COLUMNS, currentColumns).apply()
 
             applyColumns(currentColumns)
             updateLayoutButtonIcon()
@@ -121,13 +123,13 @@ val metadataExtractor = com.stash.stashwave.utils.MetadataExtractor(requireConte
         binding.layoutButton.setOnLongClickListener { v ->
             try { v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) } catch (_: Exception) {}
             val choices = arrayOf(
-                getString(com.stash.stashwave.R.string.layout_list),
-                getString(com.stash.stashwave.R.string.layout_two_columns),
-                getString(com.stash.stashwave.R.string.layout_three_columns)
+                getString(com.stash.opusplayer.R.string.layout_list),
+                getString(com.stash.opusplayer.R.string.layout_two_columns),
+                getString(com.stash.opusplayer.R.string.layout_three_columns)
             )
             val selectedIndex = when (currentColumns) { 1 -> 0; 2 -> 1; else -> 2 }
             androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                .setTitle(com.stash.stashwave.R.string.choose_layout_title)
+                .setTitle(com.stash.opusplayer.R.string.choose_layout_title)
                 .setSingleChoiceItems(choices, selectedIndex) { dialog, which ->
                     val newCols = when (which) { 0 -> 1; 1 -> 2; else -> 3 }
                     if (newCols != currentColumns) {
@@ -139,21 +141,21 @@ val metadataExtractor = com.stash.stashwave.utils.MetadataExtractor(requireConte
                         }
                         currentColumns = newCols
                         val prefs = requireContext().getSharedPreferences("settings", 0)
-                        prefs.edit().putInt(com.stash.stashwave.utils.PrefsKeys.SONGS_VIEW_COLUMNS, currentColumns).apply()
+                        prefs.edit().putInt(com.stash.opusplayer.utils.PrefsKeys.SONGS_VIEW_COLUMNS, currentColumns).apply()
                         applyColumns(currentColumns)
                         updateLayoutButtonIcon()
                         try { binding.recyclerView.scrollToPosition(firstPos) } catch (_: Exception) {}
                     }
                     dialog.dismiss()
                 }
-                .setNegativeButton(com.stash.stashwave.R.string.cancel, null)
+                .setNegativeButton(com.stash.opusplayer.R.string.cancel, null)
                 .show()
             true
         }
     }
 
     private fun updateLayoutButtonIcon() {
-        val iconRes = if (currentColumns == 1) com.stash.stashwave.R.drawable.ic_view_list else com.stash.stashwave.R.drawable.ic_view_grid
+        val iconRes = if (currentColumns == 1) com.stash.opusplayer.R.drawable.ic_view_list else com.stash.opusplayer.R.drawable.ic_view_grid
         try { binding.layoutButton.setIconResource(iconRes) } catch (_: Exception) {}
     }
 
@@ -167,8 +169,8 @@ val metadataExtractor = com.stash.stashwave.utils.MetadataExtractor(requireConte
         } else {
             binding.recyclerView.layoutManager = GridLayoutManager(requireContext(), cols)
             songAdapter.setColumns(cols)
-            val spacing = resources.getDimensionPixelSize(com.stash.stashwave.R.dimen.grid_spacing)
-            gridDecoration = com.stash.stashwave.ui.widgets.GridSpacingItemDecoration(cols, spacing, true)
+            val spacing = resources.getDimensionPixelSize(com.stash.opusplayer.R.dimen.grid_spacing)
+            gridDecoration = com.stash.opusplayer.ui.widgets.GridSpacingItemDecoration(cols, spacing, true)
             binding.recyclerView.addItemDecoration(gridDecoration!!)
         }
     }
@@ -189,6 +191,12 @@ val metadataExtractor = com.stash.stashwave.utils.MetadataExtractor(requireConte
                 }
                 .start()
             showSearchDialog()
+        }
+    }
+    
+    private fun setupSortButton() {
+        binding.sortButton.setOnClickListener {
+            showSortDialog()
         }
     }
     
@@ -213,9 +221,9 @@ val metadataExtractor = com.stash.stashwave.utils.MetadataExtractor(requireConte
             
             // Navigate to Liked Songs fragment
             (activity as? MainActivity)?.let { mainActivity ->
-val favoritesFragment = com.stash.stashwave.ui.fragments.FavoritesFragment()
+val favoritesFragment = com.stash.opusplayer.ui.fragments.FavoritesFragment()
                 mainActivity.supportFragmentManager.beginTransaction()
-.replace(com.stash.stashwave.R.id.main_content, favoritesFragment)
+.replace(com.stash.opusplayer.R.id.main_content, favoritesFragment)
                     .addToBackStack(null)
                     .commit()
                 mainActivity.supportActionBar?.title = "Liked Songs"
@@ -296,6 +304,35 @@ val favoritesFragment = com.stash.stashwave.ui.fragments.FavoritesFragment()
         }
     }
     
+    private fun showSortDialog() {
+        val sortOptions = arrayOf(
+            getString(R.string.sort_by_title),
+            getString(R.string.sort_by_artist),
+            getString(R.string.sort_by_album),
+            getString(R.string.sort_by_duration)
+        )
+        
+        AlertDialog.Builder(requireContext())
+            .setTitle(getString(R.string.choose_sort_title))
+            .setItems(sortOptions) { _, which ->
+                val sorted = when (which) {
+                    0 -> allSongs.sortedBy { it.title.lowercase() }
+                    1 -> allSongs.sortedBy { it.artist.lowercase() }
+                    2 -> allSongs.sortedBy { it.album.lowercase() }
+                    3 -> allSongs.sortedBy { it.duration }
+                    else -> allSongs
+                }
+                songAdapter.submitList(sorted)
+                android.widget.Toast.makeText(
+                    requireContext(),
+                    "Sorted by ${sortOptions[which]}",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+            .setNegativeButton(getString(R.string.cancel), null)
+            .show()
+    }
+    
     private fun loadSongs() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
@@ -320,12 +357,12 @@ val favoritesFragment = com.stash.stashwave.ui.fragments.FavoritesFragment()
                         songAdapter.submitList(full)
                     }
                 }
-(activity as? com.stash.stashwave.ui.MainActivity)?.notifyContentLoaded()
+(activity as? com.stash.opusplayer.ui.MainActivity)?.notifyContentLoaded()
             } catch (e: Exception) {
                 val b = _binding ?: return@launch
                 b.recyclerView.visibility = View.GONE
                 b.emptyStateText.visibility = View.VISIBLE
-(activity as? com.stash.stashwave.ui.MainActivity)?.notifyContentLoaded()
+(activity as? com.stash.opusplayer.ui.MainActivity)?.notifyContentLoaded()
             }
         }
     }

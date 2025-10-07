@@ -1,11 +1,11 @@
-package com.stash.stashwave.data.database
+package com.stash.opusplayer.data.database
 
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import android.content.Context
-import com.stash.stashwave.data.MetadataInfo
-import com.stash.stashwave.data.MetadataDao
+import com.stash.opusplayer.data.MetadataInfo
+import com.stash.opusplayer.data.MetadataDao
 
 @Database(
     entities = [FavoriteEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class, MetadataInfo::class],

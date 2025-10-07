@@ -1,4 +1,4 @@
-package com.stash.stashwave.utils
+package com.stash.opusplayer.utils
 
 import android.content.ContentResolver
 import android.content.Context

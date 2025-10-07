@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.widgets
+package com.stash.opusplayer.ui.widgets
 
 import android.content.Context
 import android.graphics.Canvas
@@ -7,7 +7,7 @@ import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
 import androidx.core.content.ContextCompat
-import com.stash.stashwave.R
+import com.stash.opusplayer.R
 import java.security.MessageDigest
 import kotlin.math.max
 import kotlin.math.min

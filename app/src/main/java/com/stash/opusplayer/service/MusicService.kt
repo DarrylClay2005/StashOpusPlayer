@@ -1,4 +1,4 @@
-package com.stash.stashwave.service
+package com.stash.opusplayer.service
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -24,11 +24,11 @@ import androidx.media3.session.SessionResult
 import androidx.media3.session.MediaSessionService
 import androidx.media3.ui.PlayerNotificationManager
 import androidx.media3.session.SessionCommands
-import com.stash.stashwave.R
+import com.stash.opusplayer.R
 import androidx.preference.PreferenceManager
-import com.stash.stashwave.audio.EqualizerManager
-import com.stash.stashwave.data.Song
-import com.stash.stashwave.ui.MainActivity
+import com.stash.opusplayer.audio.EqualizerManager
+import com.stash.opusplayer.data.Song
+import com.stash.opusplayer.ui.MainActivity
 import kotlin.math.pow
 import kotlin.math.log10
 import kotlinx.coroutines.GlobalScope
@@ -73,6 +73,11 @@ private lateinit var activePlayer: ExoPlayer
     private var crossfadeDurationMs: Long = 1000L
     private var audioFocusEnabled: Boolean = true
     private var crossfadePollingEnabled: Boolean = true
+
+    // AB repeat
+    private val abRepeatManager by lazy { ABRepeatManager(this) }
+    private var abCheckRunnable: Runnable? = null
+    private val abToleranceMs: Long = 250L
 
     // Playback enhancements
     private var skipSilenceEnabled: Boolean = false
@@ -339,6 +344,11 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
                         "SKIP_TO_PREVIOUS",
                         "DUMP_PLAYBACK_STATE"
                     ).forEach { add(SessionCommand(it, android.os.Bundle.EMPTY)) }
+                    // AB repeat controls
+                    add(SessionCommand("SET_AB_ENABLED", android.os.Bundle.EMPTY))
+                    add(SessionCommand("SET_AB_A", android.os.Bundle.EMPTY))
+                    add(SessionCommand("SET_AB_B", android.os.Bundle.EMPTY))
+                    add(SessionCommand("CLEAR_AB", android.os.Bundle.EMPTY))
                 }.build()
                 val playerCommands = Player.Commands.Builder().addAllCommands().build()
                 return MediaSession.ConnectionResult.accept(sessionCommands, playerCommands)
@@ -370,7 +380,7 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
                         "SET_EQ_PRESET" -> {
                             val name = args.getString("preset") ?: "NORMAL"
                             try {
-equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(name))
+equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(name))
                                 // Ensure effects are enabled when user selects a preset
                                 equalizerManager.setEnabled(true)
                                 // Persist in both default prefs and settings
@@ -445,6 +455,10 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
                         "SET_CROSSFADE_DURATION" -> {
                             val durMs = args.getLong("duration_ms", 1000L)
                             setCrossfadeDuration(durMs)
+                            // If user sets duration to 0, disable crossfade to avoid inconsistent state
+                            if (durMs <= 0L) {
+                                setCrossfadeEnabled(false)
+                            }
                         }
                         "SET_AUDIO_FOCUS" -> {
                             val enabled = args.getBoolean("enabled", true)
@@ -462,17 +476,47 @@ equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(nam
                             if (crossfadePollingEnabled && activePlayer.isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
                         }
                         "SKIP_TO_NEXT" -> {
+                            // Only continue playing if already playing, don't auto-start
+                            val wasPlaying = try { activePlayer.isPlaying } catch (_: Exception) { false }
                             cancelCrossfadeAndFocusActive()
                             try { activePlayer.seekToNextMediaItem() } catch (_: Exception) {}
-                            try { activePlayer.playWhenReady = true } catch (_: Exception) {}
+                            // Only set playWhenReady if music was already playing
+                            if (wasPlaying) {
+                                try { activePlayer.playWhenReady = true } catch (_: Exception) {}
+                            }
                         }
                         "SKIP_TO_PREVIOUS" -> {
+                            // Only continue playing if already playing, don't auto-start
+                            val wasPlaying = try { activePlayer.isPlaying } catch (_: Exception) { false }
                             cancelCrossfadeAndFocusActive()
                             try { activePlayer.seekToPreviousMediaItem() } catch (_: Exception) {}
-                            try { activePlayer.playWhenReady = true } catch (_: Exception) {}
+                            // Only set playWhenReady if music was already playing
+                            if (wasPlaying) {
+                                try { activePlayer.playWhenReady = true } catch (_: Exception) {}
+                            }
                         }
                         "DUMP_PLAYBACK_STATE" -> {
                             dumpPlaybackState()
+                        }
+                        // AB repeat commands
+                        "SET_AB_ENABLED" -> {
+                            val enabled = args.getBoolean("enabled", false)
+                            abRepeatManager.setEnabled(enabled)
+                            if (enabled && activePlayer.isPlaying) startAbCheckLoop() else if (!enabled) stopAbCheckLoop()
+                        }
+                        "SET_AB_A" -> {
+                            val pos = args.getLong("position_ms", try { activePlayer.currentPosition } catch (_: Exception) { 0L })
+                            val key = currentTrackKey()
+                            if (key != null) abRepeatManager.setPointA(key, pos)
+                        }
+                        "SET_AB_B" -> {
+                            val pos = args.getLong("position_ms", try { activePlayer.currentPosition } catch (_: Exception) { 0L })
+                            val key = currentTrackKey()
+                            if (key != null) abRepeatManager.setPointB(key, pos)
+                        }
+                        "CLEAR_AB" -> {
+                            val key = currentTrackKey()
+                            if (key != null) abRepeatManager.clearAllForTrack(key)
                         }
                     }
                 } catch (_: Exception) {}
@@ -546,18 +590,26 @@ val sessionId = activePlayer.audioSessionId
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 try {
-                    android.util.Log.e("MusicService", "onPlayerError: code=${error.errorCode} msg=${error.message}", error)
+                    val idx = try { activePlayer.currentMediaItemIndex } catch (_: Exception) { -1 }
+                    val uri = try { activePlayer.currentMediaItem?.localConfiguration?.uri?.toString() } catch (_: Exception) { null }
+                    val title = try { activePlayer.mediaMetadata.title?.toString() } catch (_: Exception) { null }
+                    android.util.Log.e(
+                        "MusicService",
+                        "onPlayerError: code=${error.errorCode} msg=${error.message} idx=$idx uri=$uri title=$title",
+                        error
+                    )
                 } catch (_: Exception) {}
             }
             
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying && crossfadeEnabled) startCrossfadePolling() else stopCrossfadePolling()
+                if (isPlaying) startAbCheckLoop() else stopAbCheckLoop()
                 // Ensure app volume is applied when playback starts
                 if (isPlaying) { try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {} }
                 // Notify widget to update
                 try {
-                    sendBroadcast(Intent(com.stash.stashwave.widgets.PlayerWidgetProvider.ACTION_UPDATE)
-                        .setComponent(ComponentName(this@MusicService, com.stash.stashwave.widgets.PlayerWidgetProvider::class.java)))
+                    sendBroadcast(Intent(com.stash.opusplayer.widgets.PlayerWidgetProvider.ACTION_UPDATE)
+                        .setComponent(ComponentName(this@MusicService, com.stash.opusplayer.widgets.PlayerWidgetProvider::class.java)))
                 } catch (_: Exception) {}
                 // Notification foreground/updates are handled by PlayerNotificationManager
                 // Check if app is in background and no active activities when paused
@@ -574,8 +626,8 @@ val sessionId = activePlayer.audioSessionId
                 try { saveQueueState() } catch (_: Exception) {}
                 // Request widget refresh
                 try {
-                    sendBroadcast(Intent(com.stash.stashwave.widgets.PlayerWidgetProvider.ACTION_UPDATE)
-                        .setComponent(ComponentName(this@MusicService, com.stash.stashwave.widgets.PlayerWidgetProvider::class.java)))
+                    sendBroadcast(Intent(com.stash.opusplayer.widgets.PlayerWidgetProvider.ACTION_UPDATE)
+                        .setComponent(ComponentName(this@MusicService, com.stash.opusplayer.widgets.PlayerWidgetProvider::class.java)))
                 } catch (_: Exception) {}
                 // Prefetch neighbor artwork to reduce flashes
                 try { prefetchNeighborArtwork() } catch (_: Exception) {}
@@ -599,6 +651,8 @@ val sessionId = activePlayer.audioSessionId
                 }
                 // Apply ReplayGain for new item
                 if (rgEnabled) applyReplayGainForCurrent()
+                // Notify AB manager of track change
+                try { abRepeatManager.onTrackChanged(currentTrackKey() ?: "") } catch (_: Exception) {}
             }
         })
     }
@@ -667,15 +721,24 @@ val sessionId = activePlayer.audioSessionId
                 val index = prefs.getInt("index", 0).coerceIn(0, items.lastIndex)
                 val pos = prefs.getLong("position", 0L).coerceAtLeast(0L)
                 try {
+                    // CRITICAL: Set playWhenReady to false to prevent auto-start
+                    android.util.Log.w("MusicService", "restoreQueueStateIfAny: Setting playWhenReady=false to prevent auto-start")
+                    activePlayer.playWhenReady = false
                     activePlayer.setMediaItems(items, index, pos)
                     activePlayer.prepare()
                 } catch (_: Exception) {
+                    android.util.Log.w("MusicService", "restoreQueueStateIfAny: Setting playWhenReady=false (exception path)")
+                    activePlayer.playWhenReady = false
                     activePlayer.setMediaItems(items)
                     activePlayer.seekTo(index, pos)
                 }
                 // Restore shuffle/repeat
                 try { activePlayer.shuffleModeEnabled = prefs.getBoolean("shuffle", activePlayer.shuffleModeEnabled) } catch (_: Exception) {}
                 try { activePlayer.repeatMode = prefs.getInt("repeat", activePlayer.repeatMode) } catch (_: Exception) {}
+                
+                // Explicitly ensure playback does NOT start automatically
+                android.util.Log.w("MusicService", "restoreQueueStateIfAny: Final check - setting playWhenReady=false")
+                activePlayer.playWhenReady = false
             }
         } catch (_: Exception) {}
     }
@@ -686,7 +749,7 @@ val sessionId = activePlayer.audioSessionId
             val title = mm.title?.toString() ?: return
             val artist = mm.artist?.toString() ?: ""
             val album = mm.albumTitle?.toString() ?: ""
-            val fallback = com.stash.stashwave.data.Song(
+            val fallback = com.stash.opusplayer.data.Song(
                 id = 0L,
                 title = title,
                 artist = artist,
@@ -694,7 +757,7 @@ val sessionId = activePlayer.audioSessionId
                 duration = try { activePlayer.duration.takeIf { it > 0 } ?: 0L } catch (_: Exception) { 0L },
                 path = ""
             )
-            val repo = com.stash.stashwave.data.MusicRepository(this)
+            val repo = com.stash.opusplayer.data.MusicRepository(this)
             // Do DB work off the main thread
             kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                 try {
@@ -879,7 +942,7 @@ val title = activePlayer.mediaMetadata.title?.toString() ?: ""
         val album = activePlayer.mediaMetadata.albumTitle?.toString() ?: ""
         if (title.isBlank() && artist.isBlank() && album.isBlank()) return null
         return try {
-            val fakeSong = com.stash.stashwave.data.Song(
+            val fakeSong = com.stash.opusplayer.data.Song(
                 id = 0L,
                 title = title,
                 artist = artist,
@@ -887,7 +950,7 @@ val title = activePlayer.mediaMetadata.title?.toString() ?: ""
                 duration = 0L,
                 path = ""
             )
-            val cache = com.stash.stashwave.artwork.ArtworkCache(this)
+            val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
             cache.loadBitmapIfPresent(fakeSong)
         } catch (_: Exception) {
             null
@@ -1004,8 +1067,48 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
         crossfadeCheckRunnable = null
     }
 
+    // AB repeat loop maintenance (~200ms). Lightweight check to seek to A when reaching B.
+    private fun startAbCheckLoop() {
+        if (abCheckRunnable != null) return
+        if (!abRepeatManager.isEnabled()) return
+        abCheckRunnable = object : Runnable {
+            override fun run() {
+                try {
+                    if (abRepeatManager.isEnabled()) {
+                        val key = currentTrackKey()
+                        if (key != null) {
+                            val points = abRepeatManager.getPoints(key)
+                            if (points != null) {
+                                val (a, b) = points
+                                val pos = try { activePlayer.currentPosition } catch (_: Exception) { 0L }
+                                if (a >= 0 && b > a && pos >= (b - abToleranceMs)) {
+                                    try { activePlayer.seekTo(a) } catch (_: Exception) {}
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) { }
+                mainHandler.postDelayed(this, 200L)
+            }
+        }
+        mainHandler.post(abCheckRunnable!!)
+    }
+
+    private fun stopAbCheckLoop() {
+        abCheckRunnable?.let { mainHandler.removeCallbacks(it) }
+        abCheckRunnable = null
+    }
+
+    private fun currentTrackKey(): String? {
+        return try {
+            activePlayer.currentMediaItem?.localConfiguration?.uri?.toString()
+                ?: activePlayer.mediaMetadata.title?.toString()
+        } catch (_: Exception) { null }
+    }
+
     private fun startTrueCrossfade() {
         // Determine the actual next media item index respecting shuffle and repeat
+        try { android.util.Log.d("MusicService", "startTrueCrossfade: enabled=$crossfadeEnabled dur=${crossfadeDurationMs}ms") } catch (_: Exception) {}
         val nextIndex = try { activePlayer.nextMediaItemIndex } catch (_: Exception) { C.INDEX_UNSET }
         if (nextIndex == C.INDEX_UNSET || nextIndex >= activePlayer.mediaItemCount) return
         val nextItem = try { activePlayer.getMediaItemAt(nextIndex) } catch (_: Exception) { null } ?: return
@@ -1045,10 +1148,18 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
                 } else {
                     // Switch session to spare and swap references
                     try {
+                        val spareSession = try { spare.audioSessionId } catch (_: Exception) { C.AUDIO_SESSION_ID_UNSET }
+                        val activeSession = try { activePlayer.audioSessionId } catch (_: Exception) { C.AUDIO_SESSION_ID_UNSET }
+                        android.util.Log.d(
+                            "MusicService",
+                            "crossfade swap: fromSession=$activeSession toSession=$spareSession nextIdx=$nextIndex"
+                        )
                         mediaSession?.setPlayer(spare)
                         try { equalizerManager.initialize(spare.audioSessionId) } catch (_: Exception) {}
                         try { configureReverbForSession(spare.audioSessionId) } catch (_: Exception) {}
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) {
+                        android.util.Log.e("MusicService", "crossfade swap setPlayer failed", e)
+                    }
                     try { activePlayer.pause() } catch (_: Exception) {}
                     try { activePlayer.seekToDefaultPosition(nextIndex) } catch (_: Exception) {}
                     try { activePlayer.stop() } catch (_: Exception) {}
@@ -1062,6 +1173,12 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
                     // Ensure notification manager targets the new active player
                     try { playerNotificationManager?.setPlayer(activePlayer) } catch (_: Exception) {}
                     try { saveQueueState() } catch (_: Exception) {}
+                    try {
+                        android.util.Log.d(
+                            "MusicService",
+                            "crossfade complete: activeIdx=${try { activePlayer.currentMediaItemIndex } catch (_: Exception) { -1 }}"
+                        )
+                    } catch (_: Exception) {}
                 }
             }
         }
@@ -1136,7 +1253,7 @@ val sessionId = activePlayer.audioSessionId
             val uri = activePlayer.currentMediaItem?.localConfiguration?.uri ?: return
             // Compute asynchronously to avoid blocking the main thread
             GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                val info = com.stash.stashwave.utils.ReplayGainUtil.parseWithCache(this@MusicService, uri.toString())
+                val info = com.stash.opusplayer.utils.ReplayGainUtil.parseWithCache(this@MusicService, uri.toString())
                 val pair = computeReplayGainFor(info)
                 val amp = pair.first
                 val leMb = pair.second
@@ -1156,7 +1273,7 @@ val sessionId = activePlayer.audioSessionId
     }
 
     // Returns Pair(ampMultiplierForPlayerVolume, positiveBoostMillibelsForLoudnessEnhancer)
-    private fun computeReplayGainFor(info: com.stash.stashwave.utils.ReplayGainUtil.Info?): Pair<Float, Int> {
+    private fun computeReplayGainFor(info: com.stash.opusplayer.utils.ReplayGainUtil.Info?): Pair<Float, Int> {
         if (!rgEnabled) return 1f to 0
         val gainDbFromTag = when (rgMode) {
             "album" -> info?.albumGainDb
@@ -1270,8 +1387,8 @@ try { activePlayer.pause() } catch (_: Exception) {}
             when (key) {
                 "equalizer_enabled" -> equalizerManager.setEnabled(prefs.getBoolean("equalizer_enabled", false))
                 "equalizer_preset" -> {
-                    val name = prefs.getString("equalizer_preset", com.stash.stashwave.audio.EqualizerPreset.NORMAL.name)
-                    try { equalizerManager.setPreset(com.stash.stashwave.audio.EqualizerPreset.valueOf(name ?: "NORMAL")) } catch (_: Exception) {}
+                    val name = prefs.getString("equalizer_preset", com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name)
+                    try { equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(name ?: "NORMAL")) } catch (_: Exception) {}
                 }
                 "bass_boost_strength" -> equalizerManager.setBassBoost(prefs.getInt("bass_boost_strength", 0))
                 "virtualizer_strength" -> equalizerManager.setVirtualizer(prefs.getInt("virtualizer_strength", 0))
@@ -1302,12 +1419,12 @@ try { activePlayer.pause() } catch (_: Exception) {}
                 val album = mi.mediaMetadata.albumTitle?.toString() ?: ""
                 if (title.isBlank() && artist.isBlank() && album.isBlank()) continue
                 try {
-                    val fakeSong = com.stash.stashwave.data.Song(0L, title, artist, album, 0L, "")
-                    val cache = com.stash.stashwave.artwork.ArtworkCache(this)
+                    val fakeSong = com.stash.opusplayer.data.Song(0L, title, artist, album, 0L, "")
+                    val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
                     val bmp = cache.loadBitmapIfPresent(fakeSong, 256)
                     if (bmp == null) {
                         kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            try { com.stash.stashwave.artwork.OnlineArtworkFetcher(this@MusicService).getOrFetch(fakeSong) } catch (_: Exception) {}
+                            try { com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@MusicService).getOrFetch(fakeSong) } catch (_: Exception) {}
                         }
                     }
                 } catch (_: Exception) {}

@@ -1,4 +1,4 @@
-package com.stash.stashwave.utils
+package com.stash.opusplayer.utils
 
 data class LrcLine(val timeMs: Long, val text: String)
 

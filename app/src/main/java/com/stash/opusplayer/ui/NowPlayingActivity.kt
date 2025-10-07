@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui
+package com.stash.opusplayer.ui
 
 import android.content.ComponentName
 import android.content.Intent
@@ -16,14 +16,14 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.session.SessionToken
 import com.bumptech.glide.Glide
 import com.google.common.util.concurrent.MoreExecutors
-import com.stash.stashwave.R
-import com.stash.stashwave.audio.EqualizerManager
-import com.stash.stashwave.data.Song
-import com.stash.stashwave.databinding.ActivityNowPlayingBinding
-import com.stash.stashwave.player.MusicPlayerManager
-import com.stash.stashwave.service.MusicService
+import com.stash.opusplayer.R
+import com.stash.opusplayer.audio.EqualizerManager
+import com.stash.opusplayer.data.Song
+import com.stash.opusplayer.databinding.ActivityNowPlayingBinding
+import com.stash.opusplayer.player.MusicPlayerManager
+import com.stash.opusplayer.service.MusicService
 import androidx.core.os.bundleOf
-import com.stash.stashwave.utils.MetadataExtractor
+import com.stash.opusplayer.utils.MetadataExtractor
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
@@ -46,6 +46,14 @@ class NowPlayingActivity : AppCompatActivity() {
         setContentView(binding.root)
         
         metadataExtractor = MetadataExtractor(this)
+        
+        // Apply appearance preferences to SynthWave
+        try {
+            val appearancePrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(this)
+            binding.synthWaveView.applyAppearancePreferences(appearancePrefs)
+        } catch (e: Exception) {
+            android.util.Log.w("NowPlayingActivity", "Error applying appearance preferences to SynthWave", e)
+        }
         
         setupUI()
         connectToMediaController()
@@ -72,8 +80,14 @@ class NowPlayingActivity : AppCompatActivity() {
             finish()
         }
         
-        // Playback controls
-        binding.playPauseButton.setOnClickListener {
+        // Playback controls with visual feedback
+        binding.playPauseButton.setOnClickListener { view ->
+            // Add visual feedback
+            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
+                .withEndAction {
+                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                }.start()
+            
             mediaController?.let { controller ->
                 if (controller.isPlaying) {
                     controller.pause()
@@ -83,26 +97,24 @@ class NowPlayingActivity : AppCompatActivity() {
             }
         }
         
-        binding.previousButton.setOnClickListener {
-            try {
-                mediaController?.sendCustomCommand(
-                    androidx.media3.session.SessionCommand("SKIP_TO_PREVIOUS", android.os.Bundle.EMPTY),
-                    android.os.Bundle.EMPTY
-                )
-            } catch (_: Exception) {
-                mediaController?.seekToPrevious()
-            }
+        binding.previousButton.setOnClickListener { view ->
+            // Add visual feedback
+            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
+                .withEndAction {
+                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                }.start()
+            
+            mediaController?.seekToPrevious()
         }
         
-        binding.nextButton.setOnClickListener {
-            try {
-                mediaController?.sendCustomCommand(
-                    androidx.media3.session.SessionCommand("SKIP_TO_NEXT", android.os.Bundle.EMPTY),
-                    android.os.Bundle.EMPTY
-                )
-            } catch (_: Exception) {
-                mediaController?.seekToNext()
-            }
+        binding.nextButton.setOnClickListener { view ->
+            // Add visual feedback
+            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
+                .withEndAction {
+                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                }.start()
+            
+            mediaController?.seekToNext()
         }
         
         binding.shuffleButton.setOnClickListener {
@@ -170,7 +182,7 @@ class NowPlayingActivity : AppCompatActivity() {
                         // Ask MainActivity to navigate to the last playback source
                         try {
                             val intent = Intent(this, MainActivity::class.java).apply {
-                                action = "com.stash.stashwave.ACTION_JUMP_TO_SOURCE"
+                                action = "com.stash.opusplayer.ACTION_JUMP_TO_SOURCE"
                                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                             }
                             startActivity(intent)
@@ -189,7 +201,7 @@ class NowPlayingActivity : AppCompatActivity() {
                         currentSong?.let { s ->
                             try {
                                 val intent = Intent(this, MainActivity::class.java).apply {
-                                    action = "com.stash.stashwave.ACTION_GO_TO_ALBUM"
+                                    action = "com.stash.opusplayer.ACTION_GO_TO_ALBUM"
                                     putExtra("album", s.albumName)
                                     addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                                 }
@@ -202,7 +214,7 @@ class NowPlayingActivity : AppCompatActivity() {
                         currentSong?.let { s ->
                             try {
                                 val intent = Intent(this, MainActivity::class.java).apply {
-                                    action = "com.stash.stashwave.ACTION_GO_TO_ARTIST"
+                                    action = "com.stash.opusplayer.ACTION_GO_TO_ARTIST"
                                     putExtra("artist", s.artistName)
                                     addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                                 }
@@ -213,6 +225,23 @@ class NowPlayingActivity : AppCompatActivity() {
                     }
                     R.id.action_show_replaygain_info -> {
                         showReplayGainInfo()
+                        true
+                    }
+                    // AB Repeat controls
+                    R.id.action_ab_toggle -> {
+                        toggleAbRepeat()
+                        true
+                    }
+                    R.id.action_ab_set_a -> {
+                        sendAbSetPoint("SET_AB_A")
+                        true
+                    }
+                    R.id.action_ab_set_b -> {
+                        sendAbSetPoint("SET_AB_B")
+                        true
+                    }
+                    R.id.action_ab_clear -> {
+                        sendAbClear()
                         true
                     }
                     else -> false
@@ -252,7 +281,7 @@ class NowPlayingActivity : AppCompatActivity() {
             currentSong?.let { song ->
                 lifecycleScope.launch {
                     try {
-val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivity)
+val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivity)
                         val isFavorite = repository.isFavorite(song.id)
                         
                         if (isFavorite) {
@@ -311,7 +340,7 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
             val controller = mediaController ?: return
             val uri = controller.currentMediaItem?.localConfiguration?.uri ?: return
             lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                val info = com.stash.stashwave.utils.ReplayGainUtil.parseWithCache(this@NowPlayingActivity, uri.toString())
+                val info = com.stash.opusplayer.utils.ReplayGainUtil.parseWithCache(this@NowPlayingActivity, uri.toString())
                 val mode = prefs.getString("replaygain_mode", "track") ?: "track"
                 val preamp = prefs.getFloat("replaygain_preamp_db", 0f)
                 val fallback = prefs.getFloat("replaygain_fallback_db", 0f)
@@ -342,7 +371,7 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
         try {
             val controller = mediaController ?: return
             val uri = controller.currentMediaItem?.localConfiguration?.uri ?: return
-            val info = com.stash.stashwave.utils.ReplayGainUtil.parseWithCache(this, uri.toString())
+            val info = com.stash.opusplayer.utils.ReplayGainUtil.parseWithCache(this, uri.toString())
             // Read settings to compute effective values similarly to service
             val prefs = getSharedPreferences("settings", 0)
             val enabled = prefs.getBoolean("replaygain_enabled", false)
@@ -412,7 +441,7 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
             android.widget.Toast.makeText(this, "No lyrics file found", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
-        val lines = com.stash.stashwave.utils.LrcParser.parse(lrcContent)
+        val lines = com.stash.opusplayer.utils.LrcParser.parse(lrcContent)
         if (lines.isEmpty()) {
             android.widget.Toast.makeText(this, "No timed lyrics found", android.widget.Toast.LENGTH_SHORT).show()
             return
@@ -446,6 +475,43 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
         }
         dialog.setOnDismissListener { handler.removeCallbacksAndMessages(null) }
         handler.post(runnable)
+    }
+
+    private fun toggleAbRepeat() {
+        try {
+            val prefs = getSharedPreferences("ab_repeat", 0)
+            val current = prefs.getBoolean("ab_enabled", false)
+            val next = !current
+            prefs.edit().putBoolean("ab_enabled", next).apply()
+            mediaController?.sendCustomCommand(
+                androidx.media3.session.SessionCommand("SET_AB_ENABLED", android.os.Bundle.EMPTY),
+                androidx.core.os.bundleOf("enabled" to next)
+            )
+            android.widget.Toast.makeText(this, if (next) "A-B Repeat ON" else "A-B Repeat OFF", android.widget.Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
+    }
+
+    private fun sendAbSetPoint(action: String) {
+        try {
+            val pos = mediaController?.currentPosition ?: 0L
+            val extras = android.os.Bundle().apply { putLong("position_ms", pos) }
+            mediaController?.sendCustomCommand(
+                androidx.media3.session.SessionCommand(action, android.os.Bundle.EMPTY),
+                extras
+            )
+            val label = if (action == "SET_AB_A") "Set A" else "Set B"
+            android.widget.Toast.makeText(this, "$label at ${formatTime(pos)}", android.widget.Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
+    }
+
+    private fun sendAbClear() {
+        try {
+            mediaController?.sendCustomCommand(
+                androidx.media3.session.SessionCommand("CLEAR_AB", android.os.Bundle.EMPTY),
+                android.os.Bundle.EMPTY
+            )
+            android.widget.Toast.makeText(this, "A-B points cleared", android.widget.Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
     }
 
     private fun showSleepTimerDialog() {
@@ -550,8 +616,8 @@ val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivit
         
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val ok = when (ext) {
-"mp3" -> com.stash.stashwave.utils.TagEditor.embedArtworkMp3(this@NowPlayingActivity, path, jpegBytes)
-else -> com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActivity, path, jpegBytes)
+"mp3" -> com.stash.opusplayer.utils.TagEditor.embedArtworkMp3(this@NowPlayingActivity, path, jpegBytes)
+else -> com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActivity, path, jpegBytes)
             }
             launch(kotlinx.coroutines.Dispatchers.Main) {
                 if (ok) {
@@ -608,7 +674,7 @@ else -> com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActiv
     }
     
     private fun setupPlayerManager() {
-        musicPlayerManager = (application as com.stash.stashwave.StashWaveApplication).playerManager
+        musicPlayerManager = (application as com.stash.opusplayer.StashWaveApplication).playerManager
         
         // Observe player state changes (shared manager)
         lifecycleScope.launch {
@@ -641,6 +707,13 @@ else -> com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActiv
                 } else {
                     stopProgressUpdates()
                 }
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                try {
+                    android.util.Log.e("NowPlayingActivity", "Player error: code=${error.errorCode} msg=${error.message}", error)
+                    android.widget.Toast.makeText(this@NowPlayingActivity, "Playback error: ${'$'}{error.errorCode}", android.widget.Toast.LENGTH_LONG).show()
+                } catch (_: Exception) {}
             }
             
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -709,7 +782,7 @@ else -> com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActiv
         val allowOnline = prefs.getBoolean("fetch_artwork_online", true)
         if (allowOnline) {
             lifecycleScope.launch {
-val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingActivity)
+val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingActivity)
                 val file = fetcher.getOrFetch(song)
                 if (file != null && song == currentSong) {
                     Glide.with(this@NowPlayingActivity)
@@ -750,9 +823,9 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
             val jpeg = baos.toByteArray()
             lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                 if (ext == "mp3") {
-                    com.stash.stashwave.utils.TagEditor.embedArtworkMp3(this@NowPlayingActivity, song.path, jpeg)
+                    com.stash.opusplayer.utils.TagEditor.embedArtworkMp3(this@NowPlayingActivity, song.path, jpeg)
                 } else {
-                    com.stash.stashwave.utils.TagEditor.embedArtworkAny(this@NowPlayingActivity, song.path, jpeg)
+                    com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActivity, song.path, jpeg)
                 }
             }
         } catch (_: Exception) {}
@@ -770,7 +843,7 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
             val title = controller.mediaMetadata.title?.toString() ?: return
             val artist = controller.mediaMetadata.artist?.toString() ?: ""
             val album = controller.mediaMetadata.albumTitle?.toString() ?: ""
-            val fakeSong = com.stash.stashwave.data.Song(
+            val fakeSong = com.stash.opusplayer.data.Song(
                 id = 0L,
                 title = title,
                 artist = artist,
@@ -778,7 +851,7 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
                 duration = controller.duration.takeIf { it > 0 } ?: 0L,
                 path = ""
             )
-            val cache = com.stash.stashwave.artwork.ArtworkCache(this)
+            val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
             val bmp = cache.loadBitmapIfPresent(fakeSong, 512)
             if (bmp != null) {
                 Glide.with(this)
@@ -862,9 +935,16 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
         stopProgressUpdates()
         progressRunnable = object : Runnable {
             override fun run() {
-                if (!isUserSeeking) {
-                    mediaController?.let { controller ->
-                        updateSeekBar(controller.currentPosition, controller.duration)
+                mediaController?.let { controller ->
+                    val currentPos = controller.currentPosition
+                    val duration = controller.duration
+                    updateSeekBar(currentPos, duration)
+                    
+                    // Update SynthWave progress
+                    try {
+                        binding.synthWaveView.updateProgress(currentPos, duration)
+                    } catch (e: Exception) {
+                        android.util.Log.w("NowPlayingActivity", "Error updating SynthWave progress", e)
                     }
                 }
                 progressHandler.postDelayed(this, 1000)
@@ -915,7 +995,7 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
     }
     
     private fun showQueueDialog() {
-        val mgr = (application as? com.stash.stashwave.StashWaveApplication)?.playerManager
+        val mgr = (application as? com.stash.opusplayer.StashWaveApplication)?.playerManager
         val list = mgr?.playlist?.value ?: emptyList()
         if (list.isEmpty()) {
             android.widget.Toast.makeText(this, "Queue is empty", android.widget.Toast.LENGTH_SHORT).show()
@@ -958,13 +1038,13 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
             // Load from cache or extract in background (silently)
             lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                 try {
-                    val repository = com.stash.stashwave.data.MusicRepository(this@NowPlayingActivity)
+                    val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivity)
                     var metadata = repository.metadataDao.getMetadata(song.path)
                     
                     // If not cached or outdated, extract metadata
                     if (metadata == null || metadata.hasErrors || isMetadataOutdated(metadata)) {
                         // Schedule background metadata scanning for this file
-                        com.stash.stashwave.work.MetadataScanWorker.scheduleMetadataScan(
+                        com.stash.opusplayer.work.MetadataScanWorker.scheduleMetadataScan(
                             this@NowPlayingActivity,
                             listOf(song.path)
                         )
@@ -1014,14 +1094,14 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
         }
     }
     
-    private fun isMetadataOutdated(metadata: com.stash.stashwave.data.MetadataInfo): Boolean {
+    private fun isMetadataOutdated(metadata: com.stash.opusplayer.data.MetadataInfo): Boolean {
         val file = java.io.File(metadata.filePath)
         if (!file.exists()) return true
         // Check if file was modified since last scan
         return file.lastModified() != metadata.lastModified
     }
     
-    private suspend fun extractMetadataQuietly(filePath: String): com.stash.stashwave.data.MetadataInfo? {
+    private suspend fun extractMetadataQuietly(filePath: String): com.stash.opusplayer.data.MetadataInfo? {
         return try {
             val file = java.io.File(filePath)
             val retriever = android.media.MediaMetadataRetriever()
@@ -1049,7 +1129,7 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
                     else -> filePath.substringAfterLast('.', "Unknown").uppercase()
                 }
                 
-                val metadata = com.stash.stashwave.data.MetadataInfo(
+                val metadata = com.stash.opusplayer.data.MetadataInfo(
                     filePath = filePath,
                     fileName = file.name,
                     duration = duration,
@@ -1063,7 +1143,7 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
                 )
                 
                 // Cache it for next time (silently)
-                val repository = com.stash.stashwave.data.MusicRepository(this)
+                val repository = com.stash.opusplayer.data.MusicRepository(this)
                 repository.metadataDao.insertMetadata(metadata)
                 
                 metadata
@@ -1090,7 +1170,8 @@ val fetcher = com.stash.stashwave.artwork.OnlineArtworkFetcher(this@NowPlayingAc
     override fun onDestroy() {
         super.onDestroy()
         stopProgressUpdates()
-        musicPlayerManager?.release()
+        // Do NOT release the shared MusicPlayerManager here — it's a singleton managed by the Application.
+        // Releasing it would drop the MediaController connection app-wide and break playback.
         mediaController?.release()
     }
 }

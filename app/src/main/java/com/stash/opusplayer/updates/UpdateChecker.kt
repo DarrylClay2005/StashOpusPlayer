@@ -1,14 +1,14 @@
-package com.stash.stashwave.updates
+package com.stash.opusplayer.updates
 
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.preference.PreferenceManager
-import com.stash.stashwave.BuildConfig
-import com.stash.stashwave.data.GitHubRelease
-import com.stash.stashwave.data.UpdateInfo
-import com.stash.stashwave.data.UpdatePriority
-import com.stash.stashwave.network.GitHubApiService
-import com.stash.stashwave.network.NetworkClient
+import com.stash.opusplayer.BuildConfig
+import com.stash.opusplayer.data.GitHubRelease
+import com.stash.opusplayer.data.UpdateInfo
+import com.stash.opusplayer.data.UpdatePriority
+import com.stash.opusplayer.network.GitHubApiService
+import com.stash.opusplayer.network.NetworkClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Calendar

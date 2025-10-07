@@ -1,15 +1,15 @@
-package com.stash.stashwave.service
+package com.stash.opusplayer.service
 
 import android.content.Context
 import android.util.Log
-import com.stash.stashwave.data.YouTubeVideo
-import com.stash.stashwave.data.AudioFormat
-import com.stash.stashwave.data.DownloadRequest
-import com.stash.stashwave.data.DownloadProgress
-import com.stash.stashwave.data.DownloadStatus
-import com.stash.stashwave.network.YouTubeApiService
-import com.stash.stashwave.utils.YtDlpExtractor
-import com.stash.stashwave.utils.MetadataExtractor
+import com.stash.opusplayer.data.YouTubeVideo
+import com.stash.opusplayer.data.AudioFormat
+import com.stash.opusplayer.data.DownloadRequest
+import com.stash.opusplayer.data.DownloadProgress
+import com.stash.opusplayer.data.DownloadStatus
+import com.stash.opusplayer.network.YouTubeApiService
+import com.stash.opusplayer.utils.YtDlpExtractor
+import com.stash.opusplayer.utils.MetadataExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -71,7 +71,7 @@ class CustomYouTubeExtractionService(private val context: Context) {
         query: String,
         maxResults: Int = 25,
         pageToken: String? = null
-): Result<com.stash.stashwave.data.YouTubeSearchResult> {
+): Result<com.stash.opusplayer.data.YouTubeSearchResult> {
         return try {
             Log.i(TAG, "🔍 Searching YouTube using Data API v3: '$query'")
             val result = youTubeApiService.searchVideos(query, maxResults, pageToken)

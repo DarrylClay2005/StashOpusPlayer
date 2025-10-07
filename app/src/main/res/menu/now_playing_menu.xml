@@ -40,5 +40,23 @@
         android:id="@+id/action_show_replaygain_info"
         android:title="Show ReplayGain Info"
         android:visible="true" />
+
+    <!-- AB Repeat actions -->
+    <item
+        android:id="@+id/action_ab_toggle"
+        android:title="Toggle A-B Repeat"
+        android:visible="true" />
+    <item
+        android:id="@+id/action_ab_set_a"
+        android:title="Set A (loop start)"
+        android:visible="true" />
+    <item
+        android:id="@+id/action_ab_set_b"
+        android:title="Set B (loop end)"
+        android:visible="true" />
+    <item
+        android:id="@+id/action_ab_clear"
+        android:title="Clear A-B Points"
+        android:visible="true" />
 </menu>
 

@@ -1,12 +1,12 @@
-package com.stash.stashwave
+package com.stash.opusplayer
 
 import android.app.Application
 
 class StashWaveApplication : Application() {
     
     // Shared player manager for the whole app
-    val playerManager: com.stash.stashwave.player.MusicPlayerManager by lazy {
-        com.stash.stashwave.player.MusicPlayerManager(this).apply { initialize() }
+    val playerManager: com.stash.opusplayer.player.MusicPlayerManager by lazy {
+        com.stash.opusplayer.player.MusicPlayerManager(this).apply { initialize() }
     }
     
     override fun onCreate() {
@@ -15,7 +15,7 @@ class StashWaveApplication : Application() {
         // Install a simple crash logger to help diagnose startup crashes
         installCrashLogger()
         try {
-            com.stash.stashwave.work.AutoEmbedWorker.schedule(this)
+            com.stash.opusplayer.work.AutoEmbedWorker.schedule(this)
         } catch (_: Exception) {}
     }
 

@@ -1,4 +1,4 @@
-package com.stash.stashwave.data
+package com.stash.opusplayer.data
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey

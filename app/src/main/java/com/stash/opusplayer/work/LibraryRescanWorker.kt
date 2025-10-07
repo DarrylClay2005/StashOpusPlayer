@@ -1,10 +1,10 @@
-package com.stash.stashwave.work
+package com.stash.opusplayer.work
 
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.stash.stashwave.data.MusicRepository
-import com.stash.stashwave.utils.LibraryScanTracker
+import com.stash.opusplayer.data.MusicRepository
+import com.stash.opusplayer.utils.LibraryScanTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
