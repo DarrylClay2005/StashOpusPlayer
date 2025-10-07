@@ -51,6 +51,17 @@ class NowPlayingActivity : AppCompatActivity() {
         try {
             val appearancePrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(this)
             binding.synthWaveView.applyAppearancePreferences(appearancePrefs)
+            
+            // Set up seek listener for SynthWave progress line
+            binding.synthWaveView.setOnSeekListener { seekPosition ->
+                mediaController?.let { controller ->
+                    if (controller.duration > 0) {
+                        val targetPosition = (seekPosition * controller.duration).toLong()
+                        controller.seekTo(targetPosition)
+                        android.widget.Toast.makeText(this, "Seeking to ${formatTime(targetPosition)}", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
         } catch (e: Exception) {
             android.util.Log.w("NowPlayingActivity", "Error applying appearance preferences to SynthWave", e)
         }
@@ -670,6 +681,23 @@ else -> com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActi
             mediaController = controllerFuture.get()
             setupMediaControllerListeners()
             updateUIFromController()
+            
+            // Connect SynthWave to the media controller's audio session
+            try {
+                mediaController?.let { controller ->
+                    val audioSessionId = controller.audioAttributes?.let { 
+                        // Try to get audio session ID from the controller
+                        if (controller is androidx.media3.exoplayer.ExoPlayer) {
+                            controller.audioSessionId
+                        } else {
+                            0 // Fall back to global session
+                        }
+                    } ?: 0
+                    binding.synthWaveView.setAudioSession(audioSessionId)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("NowPlayingActivity", "Could not connect SynthWave to audio session", e)
+            }
         }, MoreExecutors.directExecutor())
     }
     

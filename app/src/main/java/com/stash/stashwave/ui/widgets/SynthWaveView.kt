@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.*
 import android.media.audiofx.Visualizer
 import android.util.AttributeSet
+import android.view.MotionEvent
 import android.view.View
 import androidx.core.content.ContextCompat
 import com.stash.opusplayer.R
@@ -74,6 +75,13 @@ class SynthWaveView @JvmOverloads constructor(
     
     // Appearance preferences reference
     private var appearancePrefs: com.stash.opusplayer.ui.appearance.AppearancePreferences? = null
+    
+    // Audio session for specific track visualization
+    private var audioSession: Int = 0
+    
+    // Touch handling for seeking
+    private var onSeekListener: ((Float) -> Unit)? = null
+    private var isDragging = false
 
     // Particle class for visual effects
     private data class Particle(
@@ -111,8 +119,8 @@ class SynthWaveView @JvmOverloads constructor(
 
     fun start() {
         try {
-            // Visualizer on global output mix (session 0) to avoid wiring to player
-            visualizer = Visualizer(0).apply {
+            // Use specific audio session if set, otherwise fall back to global output (session 0)
+            visualizer = Visualizer(audioSession).apply {
                 captureSize = Visualizer.getCaptureSizeRange()[1]
                 setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
                     override fun onWaveFormDataCapture(
@@ -195,6 +203,27 @@ class SynthWaveView @JvmOverloads constructor(
             glowPaint.color = ContextCompat.getColor(context, R.color.accent_gradient_start)
             particlePaint.color = ContextCompat.getColor(context, R.color.accent_color)
         }
+    }
+    
+    /**
+     * Set the audio session ID to visualize specific track
+     */
+    fun setAudioSession(sessionId: Int) {
+        if (audioSession != sessionId) {
+            audioSession = sessionId
+            // Restart visualizer with new session
+            if (visualizer != null) {
+                stop()
+                start()
+            }
+        }
+    }
+    
+    /**
+     * Set listener for seek events when user drags the progress line
+     */
+    fun setOnSeekListener(listener: (Float) -> Unit) {
+        onSeekListener = listener
     }
     
     private fun processFrequencyData(fftBytes: ByteArray) {
@@ -366,16 +395,32 @@ class SynthWaveView @JvmOverloads constructor(
         // Draw progress indicator line in progress mode
         if (progressMode && progress > 0f && progress < 1f) {
             val progressX = activeWidth
+            val baseColor = if (useCustomColors) {
+                appearancePrefs?.synthWavePrimaryColor ?: paint1.color
+            } else {
+                paint1.color
+            }
+            
+            // Make the line more visible when being dragged
             val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE
-                strokeWidth = dp(2f)
-                color = if (useCustomColors) {
-                    appearancePrefs?.synthWavePrimaryColor ?: paint1.color
-                } else {
-                    paint1.color
-                }
-                alpha = 200
+                strokeWidth = if (isDragging) dp(4f) else dp(2f)
+                color = baseColor
+                alpha = if (isDragging) 255 else 200
             }
+            
+            // Add glow effect when dragging
+            if (isDragging) {
+                val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = dp(8f)
+                    color = baseColor
+                    alpha = 100
+                    maskFilter = BlurMaskFilter(dp(4f), BlurMaskFilter.Blur.NORMAL)
+                }
+                canvas.drawLine(progressX, h * 0.1f, progressX, h * 0.9f, glowPaint)
+            }
+            
             canvas.drawLine(progressX, h * 0.2f, progressX, h * 0.8f, progressPaint)
         }
     }
@@ -405,5 +450,44 @@ class SynthWaveView @JvmOverloads constructor(
         }
     }
 
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!progressMode || totalDuration <= 0) return super.onTouchEvent(event)
+        
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                val x = event.x
+                val progress = if (progressMode && totalDuration > 0) {
+                    (currentPosition.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
+                } else {
+                    1f
+                }
+                val progressX = width * progress
+                
+                // Check if touch is near the progress line (within 30dp)
+                val touchThreshold = 30 * resources.displayMetrics.density
+                if (kotlin.math.abs(x - progressX) <= touchThreshold) {
+                    isDragging = true
+                    parent.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (isDragging) {
+                    val seekPosition = (event.x / width).coerceIn(0f, 1f)
+                    onSeekListener?.invoke(seekPosition)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (isDragging) {
+                    isDragging = false
+                    parent.requestDisallowInterceptTouchEvent(false)
+                    return true
+                }
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+    
     private fun dp(v: Float) = v * resources.displayMetrics.density
 }
