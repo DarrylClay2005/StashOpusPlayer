@@ -1,4 +1,4 @@
-package com.stash.stashwave.service
+package com.stash.opusplayer.service
 
 import android.content.Context
 import android.media.MediaMetadataRetriever
@@ -6,15 +6,15 @@ import android.net.Uri
 import android.util.Base64
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
-import com.stash.stashwave.data.DownloadProgress
-import com.stash.stashwave.data.DownloadRequest
-import com.stash.stashwave.data.DownloadStatus
-import com.stash.stashwave.data.Song
-import com.stash.stashwave.utils.MetadataExtractor
-import com.stash.stashwave.utils.YtDlpExtractor
-import com.stash.stashwave.utils.FfmpegEmbedder
-import com.stash.stashwave.utils.TagEditor
-import com.stash.stashwave.artwork.ArtworkCache
+import com.stash.opusplayer.data.DownloadProgress
+import com.stash.opusplayer.data.DownloadRequest
+import com.stash.opusplayer.data.DownloadStatus
+import com.stash.opusplayer.data.Song
+import com.stash.opusplayer.utils.MetadataExtractor
+import com.stash.opusplayer.utils.YtDlpExtractor
+import com.stash.opusplayer.utils.FfmpegEmbedder
+import com.stash.opusplayer.utils.TagEditor
+import com.stash.opusplayer.artwork.ArtworkCache
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
@@ -597,19 +597,19 @@ class VideoDownloadManager(private val context: Context) {
     /**
      * Get available audio formats (simplified)
      */
-    suspend fun getAvailableFormats(videoUrl: String): Result<List<com.stash.stashwave.data.AudioFormat>> {
+    suspend fun getAvailableFormats(videoUrl: String): Result<List<com.stash.opusplayer.data.AudioFormat>> {
         return Result.success(getDefaultFormats())
     }
 
-    private fun getDefaultFormats(): List<com.stash.stashwave.data.AudioFormat> {
+    private fun getDefaultFormats(): List<com.stash.opusplayer.data.AudioFormat> {
         return listOf(
-            com.stash.stashwave.data.AudioFormat("opus-best", "opus", "Best", "160", "opus", null),
-            com.stash.stashwave.data.AudioFormat("m4a-best", "m4a", "Best", "256", "aac", null),
-            com.stash.stashwave.data.AudioFormat("mp3-best", "mp3", "Best", "320", "mp3", null),
-            com.stash.stashwave.data.AudioFormat("mp3-good", "mp3", "Good", "192", "mp3", null),
-            com.stash.stashwave.data.AudioFormat("opus-good", "opus", "Good", "128", "opus", null),
-            com.stash.stashwave.data.AudioFormat("m4a-good", "m4a", "Good", "128", "aac", null),
-            com.stash.stashwave.data.AudioFormat("mp3-medium", "mp3", "Medium", "128", "mp3", null)
+            com.stash.opusplayer.data.AudioFormat("opus-best", "opus", "Best", "160", "opus", null),
+            com.stash.opusplayer.data.AudioFormat("m4a-best", "m4a", "Best", "256", "aac", null),
+            com.stash.opusplayer.data.AudioFormat("mp3-best", "mp3", "Best", "320", "mp3", null),
+            com.stash.opusplayer.data.AudioFormat("mp3-good", "mp3", "Good", "192", "mp3", null),
+            com.stash.opusplayer.data.AudioFormat("opus-good", "opus", "Good", "128", "opus", null),
+            com.stash.opusplayer.data.AudioFormat("m4a-good", "m4a", "Good", "128", "aac", null),
+            com.stash.opusplayer.data.AudioFormat("mp3-medium", "mp3", "Medium", "128", "mp3", null)
         )
     }
 

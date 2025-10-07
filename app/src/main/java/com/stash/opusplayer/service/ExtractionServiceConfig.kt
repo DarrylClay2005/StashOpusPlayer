@@ -1,7 +1,7 @@
-package com.stash.stashwave.service
+package com.stash.opusplayer.service
 
 import android.content.Context
-import com.stash.stashwave.utils.NetworkUtils
+import com.stash.opusplayer.utils.NetworkUtils
 
 /**
  * Configuration for external video/audio extraction services.

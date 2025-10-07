@@ -1,4 +1,4 @@
-package com.stash.stashwave.integration
+package com.stash.opusplayer.integration
 
 import android.content.ActivityNotFoundException
 import android.content.ClipData

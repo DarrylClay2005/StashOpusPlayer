@@ -1,6 +1,6 @@
-package com.stash.stashwave.network
+package com.stash.opusplayer.network
 
-import com.stash.stashwave.data.GitHubRelease
+import com.stash.opusplayer.data.GitHubRelease
 import retrofit2.Response
 import retrofit2.http.GET
 import retrofit2.http.Path

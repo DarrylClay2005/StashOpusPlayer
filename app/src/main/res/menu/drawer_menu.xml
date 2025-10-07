@@ -13,6 +13,14 @@
             android:icon="@drawable/ic_playlist_play"
             android:title="@string/menu_playlists" />
         <item
+            android:id="@+id/nav_artists"
+            android:icon="@drawable/ic_person"
+            android:title="Artists" />
+        <item
+            android:id="@+id/nav_genres"
+            android:icon="@drawable/ic_category"
+            android:title="Genres" />
+        <item
             android:id="@+id/nav_equalizer"
             android:icon="@drawable/ic_equalizer"
             android:title="@string/menu_equalizer" />

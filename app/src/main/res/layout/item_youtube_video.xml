@@ -26,22 +26,22 @@
             tools:src="@tools:sample/backgrounds/scenic" />
 
         <!-- Circular play button overlay -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/playOverlayButton"
-            style="@style/Widget.Material3.Button.Icon"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:layout_gravity="center"
-            android:background="@drawable/neomorphic_accent_button"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:insetLeft="0dp"
-            android:insetRight="0dp"
-            app:icon="@drawable/ic_play_arrow"
-            app:iconTint="@color/white"
-            app:iconSize="16dp"
-            app:iconGravity="textStart"
-            android:contentDescription="Play preview" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/playOverlayButton"
+                style="@style/Widget.MaterialComponents.Button"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_gravity="center"
+                android:background="@drawable/neomorphic_accent_button"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:insetLeft="0dp"
+                android:insetRight="0dp"
+                app:icon="@drawable/ic_play_arrow"
+                app:iconTint="@color/white"
+                app:iconSize="16dp"
+                app:iconGravity="textStart"
+                android:contentDescription="Play preview" />
 
     </FrameLayout>
 
@@ -89,8 +89,8 @@
                 android:id="@+id/durationTextView"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textAppearance="?attr/textAppearanceBodySmall"
-                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
+                android:textColor="@color/text_secondary"
                 android:background="@drawable/duration_background"
                 android:paddingHorizontal="6dp"
                 android:paddingVertical="2dp"
@@ -101,8 +101,8 @@
                 android:id="@+id/viewsTextView"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textAppearance="?attr/textAppearanceBodySmall"
-                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
+                android:textColor="@color/text_secondary"
                 tools:text="1.2M views" />
 
         </LinearLayout>
@@ -129,7 +129,7 @@
                 android:id="@+id/downloadStatusText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
                 android:textColor="?attr/colorPrimary"
                 tools:text="25%" />
 

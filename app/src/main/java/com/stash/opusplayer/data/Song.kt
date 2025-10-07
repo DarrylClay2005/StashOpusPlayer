@@ -1,4 +1,4 @@
-package com.stash.stashwave.data
+package com.stash.opusplayer.data
 
 import android.os.Parcelable
 import kotlinx.parcelize.Parcelize

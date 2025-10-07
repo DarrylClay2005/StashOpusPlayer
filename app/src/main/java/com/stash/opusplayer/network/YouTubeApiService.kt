@@ -1,10 +1,10 @@
-package com.stash.stashwave.network
+package com.stash.opusplayer.network
 
 import android.util.Log
-import com.stash.stashwave.BuildConfig
-import com.stash.stashwave.data.YouTubeVideo
-import com.stash.stashwave.data.YouTubeSearchResult
-import com.stash.stashwave.data.AudioFormat
+import com.stash.opusplayer.BuildConfig
+import com.stash.opusplayer.data.YouTubeVideo
+import com.stash.opusplayer.data.YouTubeSearchResult
+import com.stash.opusplayer.data.AudioFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -92,7 +92,7 @@ class YouTubeApiService(private val context: android.content.Context) {
     private suspend fun searchVideosFallback(query: String, maxResults: Int): Result<YouTubeSearchResult> = withContext(Dispatchers.IO) {
         try {
             // Initialize yt-dlp via our extractor
-            val extractor = com.stash.stashwave.utils.YtDlpExtractor(context)
+            val extractor = com.stash.opusplayer.utils.YtDlpExtractor(context)
             if (!extractor.initialize()) {
                 return@withContext Result.failure(IOException("yt-dlp initialization failed"))
             }
@@ -108,7 +108,7 @@ class YouTubeApiService(private val context: android.content.Context) {
             if (out.isNullOrBlank()) {
                 return@withContext Result.failure(IOException("Empty result from yt-dlp search"))
             }
-            val videos = mutableListOf<com.stash.stashwave.data.YouTubeVideo>()
+            val videos = mutableListOf<com.stash.opusplayer.data.YouTubeVideo>()
             out.lineSequence().forEach { line ->
                 val t = line.trim()
                 if (t.isBlank()) return@forEach
@@ -121,7 +121,7 @@ class YouTubeApiService(private val context: android.content.Context) {
                     val publishedAt = json.optString("upload_date", "")
                     val url = "https://www.youtube.com/watch?v=$videoId"
                     videos.add(
-                        com.stash.stashwave.data.YouTubeVideo(
+                        com.stash.opusplayer.data.YouTubeVideo(
                             id = videoId,
                             title = title,
                             description = "",
@@ -137,7 +137,7 @@ class YouTubeApiService(private val context: android.content.Context) {
                     )
                 } catch (_: Exception) {}
             }
-            Result.success(com.stash.stashwave.data.YouTubeSearchResult(videos, null, videos.size))
+            Result.success(com.stash.opusplayer.data.YouTubeSearchResult(videos, null, videos.size))
         } catch (e: Exception) {
             Log.e(TAG, "yt-dlp fallback search failed", e)
             Result.failure(e)
@@ -361,7 +361,7 @@ class YouTubeApiService(private val context: android.content.Context) {
         maxResults: Int = 20,
         pageToken: String? = null,
         order: String = "relevance"
-): Result<com.stash.stashwave.data.YouTubeCommentsResult> = withContext(Dispatchers.IO) {
+): Result<com.stash.opusplayer.data.YouTubeCommentsResult> = withContext(Dispatchers.IO) {
         try {
             val base = "$BASE_URL/commentThreads"
             val url = buildString {
@@ -394,10 +394,10 @@ class YouTubeApiService(private val context: android.content.Context) {
         }
     }
 
-private fun parseCommentsResponse(jsonResponse: String): com.stash.stashwave.data.YouTubeCommentsResult {
+private fun parseCommentsResponse(jsonResponse: String): com.stash.opusplayer.data.YouTubeCommentsResult {
         val json = JSONObject(jsonResponse)
         val items = json.optJSONArray("items")
-val comments = mutableListOf<com.stash.stashwave.data.YouTubeComment>()
+val comments = mutableListOf<com.stash.opusplayer.data.YouTubeComment>()
         if (items != null) {
             for (i in 0 until items.length()) {
                 val item = items.getJSONObject(i)
@@ -412,7 +412,7 @@ val comments = mutableListOf<com.stash.stashwave.data.YouTubeComment>()
                 val replyCount = snippet.optInt("totalReplyCount", 0)
                 val commentId = topLevelComment.optString("id", null)
                 comments.add(
-com.stash.stashwave.data.YouTubeComment(
+com.stash.opusplayer.data.YouTubeComment(
                         authorName = authorName,
                         authorProfileImageUrl = authorProfileImageUrl,
                         textHtml = textHtml,
@@ -426,14 +426,14 @@ com.stash.stashwave.data.YouTubeComment(
             }
         }
         val nextPageToken = json.optString("nextPageToken", null)
-return com.stash.stashwave.data.YouTubeCommentsResult(comments, nextPageToken)
+return com.stash.opusplayer.data.YouTubeCommentsResult(comments, nextPageToken)
     }
 
     suspend fun getCommentReplies(
         parentId: String,
         maxResults: Int = 20,
         pageToken: String? = null
-): Result<com.stash.stashwave.data.YouTubeCommentsResult> = withContext(Dispatchers.IO) {
+): Result<com.stash.opusplayer.data.YouTubeCommentsResult> = withContext(Dispatchers.IO) {
         try {
             val base = "$BASE_URL/comments"
             val url = buildString {
@@ -457,10 +457,10 @@ return com.stash.stashwave.data.YouTubeCommentsResult(comments, nextPageToken)
         }
     }
 
-private fun parseRepliesResponse(jsonResponse: String, parentId: String): com.stash.stashwave.data.YouTubeCommentsResult {
+private fun parseRepliesResponse(jsonResponse: String, parentId: String): com.stash.opusplayer.data.YouTubeCommentsResult {
         val json = JSONObject(jsonResponse)
         val items = json.optJSONArray("items")
-val comments = mutableListOf<com.stash.stashwave.data.YouTubeComment>()
+val comments = mutableListOf<com.stash.opusplayer.data.YouTubeComment>()
         if (items != null) {
             for (i in 0 until items.length()) {
                 val item = items.getJSONObject(i)
@@ -472,7 +472,7 @@ val comments = mutableListOf<com.stash.stashwave.data.YouTubeComment>()
                 val publishedAt = snippet.optString("publishedAt", "")
                 val commentId = item.optString("id", null)
                 comments.add(
-com.stash.stashwave.data.YouTubeComment(
+com.stash.opusplayer.data.YouTubeComment(
                         authorName = authorName,
                         authorProfileImageUrl = authorProfileImageUrl,
                         textHtml = textHtml,
@@ -486,7 +486,7 @@ com.stash.stashwave.data.YouTubeComment(
             }
         }
         val nextPageToken = json.optString("nextPageToken", null)
-return com.stash.stashwave.data.YouTubeCommentsResult(comments, nextPageToken)
+return com.stash.opusplayer.data.YouTubeCommentsResult(comments, nextPageToken)
     }
 
     private fun formatDuration(isoDuration: String?): String? {

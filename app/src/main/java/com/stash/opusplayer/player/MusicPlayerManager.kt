@@ -1,4 +1,4 @@
-package com.stash.stashwave.player
+package com.stash.opusplayer.player
 
 import android.content.ComponentName
 import android.content.Context
@@ -9,9 +9,9 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
-import com.stash.stashwave.audio.EqualizerManager
-import com.stash.stashwave.data.Song
-import com.stash.stashwave.service.MusicService
+import com.stash.opusplayer.audio.EqualizerManager
+import com.stash.opusplayer.data.Song
+import com.stash.opusplayer.service.MusicService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -70,26 +70,38 @@ class MusicPlayerManager(private val context: Context) {
     
     fun initialize() {
         val sessionToken = SessionToken(context, ComponentName(context, MusicService::class.java))
+        android.util.Log.d("MusicPlayerManager", "initialize: building MediaController for token=${sessionToken}")
         controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture?.addListener({
-            mediaController = controllerFuture?.get()
-            mediaController?.addListener(playerListener)
-            // Flush any queued actions
-            mediaController?.let { controller ->
-                val iterator = pendingControllerActions.iterator()
-                while (iterator.hasNext()) {
-                    try {
-                        iterator.next().invoke(controller)
-                    } catch (_: Exception) {}
-                    iterator.remove()
+            try {
+                mediaController = controllerFuture?.get()
+                android.util.Log.d("MusicPlayerManager", "MediaController built: isConnected=${mediaController != null}")
+                mediaController?.addListener(playerListener)
+                // Flush any queued actions
+                mediaController?.let { controller ->
+                    val iterator = pendingControllerActions.iterator()
+                    while (iterator.hasNext()) {
+                        try {
+                            val action = iterator.next()
+                            action.invoke(controller)
+                        } catch (e: Exception) {
+                            android.util.Log.w("MusicPlayerManager", "pending action failed", e)
+                        }
+                        iterator.remove()
+                    }
                 }
+            } catch (e: Exception) {
+                android.util.Log.e("MusicPlayerManager", "Failed to get MediaController", e)
             }
         }, MoreExecutors.directExecutor())
     }
     
     fun release() {
-        mediaController?.removeListener(playerListener)
-        controllerFuture?.let { MediaController.releaseFuture(it) }
+        // Only to be used when the app is truly shutting down. Most screens should NOT call this.
+        try { mediaController?.removeListener(playerListener) } catch (_: Exception) {}
+        try { controllerFuture?.let { MediaController.releaseFuture(it) } } catch (_: Exception) {}
+        mediaController = null
+        controllerFuture = null
     }
     
     // Playback control methods
@@ -134,64 +146,28 @@ class MusicPlayerManager(private val context: Context) {
         _currentIndex.value = idx
         _currentSong.value = songs[idx]
         val mediaItems = songs.map { song -> createMediaItem(song) }
+        android.util.Log.d("MusicPlayerManager", "playQueue: size=${songs.size} idx=$idx firstUri=${resolveSongUri(songs.first()).toString()}")
         runWhenReady { controller ->
-            // Prefer server-side queue replacement for robustness
-            try {
-                val uris = java.util.ArrayList<String>()
-                val titles = java.util.ArrayList<String>()
-                val artists = java.util.ArrayList<String>()
-                val albums = java.util.ArrayList<String>()
-                songs.forEach { s ->
-                    val u = resolveSongUri(s).toString()
-                    uris.add(u)
-                    titles.add(s.displayName)
-                    artists.add(s.artistName)
-                    albums.add(s.albumName)
-                }
-                val extras = android.os.Bundle().apply {
-                    putStringArrayList("uris", uris)
-                    putStringArrayList("titles", titles)
-                    putStringArrayList("artists", artists)
-                    putStringArrayList("albums", albums)
-                    putInt("index", idx)
-                }
-                val cmd = androidx.media3.session.SessionCommand("REPLACE_QUEUE_AND_PLAY", android.os.Bundle.EMPTY)
-                val fut = controller.sendCustomCommand(cmd, extras)
-                fut.addListener({ /* done */ }, MoreExecutors.directExecutor())
-                return@runWhenReady
-            } catch (_: Exception) {
-                // Fallback to client-side reset if server command unsupported
-            }
-            // Fallback path (client-side)
+            android.util.Log.d("MusicPlayerManager", "runWhenReady: controller available, performing client-side queue replace/play")
+            // Send a best-effort cancel of any crossfade, but don't depend on it
             try {
                 val cancel = androidx.media3.session.SessionCommand("CANCEL_CROSSFADE", android.os.Bundle.EMPTY)
-                val future = controller.sendCustomCommand(cancel, android.os.Bundle.EMPTY)
-                future.addListener({
-                    try {
-                        try { controller.pause() } catch (_: Exception) {}
-                        try { controller.stop() } catch (_: Exception) {}
-                        try { controller.clearMediaItems() } catch (_: Exception) {}
-                        controller.setMediaItems(mediaItems, idx, 0)
-                    } catch (_: Exception) {
-                        try { controller.clearMediaItems() } catch (_: Exception) {}
-                        controller.setMediaItems(mediaItems)
-                        controller.seekToDefaultPosition(idx)
-                    }
-                    controller.prepare(); controller.play()
-                }, MoreExecutors.directExecutor())
+                controller.sendCustomCommand(cancel, android.os.Bundle.EMPTY)
+            } catch (_: Exception) {}
+            // Robust client-side queue replacement
+            try {
+                try { controller.pause() } catch (_: Exception) {}
+                try { controller.stop() } catch (_: Exception) {}
+                try { controller.clearMediaItems() } catch (_: Exception) {}
+                controller.setMediaItems(mediaItems, idx, 0)
             } catch (_: Exception) {
-                try {
-                    try { controller.pause() } catch (_: Exception) {}
-                    try { controller.stop() } catch (_: Exception) {}
-                    try { controller.clearMediaItems() } catch (_: Exception) {}
-                    controller.setMediaItems(mediaItems, idx, 0)
-                } catch (_: Exception) {
-                    try { controller.clearMediaItems() } catch (_: Exception) {}
-                    controller.setMediaItems(mediaItems)
-                    controller.seekToDefaultPosition(idx)
-                }
-                controller.prepare(); controller.play()
+                try { controller.clearMediaItems() } catch (_: Exception) {}
+                controller.setMediaItems(mediaItems)
+                controller.seekToDefaultPosition(idx)
             }
+            android.util.Log.d("MusicPlayerManager", "client-side setMediaItems complete -> prepare+play")
+            controller.prepare()
+            controller.play()
         }
     }
     
@@ -322,7 +298,7 @@ class MusicPlayerManager(private val context: Context) {
         } else {
             // Fallback from controller metadata so UI updates even without local playlist mirror
             val mm = controller.mediaMetadata
-            val fallback = com.stash.stashwave.data.Song(
+            val fallback = com.stash.opusplayer.data.Song(
                 id = 0L,
                 title = mm.title?.toString() ?: "",
                 artist = mm.artist?.toString() ?: "",
@@ -344,10 +320,34 @@ class MusicPlayerManager(private val context: Context) {
     private fun runWhenReady(action: (MediaController) -> Unit) {
         val controller = mediaController
         if (controller != null) {
-            action(controller)
+            try {
+                action(controller)
+            } catch (_: Exception) {
+                // If the controller is in a bad state (e.g., previously released), rebuild and queue the action
+                android.util.Log.w("MusicPlayerManager", "controller present but action failed; rebuilding")
+                rebuildControllerAndQueue(action)
+            }
         } else {
+            // Ensure we have a controller building if none present
+            if (controllerFuture == null) {
+                android.util.Log.d("MusicPlayerManager", "controller not ready; initializing and queuing action")
+                try { initialize() } catch (_: Exception) {}
+            } else {
+                android.util.Log.d("MusicPlayerManager", "controller building; queuing action")
+            }
             pendingControllerActions.add(action)
         }
+    }
+
+    private fun rebuildControllerAndQueue(action: (MediaController) -> Unit) {
+        try {
+            mediaController = null
+            controllerFuture?.let { MediaController.releaseFuture(it) }
+        } catch (_: Exception) {}
+        controllerFuture = null
+        // Rebuild
+        try { initialize() } catch (_: Exception) {}
+        pendingControllerActions.add(action)
     }
     
     // Shuffle helper methods

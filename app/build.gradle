@@ -9,7 +9,7 @@ plugins {
 apply plugin: 'com.github.triplet.play'
 
 android {
-    namespace 'com.stash.stashwave'
+    namespace 'com.stash.opusplayer'
     compileSdk 34
 
     // Load API keys from local.properties or environment variables
@@ -28,11 +28,11 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.stash.stashwave"
+        applicationId "com.stash.opusplayer"
         minSdk 21
         targetSdk 34
-        versionCode 133
-        versionName "10.7.27"
+        versionCode 136
+        versionName "10.7.30"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
         // Inject YouTube API key into BuildConfig

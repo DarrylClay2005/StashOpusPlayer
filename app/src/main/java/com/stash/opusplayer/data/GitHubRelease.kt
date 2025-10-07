@@ -1,4 +1,4 @@
-package com.stash.stashwave.data
+package com.stash.opusplayer.data
 
 import com.google.gson.annotations.SerializedName
 import java.util.Date

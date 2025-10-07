@@ -1,4 +1,4 @@
-package com.stash.stashwave.artwork
+package com.stash.opusplayer.artwork
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -6,7 +6,7 @@ import android.graphics.BitmapFactory
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import com.stash.stashwave.data.Song
+import com.stash.opusplayer.data.Song
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -136,7 +136,7 @@ class OnlineArtworkFetcher(context: Context) {
             val cached = cache.fileFor(song)
             if (cached.exists()) return@withContext cached
 
-            com.stash.stashwave.utils.ImageDownloadTracker.begin()
+            com.stash.opusplayer.utils.ImageDownloadTracker.begin()
             try {
                 // Try MusicBrainz + CAA
             val mbid = searchMusicBrainzRecording(song)
@@ -151,7 +151,7 @@ class OnlineArtworkFetcher(context: Context) {
                 if (cache.saveJpeg(bytes, cached)) return@withContext cached
             }
             } finally {
-                com.stash.stashwave.utils.ImageDownloadTracker.end()
+                com.stash.opusplayer.utils.ImageDownloadTracker.end()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Artwork fetch error", e)
@@ -159,7 +159,7 @@ class OnlineArtworkFetcher(context: Context) {
         return@withContext null
     }
 
-private fun buildUserAgent(): String = "StashAudio/${com.stash.stashwave.BuildConfig.VERSION_NAME} (Android; +https://github.com/DarrylClay2005/StashOpusPlayer)"
+private fun buildUserAgent(): String = "StashAudio/${com.stash.opusplayer.BuildConfig.VERSION_NAME} (Android; +https://github.com/DarrylClay2005/StashOpusPlayer)"
 
     private fun request(url: String): Request = Request.Builder()
         .url(url)

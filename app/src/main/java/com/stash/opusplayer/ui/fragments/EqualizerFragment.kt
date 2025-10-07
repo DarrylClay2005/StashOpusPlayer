@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.fragments
+package com.stash.opusplayer.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -11,9 +11,9 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.core.os.bundleOf
 import com.google.common.util.concurrent.MoreExecutors
-import com.stash.stashwave.audio.EqualizerManager
-import com.stash.stashwave.audio.EqualizerPreset
-import com.stash.stashwave.databinding.FragmentEqualizerBinding
+import com.stash.opusplayer.audio.EqualizerManager
+import com.stash.opusplayer.audio.EqualizerPreset
+import com.stash.opusplayer.databinding.FragmentEqualizerBinding
 import kotlinx.coroutines.launch
 
 class EqualizerFragment : Fragment() {
@@ -64,7 +64,7 @@ class EqualizerFragment : Fragment() {
     }
     
     private fun connectToMediaController() {
-val token = SessionToken(requireContext(), android.content.ComponentName(requireContext(), com.stash.stashwave.service.MusicService::class.java))
+val token = SessionToken(requireContext(), android.content.ComponentName(requireContext(), com.stash.opusplayer.service.MusicService::class.java))
         val future = MediaController.Builder(requireContext(), token).buildAsync()
         future.addListener({
             mediaController = future.get()
@@ -250,8 +250,8 @@ val token = SessionToken(requireContext(), android.content.ComponentName(require
             binding.equalizerSwitch.isChecked = enabled
             updateBandControlsEnabled(enabled)
 
-val presetName = prefs.getString("equalizer_preset", com.stash.stashwave.audio.EqualizerPreset.NORMAL.name) ?: com.stash.stashwave.audio.EqualizerPreset.NORMAL.name
-val index = com.stash.stashwave.audio.EqualizerPreset.values().indexOfFirst { it.name == presetName }.coerceAtLeast(0)
+val presetName = prefs.getString("equalizer_preset", com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name) ?: com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name
+val index = com.stash.opusplayer.audio.EqualizerPreset.values().indexOfFirst { it.name == presetName }.coerceAtLeast(0)
             binding.presetSpinner.setSelection(index)
 
             val bass = prefs.getInt("bass_boost_strength", 0)

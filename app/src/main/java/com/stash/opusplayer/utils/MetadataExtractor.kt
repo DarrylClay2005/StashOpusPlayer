@@ -1,4 +1,4 @@
-package com.stash.stashwave.utils
+package com.stash.opusplayer.utils
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -7,7 +7,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Base64
 import android.util.Log
-import com.stash.stashwave.data.Song
+import com.stash.opusplayer.data.Song
 import java.io.ByteArrayOutputStream
 import java.io.File
 
@@ -108,7 +108,7 @@ class MetadataExtractor(private val context: Context) {
 
             // Save to on-device cache for fast reuse
             try {
-val cache = com.stash.stashwave.artwork.ArtworkCache(context)
+val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
                 val outFile = cache.fileFor(song)
                 if (!outFile.exists()) {
                     cache.saveJpeg(compressedBytes, outFile)
@@ -258,7 +258,7 @@ val cache = com.stash.stashwave.artwork.ArtworkCache(context)
 
     fun loadCachedArtwork(context: Context, song: Song, maxDim: Int = MAX_ART_DIMENSION): Bitmap? {
         return try {
-            val cache = com.stash.stashwave.artwork.ArtworkCache(context)
+            val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
             // Try exact match
             cache.loadBitmapIfPresent(song, maxDim)
                 ?: run {
@@ -485,7 +485,7 @@ val cache = com.stash.stashwave.artwork.ArtworkCache(context)
         // Cache the thumbnail for faster future loads
         if (thumbnailBase64 != null) {
             try {
-                val cache = com.stash.stashwave.artwork.ArtworkCache(context)
+                val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
                 val artBytes = Base64.decode(thumbnailBase64, Base64.DEFAULT)
                 val outFile = cache.fileFor(song)
                 if (!outFile.exists()) {

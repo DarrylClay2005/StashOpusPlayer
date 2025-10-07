@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.fragments
+package com.stash.opusplayer.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -7,9 +7,12 @@ import android.widget.*
 import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
-import com.stash.stashwave.ui.MainActivity
+import com.stash.opusplayer.ui.MainActivity
 import android.content.Intent
-import com.stash.stashwave.updates.UpdatePreferences
+import com.stash.opusplayer.updates.UpdatePreferences
+import android.graphics.Color
+import android.content.res.ColorStateList
+import com.stash.opusplayer.utils.ResponsiveUtils
 
 class SettingsFragment : Fragment() {
     private val folderPickerLauncher = registerForActivityResult(
@@ -23,7 +26,7 @@ class SettingsFragment : Fragment() {
                     uri, flags
                 )
                 // Save to repository prefs
-                val repo = com.stash.stashwave.data.MusicRepository(requireContext())
+                val repo = com.stash.opusplayer.data.MusicRepository(requireContext())
                 repo.addCustomMusicFolderTreeUri(uri.toString())
                 Toast.makeText(requireContext(), "Folder added. Pull-to-refresh Folders tab to rescan.", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
@@ -58,23 +61,46 @@ class SettingsFragment : Fragment() {
         val tabs = com.google.android.material.tabs.TabLayout(requireContext()).apply {
             addTab(newTab().setText("General"))
             addTab(newTab().setText("Audio"))
-            tabGravity = com.google.android.material.tabs.TabLayout.GRAVITY_FILL
+            addTab(newTab().setText("Appearance")) // Shortened for small screens
+            
+            // Apply responsive tab settings
+            val tabCount = 3
+            tabMode = ResponsiveUtils.getOptimalTabMode(requireContext(), tabCount)
+            tabGravity = ResponsiveUtils.getOptimalTabGravity(requireContext(), tabCount)
+            
+            // Log screen info for debugging
+            ResponsiveUtils.logScreenInfo(requireContext())
+            
+            // Apply responsive text sizing to tabs
+            val screenInfo = ResponsiveUtils.getScreenInfo(requireContext())
+            if (screenInfo.widthDp < 360) {
+                // For very small screens, make tab text smaller
+                for (i in 0 until tabCount) {
+                    getTabAt(i)?.let { tab ->
+                        val tabView = tab.customView ?: tab.view
+                        tabView.findViewById<android.widget.TextView>(com.google.android.material.R.id.text)?.let { textView ->
+                            ResponsiveUtils.applyResponsiveTextSize(textView, 12f) // Smaller tab text
+                        }
+                    }
+                }
+            }
         }
         root.addView(tabs, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         val contentContainer = FrameLayout(requireContext()).apply { id = View.generateViewId() }
         root.addView(contentContainer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT))
 
-        // Build the two pages as Views
+        // Build the three pages as Views
         val generalView = buildGeneralContent()
         val pitchView = buildPitchContent() // Now includes Speed & Reverb too
+        val appearanceView = buildAppearanceContent()
 
         // Select initial tab based on arguments
         val initialIndex = arguments?.getInt("initial_tab", 0) ?: 0
-        if (initialIndex == 1) {
-            contentContainer.addView(pitchView)
-        } else {
-            contentContainer.addView(generalView)
+        when (initialIndex) {
+            1 -> contentContainer.addView(pitchView)
+            2 -> contentContainer.addView(appearanceView)
+            else -> contentContainer.addView(generalView)
         }
         tabs.getTabAt(initialIndex)?.select()
 
@@ -84,6 +110,7 @@ class SettingsFragment : Fragment() {
                 when (tab.position) {
                     0 -> contentContainer.addView(generalView)
                     1 -> contentContainer.addView(pitchView)
+                    2 -> contentContainer.addView(appearanceView)
                 }
             }
             override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab) {}
@@ -131,7 +158,7 @@ class SettingsFragment : Fragment() {
 
     private fun connectController() {
         try {
-val token = androidx.media3.session.SessionToken(requireContext(), android.content.ComponentName(requireContext(), com.stash.stashwave.service.MusicService::class.java))
+val token = androidx.media3.session.SessionToken(requireContext(), android.content.ComponentName(requireContext(), com.stash.opusplayer.service.MusicService::class.java))
             controllerFuture = androidx.media3.session.MediaController.Builder(requireContext(), token).buildAsync()
             controllerFuture?.addListener({
                 try { mediaController = controllerFuture?.get() } catch (_: Exception) {}
@@ -143,14 +170,15 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         val scrollView = ScrollView(requireContext())
         val layout = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(32, 32, 32, 32)
+            // Apply responsive padding
+            ResponsiveUtils.applyResponsivePadding(this, 16, 16, 16, 16)
         }
 
-        // Title
+        // Title with responsive sizing
         val titleText = TextView(requireContext()).apply {
             text = "Settings"
-            textSize = 24f
-            setPadding(0, 0, 0, 32)
+            ResponsiveUtils.applyResponsiveTextSize(this, 20f)
+            ResponsiveUtils.applyResponsivePadding(this, 0, 0, 0, 16)
         }
         layout.addView(titleText)
 
@@ -185,26 +213,26 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
 
         // Default Songs layout
         val songsLabel = TextView(requireContext()).apply {
-            text = getString(com.stash.stashwave.R.string.default_songs_layout_title)
+            text = getString(com.stash.opusplayer.R.string.default_songs_layout_title)
             setPadding(0, 16, 0, 8)
         }
         layout.addView(songsLabel)
         val songsSpinner = android.widget.Spinner(requireContext())
         val entries = listOf(
-            getString(com.stash.stashwave.R.string.layout_list),
-            getString(com.stash.stashwave.R.string.layout_two_columns),
-            getString(com.stash.stashwave.R.string.layout_three_columns)
+            getString(com.stash.opusplayer.R.string.layout_list),
+            getString(com.stash.opusplayer.R.string.layout_two_columns),
+            getString(com.stash.opusplayer.R.string.layout_three_columns)
         )
         val adapter = android.widget.ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, entries).also {
             it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         }
         songsSpinner.adapter = adapter
-        val savedSongsCols = prefs.getInt(com.stash.stashwave.utils.PrefsKeys.DEFAULT_SONGS_VIEW_COLUMNS, 1)
+        val savedSongsCols = prefs.getInt(com.stash.opusplayer.utils.PrefsKeys.DEFAULT_SONGS_VIEW_COLUMNS, 1)
         songsSpinner.setSelection(when (savedSongsCols) { 1 -> 0; 2 -> 1; else -> 2 })
         songsSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val cols = when (position) { 0 -> 1; 1 -> 2; else -> 3 }
-                prefs.edit().putInt(com.stash.stashwave.utils.PrefsKeys.DEFAULT_SONGS_VIEW_COLUMNS, cols).apply()
+                prefs.edit().putInt(com.stash.opusplayer.utils.PrefsKeys.DEFAULT_SONGS_VIEW_COLUMNS, cols).apply()
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
@@ -212,18 +240,18 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
 
         // Default Folder layout (Folder Detail screen)
         val folderLabel = TextView(requireContext()).apply {
-            text = getString(com.stash.stashwave.R.string.default_folder_layout_title)
+            text = getString(com.stash.opusplayer.R.string.default_folder_layout_title)
             setPadding(0, 16, 0, 8)
         }
         layout.addView(folderLabel)
         val folderSpinner = android.widget.Spinner(requireContext())
         folderSpinner.adapter = adapter
-        val savedFolderCols = prefs.getInt(com.stash.stashwave.utils.PrefsKeys.DEFAULT_FOLDER_DETAIL_VIEW_COLUMNS, 1)
+        val savedFolderCols = prefs.getInt(com.stash.opusplayer.utils.PrefsKeys.DEFAULT_FOLDER_DETAIL_VIEW_COLUMNS, 1)
         folderSpinner.setSelection(when (savedFolderCols) { 1 -> 0; 2 -> 1; else -> 2 })
         folderSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val cols = when (position) { 0 -> 1; 1 -> 2; else -> 3 }
-                prefs.edit().putInt(com.stash.stashwave.utils.PrefsKeys.DEFAULT_FOLDER_DETAIL_VIEW_COLUMNS, cols).apply()
+                prefs.edit().putInt(com.stash.opusplayer.utils.PrefsKeys.DEFAULT_FOLDER_DETAIL_VIEW_COLUMNS, cols).apply()
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
@@ -446,7 +474,7 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
                 (view as? Button)?.text = "Starting rescan..."
                 
                 try {
-                    val req = androidx.work.OneTimeWorkRequestBuilder<com.stash.stashwave.work.LibraryRescanWorker>().build()
+                    val req = androidx.work.OneTimeWorkRequestBuilder<com.stash.opusplayer.work.LibraryRescanWorker>().build()
                     androidx.work.WorkManager.getInstance(requireContext()).enqueue(req)
                     Toast.makeText(requireContext(), "📚 Library rescan started! Check the banner at top for progress.", Toast.LENGTH_LONG).show()
                 } catch (_: Exception) {
@@ -471,7 +499,7 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
                 val wm = androidx.work.WorkManager.getInstance(requireContext())
                 val tag = "library_rescan_periodic"
                 if (isChecked) {
-                    val req = androidx.work.PeriodicWorkRequestBuilder<com.stash.stashwave.work.LibraryRescanWorker>(java.time.Duration.ofHours(24)).addTag(tag).build()
+                    val req = androidx.work.PeriodicWorkRequestBuilder<com.stash.opusplayer.work.LibraryRescanWorker>(java.time.Duration.ofHours(24)).addTag(tag).build()
                     wm.enqueueUniquePeriodicWork(tag, androidx.work.ExistingPeriodicWorkPolicy.UPDATE, req)
                     Toast.makeText(requireContext(), "Periodic rescan scheduled", Toast.LENGTH_SHORT).show()
                 } else {
@@ -487,7 +515,7 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
             text = "Force Re-extract All Artwork"
             setOnClickListener {
                 try {
-                    val req = androidx.work.OneTimeWorkRequestBuilder<com.stash.stashwave.work.ArtworkExtractionWorker>().build()
+                    val req = androidx.work.OneTimeWorkRequestBuilder<com.stash.opusplayer.work.ArtworkExtractionWorker>().build()
                     androidx.work.WorkManager.getInstance(requireContext()).enqueue(req)
                     Toast.makeText(requireContext(), "Artwork re-extraction started", Toast.LENGTH_SHORT).show()
                 } catch (_: Exception) {
@@ -510,8 +538,11 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         }
         layout.addView(checkUpdateButton)
 
-
         scrollView.addView(layout)
+        
+        // Apply comprehensive responsive design to the entire layout
+        ResponsiveUtils.applyResponsiveDesign(layout)
+        
         return scrollView
     }
 
@@ -519,13 +550,14 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         val scrollView = ScrollView(requireContext())
         val layout = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(32, 32, 32, 32)
+            // Apply responsive padding
+            ResponsiveUtils.applyResponsivePadding(this, 16, 16, 16, 16)
         }
 
         val title = TextView(requireContext()).apply {
             text = "Audio Controls"
-            textSize = 22f
-            setPadding(0, 0, 0, 16)
+            ResponsiveUtils.applyResponsiveTextSize(this, 18f)
+            ResponsiveUtils.applyResponsivePadding(this, 0, 0, 0, 12)
         }
         layout.addView(title)
 
@@ -578,7 +610,7 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
         layout.addView(presetLabel)
 
         val presetSpinner = Spinner(requireContext())
-val presetNames = com.stash.stashwave.audio.EqualizerPreset.values().map {
+val presetNames = com.stash.opusplayer.audio.EqualizerPreset.values().map {
             it.name.replace("_", " ").lowercase().replaceFirstChar { c -> c.uppercaseChar() }
         }
         val presetAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, presetNames)
@@ -588,13 +620,13 @@ val presetNames = com.stash.stashwave.audio.EqualizerPreset.values().map {
 
         // Restore preset selection
         val prefsEq2 = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
-val savedPresetName = prefsEq2.getString("equalizer_preset", com.stash.stashwave.audio.EqualizerPreset.NORMAL.name) ?: com.stash.stashwave.audio.EqualizerPreset.NORMAL.name
-val savedIndex = com.stash.stashwave.audio.EqualizerPreset.values().indexOfFirst { it.name == savedPresetName }.coerceAtLeast(0)
+val savedPresetName = prefsEq2.getString("equalizer_preset", com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name) ?: com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name
+val savedIndex = com.stash.opusplayer.audio.EqualizerPreset.values().indexOfFirst { it.name == savedPresetName }.coerceAtLeast(0)
         presetSpinner.setSelection(savedIndex)
 
         presetSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-val preset = com.stash.stashwave.audio.EqualizerPreset.values()[position]
+val preset = com.stash.opusplayer.audio.EqualizerPreset.values()[position]
                 prefsEq2.edit().putString("equalizer_preset", preset.name).apply()
                 mediaController?.sendCustomCommand(
                     androidx.media3.session.SessionCommand("SET_EQ_PRESET", android.os.Bundle.EMPTY),
@@ -609,11 +641,11 @@ val preset = com.stash.stashwave.audio.EqualizerPreset.values()[position]
             isSingleSelection = true
         }
         val quickPresets = listOf(
-Pair("3D Surround", com.stash.stashwave.audio.EqualizerPreset.SURROUND_3D),
-            Pair("Concert Hall", com.stash.stashwave.audio.EqualizerPreset.CONCERT_HALL),
-            Pair("Super Bass", com.stash.stashwave.audio.EqualizerPreset.SUPER_BASS_BOOST),
-            Pair("Super Reverb", com.stash.stashwave.audio.EqualizerPreset.SUPER_REVERB),
-            Pair("Lo-Fi", com.stash.stashwave.audio.EqualizerPreset.LOFI)
+Pair("3D Surround", com.stash.opusplayer.audio.EqualizerPreset.SURROUND_3D),
+            Pair("Concert Hall", com.stash.opusplayer.audio.EqualizerPreset.CONCERT_HALL),
+            Pair("Super Bass", com.stash.opusplayer.audio.EqualizerPreset.SUPER_BASS_BOOST),
+            Pair("Super Reverb", com.stash.opusplayer.audio.EqualizerPreset.SUPER_REVERB),
+            Pair("Lo-Fi", com.stash.opusplayer.audio.EqualizerPreset.LOFI)
         )
         quickPresets.forEach { (label, preset) ->
             val chip = com.google.android.material.chip.Chip(requireContext()).apply {
@@ -621,7 +653,7 @@ Pair("3D Surround", com.stash.stashwave.audio.EqualizerPreset.SURROUND_3D),
                 isCheckable = true
                 setOnClickListener {
                     val name = preset.name
-presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().indexOf(preset))
+presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().indexOf(preset))
                     prefsEq2.edit().putString("equalizer_preset", name).apply()
                     mediaController?.sendCustomCommand(
                         androidx.media3.session.SessionCommand("SET_EQ_PRESET", android.os.Bundle.EMPTY),
@@ -718,7 +750,7 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
                 
                 try {
                     parentFragmentManager.beginTransaction()
-                        .replace((view?.parent as? ViewGroup)?.id ?: (requireActivity() as androidx.appcompat.app.AppCompatActivity).findViewById<View>(com.stash.stashwave.R.id.main_content).id, com.stash.stashwave.ui.fragments.EqualizerFragment())
+                        .replace((view?.parent as? ViewGroup)?.id ?: (requireActivity() as androidx.appcompat.app.AppCompatActivity).findViewById<View>(com.stash.opusplayer.R.id.main_content).id, com.stash.opusplayer.ui.fragments.EqualizerFragment())
                         .addToBackStack(null)
                         .commit()
                 } catch (_: Exception) {
@@ -1083,8 +1115,8 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
         val savedVol = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
         val volLabel = TextView(requireContext()).apply {
             setPadding(12, 6, 12, 6)
-            setTextColor(ContextCompat.getColor(requireContext(), com.stash.stashwave.R.color.text_primary))
-            background = ContextCompat.getDrawable(requireContext(), com.stash.stashwave.R.drawable.duration_background)
+            setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_primary))
+            background = ContextCompat.getDrawable(requireContext(), com.stash.opusplayer.R.drawable.duration_background)
             textSize = 12f
         }
         fun updateVolLabel(v: Float) {
@@ -1307,14 +1339,18 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
         } catch (_: Exception) {}
 
         scrollView.addView(layout)
+        
+        // Apply comprehensive responsive design to the entire layout
+        ResponsiveUtils.applyResponsiveDesign(layout)
+        
         return scrollView
     }
     
     private fun addSectionHeader(parent: LinearLayout, title: String) {
         val header = TextView(requireContext()).apply {
             text = title
-            textSize = 18f
-            setPadding(0, 24, 0, 12)
+            ResponsiveUtils.applyResponsiveTextSize(this, 16f) // Responsive section header size
+            ResponsiveUtils.applyResponsivePadding(this, 0, 16, 0, 8) // Responsive padding
             setTextColor(ContextCompat.getColor(requireContext(), android.R.color.holo_blue_bright))
         }
         parent.addView(header)
@@ -1327,7 +1363,7 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
         }
     }
     private fun showManageFoldersDialog() {
-        val repo = com.stash.stashwave.data.MusicRepository(requireContext())
+        val repo = com.stash.opusplayer.data.MusicRepository(requireContext())
         val trees = repo.getCustomMusicFolderTreeUris().toList()
         if (trees.isEmpty()) {
             Toast.makeText(requireContext(), "No folders added", Toast.LENGTH_SHORT).show()
@@ -1352,6 +1388,394 @@ presetSpinner.setSelection(com.stash.stashwave.audio.EqualizerPreset.values().in
             .show()
     }
 
+    private fun buildAppearanceContent(): View {
+        val scrollView = ScrollView(requireContext())
+        val layout = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            // Apply responsive padding instead of fixed padding
+            ResponsiveUtils.applyResponsivePadding(this, 16, 16, 16, 16)
+        }
+
+        val currentPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+        
+        // Title with responsive text size
+        val title = TextView(requireContext()).apply {
+            text = getString(com.stash.opusplayer.R.string.settings_appearance_title)
+            ResponsiveUtils.applyResponsiveTextSize(this, 20f) // Responsive title size
+            ResponsiveUtils.applyResponsivePadding(this, 0, 0, 0, 16)
+            setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_primary))
+        }
+        layout.addView(title)
+        
+        // Quick Theme Presets Section
+        addSectionHeader(layout, "Quick Themes")
+        val presetChips = com.google.android.material.chip.ChipGroup(requireContext()).apply {
+            isSingleSelection = false
+        }
+        
+        com.stash.opusplayer.ui.appearance.AppearancePresets.listPresets().forEach { preset ->
+            val chip = com.google.android.material.chip.Chip(requireContext()).apply {
+                text = preset.name
+                isCheckable = true
+                setOnClickListener {
+                    applyAppearancePreset(preset)
+                    isChecked = false
+                }
+            }
+            presetChips.addView(chip)
+        }
+        layout.addView(presetChips)
+        
+        // Colors Section
+        addSectionHeader(layout, getString(com.stash.opusplayer.R.string.settings_appearance_theme_colors))
+        
+        // Color buttons for main colors
+        val colorButtons = listOf(
+            "Primary Color" to currentPrefs.primaryColor,
+            "Accent Color" to currentPrefs.accentColor,
+            "Background Color" to currentPrefs.backgroundColor,
+            "Primary Text Color" to currentPrefs.textPrimaryColor,
+            "Secondary Text Color" to currentPrefs.textSecondaryColor
+        )
+        
+        colorButtons.forEach { (label, color) ->
+            val colorRow = LinearLayout(requireContext()).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, 8, 0, 8)
+            }
+            
+            val labelView = TextView(requireContext()).apply {
+                text = label
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_primary))
+            }
+            colorRow.addView(labelView)
+            
+            val colorSwatch = View(requireContext()).apply {
+                val size = (48 * resources.displayMetrics.density).toInt()
+                layoutParams = LinearLayout.LayoutParams(size, size)
+                setBackgroundColor(color)
+                setOnClickListener {
+                    // Determine which color we're changing
+                    val colorKey = when (label) {
+                        "Primary Color" -> "primary"
+                        "Accent Color" -> "accent"
+                        "Background Color" -> "background"
+                        "Primary Text Color" -> "text_primary"
+                        "Secondary Text Color" -> "text_secondary"
+                        else -> return@setOnClickListener
+                    }
+                    
+                    showColorPicker(label, color) { newColor ->
+                        // Update the swatch immediately
+                        setBackgroundColor(newColor)
+                        
+                        // Save the new color to preferences
+                        val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                        val updatedPrefs = when (colorKey) {
+                            "primary" -> latestPrefs.copy(primaryColor = newColor)
+                            "accent" -> latestPrefs.copy(accentColor = newColor)
+                            "background" -> latestPrefs.copy(backgroundColor = newColor)
+                            "text_primary" -> latestPrefs.copy(textPrimaryColor = newColor)
+                            "text_secondary" -> latestPrefs.copy(textSecondaryColor = newColor)
+                            else -> latestPrefs
+                        }
+                        updatedPrefs.saveToPrefs(requireContext())
+                        
+                        // Persist as recent color
+                        com.stash.opusplayer.ui.appearance.AppearancePreferences.persistRecentColor(requireContext(), newColor)
+                        
+                        // Apply the changes
+                        com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+                        
+                        Toast.makeText(requireContext(), "$label updated!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            colorRow.addView(colorSwatch)
+            layout.addView(colorRow)
+        }
+        
+        // Typography Section
+        addSectionHeader(layout, getString(com.stash.opusplayer.R.string.settings_appearance_typography))
+        
+        // Font Scale
+        val fontScaleLabel = TextView(requireContext()).apply {
+            text = getString(com.stash.opusplayer.R.string.appearance_font_scale)
+            setPadding(0, 8, 0, 8)
+        }
+        layout.addView(fontScaleLabel)
+        
+        val fontScaleSpinner = Spinner(requireContext())
+        val fontScales = listOf(
+            "Small (85%)" to 0.85f,
+            "Medium (100%)" to 1.0f, 
+            "Large (115%)" to 1.15f,
+            "Extra Large (130%)" to 1.3f
+        )
+        val fontAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, fontScales.map { it.first })
+        fontAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        fontScaleSpinner.adapter = fontAdapter
+        fontScaleSpinner.setSelection(fontScales.indexOfFirst { it.second == currentPrefs.fontScale }.coerceAtLeast(0))
+        fontScaleSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val newScale = fontScales[position].second
+                val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                val updatedPrefs = latestPrefs.copy(fontScale = newScale)
+                updatedPrefs.saveToPrefs(requireContext())
+                // Don't recreate activity to prevent tab switching - just broadcast dynamic change
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+                Toast.makeText(requireContext(), "Font scale changed. Changes will apply when app is restarted.", Toast.LENGTH_SHORT).show()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        layout.addView(fontScaleSpinner)
+        
+        // Bold Titles Toggle
+        val boldToggle = CheckBox(requireContext()).apply {
+            text = getString(com.stash.opusplayer.R.string.appearance_title_weight_bold)
+            isChecked = currentPrefs.titleBold
+            setOnCheckedChangeListener { _, isChecked ->
+                val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                val updatedPrefs = latestPrefs.copy(titleBold = isChecked)
+                updatedPrefs.saveToPrefs(requireContext())
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            }
+        }
+        layout.addView(boldToggle)
+        
+        // UI Elements Section
+        addSectionHeader(layout, getString(com.stash.opusplayer.R.string.settings_appearance_ui_elements))
+        
+        // Shadows Toggle
+        val shadowsToggle = CheckBox(requireContext()).apply {
+            text = getString(com.stash.opusplayer.R.string.appearance_shadows_enable)
+            isChecked = currentPrefs.shadowsEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                val updatedPrefs = latestPrefs.copy(shadowsEnabled = isChecked)
+                updatedPrefs.saveToPrefs(requireContext())
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            }
+        }
+        layout.addView(shadowsToggle)
+        
+        // Animations Section
+        addSectionHeader(layout, getString(com.stash.opusplayer.R.string.settings_appearance_animations))
+        
+        // Animations Toggle
+        val animationsToggle = CheckBox(requireContext()).apply {
+            text = getString(com.stash.opusplayer.R.string.appearance_animations_enable)
+            isChecked = currentPrefs.animationsEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                val updatedPrefs = latestPrefs.copy(animationsEnabled = isChecked)
+                updatedPrefs.saveToPrefs(requireContext())
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            }
+        }
+        layout.addView(animationsToggle)
+        
+        // Animation Speed
+        val animSpeedLabel = TextView(requireContext()).apply {
+            text = getString(com.stash.opusplayer.R.string.appearance_animation_speed)
+            setPadding(0, 16, 0, 8)
+        }
+        layout.addView(animSpeedLabel)
+        
+        val animSpeedSpinner = Spinner(requireContext())
+        val animSpeeds = listOf(
+            "Slow" to com.stash.opusplayer.ui.appearance.AppearancePreferences.AnimationSpeed.SLOW,
+            "Normal" to com.stash.opusplayer.ui.appearance.AppearancePreferences.AnimationSpeed.NORMAL,
+            "Fast" to com.stash.opusplayer.ui.appearance.AppearancePreferences.AnimationSpeed.FAST
+        )
+        val animSpeedAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, animSpeeds.map { it.first })
+        animSpeedAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        animSpeedSpinner.adapter = animSpeedAdapter
+        animSpeedSpinner.setSelection(animSpeeds.indexOfFirst { it.second == currentPrefs.animationSpeed }.coerceAtLeast(0))
+        animSpeedSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val newSpeed = animSpeeds[position].second
+                val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                val updatedPrefs = latestPrefs.copy(animationSpeed = newSpeed)
+                updatedPrefs.saveToPrefs(requireContext())
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        layout.addView(animSpeedSpinner)
+        
+        // Mini Player Section
+        addSectionHeader(layout, getString(com.stash.opusplayer.R.string.settings_appearance_mini_player))
+        
+        // Show Album Art Toggle
+        val showArtToggle = CheckBox(requireContext()).apply {
+            text = getString(com.stash.opusplayer.R.string.appearance_mini_player_show_art)
+            isChecked = currentPrefs.miniPlayerShowArt
+            setOnCheckedChangeListener { _, isChecked ->
+                val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                val updatedPrefs = latestPrefs.copy(miniPlayerShowArt = isChecked)
+                updatedPrefs.saveToPrefs(requireContext())
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            }
+        }
+        layout.addView(showArtToggle)
+        
+        // Show Artist Toggle
+        val showArtistToggle = CheckBox(requireContext()).apply {
+            text = getString(com.stash.opusplayer.R.string.appearance_mini_player_show_artist)
+            isChecked = currentPrefs.miniPlayerShowArtist
+            setOnCheckedChangeListener { _, isChecked ->
+                val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                val updatedPrefs = latestPrefs.copy(miniPlayerShowArtist = isChecked)
+                updatedPrefs.saveToPrefs(requireContext())
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            }
+        }
+        layout.addView(showArtistToggle)
+        
+        // Compact Mode Toggle
+        val compactModeToggle = CheckBox(requireContext()).apply {
+            text = getString(com.stash.opusplayer.R.string.appearance_mini_player_compact_mode)
+            isChecked = currentPrefs.miniPlayerCompactMode
+            setOnCheckedChangeListener { _, isChecked ->
+                val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                val updatedPrefs = latestPrefs.copy(miniPlayerCompactMode = isChecked)
+                updatedPrefs.saveToPrefs(requireContext())
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            }
+        }
+        layout.addView(compactModeToggle)
+        
+        // UI Scale Section
+        addSectionHeader(layout, "UI Scaling")
+        
+        // Button Size Scale
+        layout.addView(createSeekBarControl(
+            "Button Size",
+            (currentPrefs.buttonSizeScale * 100).toInt(),
+            80, 120,
+            { /* preview update */ },
+            { progress ->
+                val scale = progress / 100f
+                val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                val updatedPrefs = latestPrefs.copy(buttonSizeScale = scale)
+                updatedPrefs.saveToPrefs(requireContext())
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            }
+        ))
+        
+        // Card Corner Radius
+        layout.addView(createSeekBarControl(
+            "Corner Radius",
+            currentPrefs.cardCornerRadiusDp,
+            8, 32,
+            { /* preview update */ },
+            { progress ->
+                val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                val updatedPrefs = latestPrefs.copy(cardCornerRadiusDp = progress)
+                updatedPrefs.saveToPrefs(requireContext())
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            }
+        ))
+        
+        // Reset to Defaults Button
+        val resetButton = com.google.android.material.button.MaterialButton(requireContext()).apply {
+            text = getString(com.stash.opusplayer.R.string.appearance_reset_defaults)
+            setTextColor(Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.error_color))
+            setOnClickListener {
+                showResetAppearanceDialog()
+            }
+        }
+        layout.addView(resetButton)
+        
+        scrollView.addView(layout)
+        
+        // Apply comprehensive responsive design to the entire layout
+        ResponsiveUtils.applyResponsiveDesign(layout)
+        
+        return scrollView
+    }
+    
+    private fun applyAppearancePreset(preset: com.stash.opusplayer.ui.appearance.AppearancePresets.PresetInfo) {
+        val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+        val updatedPrefs = latestPrefs.copy(
+            primaryColor = preset.primaryColor,
+            accentColor = preset.accentColor,
+            backgroundColor = preset.backgroundColor,
+            textPrimaryColor = preset.textPrimaryColor,
+            textSecondaryColor = preset.textSecondaryColor
+        )
+        updatedPrefs.saveToPrefs(requireContext())
+        com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+        Toast.makeText(requireContext(), "Preset '${preset.name}' applied!", Toast.LENGTH_SHORT).show()
+    }
+    
+    private fun showResetAppearanceDialog() {
+        androidx.appcompat.app.AlertDialog.Builder(requireContext())
+            .setTitle(getString(com.stash.opusplayer.R.string.appearance_reset_defaults))
+            .setMessage(getString(com.stash.opusplayer.R.string.appearance_confirm_reset_all))
+            .setPositiveButton("Reset") { _, _ ->
+                com.stash.opusplayer.ui.appearance.AppearancePreferences.resetToDefaults(requireContext())
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), true)
+                activity?.recreate()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+    
+    private fun createSeekBarControl(
+        title: String,
+        initialValue: Int,
+        minValue: Int,
+        maxValue: Int,
+        onPreviewUpdate: (Int) -> Unit,
+        onValueChanged: (Int) -> Unit
+    ): View {
+        val container = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 16, 0, 16)
+        }
+        
+        val labelText = TextView(requireContext()).apply {
+            text = "$title: $initialValue"
+            setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_primary))
+            setPadding(0, 0, 0, 8)
+        }
+        container.addView(labelText)
+        
+        val seekBar = SeekBar(requireContext()).apply {
+            max = maxValue - minValue
+            progress = initialValue - minValue
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        val value = progress + minValue
+                        labelText.text = "$title: $value"
+                        onPreviewUpdate(value)
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                    val value = (seekBar?.progress ?: 0) + minValue
+                    onValueChanged(value)
+                }
+            })
+        }
+        container.addView(seekBar)
+        
+        return container
+    }
+    
+    private fun showColorPicker(title: String, initialColor: Int, onColorSelected: (Int) -> Unit) {
+        val colorPicker = com.stash.opusplayer.ui.appearance.ColorPickerDialog.newInstance(
+            initialColor = initialColor,
+            onColorSelected = onColorSelected
+        )
+        colorPicker.show(parentFragmentManager, "color_picker")
+    }
+    
     private fun clearArtworkCache() {
         // Show confirmation dialog first
         androidx.appcompat.app.AlertDialog.Builder(requireContext())

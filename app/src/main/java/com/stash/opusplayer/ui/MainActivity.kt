@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui
+package com.stash.opusplayer.ui
 
 import android.Manifest
 import android.content.Intent
@@ -23,24 +23,28 @@ import androidx.appcompat.app.AlertDialog
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import com.bumptech.glide.Glide
-import com.stash.stashwave.BuildConfig
+import com.stash.opusplayer.BuildConfig
 import com.google.android.material.navigation.NavigationView
 import com.karumi.dexter.Dexter
 import com.karumi.dexter.MultiplePermissionsReport
 import com.karumi.dexter.PermissionToken
 import com.karumi.dexter.listener.PermissionRequest
 import com.karumi.dexter.listener.multi.MultiplePermissionsListener
-import com.stash.stashwave.R
-import com.stash.stashwave.databinding.ActivityMainBinding
-import com.stash.stashwave.ui.fragments.MusicLibraryFragment
-import com.stash.stashwave.ui.fragments.EqualizerFragment
-import com.stash.stashwave.ui.fragments.SettingsFragment
-import com.stash.stashwave.ui.fragments.PlaylistsFragment
-import com.stash.stashwave.ui.fragments.YouTubeSearchFragment
-import com.stash.stashwave.utils.PermissionUtils
-import com.stash.stashwave.updates.UpdateManager
-import com.stash.stashwave.player.MusicPlayerManager
-import com.stash.stashwave.data.Song
+import com.stash.opusplayer.R
+import com.stash.opusplayer.databinding.ActivityMainBinding
+import com.stash.opusplayer.ui.fragments.MusicLibraryFragment
+import com.stash.opusplayer.ui.fragments.EqualizerFragment
+import com.stash.opusplayer.ui.fragments.SettingsFragment
+import com.stash.opusplayer.ui.fragments.PlaylistsFragment
+import com.stash.opusplayer.ui.fragments.YouTubeSearchFragment
+import com.stash.opusplayer.utils.PermissionUtils
+import com.stash.opusplayer.updates.UpdateManager
+import com.stash.opusplayer.player.MusicPlayerManager
+import com.stash.opusplayer.data.Song
+import com.stash.opusplayer.ui.appearance.ThemeManager
+import com.stash.opusplayer.ui.appearance.AppearancePreferences
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
     
@@ -51,6 +55,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var musicPlayerManager: MusicPlayerManager
     private lateinit var miniPlayerView: MiniPlayerView
     
+    // Appearance customization
+    private var appearanceReceiver: BroadcastReceiver? = null
+    
     private val imagePickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -58,6 +65,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Apply appearance theme BEFORE setting content view
+        applyAppearanceTheme()
+        
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -71,6 +81,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         setupNavigationDrawer()
         setupBackgroundImage()
         
+        // Apply appearance customizations after views are set up
+        applyAppearanceToViews()
+        
         setupBottomNavigation()
         checkPermissionsAndSetup()
         requestNotificationPermissionIfNeeded()
@@ -78,9 +91,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         // Observe image download tracker to show top banner
         lifecycleScope.launch {
             repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-                com.stash.stashwave.utils.ImageDownloadTracker.active.collect { count ->
-                    val banner = findViewById<android.view.View>(com.stash.stashwave.R.id.download_banner)
-                    val text = findViewById<android.widget.TextView>(com.stash.stashwave.R.id.download_text)
+                com.stash.opusplayer.utils.ImageDownloadTracker.active.collect { count ->
+                    val banner = findViewById<android.view.View>(com.stash.opusplayer.R.id.download_banner)
+                    val text = findViewById<android.widget.TextView>(com.stash.opusplayer.R.id.download_text)
                     if (count > 0) {
                         banner.visibility = android.view.View.VISIBLE
                         text.text = "Downloading images… ($count)"
@@ -94,9 +107,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         // Observe library scanning status (filter out background metadata operations)
         lifecycleScope.launch {
             repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-                com.stash.stashwave.utils.LibraryScanTracker.status.collect { msg ->
-                    val banner = findViewById<android.view.View>(com.stash.stashwave.R.id.scanning_banner)
-                    val text = findViewById<android.widget.TextView>(com.stash.stashwave.R.id.scanning_text)
+                com.stash.opusplayer.utils.LibraryScanTracker.status.collect { msg ->
+                    val banner = findViewById<android.view.View>(com.stash.opusplayer.R.id.scanning_banner)
+                    val text = findViewById<android.widget.TextView>(com.stash.opusplayer.R.id.scanning_text)
                     
                     // Filter out background metadata scanning and processing messages
                     val shouldShow = msg.isNotBlank() && 
@@ -141,6 +154,16 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         })
     }
     
+    override fun onStart() {
+        super.onStart()
+        registerAppearanceReceiver()
+    }
+    
+    override fun onStop() {
+        super.onStop()
+        unregisterAppearanceReceiver()
+    }
+    
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val permission = android.Manifest.permission.POST_NOTIFICATIONS
@@ -165,12 +188,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     true
                 }
                 R.id.nav_liked -> {
-loadFragment(com.stash.stashwave.ui.fragments.FavoritesFragment())
+loadFragment(com.stash.opusplayer.ui.fragments.FavoritesFragment())
                     supportActionBar?.title = "Liked Songs"
                     true
                 }
                 R.id.nav_folders -> {
-loadFragment(com.stash.stashwave.ui.fragments.FoldersFragment())
+loadFragment(com.stash.opusplayer.ui.fragments.FoldersFragment())
                     supportActionBar?.title = getString(R.string.menu_folders)
                     true
                 }
@@ -217,7 +240,11 @@ loadFragment(com.stash.stashwave.ui.fragments.FoldersFragment())
                 uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
             
-            // Save URI to preferences
+            // Save URI to appearance preferences
+            val currentPrefs = AppearancePreferences.fromPrefs(this)
+            currentPrefs.copy(backgroundImageUri = uri.toString()).saveToPrefs(this)
+            
+            // Also save to legacy preference for compatibility
             sharedPreferences.edit()
                 .putString("background_image_uri", uri.toString())
                 .apply()
@@ -227,6 +254,12 @@ loadFragment(com.stash.stashwave.ui.fragments.FoldersFragment())
             Glide.with(this)
                 .load(uri)
                 .into(binding.backgroundImage)
+            
+            // Apply background overlay with current dim/blur settings
+            ThemeManager.applyBackgroundOverlay(this, currentPrefs.copy(backgroundImageUri = uri.toString()))
+            
+            // Broadcast change
+            ThemeManager.broadcastChange(this, false)
                 
         } catch (e: Exception) {
             Toast.makeText(this, "Failed to set background image", Toast.LENGTH_SHORT).show()
@@ -294,12 +327,12 @@ loadFragment(com.stash.stashwave.ui.fragments.FoldersFragment())
     private fun initializeBackgroundMetadataScanning() {
         try {
             // Schedule periodic metadata scanning (runs every 6 hours when device is idle)
-            com.stash.stashwave.work.MetadataScanWorker.schedulePeriodicMetadataScan(this)
+            com.stash.opusplayer.work.MetadataScanWorker.schedulePeriodicMetadataScan(this)
             
             // Also do an initial one-time scan for any new files (low priority)
             lifecycleScope.launch {
                 kotlinx.coroutines.delay(5000) // Wait 5 seconds after app start
-                com.stash.stashwave.work.MetadataScanWorker.scheduleMetadataScan(this@MainActivity)
+                com.stash.opusplayer.work.MetadataScanWorker.scheduleMetadataScan(this@MainActivity)
             }
         } catch (e: Exception) {
             android.util.Log.w("MainActivity", "Failed to initialize background metadata scanning", e)
@@ -315,6 +348,14 @@ loadFragment(com.stash.stashwave.ui.fragments.FoldersFragment())
             R.id.nav_playlists -> {
                 loadFragment(PlaylistsFragment())
                 supportActionBar?.title = getString(R.string.menu_playlists)
+            }
+            R.id.nav_artists -> {
+                loadFragment(com.stash.opusplayer.ui.fragments.ArtistsFragment())
+                supportActionBar?.title = "Artists"
+            }
+            R.id.nav_genres -> {
+                loadFragment(com.stash.opusplayer.ui.fragments.GenresFragment())
+                supportActionBar?.title = "Genres"
             }
             R.id.nav_equalizer -> {
                 loadFragment(EqualizerFragment())
@@ -388,28 +429,123 @@ Check for updates anytime from Settings.""")
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         when (intent?.action) {
-            "com.stash.stashwave.ACTION_JUMP_TO_SOURCE" -> jumpToLastPlaybackSource()
-            "com.stash.stashwave.ACTION_GO_TO_ARTIST" -> {
+            "com.stash.opusplayer.ACTION_JUMP_TO_SOURCE" -> jumpToLastPlaybackSource()
+            "com.stash.opusplayer.ACTION_GO_TO_ARTIST" -> {
                 val name = intent.getStringExtra("artist") ?: return
-                val repo = com.stash.stashwave.data.MusicRepository(this)
-                lifecycleScope.launch {
-                    val songs = repo.getSongsByArtist(name)
-                    val fragment = com.stash.stashwave.ui.fragments.ArtistSongsFragment.newInstance(name, ArrayList(songs))
+                val repo = com.stash.opusplayer.data.MusicRepository(this)
+                lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                    // Fast path: query MediaStore directly for this artist
+                    val quick = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { repo.getSongsByArtistDirect(name) }
+                    val songs = if (quick.isNotEmpty()) quick else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { repo.getSongsByArtist(name) }
+
+                    // Kick off background metadata scan for these files (best-effort)
+                    runCatching {
+                        val paths = songs.map { it.path }
+                        com.stash.opusplayer.work.MetadataScanWorker.scheduleMetadataScan(this@MainActivity, paths, forceRescan = false)
+                    }
+
+                    val fragment = com.stash.opusplayer.ui.fragments.ArtistSongsFragment.newInstance(name, ArrayList(songs))
                     loadFragment(fragment)
                 }
             }
-            "com.stash.stashwave.ACTION_GO_TO_ALBUM" -> {
+            "com.stash.opusplayer.ACTION_GO_TO_ALBUM" -> {
                 val album = intent.getStringExtra("album") ?: return
-                val repo = com.stash.stashwave.data.MusicRepository(this)
+                val repo = com.stash.opusplayer.data.MusicRepository(this)
                 lifecycleScope.launch {
                     val songs = repo.getSongsInAlbum(album)
-                    val fragment = com.stash.stashwave.ui.fragments.FolderDetailFragment.newInstance(album, ArrayList(songs))
+                    val fragment = com.stash.opusplayer.ui.fragments.FolderDetailFragment.newInstance(album, ArrayList(songs))
                     loadFragment(fragment)
                 }
             }
         }
     }
-
+    
+    /**
+     * Apply appearance theme early in onCreate
+     */
+    private fun applyAppearanceTheme() {
+        try {
+            val prefs = AppearancePreferences.fromPrefs(this)
+            
+            // Apply font scale
+            if (prefs.fontScale != 1.0f) {
+                ThemeManager.applyTypographyScale(this, prefs.fontScale)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error applying appearance theme", e)
+        }
+    }
+    
+    /**
+     * Apply appearance customizations to views after they're set up
+     */
+    private fun applyAppearanceToViews() {
+        try {
+            val prefs = AppearancePreferences.fromPrefs(this)
+            
+            // Apply to activity (system bars, toolbar, etc.)
+            ThemeManager.applyToActivity(this, prefs)
+            
+            // Apply background overlay
+            ThemeManager.applyBackgroundOverlay(this, prefs)
+            
+            // Apply mini player settings
+            updateMiniPlayerFromPrefs(prefs)
+            
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error applying appearance to views", e)
+        }
+    }
+    
+    /**
+     * Update mini player based on appearance preferences
+     */
+    private fun updateMiniPlayerFromPrefs(prefs: AppearancePreferences) {
+        try {
+            ThemeManager.applyMiniPlayerSettings(miniPlayerView, prefs)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error updating mini player", e)
+        }
+    }
+    
+    /**
+     * Register broadcast receiver for appearance changes
+     */
+    private fun registerAppearanceReceiver() {
+        appearanceReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context?, intent: Intent?) {
+                if (intent?.action == ThemeManager.ACTION_APPEARANCE_CHANGED) {
+                    val requiresRecreate = intent.getBooleanExtra(ThemeManager.EXTRA_REQUIRES_RECREATE, false)
+                    
+                    if (requiresRecreate) {
+                        // Recreate activity for changes that require it
+                        recreate()
+                    } else {
+                        // Apply changes dynamically
+                        applyAppearanceToViews()
+                    }
+                }
+            }
+        }
+        
+        val filter = IntentFilter(ThemeManager.ACTION_APPEARANCE_CHANGED)
+        registerReceiver(appearanceReceiver, filter)
+    }
+    
+    /**
+     * Unregister broadcast receiver
+     */
+    private fun unregisterAppearanceReceiver() {
+        appearanceReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (e: Exception) {
+                // Already unregistered
+            }
+        }
+        appearanceReceiver = null
+    }
+    
     private fun jumpToLastPlaybackSource() {
         val prefs = getSharedPreferences("playback_source", 0)
         val type = prefs.getString("type", null) ?: return
@@ -417,43 +553,43 @@ Check for updates anytime from Settings.""")
         when (type) {
             "songs" -> {
                 // Navigate to MusicLibraryFragment
-                loadFragment(com.stash.stashwave.ui.fragments.MusicLibraryFragment())
+                loadFragment(com.stash.opusplayer.ui.fragments.MusicLibraryFragment())
             }
             "artist" -> {
                 // If we have the artist name and currently cached songs, build the fragment
-                val repo = com.stash.stashwave.data.MusicRepository(this)
+                val repo = com.stash.opusplayer.data.MusicRepository(this)
                 lifecycleScope.launch {
                     val songs = repo.getSongsByArtist(arg)
-                    val fragment = com.stash.stashwave.ui.fragments.ArtistSongsFragment.newInstance(arg, ArrayList(songs))
+                    val fragment = com.stash.opusplayer.ui.fragments.ArtistSongsFragment.newInstance(arg, ArrayList(songs))
                     loadFragment(fragment)
                 }
             }
             "folder" -> {
-                val repo = com.stash.stashwave.data.MusicRepository(this)
+                val repo = com.stash.opusplayer.data.MusicRepository(this)
                 lifecycleScope.launch {
                     val songs = repo.getSongsInFolder(arg)
-                    val fragment = com.stash.stashwave.ui.fragments.FolderDetailFragment.newInstance(arg, ArrayList(songs))
+                    val fragment = com.stash.opusplayer.ui.fragments.FolderDetailFragment.newInstance(arg, ArrayList(songs))
                     loadFragment(fragment)
                 }
             }
             "playlist" -> {
                 val id = arg.toLongOrNull()
                 if (id != null) {
-                    loadFragment(com.stash.stashwave.ui.fragments.PlaylistDetailFragment.newInstance(id))
+                    loadFragment(com.stash.opusplayer.ui.fragments.PlaylistDetailFragment.newInstance(id))
                 }
             }
             "favorites" -> {
-                loadFragment(com.stash.stashwave.ui.fragments.FavoritesFragment())
+                loadFragment(com.stash.opusplayer.ui.fragments.FavoritesFragment())
             }
             else -> {
                 // Default to library
-                loadFragment(com.stash.stashwave.ui.fragments.MusicLibraryFragment())
+                loadFragment(com.stash.opusplayer.ui.fragments.MusicLibraryFragment())
             }
         }
     }
     
     private fun setupMusicPlayer() {
-        musicPlayerManager = (application as com.stash.stashwave.StashWaveApplication).playerManager
+        musicPlayerManager = (application as com.stash.opusplayer.StashWaveApplication).playerManager
     }
     
     private var playingBannerDismissRunnable: Runnable? = null
@@ -527,8 +663,8 @@ Check for updates anytime from Settings.""")
         }
     }
     
-    fun addToPlaylist(song: com.stash.stashwave.data.Song) {
-val repo = com.stash.stashwave.data.MusicRepository(this)
+    fun addToPlaylist(song: com.stash.opusplayer.data.Song) {
+val repo = com.stash.opusplayer.data.MusicRepository(this)
         lifecycleScope.launch {
             // Fetch current playlists
             val first = repo.getPlaylists().first()
@@ -555,7 +691,7 @@ val repo = com.stash.stashwave.data.MusicRepository(this)
         }
     }
 
-private fun promptCreatePlaylistAndAdd(repo: com.stash.stashwave.data.MusicRepository, song: com.stash.stashwave.data.Song) {
+    private fun promptCreatePlaylistAndAdd(repo: com.stash.opusplayer.data.MusicRepository, song: com.stash.opusplayer.data.Song) {
         val edit = android.widget.EditText(this)
         edit.hint = "Playlist name"
         androidx.appcompat.app.AlertDialog.Builder(this)
@@ -575,24 +711,24 @@ private fun promptCreatePlaylistAndAdd(repo: com.stash.stashwave.data.MusicRepos
             .show()
     }
     
-fun playNext(song: com.stash.stashwave.data.Song) {
+    fun playNext(song: com.stash.opusplayer.data.Song) {
         try {
             musicPlayerManager.insertNext(song)
             Toast.makeText(this, "Will play next", Toast.LENGTH_SHORT).show()
         } catch (_: Exception) {}
     }
 
-    fun addToQueueTail(song: com.stash.stashwave.data.Song) {
+    fun addToQueueTail(song: com.stash.opusplayer.data.Song) {
         try {
             musicPlayerManager.addToQueue(song)
             Toast.makeText(this, "Added to queue", Toast.LENGTH_SHORT).show()
         } catch (_: Exception) {}
     }
 
-fun toggleFavorite(song: com.stash.stashwave.data.Song) {
+    fun toggleFavorite(song: com.stash.opusplayer.data.Song) {
         lifecycleScope.launch {
             try {
-val repository = com.stash.stashwave.data.MusicRepository(this@MainActivity)
+val repository = com.stash.opusplayer.data.MusicRepository(this@MainActivity)
                 val isFavorite = repository.isFavorite(song.id)
                 
                 if (isFavorite) {

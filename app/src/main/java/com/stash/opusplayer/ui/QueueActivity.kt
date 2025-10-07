@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui
+package com.stash.opusplayer.ui
 
 import android.os.Bundle
 import android.view.View
@@ -9,7 +9,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DividerItemDecoration
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.stash.stashwave.R
+import com.stash.opusplayer.R
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -19,7 +19,7 @@ class QueueActivity : AppCompatActivity() {
     private lateinit var titleText: TextView
     private var adapter = QueueAdapter { index ->
         try {
-            val mgr = (application as com.stash.stashwave.StashWaveApplication).playerManager
+            val mgr = (application as com.stash.opusplayer.StashWaveApplication).playerManager
             mgr.playFromPlaylist(index)
             finish()
         } catch (_: Exception) {}
@@ -45,20 +45,20 @@ class QueueActivity : AppCompatActivity() {
                 val from = vh.bindingAdapterPosition
                 val to = target.bindingAdapterPosition
                 adapter.onItemMoved(from, to)
-                val mgr = (application as com.stash.stashwave.StashWaveApplication).playerManager
+                val mgr = (application as com.stash.opusplayer.StashWaveApplication).playerManager
                 mgr.moveItem(from, to)
                 return true
             }
             override fun onSwiped(vh: RecyclerView.ViewHolder, dir: Int) {
                 val pos = vh.bindingAdapterPosition
-                val mgr = (application as com.stash.stashwave.StashWaveApplication).playerManager
+                val mgr = (application as com.stash.opusplayer.StashWaveApplication).playerManager
                 mgr.removeItem(pos)
             }
             override fun isLongPressDragEnabled(): Boolean = true
         })
         touchHelper.attachToRecyclerView(recycler)
 
-        val mgr = (application as com.stash.stashwave.StashWaveApplication).playerManager
+        val mgr = (application as com.stash.opusplayer.StashWaveApplication).playerManager
         lifecycleScope.launch {
             mgr.playlist.collectLatest { list ->
                 adapter.submit(list, mgr.currentIndex.value)
@@ -75,10 +75,10 @@ class QueueActivity : AppCompatActivity() {
     private class QueueAdapter(
         val onClick: (Int) -> Unit
     ) : RecyclerView.Adapter<QueueViewHolder>() {
-        private var items: List<com.stash.stashwave.data.Song> = emptyList()
+        private var items: List<com.stash.opusplayer.data.Song> = emptyList()
         private var currentIndex: Int = -1
 
-        fun submit(list: List<com.stash.stashwave.data.Song>, current: Int) {
+        fun submit(list: List<com.stash.opusplayer.data.Song>, current: Int) {
             items = list
             currentIndex = current
             notifyDataSetChanged()

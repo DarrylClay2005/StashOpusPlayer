@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.widgets
+package com.stash.opusplayer.ui.widgets
 
 import android.graphics.Rect
 import android.view.View

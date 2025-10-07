@@ -8,7 +8,7 @@
     app:cardCornerRadius="8dp"
     app:cardElevation="1dp"
     app:strokeWidth="1dp"
-    app:strokeColor="?attr/colorOutline"
+    app:strokeColor="@color/border_gray"
     android:checkable="true"
     android:focusable="true"
     android:clickable="true">
@@ -47,7 +47,7 @@
                     android:id="@+id/formatName"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textAppearance="?attr/textAppearanceBodyLarge"
+                    android:textAppearance="@style/TextAppearance.StashWave.Title"
                     android:textColor="?attr/colorOnSurface"
                     android:textStyle="bold"
                     tools:text="MP3 HQ" />
@@ -60,7 +60,7 @@
                     android:background="@drawable/quality_badge_background"
                     android:paddingHorizontal="8dp"
                     android:paddingVertical="2dp"
-                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
                     android:textColor="?attr/colorOnPrimary"
                     android:textStyle="bold"
                     tools:text="HQ" />
@@ -72,8 +72,8 @@
                 android:id="@+id/formatDetails"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textAppearance="?attr/textAppearanceBodyMedium"
-                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textAppearance="@style/TextAppearance.StashWave.Body"
+                android:textColor="@color/text_secondary"
                 android:layout_marginTop="2dp"
                 tools:text="320 kbps • ~12MB • MP3 Codec" />
 

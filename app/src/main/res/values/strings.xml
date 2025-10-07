@@ -73,5 +73,91 @@
     <string name="default_songs_layout_title">Default Songs layout</string>
     <string name="default_folder_layout_title">Default Folder layout</string>
     <string name="action_change_layout">Change layout</string>
+    <string name="action_sort">Sort</string>
+    <string name="sort_by_title">Title</string>
+    <string name="sort_by_artist">Artist</string>
+    <string name="sort_by_album">Album</string>
+    <string name="sort_by_duration">Duration</string>
+    <string name="sort_by_date_added">Date Added</string>
+    <string name="sort_by_name">Name</string>
+    <string name="sort_by_size">Size</string>
+    <string name="sort_ascending">Ascending</string>
+    <string name="sort_descending">Descending</string>
+    <string name="choose_sort_title">Choose Sort Order</string>
+
+    <!-- Appearance Customization -->
+    <string name="settings_appearance_title">Appearance</string>
+    <string name="settings_appearance_theme_colors">Theme &amp; Colors</string>
+    <string name="settings_appearance_typography">Typography</string>
+    <string name="settings_appearance_ui_elements">UI Elements</string>
+    <string name="settings_appearance_background">Background</string>
+    <string name="settings_appearance_animations">Animations</string>
+    <string name="settings_appearance_mini_player">Mini Player</string>
+    <string name="settings_appearance_presets">Presets</string>
+    
+    <!-- Colors -->
+    <string name="appearance_primary_color">Primary Color</string>
+    <string name="appearance_accent_color">Accent Color</string>
+    <string name="appearance_background_color">Background Color</string>
+    <string name="appearance_text_primary_color">Primary Text Color</string>
+    <string name="appearance_text_secondary_color">Secondary Text Color</string>
+    <string name="appearance_apply_colors">Apply Colors</string>
+    <string name="appearance_presets_quick">Quick Presets</string>
+    
+    <!-- Typography -->
+    <string name="appearance_font_scale">Font Size</string>
+    <string name="appearance_font_scale_small">Small (85%)</string>
+    <string name="appearance_font_scale_medium">Medium (100%)</string>
+    <string name="appearance_font_scale_large">Large (115%)</string>
+    <string name="appearance_font_scale_xlarge">Extra Large (130%)</string>
+    <string name="appearance_title_weight_bold">Bold Titles</string>
+    <string name="appearance_title_weight_normal">Normal Weight Titles</string>
+    
+    <!-- UI Elements -->
+    <string name="appearance_button_size">Button Size</string>
+    <string name="appearance_corner_radius">Corner Radius</string>
+    <string name="appearance_shadows_enable">Enable Shadows</string>
+    <string name="appearance_shadow_intensity">Shadow Intensity</string>
+    
+    <!-- Background -->
+    <string name="appearance_background_image">Background Image</string>
+    <string name="appearance_background_blur">Background Blur</string>
+    <string name="appearance_background_dim">Background Dim</string>
+    <string name="appearance_use_solid_color">Use Solid Color Only</string>
+    
+    <!-- Animations -->
+    <string name="appearance_animations_enable">Enable Animations</string>
+    <string name="appearance_animation_speed">Animation Speed</string>
+    <string name="appearance_animation_speed_slow">Slow</string>
+    <string name="appearance_animation_speed_normal">Normal</string>
+    <string name="appearance_animation_speed_fast">Fast</string>
+    
+    <!-- Mini Player -->
+    <string name="appearance_mini_player_height">Mini Player Height</string>
+    <string name="appearance_mini_player_show_art">Show Album Art</string>
+    <string name="appearance_mini_player_show_artist">Show Artist Name</string>
+    <string name="appearance_mini_player_compact_mode">Compact Mode</string>
+    <string name="appearance_mini_player_spinning_art">Spinning Album Art Animation</string>
+    
+    <!-- Presets -->
+    <string name="appearance_save_preset">Save as Preset</string>
+    <string name="appearance_load_preset">Load Preset</string>
+    <string name="appearance_export_preset">Export Preset</string>
+    <string name="appearance_import_preset">Import Preset</string>
+    <string name="appearance_delete_preset">Delete Preset</string>
+    <string name="appearance_reset_defaults">Reset to Defaults</string>
+    <string name="appearance_reset_section">Reset Section</string>
+    <string name="appearance_confirm_reset_all">Reset all appearance settings to defaults? This will restart the app.</string>
+    <string name="appearance_confirm_delete_preset">Delete this preset?</string>
+    <string name="appearance_preset_name_hint">Preset name</string>
+    
+    <!-- Common -->
+    <string name="appearance_live_preview">Live Preview</string>
+    <string name="toast_saved">Saved</string>
+    <string name="toast_applied">Applied</string>
+    <string name="toast_import_success">Preset imported successfully</string>
+    <string name="toast_export_success">Preset exported successfully</string>
+    <string name="toast_error">Error occurred</string>
+    <string name="tooltip_contrast_warning">⚠️ Low contrast detected. Text may be hard to read.</string>
 
 </resources>

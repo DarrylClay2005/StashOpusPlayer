@@ -1,4 +1,4 @@
-package com.stash.stashwave.activity
+package com.stash.opusplayer.activity
 
 import android.os.Bundle
 import android.util.Log
@@ -7,10 +7,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.stash.stashwave.R
-import com.stash.stashwave.service.ExtractionServiceConfig
-import com.stash.stashwave.service.CustomYouTubeExtractionService
-import com.stash.stashwave.utils.NetworkUtils
+import com.stash.opusplayer.R
+import com.stash.opusplayer.service.ExtractionServiceConfig
+import com.stash.opusplayer.service.CustomYouTubeExtractionService
+import com.stash.opusplayer.utils.NetworkUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

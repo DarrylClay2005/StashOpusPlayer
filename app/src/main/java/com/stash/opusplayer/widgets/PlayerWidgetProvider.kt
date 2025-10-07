@@ -1,4 +1,4 @@
-package com.stash.stashwave.widgets
+package com.stash.opusplayer.widgets
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
@@ -10,20 +10,20 @@ import android.graphics.Bitmap
 import android.widget.RemoteViews
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
-import com.stash.stashwave.R
-import com.stash.stashwave.service.MusicService
-import com.stash.stashwave.ui.MainActivity
+import com.stash.opusplayer.R
+import com.stash.opusplayer.service.MusicService
+import com.stash.opusplayer.ui.MainActivity
 import com.google.common.util.concurrent.MoreExecutors
 
 class PlayerWidgetProvider : AppWidgetProvider() {
 
     companion object {
-        const val ACTION_PLAY_PAUSE = "com.stash.stashwave.widgets.PLAY_PAUSE"
-        const val ACTION_NEXT = "com.stash.stashwave.widgets.NEXT"
-        const val ACTION_PREV = "com.stash.stashwave.widgets.PREV"
-        const val ACTION_REWIND_10 = "com.stash.stashwave.widgets.REWIND_10"
-        const val ACTION_FF_10 = "com.stash.stashwave.widgets.FF_10"
-        const val ACTION_UPDATE = "com.stash.stashwave.widgets.UPDATE"
+        const val ACTION_PLAY_PAUSE = "com.stash.opusplayer.widgets.PLAY_PAUSE"
+        const val ACTION_NEXT = "com.stash.opusplayer.widgets.NEXT"
+        const val ACTION_PREV = "com.stash.opusplayer.widgets.PREV"
+        const val ACTION_REWIND_10 = "com.stash.opusplayer.widgets.REWIND_10"
+        const val ACTION_FF_10 = "com.stash.opusplayer.widgets.FF_10"
+        const val ACTION_UPDATE = "com.stash.opusplayer.widgets.UPDATE"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -135,7 +135,7 @@ class PlayerWidgetProvider : AppWidgetProvider() {
 
     private fun loadArtworkBitmap(context: Context, title: String, artist: String, album: String): Bitmap? {
         return try {
-            val fake = com.stash.stashwave.data.Song(
+            val fake = com.stash.opusplayer.data.Song(
                 id = 0L,
                 title = title,
                 artist = artist,
@@ -143,7 +143,7 @@ class PlayerWidgetProvider : AppWidgetProvider() {
                 duration = 0L,
                 path = ""
             )
-            val cache = com.stash.stashwave.artwork.ArtworkCache(context)
+            val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
             cache.loadBitmapIfPresent(fake, 256)
         } catch (_: Exception) {
             null

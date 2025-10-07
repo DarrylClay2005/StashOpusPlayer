@@ -1,4 +1,4 @@
-package com.stash.stashwave.ui.fragments
+package com.stash.opusplayer.ui.fragments
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -7,9 +7,9 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.stash.stashwave.data.MusicRepository
-import com.stash.stashwave.databinding.FragmentGenresBinding
-import com.stash.stashwave.ui.adapters.GenreAdapter
+import com.stash.opusplayer.data.MusicRepository
+import com.stash.opusplayer.databinding.FragmentGenresBinding
+import com.stash.opusplayer.ui.adapters.GenreAdapter
 import kotlinx.coroutines.launch
 
 class GenresFragment : Fragment() {
@@ -37,8 +37,16 @@ class GenresFragment : Fragment() {
     }
 
     private fun setupRecyclerView() {
-        adapter = GenreAdapter { _ ->
-            // TODO: navigate to a genre detail list if needed
+        adapter = GenreAdapter { genre ->
+            // Navigate to show songs in this genre
+            val fragment = com.stash.opusplayer.ui.fragments.FolderDetailFragment.newInstance(
+                title = "Genre: ${genre.name}", 
+                songs = ArrayList(genre.songs)
+            )
+            parentFragmentManager.beginTransaction()
+                .replace(com.stash.opusplayer.R.id.main_content, fragment)
+                .addToBackStack(null)
+                .commit()
         }
         binding.recyclerView.apply {
             layoutManager = LinearLayoutManager(requireContext())
@@ -79,5 +87,5 @@ class GenresFragment : Fragment() {
 data class GenreInfo(
     val name: String,
     val songCount: Int,
-    val songs: List<com.stash.stashwave.data.Song>
+    val songs: List<com.stash.opusplayer.data.Song>
 )

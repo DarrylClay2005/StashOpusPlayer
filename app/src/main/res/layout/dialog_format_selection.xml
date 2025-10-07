@@ -11,7 +11,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Select Audio Format"
-        android:textAppearance="?attr/textAppearanceHeadlineSmall"
+        android:textAppearance="@style/TextAppearance.StashWave.Title"
         android:textColor="?attr/colorOnSurface"
         android:layout_marginBottom="8dp"
         android:gravity="center" />
@@ -21,7 +21,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Tap a format to start downloading immediately"
-        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
         android:textColor="?attr/colorPrimary"
         android:layout_marginBottom="16dp"
         android:gravity="center"
@@ -33,7 +33,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:layout_marginBottom="24dp"
-        android:background="?attr/colorSurfaceVariant"
+        android:background="@color/surface_variant"
         android:padding="12dp"
         android:gravity="center_vertical">
 
@@ -55,7 +55,7 @@
                 android:id="@+id/videoTitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textAppearance="@style/TextAppearance.StashWave.Body"
                 android:textColor="?attr/colorOnSurface"
                 android:maxLines="2"
                 android:ellipsize="end"
@@ -65,8 +65,8 @@
                 android:id="@+id/videoChannel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textAppearance="?attr/textAppearanceBodySmall"
-                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
+                android:textColor="@color/text_secondary"
                 android:maxLines="1"
                 android:ellipsize="end"
                 android:layout_marginTop="2dp"
@@ -81,7 +81,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Choose audio quality and format:"
-        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:textAppearance="@style/TextAppearance.StashWave.Body"
         android:textColor="?attr/colorOnSurface"
         android:layout_marginBottom="12dp" />
 
@@ -102,7 +102,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/cancelButton"
-            style="@style/Widget.Material3.Button.TextButton"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Cancel" />

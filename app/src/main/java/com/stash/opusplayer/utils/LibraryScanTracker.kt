@@ -1,4 +1,4 @@
-package com.stash.stashwave.utils
+package com.stash.opusplayer.utils
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

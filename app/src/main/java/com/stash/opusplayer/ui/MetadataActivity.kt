@@ -1,9 +1,9 @@
-package com.stash.stashwave.ui
+package com.stash.opusplayer.ui
 
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.stash.stashwave.R
+import com.stash.opusplayer.R
 import kotlinx.coroutines.launch
 
 class MetadataActivity : AppCompatActivity() {
@@ -15,7 +15,7 @@ class MetadataActivity : AppCompatActivity() {
     }
 
     private fun populate() {
-        val mgr = (application as com.stash.stashwave.StashWaveApplication).playerManager
+        val mgr = (application as com.stash.opusplayer.StashWaveApplication).playerManager
         val current = mgr.currentSong.value
         if (current != null) {
             setText(R.id.fileNameValue, java.io.File(current.path).name)
@@ -24,7 +24,7 @@ class MetadataActivity : AppCompatActivity() {
         }
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val repository = com.stash.stashwave.data.MusicRepository(this@MetadataActivity)
+                val repository = com.stash.opusplayer.data.MusicRepository(this@MetadataActivity)
                 val path = current?.path ?: return@launch
                 var metadata = repository.metadataDao.getMetadata(path)
                 if (metadata == null || isMetadataOutdated(metadata)) {
@@ -45,13 +45,13 @@ class MetadataActivity : AppCompatActivity() {
         findViewById<android.widget.TextView>(id)?.text = text
     }
 
-    private fun isMetadataOutdated(metadata: com.stash.stashwave.data.MetadataInfo): Boolean {
+    private fun isMetadataOutdated(metadata: com.stash.opusplayer.data.MetadataInfo): Boolean {
         val file = java.io.File(metadata.filePath)
         if (!file.exists()) return true
         return file.lastModified() != metadata.lastModified
     }
 
-    private suspend fun extractMetadataQuietly(filePath: String): com.stash.stashwave.data.MetadataInfo? {
+    private suspend fun extractMetadataQuietly(filePath: String): com.stash.opusplayer.data.MetadataInfo? {
         return try {
             val file = java.io.File(filePath)
             val retriever = android.media.MediaMetadataRetriever()
@@ -75,7 +75,7 @@ class MetadataActivity : AppCompatActivity() {
                     mimeType.contains("wma", true) -> "WMA"
                     else -> filePath.substringAfterLast('.', "Unknown").uppercase()
                 }
-                val metadata = com.stash.stashwave.data.MetadataInfo(
+                val metadata = com.stash.opusplayer.data.MetadataInfo(
                     filePath = filePath,
                     fileName = file.name,
                     duration = duration,
@@ -87,7 +87,7 @@ class MetadataActivity : AppCompatActivity() {
                     lastModified = if (file.exists()) file.lastModified() else 0L,
                     hasErrors = false
                 )
-                val repository = com.stash.stashwave.data.MusicRepository(this)
+                val repository = com.stash.opusplayer.data.MusicRepository(this)
                 repository.metadataDao.insertMetadata(metadata)
                 metadata
             } finally { retriever.release() }

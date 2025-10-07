@@ -1,4 +1,4 @@
-package com.stash.stashwave.data
+package com.stash.opusplayer.data
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -6,13 +6,13 @@ import android.database.Cursor
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.preference.PreferenceManager
-import com.stash.stashwave.data.database.FavoriteEntity
-import com.stash.stashwave.data.database.MusicDatabase
-import com.stash.stashwave.data.database.PlaylistDao
-import com.stash.stashwave.data.database.PlaylistEntity
-import com.stash.stashwave.data.database.PlaylistTrackEntity
-import com.stash.stashwave.data.database.PlaylistWithCount
-import com.stash.stashwave.utils.MetadataExtractor
+import com.stash.opusplayer.data.database.FavoriteEntity
+import com.stash.opusplayer.data.database.MusicDatabase
+import com.stash.opusplayer.data.database.PlaylistDao
+import com.stash.opusplayer.data.database.PlaylistEntity
+import com.stash.opusplayer.data.database.PlaylistTrackEntity
+import com.stash.opusplayer.data.database.PlaylistWithCount
+import com.stash.opusplayer.utils.MetadataExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -21,7 +21,7 @@ import java.io.File
 
 class MusicRepository(private val context: Context) {
     
-private val aiTagger = com.stash.stashwave.ai.AITagger(context)
+private val aiTagger = com.stash.opusplayer.ai.AITagger(context)
     
     private val database = MusicDatabase.getDatabase(context)
     private val favoriteDao = database.favoriteDao()
@@ -178,12 +178,12 @@ private fun isValidAudioFile(path: String): Boolean {
     
     // Enhanced method to get all songs with metadata and favorites status
 suspend fun getAllSongsWithMetadata(): List<Song> = withContext(Dispatchers.IO) {
-        if (com.stash.stashwave.utils.LibraryScanTracker.isScanInProgress()) {
+        if (com.stash.opusplayer.utils.LibraryScanTracker.isScanInProgress()) {
             return@withContext emptyList()
         }
         
         try {
-            com.stash.stashwave.utils.LibraryScanTracker.startScan("Scanning MediaStore…")
+            com.stash.opusplayer.utils.LibraryScanTracker.startScan("Scanning MediaStore…")
             val baseSongs = getAllSongs()
             // For now, we'll just return songs without favorite status since Flow handling is complex
             // This will be enhanced in future updates
@@ -195,7 +195,7 @@ suspend fun getAllSongsWithMetadata(): List<Song> = withContext(Dispatchers.IO) 
                 aiTagger.enhanceSong(withFav)
             }
         } finally {
-            com.stash.stashwave.utils.LibraryScanTracker.completeScan()
+            com.stash.opusplayer.utils.LibraryScanTracker.completeScan()
         }
     }
     
@@ -214,12 +214,12 @@ suspend fun getAllSongsWithMetadata(): List<Song> = withContext(Dispatchers.IO) 
     
     // Scan custom folders for music files
 suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
-        if (com.stash.stashwave.utils.LibraryScanTracker.isScanInProgress()) {
+        if (com.stash.opusplayer.utils.LibraryScanTracker.isScanInProgress()) {
             return@withContext emptyList()
         }
         
         try {
-            com.stash.stashwave.utils.LibraryScanTracker.startScan("Scanning custom folders…")
+            com.stash.opusplayer.utils.LibraryScanTracker.startScan("Scanning custom folders…")
             val customFolders = getCustomMusicFolders()
             val songs = mutableListOf<Song>()
             
@@ -229,7 +229,7 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
             
             songs.distinctBy { it.path } // Remove duplicates
         } finally {
-            com.stash.stashwave.utils.LibraryScanTracker.completeScan()
+            com.stash.opusplayer.utils.LibraryScanTracker.completeScan()
         }
     }
     
@@ -350,7 +350,7 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
     // AI-ish genre inference using tags or heuristics; placeholder for external APIs
     suspend fun getSongsByGenreSmart(): Map<String, List<Song>> = withContext(Dispatchers.IO) {
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-        val youTube = com.stash.stashwave.network.YouTubeApiService(context)
+        val youTube = com.stash.opusplayer.network.YouTubeApiService(context)
 
         fun normalizeTitle(name: String): String {
             return name.lowercase()
@@ -503,15 +503,15 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
 
     // Combined method to get all songs from both MediaStore and custom folders (full metadata + AI)
     suspend fun getAllSongsFromAllSources(): List<Song> = withContext(Dispatchers.IO) {
-        if (com.stash.stashwave.utils.LibraryScanTracker.isScanInProgress()) {
+        if (com.stash.opusplayer.utils.LibraryScanTracker.isScanInProgress()) {
             return@withContext emptyList()
         }
         
         try {
-            com.stash.stashwave.utils.LibraryScanTracker.startScan("Scanning your library…")
+            com.stash.opusplayer.utils.LibraryScanTracker.startScan("Scanning your library…")
             // Use fast scan first to avoid blocking
             val fast = getAllSongsFromAllSourcesFast()
-            com.stash.stashwave.utils.LibraryScanTracker.update("Processing metadata…")
+            com.stash.opusplayer.utils.LibraryScanTracker.update("Processing metadata…")
             // Then enrich each with metadata and AI
             val enriched = fast.map { s -> metadataExtractor.extractMetadata(s) }
             val ai = aiTagger.enhanceSongs(enriched)
@@ -521,10 +521,10 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
                 val key = stableKey(s)
                 if (!deduped.containsKey(key)) deduped[key] = s
             }
-            com.stash.stashwave.utils.LibraryScanTracker.update("Finalizing…")
+            com.stash.opusplayer.utils.LibraryScanTracker.update("Finalizing…")
             deduped.values.sortedBy { it.displayName }
         } finally {
-            com.stash.stashwave.utils.LibraryScanTracker.completeScan()
+            com.stash.opusplayer.utils.LibraryScanTracker.completeScan()
         }
     }
     
@@ -544,7 +544,7 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
     }
 
 private suspend fun scanDocumentTrees(): List<Song> = withContext(Dispatchers.IO) {
-        com.stash.stashwave.utils.LibraryScanTracker.update("Scanning added folders…")
+        com.stash.opusplayer.utils.LibraryScanTracker.update("Scanning added folders…")
         val result = mutableListOf<Song>()
         val trees = getCustomMusicFolderTreeUris()
         for (uriStr in trees) {
@@ -659,6 +659,56 @@ if (isValidAudioFile(name) || child.type?.startsWith("audio/") == true) {
         } catch (_: Exception) {
             "path:${song.path}"
         }
+    }
+
+    // Fast path: query MediaStore directly for a specific artist (case-insensitive best-effort)
+    suspend fun getSongsByArtistDirect(artist: String): List<Song> = withContext(Dispatchers.IO) {
+        val songs = mutableListOf<Song>()
+        if (artist.isBlank()) return@withContext songs
+        try {
+            // Base selection ensures only music files; artist match uses exact equality where possible
+            val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.ARTIST} = ?"
+            val selectionArgs = arrayOf(artist)
+            val sortOrder = "${MediaStore.Audio.Media.DISPLAY_NAME} ASC"
+
+            val projection = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) arrayOf(
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.ARTIST,
+                MediaStore.Audio.Media.ALBUM,
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.ALBUM_ID,
+                MediaStore.Audio.Media.ARTIST_ID,
+                MediaStore.Audio.Media.DATE_ADDED,
+                MediaStore.Audio.Media.SIZE,
+                MediaStore.Audio.Media.MIME_TYPE,
+                MediaStore.Audio.Media.RELATIVE_PATH
+            ) else PROJECTION
+
+            val cursor = context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                sortOrder
+            )
+            cursor?.use { c ->
+                while (c.moveToNext()) {
+                    val s = createSongFromCursorCompat(c)
+                    if (s != null) {
+                        // Some devices may not match case-insensitively; enforce here as safety
+                        if (s.artistName.equals(artist, ignoreCase = true) && isValidAudioFile(s.path)) {
+                            songs.add(s)
+                        }
+                    }
+                }
+            }
+        } catch (_: SecurityException) {
+            // Ignore and return whatever collected
+        } catch (_: Exception) {
+            // Ignore and return whatever collected
+        }
+        songs
     }
 
     companion object {
