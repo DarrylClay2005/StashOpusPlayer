@@ -1647,6 +1647,115 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
         }
         layout.addView(compactModeToggle)
         
+        // SynthWave Visualizer Section
+        addSectionHeader(layout, "SynthWave Visualizer")
+        
+        // Progress Mode Toggle
+        val synthWaveProgressToggle = CheckBox(requireContext()).apply {
+            text = "Progress-based Waveform"
+            isChecked = currentPrefs.synthWaveProgressMode
+            setOnCheckedChangeListener { _, isChecked ->
+                val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                val updatedPrefs = latestPrefs.copy(synthWaveProgressMode = isChecked)
+                updatedPrefs.saveToPrefs(requireContext())
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            }
+        }
+        layout.addView(synthWaveProgressToggle)
+        
+        // Use Custom Colors Toggle
+        val synthWaveCustomToggle = CheckBox(requireContext()).apply {
+            text = "Use Custom Colors"
+            isChecked = currentPrefs.synthWaveUseCustomColors
+            setOnCheckedChangeListener { _, isChecked ->
+                val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                val updatedPrefs = latestPrefs.copy(synthWaveUseCustomColors = isChecked)
+                updatedPrefs.saveToPrefs(requireContext())
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            }
+        }
+        layout.addView(synthWaveCustomToggle)
+        
+        // SynthWave Primary Color
+        val synthWavePrimaryColorRow = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 8, 0, 8)
+        }
+        
+        val synthWavePrimaryColorLabel = TextView(requireContext()).apply {
+            text = "SynthWave Primary Color"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_primary))
+        }
+        synthWavePrimaryColorRow.addView(synthWavePrimaryColorLabel)
+        
+        val synthWavePrimaryColorSwatch = View(requireContext()).apply {
+            val size = (48 * resources.displayMetrics.density).toInt()
+            layoutParams = LinearLayout.LayoutParams(size, size)
+            setBackgroundColor(currentPrefs.synthWavePrimaryColor)
+            setOnClickListener {
+                showColorPicker("SynthWave Primary Color", currentPrefs.synthWavePrimaryColor) { newColor ->
+                    // Update the swatch immediately
+                    setBackgroundColor(newColor)
+                    
+                    // Save the new color to preferences
+                    val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                    val updatedPrefs = latestPrefs.copy(synthWavePrimaryColor = newColor)
+                    updatedPrefs.saveToPrefs(requireContext())
+                    
+                    // Persist as recent color
+                    com.stash.opusplayer.ui.appearance.AppearancePreferences.persistRecentColor(requireContext(), newColor)
+                    
+                    // Apply the changes
+                    com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+                    
+                    Toast.makeText(requireContext(), "SynthWave Primary Color updated!", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        synthWavePrimaryColorRow.addView(synthWavePrimaryColorSwatch)
+        layout.addView(synthWavePrimaryColorRow)
+        
+        // SynthWave Secondary Color
+        val synthWaveSecondaryColorRow = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 8, 0, 8)
+        }
+        
+        val synthWaveSecondaryColorLabel = TextView(requireContext()).apply {
+            text = "SynthWave Secondary Color"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_primary))
+        }
+        synthWaveSecondaryColorRow.addView(synthWaveSecondaryColorLabel)
+        
+        val synthWaveSecondaryColorSwatch = View(requireContext()).apply {
+            val size = (48 * resources.displayMetrics.density).toInt()
+            layoutParams = LinearLayout.LayoutParams(size, size)
+            setBackgroundColor(currentPrefs.synthWaveSecondaryColor)
+            setOnClickListener {
+                showColorPicker("SynthWave Secondary Color", currentPrefs.synthWaveSecondaryColor) { newColor ->
+                    // Update the swatch immediately
+                    setBackgroundColor(newColor)
+                    
+                    // Save the new color to preferences
+                    val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
+                    val updatedPrefs = latestPrefs.copy(synthWaveSecondaryColor = newColor)
+                    updatedPrefs.saveToPrefs(requireContext())
+                    
+                    // Persist as recent color
+                    com.stash.opusplayer.ui.appearance.AppearancePreferences.persistRecentColor(requireContext(), newColor)
+                    
+                    // Apply the changes
+                    com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+                    
+                    Toast.makeText(requireContext(), "SynthWave Secondary Color updated!", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        synthWaveSecondaryColorRow.addView(synthWaveSecondaryColorSwatch)
+        layout.addView(synthWaveSecondaryColorRow)
+        
         // UI Scale Section
         addSectionHeader(layout, "UI Scaling")
         
