@@ -37,6 +37,28 @@
         android:layout_height="40dp"
         android:background="@drawable/gradient_background"
         app:layout_constraintTop_toTopOf="parent" />
+    
+    <!-- Visual Feedback Overlay -->
+    <TextView
+        android:id="@+id/feedbackOverlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/feedback_overlay_background"
+        android:elevation="8dp"
+        android:paddingStart="16dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="8dp"
+        android:textColor="@color/white"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/statusBarGradient"
+        tools:text="Seeking to 2:15"
+        tools:visibility="visible" />
 
     <!-- Neomorphic Back button -->
     <ImageButton

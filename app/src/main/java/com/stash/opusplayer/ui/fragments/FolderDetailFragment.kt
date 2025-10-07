@@ -91,6 +91,7 @@ class FolderDetailFragment : Fragment() {
             onAddToPlaylist = { song -> (activity as? MainActivity)?.addToPlaylist(song) },
             onPlayNext = { song -> (activity as? MainActivity)?.playNext(song) },
             onAddToQueue = { song -> (activity as? MainActivity)?.addToQueueTail(song) },
+            onShowFeedback = { message -> (activity as? MainActivity)?.showPlayingBanner(message) },
             metadataExtractor = metadataExtractor
         )
         binding.recyclerView.adapter = songAdapter
@@ -192,11 +193,7 @@ class FolderDetailFragment : Fragment() {
                     else -> songs
                 }
                 songAdapter.submitList(sorted)
-                android.widget.Toast.makeText(
-                    requireContext(),
-                    "Sorted by ${sortOptions[which]}",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                (activity as? MainActivity)?.showPlayingBanner("Sorted by ${sortOptions[which]}")
             }
             .setNegativeButton(getString(com.stash.opusplayer.R.string.cancel), null)
             .show()
