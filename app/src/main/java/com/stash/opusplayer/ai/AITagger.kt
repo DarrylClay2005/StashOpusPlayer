@@ -92,7 +92,7 @@ class AITagger(private val context: Context) {
         return s.replace('\u00A0', ' ').replace(Regex("\\s+"), " ").trim()
     }
 
-    private fun fetchLastFmTopTag(apiKey: String, artist: String, track: String): String? {
+    private fun fetchLastFmTopTag(@Suppress("UNUSED_PARAMETER") apiKey: String, @Suppress("UNUSED_PARAMETER") artist: String, @Suppress("UNUSED_PARAMETER") track: String): String? {
         // Last.fm disabled: skip external call
         return null
     }

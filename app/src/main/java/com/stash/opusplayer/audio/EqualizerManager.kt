@@ -345,7 +345,7 @@ class EqualizerManager(private val context: Context) {
         }
         
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
-            loudnessEnhancer?.let { le ->
+            loudnessEnhancer?.let { _ ->
                 _loudnessGain.value = prefs.getInt(PREF_LOUDNESS_ENHANCER, 0)
             }
         }

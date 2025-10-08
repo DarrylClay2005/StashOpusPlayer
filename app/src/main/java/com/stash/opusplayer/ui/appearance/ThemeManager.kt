@@ -185,6 +185,7 @@ object ThemeManager {
                 // On older versions, try the deprecated method
                 val config = Configuration(activity.resources.configuration)
                 config.fontScale = scale
+                @Suppress("DEPRECATION")
                 activity.resources.updateConfiguration(config, activity.resources.displayMetrics)
                 return true // Requires recreate
             }

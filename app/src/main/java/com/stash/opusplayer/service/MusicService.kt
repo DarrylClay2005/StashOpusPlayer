@@ -27,6 +27,8 @@ import androidx.media3.session.SessionCommands
 import com.stash.opusplayer.R
 import androidx.preference.PreferenceManager
 import com.stash.opusplayer.audio.EqualizerManager
+import com.stash.opusplayer.audio.EnhancedAudioManager
+import com.stash.opusplayer.audio.TrackMetadata
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.ui.MainActivity
 import kotlin.math.pow
@@ -47,6 +49,7 @@ private lateinit var activePlayer: ExoPlayer
     private var isCrossfading: Boolean = false
     private var crossfadeCheckRunnable: Runnable? = null
     private lateinit var equalizerManager: EqualizerManager
+    private lateinit var enhancedAudioManager: EnhancedAudioManager
 
     // Sleep timer state
     private var sleepTimerHandler: android.os.Handler? = null
@@ -114,6 +117,7 @@ private lateinit var activePlayer: ExoPlayer
         
         initializePlayers()
         initializeEqualizer()
+        initializeEnhancedAudio()
         initializeMediaSession()
         setupPlayerListener()
         // Attempt to restore last session queue before showing notification
@@ -342,7 +346,11 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
                         "SET_CROSSFADE_POLLING_ENABLED",
                         "SKIP_TO_NEXT",
                         "SKIP_TO_PREVIOUS",
-                        "DUMP_PLAYBACK_STATE"
+                        "DUMP_PLAYBACK_STATE",
+                        "SET_ENHANCED_AUDIO_ENABLED",
+                        "SET_AUDIO_PROFILE",
+                        "SET_AUTO_PROFILE_SWITCHING",
+                        "SET_CROSS_SYSTEM_SYNC"
                     ).forEach { add(SessionCommand(it, android.os.Bundle.EMPTY)) }
                     // AB repeat controls
                     add(SessionCommand("SET_AB_ENABLED", android.os.Bundle.EMPTY))
@@ -518,6 +526,34 @@ equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(na
                             val key = currentTrackKey()
                             if (key != null) abRepeatManager.clearAllForTrack(key)
                         }
+                        // Enhanced Audio Commands
+                        "SET_ENHANCED_AUDIO_ENABLED" -> {
+                            val enabled = args.getBoolean("enabled", false)
+                            if (::enhancedAudioManager.isInitialized) {
+                                enhancedAudioManager.setEnhancedAudioEnabled(enabled)
+                            }
+                        }
+                        "SET_AUDIO_PROFILE" -> {
+                            val profileName = args.getString("profile") ?: "BALANCED"
+                            if (::enhancedAudioManager.isInitialized) {
+                                try {
+                                    val profile = com.stash.opusplayer.audio.AudioProfile.valueOf(profileName)
+                                    enhancedAudioManager.setAudioProfile(profile)
+                                } catch (_: Exception) {}
+                            }
+                        }
+                        "SET_AUTO_PROFILE_SWITCHING" -> {
+                            val enabled = args.getBoolean("enabled", false)
+                            if (::enhancedAudioManager.isInitialized) {
+                                enhancedAudioManager.setAutoProfileSwitching(enabled)
+                            }
+                        }
+                        "SET_CROSS_SYSTEM_SYNC" -> {
+                            val enabled = args.getBoolean("enabled", true)
+                            if (::enhancedAudioManager.isInitialized) {
+                                enhancedAudioManager.setCrossSystemSync(enabled)
+                            }
+                        }
                     }
                 } catch (_: Exception) {}
                 return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -545,6 +581,15 @@ val sessionId = activePlayer.audioSessionId
                 equalizerManager.initialize(sessionId)
                 configureReverbForSession(sessionId)
             }
+        }
+    }
+    
+    private fun initializeEnhancedAudio() {
+        android.util.Log.d("MusicService", "initializeEnhancedAudio: starting advanced audio systems")
+        enhancedAudioManager = EnhancedAudioManager(this)
+        val sessionId = activePlayer.audioSessionId
+        if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
+            enhancedAudioManager.initialize(sessionId, equalizerManager)
         }
     }
     
@@ -576,6 +621,16 @@ val sessionId = activePlayer.audioSessionId
                     }
                     // Apply ReplayGain for current item (async parse)
                     if (rgEnabled) applyReplayGainForCurrent()
+                    
+                    // Initialize enhanced audio systems with new session
+                    if (::enhancedAudioManager.isInitialized) {
+                        try {
+                            enhancedAudioManager.getAdvancedEffects().initialize(sessionId)
+                            enhancedAudioManager.getSpatialAudio().initialize(sessionId)
+                            enhancedAudioManager.getIntelligentEQ().initialize(sessionId)
+                            enhancedAudioManager.getAudioAnalysis().initialize(sessionId)
+                        } catch (_: Exception) {}
+                    }
                 }
                 if (playbackState == Player.STATE_ENDED) {
                     // Defensive auto-advance if something prevented Exo from moving to next
@@ -653,6 +708,27 @@ val sessionId = activePlayer.audioSessionId
                 if (rgEnabled) applyReplayGainForCurrent()
                 // Notify AB manager of track change
                 try { abRepeatManager.onTrackChanged(currentTrackKey() ?: "") } catch (_: Exception) {}
+                
+                // Analyze new track for enhanced audio processing
+                if (::enhancedAudioManager.isInitialized) {
+                    try {
+                        val metadata = TrackMetadata(
+                            genre = activePlayer.mediaMetadata.genre?.toString(),
+                            artist = activePlayer.mediaMetadata.artist?.toString(),
+                            tempo = null,
+                            year = try {
+                                activePlayer.mediaMetadata.releaseYear?.toInt()
+                            } catch (_: Exception) { null }
+                        )
+                        // Start audio analysis in background
+                        GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            // This would normally get actual audio samples from the player
+                            // For now we'll use a placeholder to enable the system
+                            val dummySamples = FloatArray(1024) { 0.0f }
+                            enhancedAudioManager.analyzeCurrentTrack(dummySamples, metadata)
+                        }
+                    } catch (_: Exception) {}
+                }
             }
         })
     }
@@ -858,8 +934,12 @@ val sessionId = activePlayer.audioSessionId
                     if (ongoing) {
                         startForeground(notificationId, notification)
                     } else {
-                        @Suppress("DEPRECATION")
-                        stopForeground(false)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            stopForeground(STOP_FOREGROUND_DETACH)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            stopForeground(false)
+                        }
                         notificationManager.notify(notificationId, notification)
                         // If paused and app is backgrounded, consider stopping service later
                         checkAndStopServiceIfNeeded()
@@ -867,7 +947,12 @@ val sessionId = activePlayer.audioSessionId
                 }
 
                 override fun onNotificationCancelled(notificationId: Int, dismissedByUser: Boolean) {
-                    stopForeground(true)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        stopForeground(true)
+                    }
                     stopSelf()
                 }
             })
@@ -959,13 +1044,13 @@ val title = activePlayer.mediaMetadata.title?.toString() ?: ""
     
     fun getEqualizerManager(): EqualizerManager = equalizerManager
     
+    fun getEnhancedAudioManager(): EnhancedAudioManager = enhancedAudioManager
+    
     private fun checkAndStopServiceIfNeeded() {
         try {
             // If app is not in foreground and music is paused, consider stopping service
-            val activityManager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
-            val appTasks = activityManager.getRunningTasks(1)
-            val isAppInForeground = appTasks.isNotEmpty() &&
-                appTasks[0].topActivity?.packageName == packageName
+            // Use a simpler approach since getRunningTasks is deprecated and restricted
+            val isAppInForeground = appInForeground // Use the flag we maintain
             if (!isAppInForeground && !activePlayer.isPlaying) {
                 // App is in background and music is not playing
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
@@ -1307,7 +1392,12 @@ val sessionId = activePlayer.audioSessionId
     override fun onTaskRemoved(rootIntent: Intent?) {
 try { activePlayer.pause() } catch (_: Exception) {}
         try {
-            stopForeground(true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
             stopSelf()
         } catch (_: Exception) {}
         super.onTaskRemoved(rootIntent)
@@ -1320,6 +1410,9 @@ try { activePlayer.pause() } catch (_: Exception) {}
         try { unregisterPreferenceListeners() } catch (_: Exception) {}
         try { presetReverb?.release() } catch (_: Exception) {}
         equalizerManager.release()
+        if (::enhancedAudioManager.isInitialized) {
+            enhancedAudioManager.release()
+        }
         mediaSession?.run {
             try { activePlayer.release() } catch (_: Exception) {}
             release()

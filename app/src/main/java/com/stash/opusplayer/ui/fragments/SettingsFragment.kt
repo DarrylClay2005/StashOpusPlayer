@@ -277,10 +277,10 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
             text = "Automatically check for updates"
             isChecked = updatePrefs?.autoCheckEnabled ?: true
             setOnCheckedChangeListener { _, isChecked ->
-                val prefs = updateManager?.getUpdatePreferences()
-                if (prefs != null) {
+                val updateManagerPrefs = updateManager?.getUpdatePreferences()
+                if (updateManagerPrefs != null) {
                     updateManager.updatePreferences(
-                        prefs.copy(autoCheckEnabled = isChecked)
+                        updateManagerPrefs.copy(autoCheckEnabled = isChecked)
                     )
                 }
             }
@@ -293,8 +293,8 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
             text = "Fetch album art online when missing"
             isChecked = true
             setOnCheckedChangeListener { _, isChecked ->
-                val prefs = requireContext().getSharedPreferences("settings", 0)
-                prefs.edit().putBoolean("fetch_artwork_online", isChecked).apply()
+                val artworkPrefs = requireContext().getSharedPreferences("settings", 0)
+                artworkPrefs.edit().putBoolean("fetch_artwork_online", isChecked).apply()
             }
         }
         layout.addView(artworkToggle)
@@ -364,8 +364,8 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
             text = "Enable background rescans"
             isChecked = true
             setOnCheckedChangeListener { _, isChecked ->
-                val prefs = requireContext().getSharedPreferences("settings", 0)
-                prefs.edit().putBoolean("enable_background_rescans", isChecked).apply()
+                val bgRescanPrefs = requireContext().getSharedPreferences("settings", 0)
+                bgRescanPrefs.edit().putBoolean("enable_background_rescans", isChecked).apply()
                 Toast.makeText(requireContext(), if (isChecked) "Background rescans enabled" else "Background rescans disabled", Toast.LENGTH_SHORT).show()
             }
         }
@@ -383,9 +383,9 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
 
         val frequencySpinner = Spinner(requireContext()).apply {
             val frequencies = arrayOf("Daily", "Weekly", "Monthly", "Never")
-            val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, frequencies)
-            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-            this.adapter = adapter
+            val frequencyAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, frequencies)
+            frequencyAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            this.adapter = frequencyAdapter
 
             val currentFreq = updatePrefs2?.checkFrequency ?: 24L
             val selectedIndex = when (currentFreq) {
@@ -406,10 +406,10 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
                         3 -> -1L   // Never
                         else -> 24L
                     }
-                    val prefs = updateManager2?.getUpdatePreferences()
-                    if (prefs != null) {
+                    val updateFreqPrefs = updateManager2?.getUpdatePreferences()
+                    if (updateFreqPrefs != null) {
                         (activity as? MainActivity)?.getUpdateManager()?.updatePreferences(
-                            prefs.copy(checkFrequency = frequency)
+                            updateFreqPrefs.copy(checkFrequency = frequency)
                         )
                     }
                 }
@@ -428,8 +428,8 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
 
         val apiKeyInput = EditText(requireContext()).apply {
             hint = "Enter your YouTube API key"
-            val prefs = requireContext().getSharedPreferences("settings", 0)
-            val existing = prefs.getString("user_youtube_api_key", "") ?: ""
+            val apiKeyPrefs = requireContext().getSharedPreferences("settings", 0)
+            val existing = apiKeyPrefs.getString("user_youtube_api_key", "") ?: ""
             setText(existing)
         }
         layout.addView(apiKeyInput)
@@ -438,8 +438,8 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
             text = "Save YouTube API Key"
             setOnClickListener {
                 val key = apiKeyInput.text?.toString()?.trim() ?: ""
-                val prefs = requireContext().getSharedPreferences("settings", 0)
-                prefs.edit().putString("user_youtube_api_key", key).apply()
+                val saveKeyPrefs = requireContext().getSharedPreferences("settings", 0)
+                saveKeyPrefs.edit().putString("user_youtube_api_key", key).apply()
                 // Prompt to reload app so the key takes effect everywhere
                 androidx.appcompat.app.AlertDialog.Builder(requireContext())
                     .setTitle("Reload required")
@@ -492,10 +492,10 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
 
         val periodicRescanToggle = CheckBox(requireContext()).apply {
             text = "Enable daily background rescan"
-            val prefs = requireContext().getSharedPreferences("settings", 0)
-            isChecked = prefs.getBoolean("enable_periodic_rescan", false)
+            val periodicPrefs = requireContext().getSharedPreferences("settings", 0)
+            isChecked = periodicPrefs.getBoolean("enable_periodic_rescan", false)
             setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean("enable_periodic_rescan", isChecked).apply()
+                periodicPrefs.edit().putBoolean("enable_periodic_rescan", isChecked).apply()
                 val wm = androidx.work.WorkManager.getInstance(requireContext())
                 val tag = "library_rescan_periodic"
                 if (isChecked) {
@@ -936,8 +936,8 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
         }
         layout.addView(allowBoostToggle)
 
-        val prefs = requireContext().getSharedPreferences("settings", 0)
-        val savedSemitones = prefs.getInt("pitch_semitones", 0)
+        val pitchPrefs = requireContext().getSharedPreferences("settings", 0)
+        val savedSemitones = pitchPrefs.getInt("pitch_semitones", 0)
 
         val valueLabel = TextView(requireContext()).apply {
             textSize = 16f
@@ -969,7 +969,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
         fun applyPitch(semi: Int) {
             val pitch = semitonesToPitch(semi)
             // Persist
-            prefs.edit().putInt("pitch_semitones", semi).putFloat("pitch_factor", pitch).apply()
+            pitchPrefs.edit().putInt("pitch_semitones", semi).putFloat("pitch_factor", pitch).apply()
             // Apply to running session if available
             mediaController?.let { controller ->
                 try {
@@ -1007,7 +1007,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
         val speedLabel = TextView(requireContext()).apply { text = "1.00x" }
         layout.addView(speedLabel)
 
-        val savedSpeed = prefs.getFloat("playback_speed", 1.0f)
+        val savedSpeed = pitchPrefs.getFloat("playback_speed", 1.0f)
         fun speedToProgress(sp: Float) = ((sp - 0.25f) * 100).toInt().coerceIn(0, 175) // 0.25..2.0
         fun progressToSpeed(p: Int) = 0.25f + (p.toFloat() / 100f)
 
@@ -1019,7 +1019,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
 
         fun applySpeed(sp: Float) {
             // Persist
-            prefs.edit().putFloat("playback_speed", sp).apply()
+            pitchPrefs.edit().putFloat("playback_speed", sp).apply()
             speedLabel.text = String.format("%.2fx", sp)
             // Apply live
             mediaController?.let { controller ->
@@ -1058,7 +1058,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
         val reverbLabel = TextView(requireContext()).apply { text = "Reverb 0%" }
         layout.addView(reverbLabel)
 
-        val savedPreset = prefs.getInt("reverb_preset", 0)
+        val savedPreset = pitchPrefs.getInt("reverb_preset", 0)
         val reverbSeek = SeekBar(requireContext()).apply {
             max = 1000
             progress = when (savedPreset) {
@@ -1084,7 +1084,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
                 p < 950 -> 5
                 else -> 6
             }.toShort()
-            prefs.edit().putInt("reverb_preset", preset.toInt()).apply()
+            pitchPrefs.edit().putInt("reverb_preset", preset.toInt()).apply()
             mediaController?.let { controller ->
                 try {
                     controller.sendCustomCommand(
@@ -1112,7 +1112,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
         }
         layout.addView(volHeader)
 
-        val savedVol = prefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
+        val savedVol = pitchPrefs.getFloat("app_volume", 1.0f).coerceIn(0f, 1f)
         val volLabel = TextView(requireContext()).apply {
             setPadding(12, 6, 12, 6)
             setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_primary))
@@ -1138,7 +1138,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
             textSize = 12f
             setOnClickListener {
                 val def = 1.0f
-                prefs.edit().putFloat("app_volume", def).apply()
+                pitchPrefs.edit().putFloat("app_volume", def).apply()
                 volSeekRef?.progress = 100
                 updateVolLabel(def)
                 mediaController?.let { controller ->
@@ -1166,7 +1166,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
 
         fun applyAppVolume(progress: Int) {
             val v = (progress / 100f).coerceIn(0f, 1f)
-            prefs.edit().putFloat("app_volume", v).apply()
+            pitchPrefs.edit().putFloat("app_volume", v).apply()
             updateVolLabel(v)
             mediaController?.let { controller ->
                 try {
@@ -1188,9 +1188,9 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
         // --- Audio Focus ---
         val afToggle = CheckBox(requireContext()).apply {
             text = "Enable audio focus (pause/duck on interruptions)"
-            isChecked = prefs.getBoolean("audio_focus_enabled", true)
+            isChecked = pitchPrefs.getBoolean("audio_focus_enabled", true)
             setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean("audio_focus_enabled", isChecked).apply()
+                pitchPrefs.edit().putBoolean("audio_focus_enabled", isChecked).apply()
                 mediaController?.let { controller ->
                     try {
                         controller.sendCustomCommand(
@@ -1206,13 +1206,13 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
         // --- Crossfade ---
         val cfToggle = CheckBox(requireContext()).apply {
             text = "Enable crossfade between tracks"
-            isChecked = prefs.getBoolean("crossfade_enabled", false)
+            isChecked = pitchPrefs.getBoolean("crossfade_enabled", false)
         }
         layout.addView(cfToggle)
         cfToggleRef = cfToggle
 
         val cfLabel = TextView(requireContext())
-        val savedCf = prefs.getLong("crossfade_duration_ms", 1000L).coerceIn(0L, 5000L)
+        val savedCf = pitchPrefs.getLong("crossfade_duration_ms", 1000L).coerceIn(0L, 5000L)
         fun updateCfLabel(ms: Long) { cfLabel.text = "Crossfade duration: ${'$'}{ms} ms" }
         updateCfLabel(savedCf)
         // Crossfade row with badge + Reset
@@ -1229,7 +1229,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
             textSize = 12f
             setOnClickListener {
                 val defMs = 1000L
-                prefs.edit().putLong("crossfade_duration_ms", defMs).apply()
+                pitchPrefs.edit().putLong("crossfade_duration_ms", defMs).apply()
                 cfSeekRef?.progress = defMs.toInt()
                 updateCfLabel(defMs)
                 mediaController?.let { controller ->
@@ -1283,7 +1283,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
         layout.addView(cfPollingToggle)
 
         cfToggle.setOnCheckedChangeListener { _, enabled ->
-            prefs.edit().putBoolean("crossfade_enabled", enabled).apply()
+            pitchPrefs.edit().putBoolean("crossfade_enabled", enabled).apply()
             cfSeek.isEnabled = enabled
             mediaController?.let { controller ->
                 try {
@@ -1299,7 +1299,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
                 if (!fromUser) { updateCfLabel(progress.toLong()); return }
                 val ms = progress.coerceIn(0, 5000).toLong()
                 updateCfLabel(ms)
-                prefs.edit().putLong("crossfade_duration_ms", ms).apply()
+                pitchPrefs.edit().putLong("crossfade_duration_ms", ms).apply()
                 mediaController?.let { controller ->
                     try {
                         controller.sendCustomCommand(

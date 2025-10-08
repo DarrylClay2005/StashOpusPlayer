@@ -149,7 +149,6 @@ val token = SessionToken(requireContext(), android.content.ComponentName(require
     }
     
     private fun setupEffectsControls() {
-        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
         // Bass Boost
         binding.bassBoostSlider.max = 1000
         binding.bassBoostSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -245,20 +244,20 @@ val token = SessionToken(requireContext(), android.content.ComponentName(require
     
     private fun loadPrefsIntoUI() {
         try {
-            val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
-            val enabled = prefs.getBoolean("equalizer_enabled", false)
+            val loadPrefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+            val enabled = loadPrefs.getBoolean("equalizer_enabled", false)
             binding.equalizerSwitch.isChecked = enabled
             updateBandControlsEnabled(enabled)
 
-val presetName = prefs.getString("equalizer_preset", com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name) ?: com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name
+val presetName = loadPrefs.getString("equalizer_preset", com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name) ?: com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name
 val index = com.stash.opusplayer.audio.EqualizerPreset.values().indexOfFirst { it.name == presetName }.coerceAtLeast(0)
             binding.presetSpinner.setSelection(index)
 
-            val bass = prefs.getInt("bass_boost_strength", 0)
+            val bass = loadPrefs.getInt("bass_boost_strength", 0)
             binding.bassBoostSlider.progress = bass
             binding.bassBoostValue.text = "${bass / 10}%"
 
-            val virt = prefs.getInt("virtualizer_strength", 0)
+            val virt = loadPrefs.getInt("virtualizer_strength", 0)
             binding.virtualizerSlider.progress = virt
             binding.virtualizerValue.text = "${virt / 10}%"
         } catch (_: Exception) {}

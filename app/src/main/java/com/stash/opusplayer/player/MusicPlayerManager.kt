@@ -10,6 +10,8 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.stash.opusplayer.audio.EqualizerManager
+import com.stash.opusplayer.audio.EnhancedAudioManager
+import com.stash.opusplayer.audio.AudioProfile
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.service.MusicService
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -373,4 +375,45 @@ class MusicPlayerManager(private val context: Context) {
     fun getCurrentPosition(): Long = mediaController?.currentPosition ?: 0L
     fun getDuration(): Long = mediaController?.duration ?: 0L
     fun getBufferedPosition(): Long = mediaController?.bufferedPosition ?: 0L
+    
+    // Enhanced Audio Controls
+    fun setEnhancedAudioEnabled(enabled: Boolean) {
+        runWhenReady { controller ->
+            val command = androidx.media3.session.SessionCommand("SET_ENHANCED_AUDIO_ENABLED", android.os.Bundle())
+            val args = android.os.Bundle().apply {
+                putBoolean("enabled", enabled)
+            }
+            controller.sendCustomCommand(command, args)
+        }
+    }
+    
+    fun setAudioProfile(profile: AudioProfile) {
+        runWhenReady { controller ->
+            val command = androidx.media3.session.SessionCommand("SET_AUDIO_PROFILE", android.os.Bundle())
+            val args = android.os.Bundle().apply {
+                putString("profile", profile.name)
+            }
+            controller.sendCustomCommand(command, args)
+        }
+    }
+    
+    fun setAutoProfileSwitching(enabled: Boolean) {
+        runWhenReady { controller ->
+            val command = androidx.media3.session.SessionCommand("SET_AUTO_PROFILE_SWITCHING", android.os.Bundle())
+            val args = android.os.Bundle().apply {
+                putBoolean("enabled", enabled)
+            }
+            controller.sendCustomCommand(command, args)
+        }
+    }
+    
+    fun setCrossSystemSync(enabled: Boolean) {
+        runWhenReady { controller ->
+            val command = androidx.media3.session.SessionCommand("SET_CROSS_SYSTEM_SYNC", android.os.Bundle())
+            val args = android.os.Bundle().apply {
+                putBoolean("enabled", enabled)
+            }
+            controller.sendCustomCommand(command, args)
+        }
+    }
 }

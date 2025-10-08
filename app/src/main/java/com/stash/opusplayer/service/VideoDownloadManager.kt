@@ -272,10 +272,8 @@ class VideoDownloadManager(private val context: Context) {
      * Auto-detect download method - tries the best approach for each platform
      */
     private suspend fun downloadWithAutodetect(request: DownloadRequest) {
-        val videoId = request.video.id
         val videoUrl = request.video.url
         val outputDir = getOutputDirectory(request)
-        val fileName = "${sanitizeFileName(request.video.title)}.${request.selectedFormat.extension}"
         
         try {
             Log.i(TAG, "🔄 Auto-detecting best download method...")
