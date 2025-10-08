@@ -31,8 +31,8 @@ android {
         applicationId "com.stash.opusplayer"
         minSdk 21
         targetSdk 34
-        versionCode 141
-        versionName "11.2.0"
+        versionCode 142
+        versionName "12.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
         // Inject YouTube API key into BuildConfig
@@ -62,29 +62,57 @@ android {
     }
     
     buildTypes {
-        release {
+        debug {
+            applicationIdSuffix ".debug"
+            debuggable true
             minifyEnabled false
             shrinkResources false
+            signingConfig signingConfigs.debug
+        }
+        
+        release {
+            // Enable code optimization and obfuscation
+            minifyEnabled true
+            shrinkResources true
             debuggable false
+            zipAlignEnabled true
+            
+            // Enable R8 full mode for better optimization
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            
             if (hasReleaseKeystore) {
                 signingConfig signingConfigs.release
             } else {
                 // Fallback: sign release with debug keystore to avoid invalid package installs
                 signingConfig signingConfigs.debug
             }
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+        
+        // Beta build variant for testing
+        beta {
+            initWith release
+            applicationIdSuffix ".beta"
+            versionNameSuffix "-beta"
+            debuggable false
+            minifyEnabled true
+            shrinkResources true
         }
     }
+    
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
+        incremental true
     }
-kotlinOptions {
+    
+    kotlinOptions {
         jvmTarget = '1.8'
+        freeCompilerArgs += [
+            '-Xjsr305=strict',
+            '-Xopt-in=kotlin.RequiresOptIn'
+        ]
     }
-
-    // Note: API keys should be configured by users, not hardcoded in the build
-
+    
     buildFeatures {
         viewBinding true
         dataBinding true
@@ -94,7 +122,16 @@ kotlinOptions {
     lint {
         abortOnError false
         checkReleaseBuilds false
+        // Disable lint checks that are not critical for performance
+        disable 'UnusedResources', 'IconMissingDensityFolder'
     }
+    
+    // Performance optimizations for build
+    dexOptions {
+        javaMaxHeapSize "4g"
+        preDexLibraries = true
+    }
+    
     
     packagingOptions {
         exclude 'META-INF/DEPENDENCIES'
