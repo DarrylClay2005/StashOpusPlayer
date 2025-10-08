@@ -52,7 +52,9 @@ object NetworkUtils {
     private fun getWifiIpAddress(context: Context): String {
         return try {
             val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
             val wifiInfo = wifiManager.connectionInfo
+            @Suppress("DEPRECATION")
             val ipInt = wifiInfo.ipAddress
             
             if (ipInt == 0) return ""

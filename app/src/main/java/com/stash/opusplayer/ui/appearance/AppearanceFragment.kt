@@ -732,7 +732,6 @@ class AppearanceFragment : Fragment() {
     }
     
     private fun updatePreview() {
-        val primaryColor = tempPrimaryColor ?: currentPrefs.primaryColor
         val accentColor = tempAccentColor ?: currentPrefs.accentColor
         val backgroundColor = tempBackgroundColor ?: currentPrefs.backgroundColor
         val textPrimary = tempTextPrimaryColor ?: currentPrefs.textPrimaryColor

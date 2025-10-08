@@ -640,6 +640,7 @@ val opened = com.stash.opusplayer.integration.SealIntegration.openInSeal(this@Yo
         WindowCompat.setDecorFitsSystemWindows(window, true)
     }
 
+    @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (isFullscreen) {
             toggleFullscreen()
