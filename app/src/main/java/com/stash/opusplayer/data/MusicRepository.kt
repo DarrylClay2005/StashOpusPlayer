@@ -320,10 +320,37 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
         allSongs.filter { it.albumName == album }
     }
 
-    // Artist/Producer organization
+    // Artist/Producer organization - Enhanced with metadata extraction
     suspend fun getSongsByArtist(): Map<String, List<Song>> = withContext(Dispatchers.IO) {
         val allSongs = getAllSongsWithMetadata()
-        allSongs.groupBy { it.artistName }
+        
+        // Extract proper metadata for better artist organization
+        val songsWithMetadata = allSongs.map { song ->
+            if (song.artist.isBlank() || song.artist == "Unknown Artist") {
+                // Try to extract metadata if artist is missing
+                try {
+                    metadataExtractor.extractMetadata(song, forceArtworkExtraction = false)
+                } catch (e: Exception) {
+                    song
+                }
+            } else {
+                song
+            }
+        }
+        
+        // Group by artist with smart normalization
+        val groupedArtists = songsWithMetadata.groupBy { song ->
+            normalizeArtistName(song.artistName)
+        }
+        
+        // Sort songs within each artist by album, then track number, then title
+        groupedArtists.mapValues { (_, songs) ->
+            songs.sortedWith(
+                compareBy<Song> { it.albumName.lowercase() }
+                    .thenBy { it.track }
+                    .thenBy { it.displayName.lowercase() }
+            )
+        }
     }
     
     suspend fun getArtists(): List<String> = withContext(Dispatchers.IO) {
@@ -333,7 +360,19 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
     
     suspend fun getSongsByArtist(artist: String): List<Song> = withContext(Dispatchers.IO) {
         val allSongs = getAllSongsWithMetadata()
-        allSongs.filter { it.artistName == artist }
+        val normalizedSearchArtist = normalizeArtistName(artist)
+        
+        // Find songs by normalized artist name for better matching
+        val matchingSongs = allSongs.filter { song ->
+            normalizeArtistName(song.artistName) == normalizedSearchArtist
+        }
+        
+        // Sort by album, then track number, then title
+        matchingSongs.sortedWith(
+            compareBy<Song> { it.albumName.lowercase() }
+                .thenBy { it.track }
+                .thenBy { it.displayName.lowercase() }
+        )
     }
     
     // Album organization
@@ -347,102 +386,45 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
         allSongs.map { it.albumName }.distinct().sorted()
     }
 
-    // AI-ish genre inference using tags or heuristics; placeholder for external APIs
+    // Enhanced genre organization using metadata extraction
     suspend fun getSongsByGenreSmart(): Map<String, List<Song>> = withContext(Dispatchers.IO) {
+        val allSongs = getAllSongsWithMetadata()
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-        val youTube = com.stash.opusplayer.network.YouTubeApiService(context)
-
-        fun normalizeTitle(name: String): String {
-            return name.lowercase()
-                .replace(Regex("\\(.*?\\)"), "")
-                .replace(Regex("\".*?\""), "")
-                .replace("remastered", "")
-                .replace("official video", "")
-                .replace("official audio", "")
-                .replace("lyrics", "")
-                .replace("feat.", "")
-                .replace("ft.", "")
-                .replace(Regex("[^a-z0-9 ]"), " ")
-                .replace(Regex("\\s+"), " ")
-                .trim()
-        }
-
-        fun inferFromText(text: String): String? {
-            val t = text.lowercase()
-            val mapping = listOf(
-                "hip hop" to "Hip-Hop", "hip-hop" to "Hip-Hop", "rap" to "Hip-Hop",
-                "r&b" to "R&B", "rnb" to "R&B",
-                "pop" to "Pop",
-                "rock" to "Rock",
-                "metal" to "Metal",
-                "jazz" to "Jazz",
-                "classical" to "Classical", "symphony" to "Classical",
-                "lofi" to "Lo-Fi", "lo-fi" to "Lo-Fi",
-                "house" to "Electronic", "edm" to "Electronic", "electronic" to "Electronic",
-                "trap" to "Hip-Hop", "drill" to "Hip-Hop",
-                "indie" to "Indie",
-                "country" to "Country",
-                "blues" to "Blues",
-                "reggae" to "Reggae",
-                "afrobeat" to "Afrobeats", "afrobeats" to "Afrobeats"
-            )
-            return mapping.firstOrNull { t.contains(it.first) }?.second
-        }
-
-        val all = getAllSongsWithMetadata()
-        val result = mutableMapOf<String, MutableList<Song>>()
-
-        for (s in all) {
-            // 1) Embedded or existing genre
-            val g0 = s.genre.trim()
-            var genre = if (g0.isNotBlank()) g0 else ""
-
-            // 2) Infer from names
-            if (genre.isBlank()) {
-                genre = inferFromText("${s.displayName} ${s.albumName} ${s.artistName}") ?: ""
-            }
-
-            // 3) Cached value
-            if (genre.isBlank()) {
-                val key = "genre_cache_${stableKey(s)}"
-                genre = prefs.getString(key, "") ?: ""
-            }
-
-            // 4) YouTube metadata lookup (best-effort)
-            if (genre.isBlank()) {
+        
+        // Extract proper metadata for better genre organization
+        val songsWithMetadata = allSongs.map { song ->
+            if (song.genre.isBlank()) {
+                // Try to extract metadata if genre is missing
                 try {
-                    val q = normalizeTitle("${s.displayName} ${s.artistName} genre")
-                    val yt = youTube.searchVideos(q, maxResults = 1).getOrNull()
-                    val vid = yt?.videos?.firstOrNull()
-                    if (vid != null) {
-                        genre = inferFromText("${vid.title} ${vid.description} ${vid.channelTitle}") ?: ""
+                    val extractedSong = metadataExtractor.extractMetadata(song, forceArtworkExtraction = false)
+                    // If still no genre, try smart inference
+                    if (extractedSong.genre.isBlank()) {
+                        val inferredGenre = inferGenreFromMetadata(extractedSong, prefs)
+                        extractedSong.copy(genre = inferredGenre)
+                    } else {
+                        extractedSong
                     }
-                } catch (_: Exception) {}
-            }
-
-            if (genre.isBlank()) {
-                val norm = normalizeTitle(s.displayName)
-                genre = when {
-                    norm.contains("mix") || norm.contains("remix") -> "Dance"
-                    norm.contains("live") -> "Live"
-                    else -> "Unknown"
+                } catch (e: Exception) {
+                    song.copy(genre = inferGenreFromMetadata(song, prefs))
                 }
+            } else {
+                song
             }
-
-            // Cache best-effort result
-            runCatching {
-                if (genre.isNotBlank() && genre != "Unknown") {
-                    val key = "genre_cache_${stableKey(s)}"
-                    prefs.edit().putString(key, genre).apply()
-                }
-            }
-
-            result.getOrPut(genre) { mutableListOf() }.add(s)
         }
-
-        // Sort songs in each genre by normalized title to group similar names
-        return@withContext result.mapValues { (_, list) ->
-            list.sortedWith(compareBy({ normalizeTitle(it.displayName) }, { it.displayName.lowercase() }))
+        
+        // Group by genre with normalization
+        val groupedGenres = songsWithMetadata.groupBy { song ->
+            normalizeGenreName(song.genre.ifBlank { "Unknown Genre" })
+        }
+        
+        // Sort songs within each genre by artist, album, track
+        groupedGenres.mapValues { (_, songs) ->
+            songs.sortedWith(
+                compareBy<Song> { it.artistName.lowercase() }
+                    .thenBy { it.albumName.lowercase() }
+                    .thenBy { it.track }
+                    .thenBy { it.displayName.lowercase() }
+            )
         }
     }
 
@@ -659,6 +641,98 @@ if (isValidAudioFile(name) || child.type?.startsWith("audio/") == true) {
         } catch (_: Exception) {
             "path:${song.path}"
         }
+    }
+    
+    /**
+     * Normalize artist name for better grouping
+     */
+    private fun normalizeArtistName(artist: String): String {
+        return artist.trim()
+            .replace(Regex("\\s+"), " ") // Multiple spaces -> single space
+            .replace("&", "and") // & -> and for consistency
+            .replace(Regex("[,.;]"), "") // Remove punctuation
+            .ifBlank { "Unknown Artist" }
+    }
+    
+    /**
+     * Normalize genre name for better grouping
+     */
+    private fun normalizeGenreName(genre: String): String {
+        val normalized = genre.trim()
+            .replace(Regex("\\s+"), " ") // Multiple spaces -> single space
+            .replace("&", "and") // & -> and for consistency
+            .ifBlank { "Unknown Genre" }
+        
+        // Map common variations to standard names
+        return when (normalized.lowercase()) {
+            "hip hop", "hip-hop", "hiphop", "rap" -> "Hip-Hop"
+            "r&b", "rnb", "r and b" -> "R&B"
+            "electronic", "edm", "dance", "house", "techno" -> "Electronic"
+            "rock and roll", "rock & roll" -> "Rock"
+            "pop rock" -> "Pop Rock"
+            "hard rock" -> "Hard Rock"
+            "heavy metal" -> "Metal"
+            "alternative rock", "alt rock" -> "Alternative"
+            "indie rock", "indie pop" -> "Indie"
+            "classical music" -> "Classical"
+            "lo-fi", "lofi" -> "Lo-Fi"
+            "afrobeat", "afrobeats" -> "Afrobeats"
+            "reggae" -> "Reggae"
+            "country music" -> "Country"
+            "folk music" -> "Folk"
+            "blues music" -> "Blues"
+            "jazz music" -> "Jazz"
+            else -> normalized.split(" ").joinToString(" ") { word ->
+                word.lowercase().replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+            }
+        }
+    }
+    
+    /**
+     * Infer genre from song metadata and filename patterns
+     */
+    private fun inferGenreFromMetadata(song: Song, prefs: SharedPreferences): String {
+        // Check cache first
+        val cacheKey = "genre_cache_${stableKey(song)}"
+        val cached = prefs.getString(cacheKey, "")
+        if (!cached.isNullOrBlank()) {
+            return cached
+        }
+        
+        // Analyze text content for genre clues
+        val searchText = "${song.displayName} ${song.artistName} ${song.albumName}".lowercase()
+        
+        val inferredGenre = when {
+            searchText.containsAny(listOf("hip hop", "hip-hop", "rap", "trap", "drill")) -> "Hip-Hop"
+            searchText.containsAny(listOf("r&b", "rnb", "soul")) -> "R&B"
+            searchText.containsAny(listOf("pop", "mainstream")) -> "Pop"
+            searchText.containsAny(listOf("rock", "metal", "punk")) -> "Rock"
+            searchText.containsAny(listOf("electronic", "edm", "house", "techno", "trance", "dubstep")) -> "Electronic"
+            searchText.containsAny(listOf("jazz", "swing", "blues")) -> "Jazz"
+            searchText.containsAny(listOf("classical", "symphony", "orchestra", "concerto")) -> "Classical"
+            searchText.containsAny(listOf("country", "folk", "bluegrass")) -> "Country"
+            searchText.containsAny(listOf("indie", "alternative", "alt")) -> "Indie"
+            searchText.containsAny(listOf("reggae", "ska")) -> "Reggae"
+            searchText.containsAny(listOf("afrobeat", "afrobeats", "african")) -> "Afrobeats"
+            searchText.containsAny(listOf("lo-fi", "lofi", "chill")) -> "Lo-Fi"
+            searchText.containsAny(listOf("remix", "mix", "dj")) -> "Dance"
+            searchText.contains("live") -> "Live"
+            else -> "Unknown Genre"
+        }
+        
+        // Cache the result
+        if (inferredGenre != "Unknown Genre") {
+            prefs.edit().putString(cacheKey, inferredGenre).apply()
+        }
+        
+        return inferredGenre
+    }
+    
+    /**
+     * Extension function to check if string contains any of the given terms
+     */
+    private fun String.containsAny(terms: List<String>): Boolean {
+        return terms.any { this.contains(it, ignoreCase = true) }
     }
 
     // Fast path: query MediaStore directly for a specific artist (case-insensitive best-effort)
