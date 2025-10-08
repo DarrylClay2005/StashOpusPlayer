@@ -25,6 +25,7 @@ import com.stash.opusplayer.utils.MetadataExtractor
 import com.stash.opusplayer.ui.appearance.AppearancePreferences
 import android.animation.ObjectAnimator
 import android.view.animation.LinearInterpolator
+import com.stash.opusplayer.utils.AnimationUtils
 import kotlinx.coroutines.launch
 
 class MiniPlayerView @JvmOverloads constructor(
@@ -76,11 +77,7 @@ class MiniPlayerView @JvmOverloads constructor(
 
         // Control button listeners with improved responsiveness and visual feedback
         binding.miniPlayPauseButton.setOnClickListener { view ->
-            // Add visual feedback
-            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
-                .withEndAction {
-                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
-                }.start()
+            AnimationUtils.animateButtonPress(view)
             
             // Immediate action with fallback
             try {
@@ -106,11 +103,7 @@ class MiniPlayerView @JvmOverloads constructor(
         }
 
         binding.miniPreviousButton.setOnClickListener { view ->
-            // Add visual feedback
-            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
-                .withEndAction {
-                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
-                }.start()
+            AnimationUtils.animateButtonPress(view)
             
             try {
                 mediaController?.seekToPrevious() ?: musicPlayerManager?.skipToPrevious()
@@ -120,11 +113,7 @@ class MiniPlayerView @JvmOverloads constructor(
         }
         
         binding.miniNextButton.setOnClickListener { view ->
-            // Add visual feedback
-            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
-                .withEndAction {
-                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
-                }.start()
+            AnimationUtils.animateButtonPress(view)
             
             try {
                 mediaController?.seekToNext() ?: musicPlayerManager?.skipToNext()
@@ -134,11 +123,7 @@ class MiniPlayerView @JvmOverloads constructor(
         }
 
         binding.miniFastForwardButton.setOnClickListener { view ->
-            // Add visual feedback
-            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
-                .withEndAction {
-                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
-                }.start()
+            AnimationUtils.animateButtonPress(view)
             
             try {
                 mediaController?.let { controller ->
@@ -418,25 +403,39 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
 
     fun show() {
         if (visibility != VISIBLE) {
+            // Initialize position for slide-up animation
+            translationY = height.toFloat()
             visibility = VISIBLE
-            // Optional: Add slide up animation
+            
+            // Slide up animation with fade in
             animate()
                 .translationY(0f)
-                .setDuration(300)
+                .alpha(1f)
+                .setDuration(350)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
                 .start()
+                
+            // Animate child views with stagger effect
+            animateChildViews(true)
         }
     }
 
     fun hide() {
         if (visibility == VISIBLE) {
-            // Optional: Add slide down animation
+            // Slide down animation with fade out
             animate()
                 .translationY(height.toFloat())
+                .alpha(0f)
                 .setDuration(300)
+                .setInterpolator(android.view.animation.AccelerateInterpolator())
                 .withEndAction {
                     visibility = GONE
+                    alpha = 1f // Reset alpha for next show
                 }
                 .start()
+                
+            // Animate child views with stagger effect  
+            animateChildViews(false)
         }
     }
 
@@ -448,18 +447,7 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
                 val leftHalf = viewWidth / 2f
                 
                 // Add ripple effect
-                view.animate()
-                    .scaleX(0.95f)
-                    .scaleY(0.95f)
-                    .setDuration(150)
-                    .withEndAction {
-                        view.animate()
-                            .scaleX(1.0f)
-                            .scaleY(1.0f)
-                            .setDuration(150)
-                            .start()
-                    }
-                    .start()
+                AnimationUtils.animateButtonPress(view)
                 
                 try {
                     when {
@@ -582,5 +570,46 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
         spinningAnimator?.cancel()
         spinningAnimator = null
         binding.miniAlbumArt.rotation = 0f
+    }
+    
+    private fun animateChildViews(isShowing: Boolean) {
+        val childViews = listOf(
+            binding.miniAlbumArt,
+            binding.miniSongTitle,
+            binding.miniArtistName,
+            binding.miniPlayPauseButton,
+            binding.miniPreviousButton,
+            binding.miniNextButton,
+            binding.miniFastForwardButton
+        )
+        
+        if (isShowing) {
+            // Staggered entrance animation
+            childViews.forEachIndexed { index, view ->
+                view.alpha = 0f
+                view.scaleX = 0.8f
+                view.scaleY = 0.8f
+                view.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setStartDelay((index * 50).toLong())
+                    .setDuration(300)
+                    .setInterpolator(android.view.animation.OvershootInterpolator(1.2f))
+                    .start()
+            }
+        } else {
+            // Staggered exit animation
+            childViews.reversed().forEachIndexed { index, view ->
+                view.animate()
+                    .alpha(0f)
+                    .scaleX(0.8f)
+                    .scaleY(0.8f)
+                    .setStartDelay((index * 30).toLong())
+                    .setDuration(200)
+                    .setInterpolator(android.view.animation.AccelerateInterpolator())
+                    .start()
+            }
+        }
     }
 }

@@ -31,8 +31,8 @@ android {
         applicationId "com.stash.opusplayer"
         minSdk 21
         targetSdk 34
-        versionCode 138
-        versionName "10.9.0"
+        versionCode 141
+        versionName "11.2.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
         // Inject YouTube API key into BuildConfig
@@ -210,6 +210,16 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'
     implementation 'androidx.lifecycle:lifecycle-livedata-ktx:2.7.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
+    
+    // AWS SDK for DynamoDB
+    implementation 'com.amazonaws:aws-android-sdk-core:2.77.0'
+    implementation 'com.amazonaws:aws-android-sdk-ddb:2.77.0'
+    implementation 'com.amazonaws:aws-android-sdk-ddb-mapper:2.77.0'
+    implementation 'com.amazonaws:aws-android-sdk-auth-core:2.77.0'
+    implementation 'com.amazonaws:aws-android-sdk-auth-userpools:2.77.0'
+    
+    // AWS SDK additional dependencies
+    implementation 'com.amazonaws:aws-android-sdk-cognitoidentityprovider:2.77.0'
     
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'

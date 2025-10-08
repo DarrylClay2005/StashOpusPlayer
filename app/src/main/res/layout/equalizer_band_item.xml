@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="48dp"
+    android:layout_height="match_parent"
+    android:layout_margin="4dp"
+    android:orientation="vertical"
+    android:gravity="center_horizontal">
+
+    <!-- Band Value Label -->
+    <TextView
+        android:id="@+id/value_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="0.0 dB"
+        android:textColor="@color/text_primary"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:minHeight="20dp" />
+
+    <!-- Vertical Slider -->
+    <SeekBar
+        android:id="@+id/band_slider"
+        style="@style/VerticalSeekBar"
+        android:layout_width="wrap_content"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginVertical="8dp"
+        android:max="1500"
+        android:progress="750"
+        android:rotation="270"
+        android:transformPivotX="12dp"
+        android:transformPivotY="12dp"
+        android:layout_gravity="center"
+        android:thumb="@drawable/seekbar_thumb"
+        android:progressDrawable="@drawable/vertical_seekbar_progress" />
+
+    <!-- Frequency Label -->
+    <TextView
+        android:id="@+id/frequency_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="1.0K"
+        android:textColor="@color/text_secondary"
+        android:textSize="10sp"
+        android:gravity="center"
+        android:minHeight="20dp" />
+
+</LinearLayout>

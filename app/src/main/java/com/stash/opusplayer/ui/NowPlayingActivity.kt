@@ -24,6 +24,7 @@ import com.stash.opusplayer.player.MusicPlayerManager
 import com.stash.opusplayer.service.MusicService
 import androidx.core.os.bundleOf
 import com.stash.opusplayer.utils.MetadataExtractor
+import com.stash.opusplayer.utils.AnimationUtils
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
@@ -66,6 +67,9 @@ class NowPlayingActivity : AppCompatActivity() {
         binding = ActivityNowPlayingBinding.inflate(layoutInflater)
         setContentView(binding.root)
         
+        // Animate activity entrance
+        animateActivityEntrance()
+        
         metadataExtractor = MetadataExtractor(this)
         
         // Apply appearance preferences to SynthWave
@@ -106,10 +110,62 @@ class NowPlayingActivity : AppCompatActivity() {
         }
     }
     
+    private fun animateActivityEntrance() {
+        // Fade in the background
+        binding.root.alpha = 0f
+        binding.root.animate()
+            .alpha(1f)
+            .setDuration(400)
+            .start()
+        
+        // Slide in controls from bottom
+        val controlViews = listOf(
+            binding.playPauseButton,
+            binding.previousButton,
+            binding.nextButton,
+            binding.shuffleButton,
+            binding.repeatButton
+        )
+        
+        controlViews.forEachIndexed { index, view ->
+            view.translationY = 200f
+            view.alpha = 0f
+            view.animate()
+                .translationY(0f)
+                .alpha(1f)
+                .setStartDelay((index * 100).toLong())
+                .setDuration(500)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
+        }
+        
+        // Scale in the album art
+        try {
+            binding.albumArtwork?.let { albumArt ->
+                albumArt.scaleX = 0.3f
+                albumArt.scaleY = 0.3f
+                albumArt.alpha = 0f
+                albumArt.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .alpha(1f)
+                    .setDuration(600)
+                    .setStartDelay(200)
+                    .setInterpolator(android.view.animation.OvershootInterpolator())
+                    .start()
+            }
+        } catch (e: Exception) {
+            // Handle case where albumArtwork view might not exist
+        }
+    }
+    
     private fun setupUI() {
-        // Back button
-        binding.backButton.setOnClickListener {
-            finish()
+        // Back button with animation
+        binding.backButton.setOnClickListener { view ->
+            AnimationUtils.animateButtonPress(view) {
+                finish()
+                AnimationUtils.finishActivityWithSlideOut(this@NowPlayingActivity)
+            }
         }
         
         // Playback controls with visual feedback

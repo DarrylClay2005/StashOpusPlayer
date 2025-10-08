@@ -33,7 +33,7 @@ import com.karumi.dexter.listener.multi.MultiplePermissionsListener
 import com.stash.opusplayer.R
 import com.stash.opusplayer.databinding.ActivityMainBinding
 import com.stash.opusplayer.ui.fragments.MusicLibraryFragment
-import com.stash.opusplayer.ui.fragments.EqualizerFragment
+import com.stash.opusplayer.ui.fragments.SimpleEnhancedEqualizerFragment
 import com.stash.opusplayer.ui.fragments.SettingsFragment
 import com.stash.opusplayer.ui.fragments.PlaylistsFragment
 import com.stash.opusplayer.ui.fragments.YouTubeSearchFragment
@@ -45,6 +45,7 @@ import com.stash.opusplayer.ui.appearance.ThemeManager
 import com.stash.opusplayer.ui.appearance.AppearancePreferences
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
+import com.stash.opusplayer.utils.AnimationUtils
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
     
@@ -180,7 +181,22 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
     
     private fun setupBottomNavigation() {
+        // Animate bottom navigation on startup
+        binding.bottomNav.alpha = 0f
+        binding.bottomNav.translationY = 100f
+        binding.bottomNav.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setDuration(500)
+            .setStartDelay(300)
+            .setInterpolator(android.view.animation.DecelerateInterpolator())
+            .start()
+            
         binding.bottomNav.setOnItemSelectedListener { item ->
+            // Add click animation to navigation items
+            val selectedView = binding.bottomNav.findViewById<android.view.View>(item.itemId)
+            AnimationUtils.animateButtonPress(selectedView)
+            
             when (item.itemId) {
                 R.id.nav_songs -> {
                     loadFragment(MusicLibraryFragment())
@@ -188,12 +204,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     true
                 }
                 R.id.nav_liked -> {
-loadFragment(com.stash.opusplayer.ui.fragments.FavoritesFragment())
+                    loadFragment(com.stash.opusplayer.ui.fragments.FavoritesFragment())
                     supportActionBar?.title = "Liked Songs"
                     true
                 }
                 R.id.nav_folders -> {
-loadFragment(com.stash.opusplayer.ui.fragments.FoldersFragment())
+                    loadFragment(com.stash.opusplayer.ui.fragments.FoldersFragment())
                     supportActionBar?.title = getString(R.string.menu_folders)
                     true
                 }
@@ -354,8 +370,10 @@ loadFragment(com.stash.opusplayer.ui.fragments.FoldersFragment())
                 supportActionBar?.title = "Genres"
             }
             R.id.nav_equalizer -> {
-                loadFragment(EqualizerFragment())
-                supportActionBar?.title = getString(R.string.menu_equalizer)
+                val fragment = SimpleEnhancedEqualizerFragment.newInstance()
+                // The fragment will connect to MediaController internally
+                loadFragment(fragment)
+                supportActionBar?.title = "Enhanced Audio"
             }
             R.id.nav_settings -> {
                 loadFragment(SettingsFragment())
@@ -378,7 +396,12 @@ loadFragment(com.stash.opusplayer.ui.fragments.FoldersFragment())
     }
     
     private fun loadFragment(fragment: Fragment) {
-        supportFragmentManager.beginTransaction()
+        val transaction = supportFragmentManager.beginTransaction()
+        
+        // Add fade transition animation for smooth fragment switching
+        AnimationUtils.setFragmentFadeTransitions(transaction)
+        
+        transaction
             .replace(R.id.main_content, fragment)
             .commit()
     }

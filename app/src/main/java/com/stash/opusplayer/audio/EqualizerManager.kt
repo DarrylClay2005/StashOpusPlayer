@@ -376,35 +376,53 @@ class EqualizerManager(private val context: Context) {
         } catch (_: Exception) {}
     }
     
-    // Preset implementations
+    // Enhanced preset implementations with more sophisticated curves
     private fun applyRockPreset(eq: Equalizer) {
-        val levels = intArrayOf(800, 400, -200, -400, -200, 400, 800, 1100, 1200, 1200)
+        val levels = intArrayOf(800, 600, 300, -200, -400, -200, 400, 700, 1000, 1200, 1300, 1200)
         applyLevels(eq, levels)
+        setBassBoost(600)  // Enhanced bass for rock
+        setVirtualizer(400)  // Moderate spatial enhancement
     }
     
     private fun applyPopPreset(eq: Equalizer) {
-        val levels = intArrayOf(-200, 400, 700, 800, 500, 0, -200, -200, -200, -200)
+        val levels = intArrayOf(-100, 300, 600, 800, 700, 500, 200, -100, -200, -300, -200, -100)
         applyLevels(eq, levels)
+        setBassBoost(400)  // Controlled bass
+        setVirtualizer(600)  // Enhanced stereo imaging for pop
+        setLoudnessGain(300)  // Slight loudness enhancement
     }
     
     private fun applyJazzPreset(eq: Equalizer) {
-        val levels = intArrayOf(400, 200, 0, 200, -200, -200, 0, 200, 400, 500)
+        val levels = intArrayOf(300, 200, 100, 300, 400, 300, 200, 300, 400, 500, 400, 300)
         applyLevels(eq, levels)
+        setBassBoost(200)  // Subtle bass enhancement
+        setVirtualizer(700)  // Enhanced spatial for jazz instruments
+        setEnvironmentalReverb(400, 2000)  // Jazz club ambiance
     }
     
     private fun applyClassicalPreset(eq: Equalizer) {
-        val levels = intArrayOf(500, 300, -200, -200, -200, 0, 200, 300, 400, 500)
+        val levels = intArrayOf(400, 300, 100, -100, -200, -100, 200, 400, 600, 700, 800, 600)
         applyLevels(eq, levels)
+        setBassBoost(100)  // Natural bass response
+        setVirtualizer(800)  // Wide soundstage for orchestral music
+        setEnvironmentalReverb(600, 3500)  // Concert hall acoustics
+        setLoudnessGain(200)  // Maintain dynamic range
     }
     
     private fun applyDancePreset(eq: Equalizer) {
-        val levels = intArrayOf(1000, 700, 200, 0, 0, -500, -700, -700, 0, 0)
+        val levels = intArrayOf(1200, 1000, 600, 200, 100, -200, -400, -300, 200, 400, 600, 500)
         applyLevels(eq, levels)
+        setBassBoost(800)  // Strong bass for dance music
+        setVirtualizer(700)  // Enhanced spatial imaging
+        setLoudnessGain(500)  // Increased perceived loudness
     }
     
     private fun applyMetalPreset(eq: Equalizer) {
-        val levels = intArrayOf(1000, 500, 1000, 1300, 500, 400, 1000, 1100, 1200, 1300)
+        val levels = intArrayOf(1000, 800, 600, 1000, 1200, 800, 600, 1000, 1100, 1300, 1400, 1300)
         applyLevels(eq, levels)
+        setBassBoost(700)  // Powerful bass for metal
+        setVirtualizer(500)  // Controlled spatial enhancement
+        setLoudnessGain(400)  // Enhanced punch and presence
     }
     
     private fun applyBassBoostPreset(eq: Equalizer) {
