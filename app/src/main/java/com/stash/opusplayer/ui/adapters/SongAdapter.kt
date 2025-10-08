@@ -15,6 +15,7 @@ import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.databinding.ItemSongBinding
 import com.stash.opusplayer.databinding.ItemSongGridBinding
 import com.stash.opusplayer.utils.MetadataExtractor
+import com.stash.opusplayer.utils.AnimationUtils
 
 class SongAdapter(
     private val onSongClick: (Song) -> Unit,
@@ -74,10 +75,9 @@ class SongAdapter(
             loadAlbumArt(binding, song)
 
             binding.root.setOnClickListener { view ->
-                view.animate().scaleX(0.95f).scaleY(0.95f).setDuration(100).withEndAction {
-                    view.animate().scaleX(1f).scaleY(1f).setDuration(100).start()
-                }.start()
-                onSongClick(song)
+                AnimationUtils.animateButtonPress(view) {
+                    onSongClick(song)
+                }
             }
 
             binding.menuButton.setOnClickListener { showContextMenu(binding.root, song, it) }
@@ -96,10 +96,9 @@ class SongAdapter(
             loadAlbumArt(binding, song)
 
             binding.root.setOnClickListener { view ->
-                view.animate().scaleX(0.98f).scaleY(0.98f).setDuration(80).withEndAction {
-                    view.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
-                }.start()
-                onSongClick(song)
+                AnimationUtils.animateButtonPress(view) {
+                    onSongClick(song)
+                }
             }
 
             binding.menuButton.setOnClickListener { showContextMenu(binding.root, song, it) }
@@ -151,9 +150,7 @@ class SongAdapter(
         popup.setOnMenuItemClickListener { menuItem ->
             when (menuItem.itemId) {
                 R.id.action_favorite -> {
-                    anchor.animate().scaleX(1.1f).scaleY(1.1f).setDuration(150).withEndAction {
-                        anchor.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
-                    }.start()
+                    AnimationUtils.bounceView(anchor, 1.2f, 400)
                     onFavoriteToggle(song)
                     true
                 }

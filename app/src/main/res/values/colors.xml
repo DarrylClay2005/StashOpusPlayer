@@ -61,4 +61,9 @@
     <color name="text_tertiary">#A0AEC0</color>
     <color name="player_background">#374151</color>
     <color name="navigation_background">#374151</color>
+    
+    <!-- Spectrum Analyzer Colors -->
+    <color name="spectrum_low">#4CAF50</color>      <!-- Green for low frequencies -->
+    <color name="spectrum_mid">#FFC107</color>      <!-- Yellow/Orange for mid frequencies -->
+    <color name="spectrum_high">#FF5722</color>     <!-- Red for high frequencies -->
 </resources>

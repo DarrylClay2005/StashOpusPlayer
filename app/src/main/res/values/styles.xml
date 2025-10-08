@@ -64,4 +64,36 @@
         <item name="cornerSize">16dp</item>
     </style>
 
+    <!-- Enhanced Equalizer Styles -->
+    <style name="NeomorphicButtonSmall" parent="NeomorphicButton">
+        <item name="android:padding">6dp</item>
+        <item name="android:minHeight">32dp</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <style name="NeomorphicSeekBar" parent="">
+        <item name="android:progressDrawable">@drawable/vertical_seekbar_progress</item>
+        <item name="android:thumb">@drawable/seekbar_thumb</item>
+        <item name="android:splitTrack">false</item>
+        <item name="android:thumbOffset">0dp</item>
+    </style>
+
+    <style name="VerticalSeekBar" parent="NeomorphicSeekBar">
+        <item name="android:rotation">270</item>
+        <item name="android:layout_width">200dp</item>
+        <item name="android:layout_height">24dp</item>
+    </style>
+
+    <style name="NeomorphicSpinner" parent="">
+        <item name="android:background">@drawable/neomorphic_card_background</item>
+        <item name="android:padding">12dp</item>
+        <item name="android:popupBackground">@drawable/neomorphic_card_background</item>
+    </style>
+
+    <style name="SwitchTheme" parent="">
+        <item name="colorPrimary">@color/accent_color</item>
+        <item name="colorPrimaryVariant">@color/secondary_dark_color</item>
+        <item name="colorOnPrimary">@color/white</item>
+    </style>
+
 </resources>

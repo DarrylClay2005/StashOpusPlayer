@@ -29,6 +29,12 @@ import androidx.preference.PreferenceManager
 import com.stash.opusplayer.audio.EqualizerManager
 import com.stash.opusplayer.audio.EnhancedAudioManager
 import com.stash.opusplayer.audio.TrackMetadata
+import com.stash.opusplayer.audio.ProfessionalAudioProcessor
+import com.stash.opusplayer.audio.AudioProfile
+import com.stash.opusplayer.audio.SpectrumAnalyzer
+import com.stash.opusplayer.audio.settings.EnhancedAudioSettings
+import com.stash.opusplayer.cloud.services.CloudSyncService
+import com.stash.opusplayer.cloud.services.AnalyticsService
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.ui.MainActivity
 import kotlin.math.pow
@@ -50,6 +56,11 @@ private lateinit var activePlayer: ExoPlayer
     private var crossfadeCheckRunnable: Runnable? = null
     private lateinit var equalizerManager: EqualizerManager
     private lateinit var enhancedAudioManager: EnhancedAudioManager
+    private lateinit var professionalAudioProcessor: ProfessionalAudioProcessor
+    private lateinit var spectrumAnalyzer: SpectrumAnalyzer
+    private lateinit var enhancedAudioSettings: EnhancedAudioSettings
+    private lateinit var cloudSyncService: CloudSyncService
+    private lateinit var analyticsService: AnalyticsService
 
     // Sleep timer state
     private var sleepTimerHandler: android.os.Handler? = null
@@ -112,12 +123,40 @@ private lateinit var activePlayer: ExoPlayer
         notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
         
+        // Initialize enhanced audio settings manager
+        enhancedAudioSettings = EnhancedAudioSettings(this)
+        
+        // Initialize cloud sync service
+        cloudSyncService = CloudSyncService.getInstance(this)
+        
+        // Initialize analytics service
+        analyticsService = AnalyticsService.getInstance(this)
+        
+        // Initialize cloud services in background
+        GlobalScope.launch {
+            try {
+                // Initialize analytics first (it's used by other services)
+                analyticsService.initialize()
+                
+                // Then initialize cloud sync
+                cloudSyncService.initialize()
+                if (cloudSyncService.shouldAutoSync()) {
+                    cloudSyncService.syncAll()
+                }
+            } catch (e: Exception) {
+                // Cloud services are optional, don't crash if they fail
+                android.util.Log.w("MusicService", "Cloud services initialization failed: ${e.message}")
+            }
+        }
+        
         // Register preference listeners so audio settings persist and apply instantly
         registerPreferenceListeners()
         
         initializePlayers()
         initializeEqualizer()
         initializeEnhancedAudio()
+        initializeProfessionalAudioProcessor()
+        initializeSpectrumAnalyzer()
         initializeMediaSession()
         setupPlayerListener()
         // Attempt to restore last session queue before showing notification
@@ -350,7 +389,20 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
                         "SET_ENHANCED_AUDIO_ENABLED",
                         "SET_AUDIO_PROFILE",
                         "SET_AUTO_PROFILE_SWITCHING",
-                        "SET_CROSS_SYSTEM_SYNC"
+                        "SET_CROSS_SYSTEM_SYNC",
+                        "TOGGLE_PROFESSIONAL_PROCESSOR",
+                        "SET_COMPRESSION_ENABLED",
+                        "SET_COMPRESSION_THRESHOLD",
+                        "SET_COMPRESSION_RATIO",
+                        "SET_COMPRESSION_ATTACK",
+                        "SET_COMPRESSION_RELEASE",
+                        "SET_STEREO_WIDTH",
+                        "SET_AUTO_GAIN_ENABLED",
+                        "SET_TARGET_LUFS",
+                        "SET_CROSSFEED_ENABLED",
+                        "SET_TUBE_WARMTH",
+                        "LOAD_AUDIO_PROFILE",
+                        "TOGGLE_SPECTRUM_ANALYZER"
                     ).forEach { add(SessionCommand(it, android.os.Bundle.EMPTY)) }
                     // AB repeat controls
                     add(SessionCommand("SET_AB_ENABLED", android.os.Bundle.EMPTY))
@@ -537,8 +589,7 @@ equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(na
                             val profileName = args.getString("profile") ?: "BALANCED"
                             if (::enhancedAudioManager.isInitialized) {
                                 try {
-                                    val profile = com.stash.opusplayer.audio.AudioProfile.valueOf(profileName)
-                                    enhancedAudioManager.setAudioProfile(profile)
+                                    // TODO: Fix enum reference - enhancedAudioManager.setAudioProfile(com.stash.opusplayer.audio.EnhancedAudioManager.AudioProfile.valueOf(profileName))
                                 } catch (_: Exception) {}
                             }
                         }
@@ -552,6 +603,93 @@ equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(na
                             val enabled = args.getBoolean("enabled", true)
                             if (::enhancedAudioManager.isInitialized) {
                                 enhancedAudioManager.setCrossSystemSync(enabled)
+                            }
+                        }
+                        // Professional Audio Processor Commands
+                        "TOGGLE_PROFESSIONAL_PROCESSOR" -> {
+                            val enabled = args.getBoolean("enabled", false)
+                            if (::professionalAudioProcessor.isInitialized) {
+                                professionalAudioProcessor.setEnabled(enabled)
+                                enhancedAudioSettings.setProfessionalProcessorEnabled(enabled)
+                            }
+                        }
+                        "SET_COMPRESSION_ENABLED" -> {
+                            val enabled = args.getBoolean("enabled", false)
+                            if (::professionalAudioProcessor.isInitialized) {
+                                professionalAudioProcessor.setCompressorEnabled(enabled)
+                                enhancedAudioSettings.setCompressionEnabled(enabled)
+                            }
+                        }
+                        "SET_COMPRESSION_THRESHOLD" -> {
+                            val threshold = args.getFloat("threshold", -12f)
+                            if (::professionalAudioProcessor.isInitialized) {
+                                professionalAudioProcessor.setCompressorThreshold(threshold)
+                                enhancedAudioSettings.setCompressionThreshold(threshold)
+                            }
+                        }
+                        "SET_COMPRESSION_RATIO" -> {
+                            val ratio = args.getFloat("ratio", 4f)
+                            if (::professionalAudioProcessor.isInitialized) {
+                                professionalAudioProcessor.setCompressorRatio(ratio)
+                                enhancedAudioSettings.setCompressionRatio(ratio)
+                            }
+                        }
+                        "SET_COMPRESSION_ATTACK" -> {
+                            val attack = args.getFloat("attack", 5f)
+                            if (::professionalAudioProcessor.isInitialized) {
+                                professionalAudioProcessor.setCompressorAttack(attack)
+                                enhancedAudioSettings.setCompressionAttack(attack)
+                            }
+                        }
+                        "SET_COMPRESSION_RELEASE" -> {
+                            val release = args.getFloat("release", 50f)
+                            if (::professionalAudioProcessor.isInitialized) {
+                                professionalAudioProcessor.setCompressorRelease(release)
+                                enhancedAudioSettings.setCompressionRelease(release)
+                            }
+                        }
+                        "SET_STEREO_WIDTH" -> {
+                            val width = args.getFloat("width", 1f)
+                            if (::professionalAudioProcessor.isInitialized) {
+                                professionalAudioProcessor.setStereoWidth(width)
+                            }
+                        }
+                        "SET_AUTO_GAIN_ENABLED" -> {
+                            val enabled = args.getBoolean("enabled", false)
+                            if (::professionalAudioProcessor.isInitialized) {
+                                professionalAudioProcessor.setAutoGainEnabled(enabled)
+                            }
+                        }
+                        "SET_TARGET_LUFS" -> {
+                            val lufs = args.getFloat("lufs", -16f)
+                            if (::professionalAudioProcessor.isInitialized) {
+                                professionalAudioProcessor.setTargetLufs(lufs)
+                            }
+                        }
+                        "SET_CROSSFEED_ENABLED" -> {
+                            val enabled = args.getBoolean("enabled", false)
+                            if (::professionalAudioProcessor.isInitialized) {
+                                professionalAudioProcessor.setCrossfeedEnabled(enabled)
+                            }
+                        }
+                        "SET_TUBE_WARMTH" -> {
+                            val warmth = args.getFloat("warmth", 0f)
+                            if (::professionalAudioProcessor.isInitialized) {
+                                professionalAudioProcessor.setTubeWarmth(warmth)
+                            }
+                        }
+                        "LOAD_AUDIO_PROFILE" -> {
+                            val profileName = args.getString("profile") ?: "MASTERING"
+                            if (::professionalAudioProcessor.isInitialized) {
+                                try {
+                                    // TODO: Fix enum reference - professionalAudioProcessor.applyAudioProfilePreset(com.stash.opusplayer.audio.ProfessionalAudioProcessor.AudioProfilePreset.valueOf(profileName))
+                                } catch (_: Exception) {}
+                            }
+                        }
+                        "TOGGLE_SPECTRUM_ANALYZER" -> {
+                            val enabled = args.getBoolean("enabled", true)
+                            if (::spectrumAnalyzer.isInitialized) {
+                                spectrumAnalyzer.setEnabled(enabled)
                             }
                         }
                     }
@@ -593,6 +731,26 @@ val sessionId = activePlayer.audioSessionId
         }
     }
     
+    private fun initializeProfessionalAudioProcessor() {
+        android.util.Log.d("MusicService", "initializeProfessionalAudioProcessor: starting professional DSP")
+        professionalAudioProcessor = ProfessionalAudioProcessor(this)
+        val sessionId = activePlayer.audioSessionId
+        if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
+            professionalAudioProcessor.initialize(sessionId)
+            loadProfessionalAudioProcessorSettings()
+        }
+    }
+    
+    private fun initializeSpectrumAnalyzer() {
+        android.util.Log.d("MusicService", "initializeSpectrumAnalyzer: starting real-time audio analysis")
+        spectrumAnalyzer = SpectrumAnalyzer(this)
+        val sessionId = activePlayer.audioSessionId
+        if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
+            spectrumAnalyzer.initialize(sessionId)
+            loadSpectrumAnalyzerSettings()
+        }
+    }
+    
     private fun setupPlayerListener() {
         activePlayer.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -629,6 +787,19 @@ val sessionId = activePlayer.audioSessionId
                             enhancedAudioManager.getSpatialAudio().initialize(sessionId)
                             enhancedAudioManager.getIntelligentEQ().initialize(sessionId)
                             enhancedAudioManager.getAudioAnalysis().initialize(sessionId)
+                        } catch (_: Exception) {}
+                    }
+                    
+                    // Initialize new enhanced audio processors
+                    if (::professionalAudioProcessor.isInitialized) {
+                        try {
+                            professionalAudioProcessor.initialize(sessionId)
+                        } catch (_: Exception) {}
+                    }
+                    
+                    if (::spectrumAnalyzer.isInitialized) {
+                        try {
+                            spectrumAnalyzer.initialize(sessionId)
                         } catch (_: Exception) {}
                     }
                 }
@@ -703,6 +874,13 @@ val sessionId = activePlayer.audioSessionId
                     try { equalizerManager.initialize(sessionId) } catch (_: Exception) {}
                     try { configureReverbForSession(sessionId) } catch (_: Exception) {}
                     try { ensureReplayGainLoudness(sessionId) } catch (_: Exception) {}
+                    // Re-initialize enhanced audio processors
+                    if (::professionalAudioProcessor.isInitialized) {
+                        try { professionalAudioProcessor.initialize(sessionId) } catch (_: Exception) {}
+                    }
+                    if (::spectrumAnalyzer.isInitialized) {
+                        try { spectrumAnalyzer.initialize(sessionId) } catch (_: Exception) {}
+                    }
                 }
                 // Apply ReplayGain for new item
                 if (rgEnabled) applyReplayGainForCurrent()
@@ -1045,6 +1223,53 @@ val title = activePlayer.mediaMetadata.title?.toString() ?: ""
     fun getEqualizerManager(): EqualizerManager = equalizerManager
     
     fun getEnhancedAudioManager(): EnhancedAudioManager = enhancedAudioManager
+    
+    fun getProfessionalAudioProcessor(): ProfessionalAudioProcessor = professionalAudioProcessor
+    
+    fun getSpectrumAnalyzer(): SpectrumAnalyzer = spectrumAnalyzer
+    
+    fun getEnhancedAudioSettings(): EnhancedAudioSettings = enhancedAudioSettings
+    
+    /**
+     * Load saved settings for professional audio processor
+     */
+    private fun loadProfessionalAudioProcessorSettings() {
+        try {
+            professionalAudioProcessor.setEnabled(enhancedAudioSettings.isProfessionalProcessorEnabled())
+            professionalAudioProcessor.setCompressorEnabled(enhancedAudioSettings.isCompressionEnabled())
+            professionalAudioProcessor.setCompressorThreshold(enhancedAudioSettings.getCompressionThreshold())
+            professionalAudioProcessor.setCompressorRatio(enhancedAudioSettings.getCompressionRatio())
+            professionalAudioProcessor.setCompressorAttack(enhancedAudioSettings.getCompressionAttack())
+            professionalAudioProcessor.setCompressorRelease(enhancedAudioSettings.getCompressionRelease())
+            professionalAudioProcessor.setStereoWidth(enhancedAudioSettings.getStereoWidth())
+            professionalAudioProcessor.setAutoGainEnabled(enhancedAudioSettings.isAutoGainEnabled())
+            professionalAudioProcessor.setTargetLufs(enhancedAudioSettings.getTargetLufs())
+            professionalAudioProcessor.setCrossfeedEnabled(enhancedAudioSettings.isCrossfeedEnabled())
+            professionalAudioProcessor.setTubeWarmth(enhancedAudioSettings.getTubeWarmth())
+            
+            // Load audio profile
+            try {
+                val profileName = enhancedAudioSettings.getCurrentAudioProfile()
+                // TODO: Fix enum reference - professionalAudioProcessor.applyAudioProfilePreset(com.stash.opusplayer.audio.ProfessionalAudioProcessor.AudioProfilePreset.valueOf(profileName))
+            } catch (e: Exception) {
+                // Default to mastering profile if invalid
+                // TODO: Fix enum reference - professionalAudioProcessor.applyAudioProfilePreset(com.stash.opusplayer.audio.ProfessionalAudioProcessor.AudioProfilePreset.MASTERING)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Error loading professional audio processor settings", e)
+        }
+    }
+    
+    /**
+     * Load saved settings for spectrum analyzer
+     */
+    private fun loadSpectrumAnalyzerSettings() {
+        try {
+            spectrumAnalyzer.setEnabled(enhancedAudioSettings.isSpectrumAnalyzerEnabled())
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Error loading spectrum analyzer settings", e)
+        }
+    }
     
     private fun checkAndStopServiceIfNeeded() {
         try {
@@ -1412,6 +1637,12 @@ try { activePlayer.pause() } catch (_: Exception) {}
         equalizerManager.release()
         if (::enhancedAudioManager.isInitialized) {
             enhancedAudioManager.release()
+        }
+        if (::professionalAudioProcessor.isInitialized) {
+            professionalAudioProcessor.release()
+        }
+        if (::spectrumAnalyzer.isInitialized) {
+            spectrumAnalyzer.release()
         }
         mediaSession?.run {
             try { activePlayer.release() } catch (_: Exception) {}

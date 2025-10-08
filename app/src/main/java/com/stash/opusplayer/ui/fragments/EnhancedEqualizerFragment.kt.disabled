@@ -1,0 +1,420 @@
+package com.stash.opusplayer.ui.fragments
+
+import android.graphics.Color
+import android.os.Bundle
+import android.support.v4.media.session.MediaControllerCompat
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.*
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.lifecycleScope
+import com.google.android.material.switchmaterial.SwitchMaterial
+import com.stash.opusplayer.R
+import com.stash.opusplayer.audio.manager.EqualizerManager
+import com.stash.opusplayer.audio.processor.ProfessionalAudioProcessor
+import com.stash.opusplayer.audio.spectrum.SpectrumAnalyzer
+// import com.stash.opusplayer.databinding.FragmentEnhancedEqualizerBinding
+import com.stash.opusplayer.service.MediaPlayerService
+import com.stash.opusplayer.ui.views.SpectrumView
+import com.stash.opusplayer.viewmodels.EnhancedEqualizerViewModel
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
+
+class EnhancedEqualizerFragment : Fragment() {
+
+    // TODO: Enable ViewBinding when layout is compiled
+    private var rootView: View? = null
+    
+    private val viewModel: EnhancedEqualizerViewModel by viewModels()
+    private var mediaController: MediaControllerCompat? = null
+    
+    // Audio processors
+    private var equalizerManager: EqualizerManager? = null
+    private var professionalProcessor: ProfessionalAudioProcessor? = null
+    private var spectrumAnalyzer: SpectrumAnalyzer? = null
+    
+    // UI components
+    private val bandSliders = mutableListOf<SeekBar>()
+    private val bandLabels = mutableListOf<TextView>()
+    private val bandValues = mutableListOf<TextView>()
+
+    companion object {
+        private const val MAX_SLIDER_VALUE = 1500 // -15dB to +15dB
+        private const val SLIDER_OFFSET = 750 // 0dB offset
+        
+        fun newInstance() = EnhancedEqualizerFragment()
+    }
+
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        rootView = inflater.inflate(R.layout.fragment_enhanced_equalizer, container, false)
+        return rootView!!
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        
+        setupEqualizer()
+        setupAudioEffects()
+        setupDynamicRangeProcessor()
+        setupAdvancedSettings()
+        setupSpectrumAnalyzer()
+        setupPresetControls()
+        setupProfileButtons()
+        observeViewModel()
+    }
+    
+    private fun setupEqualizer() {
+        // Main equalizer switch
+        rootView?.findViewById<SwitchMaterial>(R.id.equalizer_switch)?.setOnCheckedChangeListener { _, isChecked ->
+            equalizerManager?.setEnabled(isChecked)
+            sendCommand(MediaPlayerService.COMMAND_TOGGLE_EQUALIZER, Bundle().apply {
+                putBoolean("enabled", isChecked)
+            })
+        }
+        
+        // Professional processor switch
+        rootView?.findViewById<SwitchMaterial>(R.id.professional_processor_switch)?.setOnCheckedChangeListener { _, isChecked ->
+            professionalProcessor?.setEnabled(isChecked)
+            toggleProfessionalProcessorVisibility(isChecked)
+        }
+        
+        // Create equalizer band controls
+        createEqualizerBands()
+    }
+    
+    private fun createEqualizerBands() {
+        val bandsContainer = rootView?.findViewById<LinearLayout>(R.id.bands_container)
+        bandsContainer?.removeAllViews()
+        bandSliders.clear()
+        bandLabels.clear()
+        bandValues.clear()
+        
+        equalizerManager?.let { manager ->
+            val numberOfBands = manager.numberOfBands
+            
+            for (i in 0 until numberOfBands) {
+                val bandView = createBandView(i)
+                bandsContainer?.addView(bandView)
+            }
+        }
+    }
+    
+    private fun createBandView(bandIndex: Int): View {
+        val bandView = layoutInflater.inflate(R.layout.equalizer_band_item, null)
+        
+        val frequencyLabel = bandView.findViewById<TextView>(R.id.frequency_label)
+        val slider = bandView.findViewById<SeekBar>(R.id.band_slider)
+        val valueLabel = bandView.findViewById<TextView>(R.id.value_label)
+        
+        // Set frequency label
+        equalizerManager?.let { manager ->
+            val centerFreq = manager.getCenterFreq(bandIndex.toShort())
+            frequencyLabel.text = formatFrequency(centerFreq)
+        }
+        
+        // Configure slider
+        slider.apply {
+            max = MAX_SLIDER_VALUE
+            progress = SLIDER_OFFSET // 0dB
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        val gainDb = (progress - SLIDER_OFFSET) / 50.0f // Convert to dB
+                        equalizerManager?.setBandLevel(bandIndex.toShort(), (gainDb * 100).toInt().toShort())
+                        valueLabel.text = String.format("%.1f dB", gainDb)
+                        
+                        sendCommand(MediaPlayerService.COMMAND_SET_BAND_LEVEL, Bundle().apply {
+                            putInt("band", bandIndex)
+                            putFloat("level", gainDb)
+                        })
+                    }
+                }
+                
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        
+        valueLabel.text = "0.0 dB"
+        
+        bandSliders.add(slider)
+        bandLabels.add(frequencyLabel)
+        bandValues.add(valueLabel)
+        
+        return bandView
+    }
+    
+    private fun formatFrequency(frequency: Int): String {
+        return when {
+            frequency < 1000 -> "${frequency}Hz"
+            frequency < 1000000 -> String.format("%.1fK", frequency / 1000.0)
+            else -> String.format("%.1fM", frequency / 1000000.0)
+        }
+    }
+    
+    private fun setupAudioEffects() {
+        // Bass Boost
+        binding.bassBoostSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    val strength = progress
+                    equalizerManager?.setBassBoostStrength(strength.toShort())
+                    binding.bassBoostValue.text = "${(progress / 10f).roundToInt()}%"
+                    
+                    sendCommand(MediaPlayerService.COMMAND_SET_BASS_BOOST, Bundle().apply {
+                        putInt("strength", strength)
+                    })
+                }
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        
+        // Virtualizer
+        binding.virtualizerSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    val strength = progress
+                    equalizerManager?.setVirtualizerStrength(strength.toShort())
+                    binding.virtualizerValue.text = "${(progress / 10f).roundToInt()}%"
+                    
+                    sendCommand(MediaPlayerService.COMMAND_SET_VIRTUALIZER, Bundle().apply {
+                        putInt("strength", strength)
+                    })
+                }
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        
+        // Stereo Width
+        binding.stereoWidthSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    val width = progress / 100f
+                    professionalProcessor?.setStereoWidth(width)
+                    binding.stereoWidthValue.text = "${progress}%"
+                }
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+    }
+    
+    private fun setupDynamicRangeProcessor() {
+        // Compressor switch
+        binding.compressorSwitch.setOnCheckedChangeListener { _, isChecked ->
+            professionalProcessor?.setCompressionEnabled(isChecked)
+            binding.compressorControls.visibility = if (isChecked) View.VISIBLE else View.GONE
+        }
+        
+        // Threshold
+        binding.compressorThresholdSlider.setOnSeekBarChangeListener(createCompressorSeekBarListener { progress ->
+            val threshold = -60f + (progress / 600f) * 60f // -60dB to 0dB
+            professionalProcessor?.setCompressionThreshold(threshold)
+            binding.compressorThresholdValue.text = String.format("%.1f dB", threshold)
+        })
+        
+        // Ratio
+        binding.compressorRatioSlider.setOnSeekBarChangeListener(createCompressorSeekBarListener { progress ->
+            val ratio = 1f + (progress / 190f) * 19f // 1:1 to 20:1
+            professionalProcessor?.setCompressionRatio(ratio)
+            binding.compressorRatioValue.text = String.format("%.1f:1", ratio)
+        })
+        
+        // Attack
+        binding.compressorAttackSlider.setOnSeekBarChangeListener(createCompressorSeekBarListener { progress ->
+            val attack = 0.1f + (progress / 999f) * 99.9f // 0.1ms to 100ms
+            professionalProcessor?.setCompressionAttack(attack)
+            binding.compressorAttackValue.text = String.format("%.1f ms", attack)
+        })
+        
+        // Release
+        binding.compressorReleaseSlider.setOnSeekBarChangeListener(createCompressorSeekBarListener { progress ->
+            val release = 1f + (progress / 999f) * 999f // 1ms to 1000ms
+            professionalProcessor?.setCompressionRelease(release)
+            binding.compressorReleaseValue.text = String.format("%.0f ms", release)
+        })
+    }
+    
+    private fun createCompressorSeekBarListener(onProgress: (Int) -> Unit): SeekBar.OnSeekBarChangeListener {
+        return object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) onProgress(progress)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        }
+    }
+    
+    private fun setupAdvancedSettings() {
+        // Auto Gain Control
+        binding.autoGainSwitch.setOnCheckedChangeListener { _, isChecked ->
+            professionalProcessor?.setAutoGainEnabled(isChecked)
+            binding.targetLufsContainer.visibility = if (isChecked) View.VISIBLE else View.GONE
+        }
+        
+        // Target LUFS
+        binding.targetLufsSlider.setOnSeekBarChangeListener(createCompressorSeekBarListener { progress ->
+            val lufs = -40f + (progress / 240f) * 40f // -40 LUFS to 0 LUFS
+            professionalProcessor?.setTargetLufs(lufs)
+            binding.targetLufsValue.text = String.format("%.1f", lufs)
+        })
+        
+        // Crossfeed
+        binding.crossfeedSwitch.setOnCheckedChangeListener { _, isChecked ->
+            professionalProcessor?.setCrossfeedEnabled(isChecked)
+        }
+        
+        // Tube Warmth
+        binding.tubeWarmthSlider.setOnSeekBarChangeListener(createCompressorSeekBarListener { progress ->
+            val warmth = progress / 100f
+            professionalProcessor?.setTubeWarmth(warmth)
+            binding.tubeWarmthValue.text = "${progress}%"
+        })
+    }
+    
+    private fun setupSpectrumAnalyzer() {
+        // Initialize spectrum view
+        binding.spectrumView.reset()
+    }
+    
+    private fun setupPresetControls() {
+        // Setup preset spinner
+        equalizerManager?.let { manager ->
+            val presets = manager.getPresetNames()
+            val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, presets)
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            binding.presetSpinner.adapter = adapter
+            
+            binding.presetSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    manager.usePreset(position.toShort())
+                    updateBandSlidersFromPreset(position)
+                    
+                    sendCommand(MediaPlayerService.COMMAND_SET_PRESET, Bundle().apply {
+                        putInt("preset", position)
+                    })
+                }
+                
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
+        }
+    }
+    
+    private fun setupProfileButtons() {
+        binding.btnMastering.setOnClickListener {
+            professionalProcessor?.loadProfile(ProfessionalAudioProcessor.AudioProfile.MASTERING)
+            updateUIFromProcessor()
+        }
+        
+        binding.btnAudiophile.setOnClickListener {
+            professionalProcessor?.loadProfile(ProfessionalAudioProcessor.AudioProfile.AUDIOPHILE)
+            updateUIFromProcessor()
+        }
+        
+        binding.btnBroadcast.setOnClickListener {
+            professionalProcessor?.loadProfile(ProfessionalAudioProcessor.AudioProfile.BROADCAST)
+            updateUIFromProcessor()
+        }
+        
+        binding.btnClub.setOnClickListener {
+            professionalProcessor?.loadProfile(ProfessionalAudioProcessor.AudioProfile.CLUB)
+            updateUIFromProcessor()
+        }
+    }
+    
+    private fun observeViewModel() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.spectrumData.collect { spectrum ->
+                binding.spectrumView.updateSpectrum(spectrum)
+            }
+        }
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.audioMetrics.collect { metrics ->
+                binding.peakFrequency.text = String.format("%.1f kHz", metrics.peakFrequency / 1000f)
+                binding.currentLufs.text = String.format("%.1f", metrics.lufs)
+                binding.dynamicRange.text = String.format("%.1f dB", metrics.dynamicRange)
+            }
+        }
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.gainReduction.collect { reduction ->
+                binding.gainReductionMeter.progress = (reduction * 10).toInt()
+                binding.gainReductionValue.text = String.format("%.1f dB", reduction)
+            }
+        }
+    }
+    
+    private fun updateBandSlidersFromPreset(presetIndex: Int) {
+        equalizerManager?.let { manager ->
+            for (i in bandSliders.indices) {
+                val level = manager.getBandLevel(i.toShort())
+                val progress = SLIDER_OFFSET + (level / 100f * 50f).toInt()
+                bandSliders[i].progress = progress
+                bandValues[i].text = String.format("%.1f dB", level / 100f)
+            }
+        }
+    }
+    
+    private fun updateUIFromProcessor() {
+        professionalProcessor?.let { processor ->
+            // Update compression settings
+            val threshold = processor.getCompressionThreshold()
+            val thresholdProgress = ((threshold + 60f) / 60f * 600f).toInt()
+            binding.compressorThresholdSlider.progress = thresholdProgress
+            binding.compressorThresholdValue.text = String.format("%.1f dB", threshold)
+            
+            val ratio = processor.getCompressionRatio()
+            val ratioProgress = ((ratio - 1f) / 19f * 190f).toInt()
+            binding.compressorRatioSlider.progress = ratioProgress
+            binding.compressorRatioValue.text = String.format("%.1f:1", ratio)
+            
+            // Update other controls similarly...
+        }
+    }
+    
+    private fun toggleProfessionalProcessorVisibility(enabled: Boolean) {
+        val visibility = if (enabled) View.VISIBLE else View.GONE
+        // Show/hide advanced controls based on professional processor state
+        binding.stereoWidthSlider.parent?.let { parent ->
+            (parent as ViewGroup).visibility = visibility
+        }
+    }
+    
+    private fun sendCommand(command: String, extras: Bundle) {
+        mediaController?.sendCommand(command, extras, null)
+    }
+    
+    fun setMediaController(controller: MediaControllerCompat?) {
+        mediaController = controller
+    }
+    
+    fun setAudioProcessors(
+        equalizer: EqualizerManager?,
+        processor: ProfessionalAudioProcessor?,
+        analyzer: SpectrumAnalyzer?
+    ) {
+        equalizerManager = equalizer
+        professionalProcessor = processor
+        spectrumAnalyzer = analyzer
+        
+        // Initialize UI with current processor states
+        if (isAdded) {
+            createEqualizerBands()
+        }
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
+    }
+}

@@ -13,6 +13,8 @@ import com.stash.opusplayer.updates.UpdatePreferences
 import android.graphics.Color
 import android.content.res.ColorStateList
 import com.stash.opusplayer.utils.ResponsiveUtils
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class SettingsFragment : Fragment() {
     private val folderPickerLauncher = registerForActivityResult(
@@ -298,6 +300,91 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
             }
         }
         layout.addView(artworkToggle)
+
+        // Cloud Sync Section
+        addSectionHeader(layout, "Cloud Sync")
+        
+        val cloudSyncService = com.stash.opusplayer.cloud.services.CloudSyncService.getInstance(requireContext())
+        
+        // Cloud sync enable/disable toggle
+        val cloudSyncToggle = CheckBox(requireContext()).apply {
+            text = "Enable cloud synchronization"
+            isChecked = cloudSyncService.isSyncEnabled()
+        }
+        layout.addView(cloudSyncToggle)
+        
+        // Sync status display
+        val syncStatusText = TextView(requireContext()).apply {
+            text = "Status: ${if (cloudSyncService.isSyncEnabled()) "Enabled" else "Disabled"}"
+            textSize = 12f
+            setPadding(0, 8, 0, 8)
+        }
+        layout.addView(syncStatusText)
+        
+        // AWS Credentials Configuration
+        val credentialsButton = Button(requireContext()).apply {
+            text = "Configure AWS Credentials"
+            setOnClickListener {
+                showAWSCredentialsDialog()
+            }
+        }
+        layout.addView(credentialsButton)
+        
+        // Test Connection Button
+        val testConnectionBtn = Button(requireContext()).apply {
+            text = "Test Connection"
+            setOnClickListener {
+                testAWSConnection()
+            }
+        }
+        layout.addView(testConnectionBtn)
+        
+        // Manual sync button
+        val manualSyncBtn = Button(requireContext()).apply {
+            text = "Sync Now"
+            isEnabled = cloudSyncService.isSyncEnabled()
+            setOnClickListener {
+                performManualSync()
+            }
+        }
+        layout.addView(manualSyncBtn)
+        
+        // Cloud sync info
+        val syncInfoText = TextView(requireContext()).apply {
+            text = "Cloud sync automatically saves your audio settings, listening history, and preferences across all your devices."
+            textSize = 11f
+            setPadding(0, 8, 0, 16)
+        }
+        layout.addView(syncInfoText)
+        
+        // Update sync status when cloud sync toggle changes
+        cloudSyncToggle.setOnCheckedChangeListener { _, isChecked ->
+            lifecycleScope.launch {
+                try {
+                    if (isChecked) {
+                        val success = cloudSyncService.setSyncEnabled(true)
+                        if (!success) {
+                            cloudSyncToggle.isChecked = false
+                            Toast.makeText(requireContext(), "Failed to enable cloud sync. Check AWS credentials.", Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(requireContext(), "Cloud sync enabled", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        cloudSyncService.setSyncEnabled(false)
+                        Toast.makeText(requireContext(), "Cloud sync disabled", Toast.LENGTH_SHORT).show()
+                    }
+                    
+                    // Update UI elements
+                    syncStatusText.text = "Status: ${if (cloudSyncService.isSyncEnabled()) "Enabled" else "Disabled"}"
+                    manualSyncBtn.isEnabled = cloudSyncService.isSyncEnabled()
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                    cloudSyncToggle.isChecked = false
+                    syncStatusText.text = "Status: Error"
+                    manualSyncBtn.isEnabled = false
+                }
+            }
+        }
 
 
         // Music Folders Section
@@ -1386,6 +1473,136 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
             }
             .setNegativeButton("Close", null)
             .show()
+    }
+    
+    private fun showAWSCredentialsDialog() {
+        val awsConfig = com.stash.opusplayer.cloud.AWSConfig.getInstance(requireContext())
+        
+        // Create dialog layout
+        val dialogLayout = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 32, 32, 32)
+        }
+        
+        val titleText = TextView(requireContext()).apply {
+            text = "AWS Credentials Configuration"
+            textSize = 18f
+            setPadding(0, 0, 0, 16)
+        }
+        dialogLayout.addView(titleText)
+        
+        val infoText = TextView(requireContext()).apply {
+            text = "Enter your AWS Access Key ID and Secret Access Key. These will be stored securely on your device."
+            textSize = 12f
+            setPadding(0, 0, 0, 16)
+        }
+        dialogLayout.addView(infoText)
+        
+        val accessKeyLabel = TextView(requireContext()).apply {
+            text = "Access Key ID:"
+            setPadding(0, 8, 0, 4)
+        }
+        dialogLayout.addView(accessKeyLabel)
+        
+        val accessKeyInput = EditText(requireContext()).apply {
+            hint = "AKIA..."
+            inputType = android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+        }
+        dialogLayout.addView(accessKeyInput)
+        
+        val secretKeyLabel = TextView(requireContext()).apply {
+            text = "Secret Access Key:"
+            setPadding(0, 16, 0, 4)
+        }
+        dialogLayout.addView(secretKeyLabel)
+        
+        val secretKeyInput = EditText(requireContext()).apply {
+            hint = "Your secret key..."
+            inputType = android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        dialogLayout.addView(secretKeyInput)
+        
+        val statusText = TextView(requireContext()).apply {
+            text = "Current source: ${awsConfig.getCredentialSource()}"
+            textSize = 11f
+            setPadding(0, 16, 0, 0)
+        }
+        dialogLayout.addView(statusText)
+        
+        androidx.appcompat.app.AlertDialog.Builder(requireContext())
+            .setView(dialogLayout)
+            .setTitle("AWS Credentials")
+            .setPositiveButton("Save") { _, _ ->
+                val accessKey = accessKeyInput.text.toString().trim()
+                val secretKey = secretKeyInput.text.toString().trim()
+                
+                if (accessKey.isEmpty() || secretKey.isEmpty()) {
+                    Toast.makeText(requireContext(), "Both fields are required", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                
+                if (awsConfig.storeCredentials(accessKey, secretKey)) {
+                    Toast.makeText(requireContext(), "Credentials saved successfully", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(requireContext(), "Failed to save credentials", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNeutralButton("Clear") { _, _ ->
+                if (awsConfig.clearStoredCredentials()) {
+                    Toast.makeText(requireContext(), "Credentials cleared", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+    
+    private fun testAWSConnection() {
+        val awsConfig = com.stash.opusplayer.cloud.AWSConfig.getInstance(requireContext())
+        
+        lifecycleScope.launch {
+            try {
+                // Show progress
+                Toast.makeText(requireContext(), "Testing AWS connection...", Toast.LENGTH_SHORT).show()
+                
+                // Initialize AWS if needed
+                val initSuccess = awsConfig.initialize()
+                if (!initSuccess) {
+                    Toast.makeText(requireContext(), "Failed to initialize AWS. Check credentials.", Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                
+                // Test connection
+                val testSuccess = awsConfig.testConnection()
+                if (testSuccess) {
+                    Toast.makeText(requireContext(), "✅ Connection successful!", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(requireContext(), "❌ Connection failed. Check credentials and permissions.", Toast.LENGTH_LONG).show()
+                }
+                
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "Connection error: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    
+    private fun performManualSync() {
+        val cloudSyncService = com.stash.opusplayer.cloud.services.CloudSyncService.getInstance(requireContext())
+        
+        lifecycleScope.launch {
+            try {
+                Toast.makeText(requireContext(), "Starting manual sync...", Toast.LENGTH_SHORT).show()
+                
+                val result = cloudSyncService.syncAll()
+                if (result.success) {
+                    Toast.makeText(requireContext(), "✅ Sync completed successfully!", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(requireContext(), "❌ Sync failed. Check connection.", Toast.LENGTH_LONG).show()
+                }
+                
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "Sync error: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun buildAppearanceContent(): View {
