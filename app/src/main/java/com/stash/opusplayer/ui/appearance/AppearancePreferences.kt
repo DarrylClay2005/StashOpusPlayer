@@ -43,11 +43,19 @@ data class AppearancePreferences(
     val miniPlayerSpinningArt: Boolean = false,
     
     // SynthWave Visualizer
+    val synthWaveEnabled: Boolean = true,
     val synthWaveProgressMode: Boolean = true,
     val synthWaveUseCustomColors: Boolean = false,
     val synthWavePrimaryColor: Int = 0xFFEC407A.toInt(),
     val synthWaveSecondaryColor: Int = 0xFF9C27B0.toInt(),
-    val synthWaveGlowColor: Int = 0xFF00BCD4.toInt()
+    val synthWaveGlowColor: Int = 0xFF00BCD4.toInt(),
+    val synthWaveAnimationIntensity: Float = 1.0f,
+    val synthWaveParticleCount: Int = 200,
+    val synthWaveFrequencyBands: Int = 64,
+    val synthWaveLightningEnabled: Boolean = true,
+    val synthWaveRippleEnabled: Boolean = true,
+    val synthWaveShakeEnabled: Boolean = true,
+    val synthWavePerformanceMode: Boolean = false
 ) {
     
     enum class AnimationSpeed(val multiplier: Float) {
@@ -97,11 +105,19 @@ data class AppearancePreferences(
                 miniPlayerCompactMode = prefs.getBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_COMPACT_MODE, false),
                 miniPlayerSpinningArt = prefs.getBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_SPINNING_ART, false),
                 
+                synthWaveEnabled = prefs.getBoolean("synthwave_enabled", true),
                 synthWaveProgressMode = prefs.getBoolean(PrefsKeys.APPEARANCE_SYNTHWAVE_PROGRESS_MODE, true),
                 synthWaveUseCustomColors = prefs.getBoolean(PrefsKeys.APPEARANCE_SYNTHWAVE_USE_CUSTOM_COLORS, false),
                 synthWavePrimaryColor = prefs.getInt(PrefsKeys.APPEARANCE_SYNTHWAVE_PRIMARY_COLOR, 0xFFEC407A.toInt()),
                 synthWaveSecondaryColor = prefs.getInt(PrefsKeys.APPEARANCE_SYNTHWAVE_SECONDARY_COLOR, 0xFF9C27B0.toInt()),
-                synthWaveGlowColor = prefs.getInt(PrefsKeys.APPEARANCE_SYNTHWAVE_GLOW_COLOR, 0xFF00BCD4.toInt())
+                synthWaveGlowColor = prefs.getInt(PrefsKeys.APPEARANCE_SYNTHWAVE_GLOW_COLOR, 0xFF00BCD4.toInt()),
+                synthWaveAnimationIntensity = prefs.getFloat("synthwave_animation_intensity", 1.0f).coerceIn(0.1f, 2.0f),
+                synthWaveParticleCount = prefs.getInt("synthwave_particle_count", 200).coerceIn(50, 500),
+                synthWaveFrequencyBands = prefs.getInt("synthwave_frequency_bands", 64).coerceIn(16, 128),
+                synthWaveLightningEnabled = prefs.getBoolean("synthwave_lightning_enabled", true),
+                synthWaveRippleEnabled = prefs.getBoolean("synthwave_ripple_enabled", true),
+                synthWaveShakeEnabled = prefs.getBoolean("synthwave_shake_enabled", true),
+                synthWavePerformanceMode = prefs.getBoolean("synthwave_performance_mode", false)
             )
         }
         
@@ -144,11 +160,19 @@ data class AppearancePreferences(
                 miniPlayerCompactMode = json.optBoolean("miniPlayerCompactMode", false),
                 miniPlayerSpinningArt = json.optBoolean("miniPlayerSpinningArt", false),
                 
+                synthWaveEnabled = json.optBoolean("synthWaveEnabled", true),
                 synthWaveProgressMode = json.optBoolean("synthWaveProgressMode", true),
                 synthWaveUseCustomColors = json.optBoolean("synthWaveUseCustomColors", false),
                 synthWavePrimaryColor = json.optInt("synthWavePrimaryColor", 0xFFEC407A.toInt()),
                 synthWaveSecondaryColor = json.optInt("synthWaveSecondaryColor", 0xFF9C27B0.toInt()),
-                synthWaveGlowColor = json.optInt("synthWaveGlowColor", 0xFF00BCD4.toInt())
+                synthWaveGlowColor = json.optInt("synthWaveGlowColor", 0xFF00BCD4.toInt()),
+                synthWaveAnimationIntensity = json.optDouble("synthWaveAnimationIntensity", 1.0).toFloat().coerceIn(0.1f, 2.0f),
+                synthWaveParticleCount = json.optInt("synthWaveParticleCount", 200).coerceIn(50, 500),
+                synthWaveFrequencyBands = json.optInt("synthWaveFrequencyBands", 64).coerceIn(16, 128),
+                synthWaveLightningEnabled = json.optBoolean("synthWaveLightningEnabled", true),
+                synthWaveRippleEnabled = json.optBoolean("synthWaveRippleEnabled", true),
+                synthWaveShakeEnabled = json.optBoolean("synthWaveShakeEnabled", true),
+                synthWavePerformanceMode = json.optBoolean("synthWavePerformanceMode", false)
             )
         }
         
@@ -236,11 +260,19 @@ data class AppearancePreferences(
             putBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_COMPACT_MODE, miniPlayerCompactMode)
             putBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_SPINNING_ART, miniPlayerSpinningArt)
             
+            putBoolean("synthwave_enabled", synthWaveEnabled)
             putBoolean(PrefsKeys.APPEARANCE_SYNTHWAVE_PROGRESS_MODE, synthWaveProgressMode)
             putBoolean(PrefsKeys.APPEARANCE_SYNTHWAVE_USE_CUSTOM_COLORS, synthWaveUseCustomColors)
             putInt(PrefsKeys.APPEARANCE_SYNTHWAVE_PRIMARY_COLOR, synthWavePrimaryColor)
             putInt(PrefsKeys.APPEARANCE_SYNTHWAVE_SECONDARY_COLOR, synthWaveSecondaryColor)
             putInt(PrefsKeys.APPEARANCE_SYNTHWAVE_GLOW_COLOR, synthWaveGlowColor)
+            putFloat("synthwave_animation_intensity", synthWaveAnimationIntensity)
+            putInt("synthwave_particle_count", synthWaveParticleCount)
+            putInt("synthwave_frequency_bands", synthWaveFrequencyBands)
+            putBoolean("synthwave_lightning_enabled", synthWaveLightningEnabled)
+            putBoolean("synthwave_ripple_enabled", synthWaveRippleEnabled)
+            putBoolean("synthwave_shake_enabled", synthWaveShakeEnabled)
+            putBoolean("synthwave_performance_mode", synthWavePerformanceMode)
             
             apply()
         }
@@ -281,11 +313,19 @@ data class AppearancePreferences(
         json.put("miniPlayerCompactMode", miniPlayerCompactMode)
         json.put("miniPlayerSpinningArt", miniPlayerSpinningArt)
         
+        json.put("synthWaveEnabled", synthWaveEnabled)
         json.put("synthWaveProgressMode", synthWaveProgressMode)
         json.put("synthWaveUseCustomColors", synthWaveUseCustomColors)
         json.put("synthWavePrimaryColor", synthWavePrimaryColor)
         json.put("synthWaveSecondaryColor", synthWaveSecondaryColor)
         json.put("synthWaveGlowColor", synthWaveGlowColor)
+        json.put("synthWaveAnimationIntensity", synthWaveAnimationIntensity)
+        json.put("synthWaveParticleCount", synthWaveParticleCount)
+        json.put("synthWaveFrequencyBands", synthWaveFrequencyBands)
+        json.put("synthWaveLightningEnabled", synthWaveLightningEnabled)
+        json.put("synthWaveRippleEnabled", synthWaveRippleEnabled)
+        json.put("synthWaveShakeEnabled", synthWaveShakeEnabled)
+        json.put("synthWavePerformanceMode", synthWavePerformanceMode)
         
         return json.toString(2)
     }

@@ -589,8 +589,12 @@ equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(na
                             val profileName = args.getString("profile") ?: "BALANCED"
                             if (::enhancedAudioManager.isInitialized) {
                                 try {
-                                    // TODO: Fix enum reference - enhancedAudioManager.setAudioProfile(com.stash.opusplayer.audio.EnhancedAudioManager.AudioProfile.valueOf(profileName))
-                                } catch (_: Exception) {}
+                                    val audioProfile = com.stash.opusplayer.audio.AudioProfile.valueOf(profileName)
+                                    enhancedAudioManager.setAudioProfile(audioProfile)
+                                    android.util.Log.d("MusicService", "Set audio profile to: $profileName")
+                                } catch (e: Exception) {
+                                    android.util.Log.e("MusicService", "Failed to set audio profile: $profileName", e)
+                                }
                             }
                         }
                         "SET_AUTO_PROFILE_SWITCHING" -> {
@@ -679,11 +683,16 @@ equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(na
                             }
                         }
                         "LOAD_AUDIO_PROFILE" -> {
-                            val profileName = args.getString("profile") ?: "MASTERING"
+                            val profileName = args.getString("profile") ?: "BALANCED"
                             if (::professionalAudioProcessor.isInitialized) {
                                 try {
-                                    // TODO: Fix enum reference - professionalAudioProcessor.applyAudioProfilePreset(com.stash.opusplayer.audio.ProfessionalAudioProcessor.AudioProfilePreset.valueOf(profileName))
-                                } catch (_: Exception) {}
+                                    // Load profile settings via EnhancedAudioSettings
+                                    enhancedAudioSettings.setCurrentAudioProfile(profileName)
+                                    loadProfessionalAudioProcessorSettings()
+                                    android.util.Log.d("MusicService", "Loaded audio profile: $profileName")
+                                } catch (e: Exception) {
+                                    android.util.Log.e("MusicService", "Failed to load audio profile: $profileName", e)
+                                }
                             }
                         }
                         "TOGGLE_SPECTRUM_ANALYZER" -> {
@@ -702,6 +711,224 @@ equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(na
             .setSessionActivity(sessionActivityPendingIntent)
             .setCallback(callback)
             .build()
+    }
+    
+    // Robust player state handlers
+    private fun handlePlayerReady() {
+        try {
+            // Ensure current app volume is applied as soon as ready
+            val base = uiToAmp(appVolumeUi)
+            android.util.Log.d("MusicService", "STATE_READY: set base volume=${base}")
+            activePlayer.volume = base
+            
+            // Initialize audio session and effects
+            initializeAudioSessionEffects()
+            
+            // Apply ReplayGain for current item (async parse)
+            if (rgEnabled) applyReplayGainForCurrent()
+            
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Error in handlePlayerReady", e)
+        }
+    }
+    
+    private fun handlePlayerEnded() {
+        try {
+            // Defensive auto-advance if something prevented Exo from moving to next
+            val mode = try { activePlayer.repeatMode } catch (_: Exception) { Player.REPEAT_MODE_OFF }
+            val hasNext = try { activePlayer.hasNextMediaItem() } catch (_: Exception) { false }
+            if (mode != Player.REPEAT_MODE_ONE && hasNext) {
+                try { 
+                    activePlayer.seekToNextMediaItem() 
+                    // Ensure audio effects remain active during transition
+                    maintainAudioEffectsAfterTransition()
+                } catch (_: Exception) {}
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Error in handlePlayerEnded", e)
+        }
+    }
+    
+    private fun handlePlayerIdle() {
+        try {
+            // Release temporary audio effects when idle to save resources
+            android.util.Log.d("MusicService", "Player idle - conserving resources")
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Error in handlePlayerIdle", e)
+        }
+    }
+    
+    private fun maintainAudioEffectsDuringBuffering() {
+        try {
+            // Keep audio effects active and ready during buffering
+            val sessionId = activePlayer.audioSessionId
+            if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId == lastAudioSessionId) {
+                // Verify effects are still bound to session
+                ensureAudioEffectsIntegrity(sessionId)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Error maintaining effects during buffering", e)
+        }
+    }
+    
+    private fun initializeAudioSessionEffects() {
+        try {
+            val sessionId = activePlayer.audioSessionId
+            if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
+                android.util.Log.d("MusicService", "STATE_READY: initializing effects for sessionId=${'$'}sessionId")
+                lastAudioSessionId = sessionId
+                
+                // Initialize core effects with error handling
+                try {
+                    equalizerManager.initialize(sessionId)
+                } catch (e: Exception) {
+                    android.util.Log.e("MusicService", "Failed to initialize equalizer", e)
+                }
+                
+                try {
+                    configureReverbForSession(sessionId)
+                } catch (e: Exception) {
+                    android.util.Log.e("MusicService", "Failed to configure reverb", e)
+                }
+                
+                try {
+                    ensureReplayGainLoudness(sessionId)
+                } catch (e: Exception) {
+                    android.util.Log.e("MusicService", "Failed to setup ReplayGain loudness", e)
+                }
+                
+                // Initialize enhanced audio systems with better error handling
+                initializeEnhancedAudioSystems(sessionId)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Error initializing audio session effects", e)
+        }
+    }
+    
+    private fun initializeEnhancedAudioSystems(sessionId: Int) {
+        // Initialize enhanced audio manager systems with robust error handling
+        if (::enhancedAudioManager.isInitialized) {
+            try {
+                enhancedAudioManager.initialize(sessionId, equalizerManager)
+            } catch (e: Exception) {
+                android.util.Log.e("MusicService", "Failed to initialize enhanced audio manager", e)
+                try {
+                    // Fallback to individual system initialization
+                    enhancedAudioManager.getAdvancedEffects().initialize(sessionId)
+                } catch (e2: Exception) {
+                    android.util.Log.e("MusicService", "Fallback advanced effects init failed", e2)
+                }
+            }
+        }
+        
+        // Initialize professional audio processor with error recovery
+        if (::professionalAudioProcessor.isInitialized) {
+            try {
+                professionalAudioProcessor.initialize(sessionId)
+                loadProfessionalAudioProcessorSettings()
+            } catch (e: Exception) {
+                android.util.Log.e("MusicService", "Failed to initialize professional audio processor", e)
+            }
+        }
+        
+        // Initialize spectrum analyzer with error recovery
+        if (::spectrumAnalyzer.isInitialized) {
+            try {
+                spectrumAnalyzer.initialize(sessionId)
+                loadSpectrumAnalyzerSettings()
+            } catch (e: Exception) {
+                android.util.Log.e("MusicService", "Failed to initialize spectrum analyzer", e)
+            }
+        }
+    }
+    
+    private fun maintainAudioEffectsAfterTransition() {
+        try {
+            // Ensure effects remain active after track transitions
+            val sessionId = activePlayer.audioSessionId
+            if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
+                ensureAudioEffectsIntegrity(sessionId)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Error maintaining effects after transition", e)
+        }
+    }
+    
+    private fun ensureAudioEffectsIntegrity(sessionId: Int) {
+        try {
+            // Verify and restore audio effects if needed
+            if (!equalizerManager.isInitialized()) {
+                equalizerManager.initialize(sessionId)
+            }
+            
+            // Check enhanced audio systems
+            if (::enhancedAudioManager.isInitialized) {
+                // Re-initialize if needed
+                try {
+                    if (enhancedAudioManager.enhancedAudioEnabled.value) {
+                        enhancedAudioManager.initialize(sessionId, equalizerManager)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("MusicService", "Enhanced audio re-init failed, continuing", e)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Error ensuring audio effects integrity", e)
+        }
+    }
+    
+    private fun updateAudioSessionEffectsIfNeeded() {
+        try {
+            val currentSessionId = activePlayer.audioSessionId
+            if (currentSessionId != C.AUDIO_SESSION_ID_UNSET && currentSessionId != lastAudioSessionId) {
+                android.util.Log.d("MusicService", "Audio session ID changed, updating effects: $lastAudioSessionId -> $currentSessionId")
+                handleAudioSessionChange(currentSessionId)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Error updating audio session effects", e)
+        }
+    }
+    
+    private fun handleAudioSessionChange(newSessionId: Int) {
+        try {
+            android.util.Log.d("MusicService", "Handling audio session change to $newSessionId")
+            lastAudioSessionId = newSessionId
+            
+            // Re-initialize all audio effects with new session
+            if (::equalizerManager.isInitialized) {
+                equalizerManager.release()
+                equalizerManager.initialize(newSessionId)
+            }
+            
+            // Re-initialize enhanced audio manager
+            if (::enhancedAudioManager.isInitialized) {
+                enhancedAudioManager.release()
+                enhancedAudioManager.initialize(newSessionId, equalizerManager)
+            }
+            
+            // Re-initialize professional audio processor
+            if (::professionalAudioProcessor.isInitialized) {
+                professionalAudioProcessor.release()
+                professionalAudioProcessor.initialize(newSessionId)
+                loadProfessionalAudioProcessorSettings()
+            }
+            
+            // Re-initialize spectrum analyzer
+            if (::spectrumAnalyzer.isInitialized) {
+                spectrumAnalyzer.release()
+                spectrumAnalyzer.initialize(newSessionId)
+                loadSpectrumAnalyzerSettings()
+            }
+            
+            // Re-configure reverb
+            configureReverbForSession(newSessionId)
+            
+            // Re-configure ReplayGain
+            ensureReplayGainLoudness(newSessionId)
+            
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Error handling audio session change", e)
+        }
     }
     
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
@@ -760,57 +987,34 @@ val sessionId = activePlayer.audioSessionId
                         "onPlaybackStateChanged state=$playbackState playWhenReady=${activePlayer.playWhenReady} isPlaying=${activePlayer.isPlaying} idx=${activePlayer.currentMediaItemIndex} count=${activePlayer.mediaItemCount} vol=${activePlayer.volume}"
                     )
                 } catch (_: Exception) {}
-                // Initialize equalizer when player is ready and has audio session
-                if (playbackState == Player.STATE_READY) {
-                    // Ensure current app volume is applied as soon as ready
-                    try {
-                        val base = uiToAmp(appVolumeUi)
-                        android.util.Log.d("MusicService", "STATE_READY: set base volume=${base}")
-                        activePlayer.volume = base
-                    } catch (_: Exception) {}
-                    val sessionId = activePlayer.audioSessionId
-                    if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != lastAudioSessionId) {
-                        android.util.Log.d("MusicService", "STATE_READY: initializing EQ for sessionId=${'$'}sessionId")
-                        lastAudioSessionId = sessionId
-                        equalizerManager.initialize(sessionId)
-                        configureReverbForSession(sessionId)
-                        // Ensure ReplayGain loudness enhancer is bound to this session
-                        ensureReplayGainLoudness(sessionId)
+                
+                when (playbackState) {
+                    Player.STATE_READY -> {
+                        handlePlayerReady()
+                        // Ensure audio effects are properly initialized when ready
+                        ensureAudioEffectsIntegrity(activePlayer.audioSessionId)
                     }
-                    // Apply ReplayGain for current item (async parse)
-                    if (rgEnabled) applyReplayGainForCurrent()
-                    
-                    // Initialize enhanced audio systems with new session
-                    if (::enhancedAudioManager.isInitialized) {
-                        try {
-                            enhancedAudioManager.getAdvancedEffects().initialize(sessionId)
-                            enhancedAudioManager.getSpatialAudio().initialize(sessionId)
-                            enhancedAudioManager.getIntelligentEQ().initialize(sessionId)
-                            enhancedAudioManager.getAudioAnalysis().initialize(sessionId)
-                        } catch (_: Exception) {}
+                    Player.STATE_ENDED -> {
+                        handlePlayerEnded()
                     }
-                    
-                    // Initialize new enhanced audio processors
-                    if (::professionalAudioProcessor.isInitialized) {
-                        try {
-                            professionalAudioProcessor.initialize(sessionId)
-                        } catch (_: Exception) {}
+                    Player.STATE_IDLE -> {
+                        handlePlayerIdle()
                     }
-                    
-                    if (::spectrumAnalyzer.isInitialized) {
-                        try {
-                            spectrumAnalyzer.initialize(sessionId)
-                        } catch (_: Exception) {}
+                    Player.STATE_BUFFERING -> {
+                        // Maintain audio effects during buffering
+                        maintainAudioEffectsDuringBuffering()
                     }
                 }
-                if (playbackState == Player.STATE_ENDED) {
-                    // Defensive auto-advance if something prevented Exo from moving to next
-                    val mode = try { activePlayer.repeatMode } catch (_: Exception) { Player.REPEAT_MODE_OFF }
-                    val hasNext = try { activePlayer.hasNextMediaItem() } catch (_: Exception) { false }
-                    if (mode != Player.REPEAT_MODE_ONE && hasNext) {
-                        try { activePlayer.seekToNextMediaItem() } catch (_: Exception) {}
-                        return
-                    }
+                
+                // Update audio session effects on all state changes
+                updateAudioSessionEffectsIfNeeded()
+            }
+            
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                super.onAudioSessionIdChanged(audioSessionId)
+                android.util.Log.d("MusicService", "Audio session changed: $lastAudioSessionId -> $audioSessionId")
+                if (audioSessionId != lastAudioSessionId) {
+                    handleAudioSessionChange(audioSessionId)
                 }
             }
 
@@ -913,18 +1117,39 @@ val sessionId = activePlayer.audioSessionId
 
     // Cancel any in-flight crossfade and ensure MediaSession is bound to activePlayer
     private fun cancelCrossfadeAndFocusActive() {
-        // Stop polling and fades
-        stopCrossfadePolling()
-        fadeRunnable?.let { mainHandler.removeCallbacks(it) }
-        fadeRunnable = null
-        // Stop and reset spare
-        try { sparePlayer?.pause() } catch (_: Exception) {}
-        try { sparePlayer?.stop() } catch (_: Exception) {}
-        try { sparePlayer?.clearMediaItems() } catch (_: Exception) {}
-        isCrossfading = false
-        // Ensure session uses active player
-        try { mediaSession?.setPlayer(activePlayer) } catch (_: Exception) {}
-        try { activePlayer.volume = uiToAmp(appVolumeUi) } catch (_: Exception) {}
+        try {
+            // Stop polling and fades
+            stopCrossfadePolling()
+            fadeRunnable?.let { mainHandler.removeCallbacks(it) }
+            fadeRunnable = null
+            
+            // Stop and reset spare player with better error recovery
+            try { 
+                sparePlayer?.pause()
+                sparePlayer?.stop()
+                sparePlayer?.clearMediaItems()
+                sparePlayer?.volume = 0f
+            } catch (e: Exception) {
+                android.util.Log.e("MusicService", "Error resetting spare player during crossfade cancel", e)
+            }
+            
+            isCrossfading = false
+            
+            // Ensure session uses active player with error recovery
+            try { 
+                mediaSession?.setPlayer(activePlayer)
+                activePlayer.volume = uiToAmp(appVolumeUi)
+                // Re-initialize audio effects if session changed
+                val currentSessionId = activePlayer.audioSessionId
+                if (currentSessionId != C.AUDIO_SESSION_ID_UNSET && currentSessionId != lastAudioSessionId) {
+                    initializeAudioSessionEffects()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MusicService", "Error restoring active player after crossfade cancel", e)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Error in cancelCrossfadeAndFocusActive", e)
+        }
     }
 
     // Persist/restore queue state
@@ -1250,10 +1475,17 @@ val title = activePlayer.mediaMetadata.title?.toString() ?: ""
             // Load audio profile
             try {
                 val profileName = enhancedAudioSettings.getCurrentAudioProfile()
-                // TODO: Fix enum reference - professionalAudioProcessor.applyAudioProfilePreset(com.stash.opusplayer.audio.ProfessionalAudioProcessor.AudioProfilePreset.valueOf(profileName))
+                // Apply the saved audio profile through enhanced audio manager
+                if (::enhancedAudioManager.isInitialized) {
+                    val audioProfile = com.stash.opusplayer.audio.AudioProfile.valueOf(profileName)
+                    enhancedAudioManager.setAudioProfile(audioProfile)
+                }
             } catch (e: Exception) {
-                // Default to mastering profile if invalid
-                // TODO: Fix enum reference - professionalAudioProcessor.applyAudioProfilePreset(com.stash.opusplayer.audio.ProfessionalAudioProcessor.AudioProfilePreset.MASTERING)
+                // Default to balanced profile if invalid
+                android.util.Log.w("MusicService", "Invalid audio profile, defaulting to BALANCED", e)
+                if (::enhancedAudioManager.isInitialized) {
+                    enhancedAudioManager.setAudioProfile(com.stash.opusplayer.audio.AudioProfile.BALANCED)
+                }
             }
         } catch (e: Exception) {
             android.util.Log.e("MusicService", "Error loading professional audio processor settings", e)

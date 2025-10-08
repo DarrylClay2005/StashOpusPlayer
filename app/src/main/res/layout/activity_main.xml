@@ -149,7 +149,8 @@
             android:layout_alignParentBottom="true"
             android:background="@drawable/neomorphic_navigation_background"
             android:paddingTop="8dp"
-            android:paddingBottom="16dp"
+            android:paddingBottom="0dp"
+            android:layout_marginTop="0dp"
             android:theme="@style/ThemeOverlay.MaterialComponents"
             app:menu="@menu/bottom_nav_menu"
             app:itemIconTint="@color/text_primary"
@@ -164,7 +165,9 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_above="@id/bottom_nav"
-            android:layout_marginBottom="8dp" />
+            android:clipToPadding="false"
+            android:paddingBottom="0dp"
+            android:layout_marginTop="0dp" />
 
     </RelativeLayout>
 

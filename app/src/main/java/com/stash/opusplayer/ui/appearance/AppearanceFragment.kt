@@ -544,6 +544,19 @@ class AppearanceFragment : Fragment() {
             orientation = LinearLayout.VERTICAL
         }
         
+        // Enable SynthWave visualizer
+        val enableToggle = CheckBox(requireContext()).apply {
+            text = "Enable SynthWave Visualizer"
+            isChecked = currentPrefs.synthWaveEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                currentPrefs = currentPrefs.copy(synthWaveEnabled = isChecked)
+                currentPrefs.saveToPrefs(requireContext())
+                ThemeManager.broadcastChange(requireContext(), false)
+                Toast.makeText(requireContext(), "SynthWave visualizer toggled", Toast.LENGTH_SHORT).show()
+            }
+        }
+        section.addView(enableToggle)
+        
         // Progress mode toggle
         val progressModeToggle = CheckBox(requireContext()).apply {
             text = "Progress Mode (Wave follows song progress)"
@@ -556,6 +569,95 @@ class AppearanceFragment : Fragment() {
             }
         }
         section.addView(progressModeToggle)
+        
+        // Animation intensity slider
+        section.addView(createSeekBarControl(
+            "Animation Intensity",
+            (currentPrefs.synthWaveAnimationIntensity * 100).toInt(),
+            10, 200,
+            { },
+            { progress ->
+                val intensity = progress / 100f
+                currentPrefs = currentPrefs.copy(synthWaveAnimationIntensity = intensity)
+                currentPrefs.saveToPrefs(requireContext())
+                ThemeManager.broadcastChange(requireContext(), false)
+            }
+        ))
+        
+        // Particle count slider
+        section.addView(createSeekBarControl(
+            "Particle Count",
+            currentPrefs.synthWaveParticleCount,
+            50, 500,
+            { },
+            { progress ->
+                currentPrefs = currentPrefs.copy(synthWaveParticleCount = progress)
+                currentPrefs.saveToPrefs(requireContext())
+                ThemeManager.broadcastChange(requireContext(), false)
+            }
+        ))
+        
+        // Wave frequency bands
+        section.addView(createSeekBarControl(
+            "Frequency Bands",
+            currentPrefs.synthWaveFrequencyBands,
+            16, 128,
+            { },
+            { progress ->
+                currentPrefs = currentPrefs.copy(synthWaveFrequencyBands = progress)
+                currentPrefs.saveToPrefs(requireContext())
+                ThemeManager.broadcastChange(requireContext(), false)
+            }
+        ))
+        
+        // Enable lightning effects
+        val lightningToggle = CheckBox(requireContext()).apply {
+            text = "Lightning Effects on Bass Drop"
+            isChecked = currentPrefs.synthWaveLightningEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                currentPrefs = currentPrefs.copy(synthWaveLightningEnabled = isChecked)
+                currentPrefs.saveToPrefs(requireContext())
+                ThemeManager.broadcastChange(requireContext(), false)
+            }
+        }
+        section.addView(lightningToggle)
+        
+        // Enable ripple effects
+        val rippleToggle = CheckBox(requireContext()).apply {
+            text = "Ripple Effects"
+            isChecked = currentPrefs.synthWaveRippleEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                currentPrefs = currentPrefs.copy(synthWaveRippleEnabled = isChecked)
+                currentPrefs.saveToPrefs(requireContext())
+                ThemeManager.broadcastChange(requireContext(), false)
+            }
+        }
+        section.addView(rippleToggle)
+        
+        // Enable shake effects
+        val shakeToggle = CheckBox(requireContext()).apply {
+            text = "Shake Effects on Beat"
+            isChecked = currentPrefs.synthWaveShakeEnabled
+            setOnCheckedChangeListener { _, isChecked ->
+                currentPrefs = currentPrefs.copy(synthWaveShakeEnabled = isChecked)
+                currentPrefs.saveToPrefs(requireContext())
+                ThemeManager.broadcastChange(requireContext(), false)
+            }
+        }
+        section.addView(shakeToggle)
+        
+        // Performance mode toggle
+        val performanceToggle = CheckBox(requireContext()).apply {
+            text = "Performance Mode (Reduced Effects)"
+            isChecked = currentPrefs.synthWavePerformanceMode
+            setOnCheckedChangeListener { _, isChecked ->
+                currentPrefs = currentPrefs.copy(synthWavePerformanceMode = isChecked)
+                currentPrefs.saveToPrefs(requireContext())
+                ThemeManager.broadcastChange(requireContext(), false)
+                Toast.makeText(requireContext(), "Performance mode updated", Toast.LENGTH_SHORT).show()
+            }
+        }
+        section.addView(performanceToggle)
         
         // Custom colors toggle
         val customColorsToggle = CheckBox(requireContext()).apply {
