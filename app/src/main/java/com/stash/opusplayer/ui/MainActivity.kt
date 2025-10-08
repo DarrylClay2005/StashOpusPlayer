@@ -46,6 +46,8 @@ import com.stash.opusplayer.ui.appearance.AppearancePreferences
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import com.stash.opusplayer.utils.AnimationUtils
+import com.stash.opusplayer.utils.UIPerformanceOptimizer
+import com.stash.opusplayer.utils.AnimationDurationManager
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
     
@@ -66,12 +68,22 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Start performance tracking
+        UIPerformanceOptimizer.startPerformanceTracking("MainActivity.onCreate")
+        
         // Apply appearance theme BEFORE setting content view
         applyAppearanceTheme()
+        
+        // Apply activity-level optimizations
+        UIPerformanceOptimizer.optimizeActivity(this)
+        UIPerformanceOptimizer.optimizeAnimationsBasedOnSettings(this)
         
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        // Optimize the root view hierarchy
+        UIPerformanceOptimizer.optimizeLayoutMeasurement(binding.root)
         
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this)
         updateManager = UpdateManager(this)
@@ -130,7 +142,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
 // Removed custom loading overlay; using Android SplashScreen API instead
         
-        // Check for updates on app start (AI will decide if/when to show)
+        // End performance tracking
+        UIPerformanceOptimizer.endPerformanceTracking("MainActivity.onCreate")
+        
         // Check for updates on app start (AI will decide if/when to show)
         // Defer a bit to avoid competing with first render and permission prompts
         lifecycleScope.launch {
@@ -165,6 +179,33 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         unregisterAppearanceReceiver()
     }
     
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        
+        when (level) {
+            android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL,
+            android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
+                // Critical memory situation - trim aggressively
+                UIPerformanceOptimizer.trimMemoryOnLowMemory(this)
+            }
+            android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> {
+                // App is in background - trim non-essential memory
+                Glide.get(this).clearMemory()
+            }
+        }
+    }
+    
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        
+        // Optimize for configuration changes
+        UIPerformanceOptimizer.optimizeForConfigurationChange(this)
+        
+        // Re-apply appearance settings for new configuration
+        applyAppearanceTheme()
+        applyAppearanceToViews()
+    }
+    
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val permission = android.Manifest.permission.POST_NOTIFICATIONS
@@ -181,14 +222,17 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
     
     private fun setupBottomNavigation() {
-        // Animate bottom navigation on startup
+        // Optimize touch responsiveness for bottom navigation
+        UIPerformanceOptimizer.optimizeTouchResponsiveness(binding.bottomNav)
+        
+        // Animate bottom navigation on startup with optimized duration
         binding.bottomNav.alpha = 0f
         binding.bottomNav.translationY = 100f
         binding.bottomNav.animate()
             .alpha(1f)
             .translationY(0f)
-            .setDuration(500)
-            .setStartDelay(300)
+            .setDuration(AnimationDurationManager.getOptimizedDuration(500).toLong())
+            .setStartDelay(AnimationDurationManager.getOptimizedDuration(300).toLong())
             .setInterpolator(android.view.animation.DecelerateInterpolator())
             .start()
             
@@ -396,13 +440,21 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
     
     private fun loadFragment(fragment: Fragment) {
+        UIPerformanceOptimizer.startPerformanceTracking("loadFragment")
+        
+        // Optimize fragment lifecycle
+        UIPerformanceOptimizer.optimizeFragmentLifecycle(fragment)
+        
         val transaction = supportFragmentManager.beginTransaction()
         
-        // Add fade transition animation for smooth fragment switching
+        // Add fade transition animation for smooth fragment switching with optimized duration
         AnimationUtils.setFragmentFadeTransitions(transaction)
         
         transaction
             .replace(R.id.main_content, fragment)
+            .runOnCommit {
+                UIPerformanceOptimizer.endPerformanceTracking("loadFragment")
+            }
             .commit()
     }
     // No-op: legacy method retained for compatibility with older calls

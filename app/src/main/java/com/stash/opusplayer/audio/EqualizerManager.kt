@@ -70,24 +70,50 @@ class EqualizerManager(private val context: Context) {
             // Release existing instances
             release()
             
-            // Create new audio effects
-            equalizer = Equalizer(0, audioSessionId).apply {
-                enabled = prefs.getBoolean(PREF_EQ_ENABLED, false)
+            Log.d(TAG, "Initializing equalizer with audio session: $audioSessionId")
+            
+            // Create new audio effects with better error handling
+            try {
+                equalizer = Equalizer(0, audioSessionId).apply {
+                    enabled = false // Start disabled, enable after full setup
+                }
+                Log.d(TAG, "Equalizer created successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create Equalizer", e)
+                // Continue with other effects even if equalizer fails
             }
             
-            bassBoost = BassBoost(0, audioSessionId).apply {
-                enabled = prefs.getBoolean(PREF_EQ_ENABLED, false)
-                setStrength(prefs.getInt(PREF_BASS_BOOST, 0).toShort())
+            // Initialize BassBoost with error handling
+            try {
+                bassBoost = BassBoost(0, audioSessionId).apply {
+                    enabled = false
+                    setStrength(prefs.getInt(PREF_BASS_BOOST, 0).toShort())
+                }
+                Log.d(TAG, "BassBoost created successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create BassBoost", e)
             }
             
-            virtualizer = Virtualizer(0, audioSessionId).apply {
-                enabled = prefs.getBoolean(PREF_EQ_ENABLED, false)
-                setStrength(prefs.getInt(PREF_VIRTUALIZER, 0).toShort())
+            // Initialize Virtualizer with error handling
+            try {
+                virtualizer = Virtualizer(0, audioSessionId).apply {
+                    enabled = false
+                    setStrength(prefs.getInt(PREF_VIRTUALIZER, 0).toShort())
+                }
+                Log.d(TAG, "Virtualizer created successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create Virtualizer", e)
             }
             
-            presetReverb = PresetReverb(0, audioSessionId).apply {
-                enabled = prefs.getBoolean(PREF_EQ_ENABLED, false)
-                preset = prefs.getInt(PREF_REVERB, PresetReverb.PRESET_NONE.toInt()).toShort()
+            // Initialize PresetReverb with error handling
+            try {
+                presetReverb = PresetReverb(0, audioSessionId).apply {
+                    enabled = false
+                    preset = prefs.getInt(PREF_REVERB, PresetReverb.PRESET_NONE.toInt()).toShort()
+                }
+                Log.d(TAG, "PresetReverb created successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create PresetReverb", e)
             }
             
             // Initialize LoudnessEnhancer for high-resolution and super bass effects
@@ -142,19 +168,63 @@ class EqualizerManager(private val context: Context) {
     }
     
     fun setEnabled(enabled: Boolean) {
+        var successfulEffects = 0
+        val totalEffects = 6
+        
+        // Enable/disable each effect independently with isolated error handling
         try {
             equalizer?.enabled = enabled
-            bassBoost?.enabled = enabled
-            virtualizer?.enabled = enabled
-            presetReverb?.enabled = enabled
-            loudnessEnhancer?.enabled = enabled
-            environmentalReverb?.enabled = enabled
-            
-            _isEnabled.value = enabled
-            prefs.edit().putBoolean(PREF_EQ_ENABLED, enabled).apply()
+            successfulEffects++
         } catch (e: Exception) {
-            Log.e(TAG, "Error setting equalizer enabled state", e)
+            Log.w(TAG, "Failed to set equalizer enabled state", e)
         }
+        
+        try {
+            bassBoost?.enabled = enabled
+            successfulEffects++
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to set bassBoost enabled state", e)
+        }
+        
+        try {
+            virtualizer?.enabled = enabled
+            successfulEffects++
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to set virtualizer enabled state", e)
+        }
+        
+        try {
+            presetReverb?.enabled = enabled
+            successfulEffects++
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to set presetReverb enabled state", e)
+        }
+        
+        try {
+            loudnessEnhancer?.enabled = enabled
+            successfulEffects++
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to set loudnessEnhancer enabled state", e)
+        }
+        
+        try {
+            environmentalReverb?.enabled = enabled
+            successfulEffects++
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to set environmentalReverb enabled state", e)
+        }
+        
+        // Update state if at least some effects were successful
+        val effectivelyEnabled = enabled && (successfulEffects > 0)
+        _isEnabled.value = effectivelyEnabled
+        
+        try {
+            prefs.edit().putBoolean(PREF_EQ_ENABLED, effectivelyEnabled).apply()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save equalizer enabled state", e)
+        }
+        
+        Log.d(TAG, "Equalizer effects enabled: $effectivelyEnabled ($successfulEffects/$totalEffects effects working)")
     }
     
     fun setPreset(preset: EqualizerPreset) {
@@ -561,6 +631,10 @@ class EqualizerManager(private val context: Context) {
             }
             prefs.edit().putString(PREF_CUSTOM_BANDS, levels.joinToString(",")).apply()
         }
+    }
+    
+    fun isInitialized(): Boolean {
+        return equalizer != null
     }
 }
 
