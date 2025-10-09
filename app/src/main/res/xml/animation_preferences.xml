@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory
+        android:title="Animation Settings"
+        android:icon="@drawable/ic_animation">
+
+        <!-- UI Animations -->
+        <PreferenceCategory android:title="UI Animations">
+            
+            <SwitchPreferenceCompat
+                android:key="ui_animations_enabled"
+                android:title="Enable UI Animations"
+                android:summary="Enable smooth transitions and animations throughout the app"
+                android:defaultValue="true" />
+
+            <SwitchPreferenceCompat
+                android:key="button_animations_enabled"
+                android:title="Button Animations"
+                android:summary="Animate buttons with press effects"
+                android:defaultValue="true"
+                android:dependency="ui_animations_enabled" />
+
+            <SwitchPreferenceCompat
+                android:key="list_animations_enabled"
+                android:title="List Animations"
+                android:summary="Animate list items when scrolling"
+                android:defaultValue="true"
+                android:dependency="ui_animations_enabled" />
+
+            <SwitchPreferenceCompat
+                android:key="slide_animations_enabled"
+                android:title="Slide Animations"
+                android:summary="Enable slide transitions between screens"
+                android:defaultValue="true"
+                android:dependency="ui_animations_enabled" />
+
+        </PreferenceCategory>
+
+        <!-- SynthWave Visualizer Animations -->
+        <PreferenceCategory android:title="SynthWave Visualizer">
+
+            <SwitchPreferenceCompat
+                android:key="synthwave_lightning"
+                android:title="Lightning Effects"
+                android:summary="Show lightning bolts triggered by audio intensity"
+                android:defaultValue="true" />
+
+            <SwitchPreferenceCompat
+                android:key="synthwave_particles"
+                android:title="Particle Trails"
+                android:summary="Display floating particle effects"
+                android:defaultValue="true" />
+
+            <SwitchPreferenceCompat
+                android:key="synthwave_ripples"
+                android:title="Ripple Effects"
+                android:summary="Show ripples synchronized with bass frequencies"
+                android:defaultValue="true" />
+
+            <SwitchPreferenceCompat
+                android:key="synthwave_breathing"
+                android:title="Breathing Animation"
+                android:summary="Apply breathing effect to the entire visualizer"
+                android:defaultValue="true" />
+
+            <SwitchPreferenceCompat
+                android:key="synthwave_color_shift"
+                android:title="Color Shifting"
+                android:summary="Enable dynamic color transitions"
+                android:defaultValue="true" />
+
+            <SeekBarPreference
+                android:key="synthwave_intensity"
+                android:title="Animation Intensity"
+                android:summary="Control the intensity of all visualizer effects"
+                android:defaultValue="50"
+                android:max="100" />
+
+        </PreferenceCategory>
+
+        <!-- Player Animations -->
+        <PreferenceCategory android:title="Player Animations">
+
+            <SwitchPreferenceCompat
+                android:key="player_pulse_enabled"
+                android:title="Pulse Animation"
+                android:summary="Pulse effect on the play button when active"
+                android:defaultValue="true" />
+
+            <SwitchPreferenceCompat
+                android:key="player_bounce_enabled"
+                android:title="Bounce Effects"
+                android:summary="Bounce animation for control buttons"
+                android:defaultValue="true" />
+
+            <SwitchPreferenceCompat
+                android:key="album_art_rotation"
+                android:title="Album Art Rotation"
+                android:summary="Rotate album art when playing"
+                android:defaultValue="false" />
+
+            <SwitchPreferenceCompat
+                android:key="progress_wave_enabled"
+                android:title="Progress Wave"
+                android:summary="Animated wave effect on progress bar"
+                android:defaultValue="true" />
+
+        </PreferenceCategory>
+
+        <!-- Feedback Animations -->
+        <PreferenceCategory android:title="Feedback Animations">
+
+            <SwitchPreferenceCompat
+                android:key="haptic_feedback_enabled"
+                android:title="Haptic Feedback"
+                android:summary="Vibration feedback for interactions"
+                android:defaultValue="true" />
+
+            <SwitchPreferenceCompat
+                android:key="visual_feedback_enabled"
+                android:title="Visual Feedback"
+                android:summary="Visual indicators for user interactions"
+                android:defaultValue="true" />
+
+            <SwitchPreferenceCompat
+                android:key="ripple_feedback_enabled"
+                android:title="Touch Ripples"
+                android:summary="Ripple effects when touching buttons"
+                android:defaultValue="true" />
+
+        </PreferenceCategory>
+
+        <!-- Performance Settings -->
+        <PreferenceCategory android:title="Performance">
+
+            <ListPreference
+                android:key="animation_performance_mode"
+                android:title="Performance Mode"
+                android:summary="Balance between performance and visual quality"
+                android:entries="@array/performance_modes"
+                android:entryValues="@array/performance_mode_values"
+                android:defaultValue="balanced" />
+
+            <SwitchPreferenceCompat
+                android:key="reduce_animations_battery"
+                android:title="Battery Saver Mode"
+                android:summary="Reduce animations to save battery"
+                android:defaultValue="false" />
+
+        </PreferenceCategory>
+
+    </PreferenceCategory>
+
+</PreferenceScreen>
