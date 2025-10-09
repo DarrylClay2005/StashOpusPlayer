@@ -205,11 +205,11 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/songInfoContainer">
 
-        <!-- Real-time Synth Wave visualization -->
-        <com.stash.opusplayer.ui.widgets.SynthWaveView
-            android:id="@+id/synthWaveView"
+        <!-- Enhanced Real-time Synth Wave visualization -->
+        <com.stash.opusplayer.ui.visualizer.EnhancedSynthWaveView
+            android:id="@+id/enhancedSynthWaveView"
             android:layout_width="match_parent"
-            android:layout_height="80dp"
+            android:layout_height="120dp"
             android:layout_marginTop="8dp" />
 
         <!-- Legacy SeekBar (hidden, kept for compatibility) -->

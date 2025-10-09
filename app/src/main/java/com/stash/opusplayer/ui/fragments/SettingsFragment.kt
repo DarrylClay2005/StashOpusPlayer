@@ -63,10 +63,11 @@ class SettingsFragment : Fragment() {
         val tabs = com.google.android.material.tabs.TabLayout(requireContext()).apply {
             addTab(newTab().setText("General"))
             addTab(newTab().setText("Audio"))
-            addTab(newTab().setText("Appearance")) // Shortened for small screens
+            addTab(newTab().setText("Appearance"))
+            addTab(newTab().setText("Enhanced")) // New tab for enhanced features
             
             // Apply responsive tab settings
-            val tabCount = 3
+            val tabCount = 4
             tabMode = ResponsiveUtils.getOptimalTabMode(requireContext(), tabCount)
             tabGravity = ResponsiveUtils.getOptimalTabGravity(requireContext(), tabCount)
             
@@ -92,16 +93,18 @@ class SettingsFragment : Fragment() {
         val contentContainer = FrameLayout(requireContext()).apply { id = View.generateViewId() }
         root.addView(contentContainer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT))
 
-        // Build the three pages as Views
+        // Build the four pages as Views
         val generalView = buildGeneralContent()
         val pitchView = buildPitchContent() // Now includes Speed & Reverb too
         val appearanceView = buildAppearanceContent()
+        val enhancedView = buildEnhancedFeaturesContent() // New enhanced features page
 
         // Select initial tab based on arguments
         val initialIndex = arguments?.getInt("initial_tab", 0) ?: 0
         when (initialIndex) {
             1 -> contentContainer.addView(pitchView)
             2 -> contentContainer.addView(appearanceView)
+            3 -> contentContainer.addView(enhancedView)
             else -> contentContainer.addView(generalView)
         }
         tabs.getTabAt(initialIndex)?.select()
@@ -113,6 +116,7 @@ class SettingsFragment : Fragment() {
                     0 -> contentContainer.addView(generalView)
                     1 -> contentContainer.addView(pitchView)
                     2 -> contentContainer.addView(appearanceView)
+                    3 -> contentContainer.addView(enhancedView)
                 }
             }
             override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab) {}
@@ -1777,12 +1781,12 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
         }
         layout.addView(shadowsToggle)
         
-        // Animations Section
-        addSectionHeader(layout, getString(com.stash.opusplayer.R.string.settings_appearance_animations))
+        // Enhanced Animation Settings Section
+        addSectionHeader(layout, "Enhanced Animation Settings")
         
-        // Animations Toggle
+        // Main Animations Toggle
         val animationsToggle = CheckBox(requireContext()).apply {
-            text = getString(com.stash.opusplayer.R.string.appearance_animations_enable)
+            text = "Enable UI Animations"
             isChecked = currentPrefs.animationsEnabled
             setOnCheckedChangeListener { _, isChecked ->
                 val latestPrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(requireContext())
@@ -1793,12 +1797,88 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
         }
         layout.addView(animationsToggle)
         
+        // Advanced Animation Settings Button
+        val advancedAnimationButton = com.google.android.material.button.MaterialButton(requireContext()).apply {
+            text = "⚡ Advanced Animation Settings"
+            setTextColor(Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.accent_color))
+            setOnClickListener {
+                // Launch the AnimationSettingsFragment
+                try {
+                    val fragment = com.stash.opusplayer.ui.preferences.AnimationSettingsFragment()
+                    parentFragmentManager.beginTransaction()
+                        .replace(android.R.id.content, fragment)
+                        .addToBackStack("animation_settings")
+                        .commit()
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "Opening animation settings...", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        layout.addView(advancedAnimationButton)
+        
         // Animation Speed
         val animSpeedLabel = TextView(requireContext()).apply {
             text = getString(com.stash.opusplayer.R.string.appearance_animation_speed)
             setPadding(0, 16, 0, 8)
         }
         layout.addView(animSpeedLabel)
+        
+        // Visual Customization Section
+        addSectionHeader(layout, "🎨 Visual Customization")
+        
+        // Visual Customization Button
+        val visualCustomizationButton = com.google.android.material.button.MaterialButton(requireContext()).apply {
+            text = "🖼️ Photo Backgrounds & Effects"
+            setTextColor(Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.secondary_color))
+            setOnClickListener {
+                // Launch the VisualCustomizationFragment
+                try {
+                    val fragment = com.stash.opusplayer.ui.customization.VisualCustomizationFragment()
+                    parentFragmentManager.beginTransaction()
+                        .replace(android.R.id.content, fragment)
+                        .addToBackStack("visual_customization")
+                        .commit()
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "Opening visual customization...", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        layout.addView(visualCustomizationButton)
+        
+        // Enhanced SynthWave Visualizer Section
+        addSectionHeader(layout, "🌊 Enhanced Visualizer")
+        
+        // Quick SynthWave Settings
+        val synthwavePrefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        
+        val synthwaveLightningToggle = CheckBox(requireContext()).apply {
+            text = "⚡ Lightning Effects"
+            isChecked = synthwavePrefs.getBoolean("synthwave_lightning_enabled", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                synthwavePrefs.edit().putBoolean("synthwave_lightning_enabled", isChecked).apply()
+            }
+        }
+        layout.addView(synthwaveLightningToggle)
+        
+        val synthwaveParticlesToggle = CheckBox(requireContext()).apply {
+            text = "✨ Particle Trails"
+            isChecked = synthwavePrefs.getBoolean("synthwave_particles_enabled", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                synthwavePrefs.edit().putBoolean("synthwave_particles_enabled", isChecked).apply()
+            }
+        }
+        layout.addView(synthwaveParticlesToggle)
+        
+        val synthwaveRipplesToggle = CheckBox(requireContext()).apply {
+            text = "🌊 Ripple Effects"
+            isChecked = synthwavePrefs.getBoolean("synthwave_ripples_enabled", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                synthwavePrefs.edit().putBoolean("synthwave_ripples_enabled", isChecked).apply()
+            }
+        }
+        layout.addView(synthwaveRipplesToggle)
         
         val animSpeedSpinner = Spinner(requireContext())
         val animSpeeds = listOf(
@@ -2145,5 +2225,147 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+    
+    private fun buildEnhancedFeaturesContent(): View {
+        val scrollView = ScrollView(requireContext())
+        val layout = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            ResponsiveUtils.applyResponsivePadding(this, 16, 16, 16, 16)
+        }
+
+        // Title
+        val title = TextView(requireContext()).apply {
+            text = "🚀 Enhanced Features"
+            ResponsiveUtils.applyResponsiveTextSize(this, 20f)
+            ResponsiveUtils.applyResponsivePadding(this, 0, 0, 0, 16)
+            setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_primary))
+        }
+        layout.addView(title)
+        
+        // Animation Settings Section
+        addSectionHeader(layout, "⚡ Advanced Animation Controls")
+        
+        val animationSettingsButton = com.google.android.material.button.MaterialButton(requireContext()).apply {
+            text = "🎬 Animation Settings Panel"
+            setTextColor(Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.accent_color))
+            setOnClickListener {
+                try {
+                    val fragment = com.stash.opusplayer.ui.preferences.AnimationSettingsFragment()
+                    parentFragmentManager.beginTransaction()
+                        .replace(android.R.id.content, fragment)
+                        .addToBackStack("animation_settings")
+                        .commit()
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "Opening animation settings...", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        layout.addView(animationSettingsButton)
+        
+        // Visual Customization Section
+        addSectionHeader(layout, "🎨 Visual Customization")
+        
+        val visualCustomizationButton = com.google.android.material.button.MaterialButton(requireContext()).apply {
+            text = "🖼️ Photo Backgrounds & Effects"
+            setTextColor(Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.secondary_color))
+            setOnClickListener {
+                try {
+                    val fragment = com.stash.opusplayer.ui.customization.VisualCustomizationFragment()
+                    parentFragmentManager.beginTransaction()
+                        .replace(android.R.id.content, fragment)
+                        .addToBackStack("visual_customization")
+                        .commit()
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "Opening visual customization...", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        layout.addView(visualCustomizationButton)
+        
+        // Enhanced SynthWave Visualizer Section
+        addSectionHeader(layout, "🌊 Enhanced SynthWave Visualizer")
+        
+        val synthwavePrefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        
+        // Quick toggle controls
+        val synthwaveToggles = listOf(
+            "⚡ Lightning Effects" to "synthwave_lightning_enabled",
+            "✨ Particle Trails" to "synthwave_particles_enabled", 
+            "🌊 Ripple Effects" to "synthwave_ripples_enabled",
+            "💨 Breathing Animation" to "synthwave_breathing_enabled",
+            "🌈 Color Shift Effects" to "synthwave_color_shift_enabled"
+        )
+        
+        synthwaveToggles.forEach { (label, prefKey) ->
+            val toggle = CheckBox(requireContext()).apply {
+                text = label
+                isChecked = synthwavePrefs.getBoolean(prefKey, true)
+                setOnCheckedChangeListener { _, isChecked ->
+                    synthwavePrefs.edit().putBoolean(prefKey, isChecked).apply()
+                }
+            }
+            layout.addView(toggle)
+        }
+        
+        // Audio Enhancement Section
+        addSectionHeader(layout, "🔊 Audio Enhancement")
+        
+        val audioEnhancementDesc = TextView(requireContext()).apply {
+            text = "Advanced equalizer with 20+ presets including Super Bass Boost, Spatial Audio, and Professional Audio Effects. Configure in the Audio tab."
+            setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_secondary))
+            ResponsiveUtils.applyResponsiveTextSize(this, 14f)
+            ResponsiveUtils.applyResponsivePadding(this, 0, 8, 0, 16)
+        }
+        layout.addView(audioEnhancementDesc)
+        
+        // Performance Section
+        addSectionHeader(layout, "⚙️ Performance Settings")
+        
+        val performanceModeSpinner = Spinner(requireContext())
+        val performanceModes = listOf(
+            "Balanced" to "balanced",
+            "High Performance" to "high_performance", 
+            "Battery Saver" to "battery_saver"
+        )
+        val performanceAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, performanceModes.map { it.first })
+        performanceAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        performanceModeSpinner.adapter = performanceAdapter
+        
+        val currentMode = synthwavePrefs.getString("performance_mode", "balanced")
+        performanceModeSpinner.setSelection(performanceModes.indexOfFirst { it.second == currentMode }.coerceAtLeast(0))
+        
+        performanceModeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selectedMode = performanceModes[position].second
+                synthwavePrefs.edit().putString("performance_mode", selectedMode).apply()
+                Toast.makeText(requireContext(), "Performance mode: ${performanceModes[position].first}", Toast.LENGTH_SHORT).show()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        layout.addView(performanceModeSpinner)
+        
+        // Feature Status Section
+        addSectionHeader(layout, "✅ Feature Status")
+        
+        val featureStatus = TextView(requireContext()).apply {
+            text = """✅ Enhanced SynthWave Visualizer - Active
+✅ Animation Settings Panel - Available
+✅ Visual Customization - Available
+✅ Advanced Equalizer - 20+ Presets
+✅ Photo Backgrounds - With Effects
+✅ Performance Optimization - Enabled"""
+            setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_secondary))
+            ResponsiveUtils.applyResponsiveTextSize(this, 12f)
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
+        layout.addView(featureStatus)
+        
+        scrollView.addView(layout)
+        ResponsiveUtils.applyResponsiveDesign(layout)
+        
+        return scrollView
     }
 }

@@ -10,6 +10,8 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.preference.PreferenceManager
 import kotlin.math.*
 import kotlin.random.Random
+import android.media.audiofx.Visualizer
+import com.stash.opusplayer.ui.appearance.AppearancePreferences
 
 /**
  * Enhanced SynthWave visualizer with advanced animations and effects
@@ -107,36 +109,97 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
     
     // Preference manager for settings
     private val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+    private var preferenceListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
     
-    // Animation preferences
+    // Animation preferences - using correct keys that match SettingsFragment
     private var enableLightning: Boolean
-        get() = prefs.getBoolean("synthwave_lightning", true)
-        set(value) = prefs.edit().putBoolean("synthwave_lightning", value).apply()
+        get() = prefs.getBoolean("synthwave_lightning_enabled", true)
+        set(value) = prefs.edit().putBoolean("synthwave_lightning_enabled", value).apply()
     
     private var enableParticles: Boolean
-        get() = prefs.getBoolean("synthwave_particles", true)
-        set(value) = prefs.edit().putBoolean("synthwave_particles", value).apply()
+        get() = prefs.getBoolean("synthwave_particles_enabled", true)
+        set(value) = prefs.edit().putBoolean("synthwave_particles_enabled", value).apply()
     
     private var enableRipples: Boolean
-        get() = prefs.getBoolean("synthwave_ripples", true)
-        set(value) = prefs.edit().putBoolean("synthwave_ripples", value).apply()
+        get() = prefs.getBoolean("synthwave_ripples_enabled", true)
+        set(value) = prefs.edit().putBoolean("synthwave_ripples_enabled", value).apply()
     
     private var enableBreathing: Boolean
-        get() = prefs.getBoolean("synthwave_breathing", true)
-        set(value) = prefs.edit().putBoolean("synthwave_breathing", value).apply()
+        get() = prefs.getBoolean("synthwave_breathing_enabled", true)
+        set(value) = prefs.edit().putBoolean("synthwave_breathing_enabled", value).apply()
     
     private var enableColorShift: Boolean
-        get() = prefs.getBoolean("synthwave_color_shift", true)
-        set(value) = prefs.edit().putBoolean("synthwave_color_shift", value).apply()
+        get() = prefs.getBoolean("synthwave_color_shift_enabled", true)
+        set(value) = prefs.edit().putBoolean("synthwave_color_shift_enabled", value).apply()
     
     private var animationIntensity: Float
         get() = prefs.getFloat("synthwave_intensity", 1f)
         set(value) = prefs.edit().putFloat("synthwave_intensity", value).apply()
+    
+    // Audio visualizer support
+    private var visualizer: Visualizer? = null
+    private var audioSessionId: Int = 0
+    
+    // Progress tracking
+    private var currentProgress: Float = 0f // 0f to 1f
+    private var progressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#FFFF00")
+        style = Paint.Style.STROKE
+        strokeWidth = 4f
+        setShadowLayer(8f, 0f, 0f, Color.parseColor("#FFFF00"))
+    }
+    
+    // Seek listener
+    private var onSeekListener: ((Float) -> Unit)? = null
 
     init {
         setupAnimations()
         initializeParticles()
         setLayerType(LAYER_TYPE_HARDWARE, null)
+        setupPreferenceListener()
+    }
+    
+    private fun setupPreferenceListener() {
+        preferenceListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            when (key) {
+                "synthwave_lightning_enabled",
+                "synthwave_particles_enabled",
+                "synthwave_ripples_enabled",
+                "synthwave_breathing_enabled",
+                "synthwave_color_shift_enabled",
+                "synthwave_intensity" -> {
+                    post {
+                        // Restart animations with new settings
+                        stopAllAnimations()
+                        setupAnimations()
+                        if (enableParticles) {
+                            initializeParticles()
+                        }
+                        invalidate()
+                    }
+                }
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
+    }
+    
+    private fun stopAllAnimations() {
+        particleAnimator?.cancel()
+        particleAnimator = null
+        rippleAnimator?.cancel() 
+        rippleAnimator = null
+        lightningAnimator?.cancel()
+        lightningAnimator = null
+    }
+    
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        stopAllAnimations()
+        releaseVisualizer()
+        preferenceListener?.let {
+            prefs.unregisterOnSharedPreferenceChangeListener(it)
+        }
+        preferenceListener = null
     }
 
     private fun setupAnimations() {
@@ -258,6 +321,9 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
         if (enableLightning) drawLightning(canvas)
         if (enableParticles) drawParticles(canvas)
         if (enableRipples) drawRipples(canvas)
+        
+        // Draw progress line
+        drawProgressLine(canvas)
     }
     
     private fun drawGrid(canvas: Canvas) {
@@ -366,6 +432,44 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
                 )
             }
         }
+    }
+    
+    private fun drawProgressLine(canvas: Canvas) {
+        if (width <= 0 || height <= 0) return
+        
+        val progressX = currentProgress * width
+        val topY = height * 0.1f
+        val bottomY = height * 0.9f
+        
+        // Draw main progress line
+        canvas.drawLine(progressX, topY, progressX, bottomY, progressPaint)
+        
+        // Draw animated glow effect
+        val glowPaint = Paint(progressPaint).apply {
+            strokeWidth = 12f
+            alpha = (128 * (0.5f + 0.5f * sin(animationPhase * 3))).toInt()
+        }
+        canvas.drawLine(progressX, topY, progressX, bottomY, glowPaint)
+    }
+    
+    override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        when (event.action) {
+            android.view.MotionEvent.ACTION_DOWN,
+            android.view.MotionEvent.ACTION_MOVE,
+            android.view.MotionEvent.ACTION_UP -> {
+                if (width > 0) {
+                    val seekPosition = (event.x / width).coerceIn(0f, 1f)
+                    if (event.action == android.view.MotionEvent.ACTION_UP) {
+                        onSeekListener?.invoke(seekPosition)
+                        
+                        // Add ripple at touch position for visual feedback
+                        addRipple(event.x, event.y)
+                    }
+                    return true
+                }
+            }
+        }
+        return super.onTouchEvent(event)
     }
     
     private fun updateParticles() {
@@ -502,6 +606,140 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
         lightningAnimator?.cancel()
         particleAnimator?.cancel()
         rippleAnimator?.cancel()
+        releaseVisualizer()
+    }
+    
+    /**
+     * Apply appearance preferences to customize the visualizer
+     */
+    fun applyAppearancePreferences(prefs: AppearancePreferences) {
+        try {
+            // Update colors based on appearance preferences
+            if (prefs.synthWaveUseCustomColors) {
+                // Update waveform paint
+                waveformPaint.shader = LinearGradient(
+                    0f, 0f, 0f, 500f,
+                    prefs.synthWavePrimaryColor,
+                    prefs.synthWaveSecondaryColor,
+                    Shader.TileMode.CLAMP
+                )
+                
+                // Update spectrum paint
+                spectrumPaint.shader = LinearGradient(
+                    0f, 0f, 0f, 300f,
+                    intArrayOf(
+                        prefs.synthWavePrimaryColor,
+                        prefs.synthWaveSecondaryColor,
+                        prefs.synthWaveGlowColor,
+                        prefs.accentColor
+                    ),
+                    floatArrayOf(0f, 0.3f, 0.7f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                
+                // Update grid paint
+                gridPaint.color = prefs.synthWavePrimaryColor
+                
+                // Update particle paint
+                particlePaint.color = prefs.synthWaveGlowColor
+                
+                // Update ripple paint
+                ripplePaint.color = prefs.synthWaveSecondaryColor
+                
+                // Update progress paint
+                progressPaint.color = prefs.accentColor
+                progressPaint.setShadowLayer(8f, 0f, 0f, prefs.accentColor)
+            }
+            
+            // Update animation intensity
+            animationIntensity = prefs.synthWaveAnimationIntensity
+            
+            invalidate()
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Error applying appearance preferences", e)
+        }
+    }
+    
+    /**
+     * Set seek listener for progress line interaction
+     */
+    fun setOnSeekListener(listener: ((Float) -> Unit)?) {
+        onSeekListener = listener
+    }
+    
+    /**
+     * Set audio session for visualizer
+     */
+    fun setAudioSession(sessionId: Int) {
+        audioSessionId = sessionId
+        setupVisualizer()
+    }
+    
+    /**
+     * Update progress for progress line display
+     */
+    fun updateProgress(currentPosition: Long, duration: Long) {
+        if (duration > 0) {
+            currentProgress = (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+            invalidate()
+        }
+    }
+    
+    private fun setupVisualizer() {
+        try {
+            releaseVisualizer()
+            
+            if (audioSessionId != 0) {
+                visualizer = Visualizer(audioSessionId).apply {
+                    captureSize = Visualizer.getCaptureSizeRange()[1]
+                    setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
+                        override fun onWaveFormDataCapture(
+                            visualizer: Visualizer,
+                            waveform: ByteArray,
+                            samplingRate: Int
+                        ) {
+                            post {
+                                setWaveformData(waveform)
+                            }
+                        }
+                        
+                        override fun onFftDataCapture(
+                            visualizer: Visualizer,
+                            fft: ByteArray,
+                            samplingRate: Int
+                        ) {
+                            // Convert FFT data to spectrum data
+                            val spectrum = FloatArray(fft.size / 2)
+                            for (i in spectrum.indices) {
+                                val real = fft[i * 2].toFloat()
+                                val imaginary = fft[i * 2 + 1].toFloat()
+                                spectrum[i] = sqrt(real * real + imaginary * imaginary)
+                            }
+                            post {
+                                setSpectrumData(spectrum)
+                            }
+                        }
+                    }, Visualizer.getMaxCaptureRate() / 2, true, true)
+                    
+                    enabled = true
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Error setting up visualizer", e)
+            visualizer = null
+        }
+    }
+    
+    private fun releaseVisualizer() {
+        try {
+            visualizer?.apply {
+                enabled = false
+                release()
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Error releasing visualizer", e)
+        }
+        visualizer = null
     }
     
     /**

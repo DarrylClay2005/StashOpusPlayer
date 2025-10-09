@@ -42,31 +42,31 @@
         <PreferenceCategory android:title="SynthWave Visualizer">
 
             <SwitchPreferenceCompat
-                android:key="synthwave_lightning"
+                android:key="synthwave_lightning_enabled"
                 android:title="Lightning Effects"
                 android:summary="Show lightning bolts triggered by audio intensity"
                 android:defaultValue="true" />
 
             <SwitchPreferenceCompat
-                android:key="synthwave_particles"
+                android:key="synthwave_particles_enabled"
                 android:title="Particle Trails"
                 android:summary="Display floating particle effects"
                 android:defaultValue="true" />
 
             <SwitchPreferenceCompat
-                android:key="synthwave_ripples"
+                android:key="synthwave_ripples_enabled"
                 android:title="Ripple Effects"
                 android:summary="Show ripples synchronized with bass frequencies"
                 android:defaultValue="true" />
 
             <SwitchPreferenceCompat
-                android:key="synthwave_breathing"
+                android:key="synthwave_breathing_enabled"
                 android:title="Breathing Animation"
                 android:summary="Apply breathing effect to the entire visualizer"
                 android:defaultValue="true" />
 
             <SwitchPreferenceCompat
-                android:key="synthwave_color_shift"
+                android:key="synthwave_color_shift_enabled"
                 android:title="Color Shifting"
                 android:summary="Enable dynamic color transitions"
                 android:defaultValue="true" />

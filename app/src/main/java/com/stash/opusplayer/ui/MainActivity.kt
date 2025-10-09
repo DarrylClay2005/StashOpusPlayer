@@ -43,6 +43,7 @@ import com.stash.opusplayer.player.MusicPlayerManager
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.ui.appearance.ThemeManager
 import com.stash.opusplayer.ui.appearance.AppearancePreferences
+import com.stash.opusplayer.ui.appearance.VisualCustomizationManager
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import com.stash.opusplayer.utils.AnimationUtils
@@ -60,6 +61,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     
     // Appearance customization
     private var appearanceReceiver: BroadcastReceiver? = null
+    private lateinit var visualCustomizationManager: VisualCustomizationManager
     
     private val imagePickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -87,12 +89,14 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this)
         updateManager = UpdateManager(this)
+        visualCustomizationManager = VisualCustomizationManager(this)
         
         setupMusicPlayer()
         setupMiniPlayer()
         setupToolbar()
         setupNavigationDrawer()
         setupBackgroundImage()
+        applyVisualCustomization()
         
         // Apply appearance customizations after views are set up
         applyAppearanceToViews()
@@ -580,6 +584,22 @@ Check for updates anytime from Settings.""")
     }
     
     /**
+     * Apply visual customization from VisualCustomizationManager
+     */
+    private fun applyVisualCustomization() {
+        try {
+            val background = visualCustomizationManager.getCurrentBackground()
+            // Apply background to main content area
+            binding.mainContent.background = background
+            
+            // Also apply to drawer if needed
+            // binding.drawerLayout.background = background  // Skip drawer background for now
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error applying visual customization", e)
+        }
+    }
+    
+    /**
      * Register broadcast receiver for appearance changes
      */
     private fun registerAppearanceReceiver() {
@@ -594,6 +614,7 @@ Check for updates anytime from Settings.""")
                     } else {
                         // Apply changes dynamically
                         applyAppearanceToViews()
+                        applyVisualCustomization()
                     }
                 }
             }
