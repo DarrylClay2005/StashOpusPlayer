@@ -18,7 +18,7 @@ import com.bumptech.glide.Glide
 import com.google.common.util.concurrent.MoreExecutors
 import com.stash.opusplayer.R
 import com.stash.opusplayer.data.Song
-import com.stash.opusplayer.databinding.LayoutMiniPlayerBinding
+import com.stash.opusplayer.databinding.MiniPlayerBinding
 import com.stash.opusplayer.player.MusicPlayerManager
 import com.stash.opusplayer.service.MusicService
 import com.stash.opusplayer.utils.MetadataExtractor
@@ -46,7 +46,7 @@ class MiniPlayerView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : FrameLayout(context, attrs, defStyleAttr) {
 
-    private val binding: LayoutMiniPlayerBinding
+    private val binding: MiniPlayerBinding
     private var mediaController: MediaController? = null
     private var musicPlayerManager: MusicPlayerManager? = null
     private val metadataExtractor = MetadataExtractor(context)
@@ -90,7 +90,7 @@ class MiniPlayerView @JvmOverloads constructor(
     private var carouselAnimator: ValueAnimator? = null
 
     init {
-        binding = LayoutMiniPlayerBinding.inflate(LayoutInflater.from(context), this, true)
+        binding = MiniPlayerBinding.inflate(LayoutInflater.from(context), this, true)
         setupEnhancedGestureSystem()
         setupUI()
         startMiniVisualizer()
@@ -264,8 +264,8 @@ class MiniPlayerView @JvmOverloads constructor(
             duration = 300
             addUpdateListener { animation ->
                 val scale = animation.animatedValue as Float
-                binding.miniPlayPause.scaleX = scale
-                binding.miniPlayPause.scaleY = scale
+                binding.miniPlayPauseButton.scaleX = scale
+                binding.miniPlayPauseButton.scaleY = scale
             }
         }
         pulseAnimator.start()
@@ -305,8 +305,8 @@ class MiniPlayerView @JvmOverloads constructor(
                     audioData[i] = (audioData[i] * 0.8f + Random.nextFloat() * 0.2f).coerceIn(0f, 1f)
                 }
                 
-                // Progress bar not available in this layout
-                // binding.miniProgressBar.invalidate()
+                // Update progress bar if available
+                binding.miniProgressBar.invalidate()
             }
         }
     }
@@ -414,7 +414,7 @@ class MiniPlayerView @JvmOverloads constructor(
         }
 
         // Control button listeners with improved responsiveness and visual feedback
-        binding.miniPlayPause.setOnClickListener { view ->
+        binding.miniPlayPauseButton.setOnClickListener { view ->
             AnimationUtils.animateButtonPress(view)
             
             // Immediate action with fallback
@@ -440,9 +440,13 @@ class MiniPlayerView @JvmOverloads constructor(
             }
         }
 
-        // Previous functionality handled by gestures
+        // Previous button click listener
+        binding.miniPreviousButton.setOnClickListener { view ->
+            AnimationUtils.animateButtonPress(view)
+            handlePreviousTrack()
+        }
         
-        binding.miniNext.setOnClickListener { view ->
+        binding.miniNextButton.setOnClickListener { view ->
             AnimationUtils.animateButtonPress(view)
             
             try {
@@ -452,7 +456,16 @@ class MiniPlayerView @JvmOverloads constructor(
             }
         }
 
-        // Fast forward functionality handled by gestures
+        // Fast forward button click listener
+        binding.miniFastForwardButton.setOnClickListener { view ->
+            AnimationUtils.animateButtonPress(view)
+            // Fast forward 30 seconds
+            mediaController?.let { controller ->
+                val currentPos = controller.currentPosition
+                val newPos = (currentPos + 30000).coerceAtMost(controller.duration)
+                controller.seekTo(newPos)
+            }
+        }
         
         // Add rewind functionality to album artwork
         setupAlbumArtworkSeekGesture()
@@ -677,9 +690,9 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
 
     private fun updatePlayPauseButton(isPlaying: Boolean) {
         if (isPlaying) {
-            binding.miniPlayPause.setImageResource(R.drawable.ic_pause_24)
+            binding.miniPlayPauseButton.setImageResource(R.drawable.ic_pause_24)
         } else {
-            binding.miniPlayPause.setImageResource(R.drawable.ic_play_arrow_24)
+            binding.miniPlayPauseButton.setImageResource(R.drawable.ic_play_arrow_24)
         }
     }
 
@@ -702,11 +715,10 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
     }
 
     private fun updateProgressBar(currentPosition: Long, duration: Long) {
-        // Progress bar not available in this layout - could be added later
-        // if (duration > 0) {
-        //     val progress = ((currentPosition.toFloat() / duration.toFloat()) * 100).toInt()
-        //     binding.miniProgressBar.progress = progress
-        // }
+        if (duration > 0) {
+            val progress = ((currentPosition.toFloat() / duration.toFloat()) * 100).toInt()
+            binding.miniProgressBar.progress = progress
+        }
     }
 
     fun show() {
@@ -889,9 +901,10 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
             binding.miniAlbumArt,
             binding.miniSongTitle,
             binding.miniArtistName,
-            binding.miniPlayPause,
-            binding.miniNext
-            // Other buttons not available in this layout
+            binding.miniPlayPauseButton,
+            binding.miniNextButton,
+            binding.miniPreviousButton,
+            binding.miniFastForwardButton
         )
         
         if (isShowing) {
