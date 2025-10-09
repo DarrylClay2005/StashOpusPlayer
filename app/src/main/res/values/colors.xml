@@ -66,4 +66,12 @@
     <color name="spectrum_low">#4CAF50</color>      <!-- Green for low frequencies -->
     <color name="spectrum_mid">#FFC107</color>      <!-- Yellow/Orange for mid frequencies -->
     <color name="spectrum_high">#FF5722</color>     <!-- Red for high frequencies -->
+    
+    <!-- Visual Customization Colors -->
+    <color name="background_dark">#121212</color>
+    <color name="text_on_primary">#FFFFFF</color>
+    <color name="switch_track_color">#424242</color>
+    <color name="visual_accent_color">#FF6B35</color>
+    <color name="visual_text_primary">#FFFFFF</color>
+    <color name="visual_text_secondary">#B3FFFFFF</color>
 </resources>

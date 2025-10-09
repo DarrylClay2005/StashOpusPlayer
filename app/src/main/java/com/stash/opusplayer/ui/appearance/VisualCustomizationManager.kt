@@ -426,11 +426,31 @@ class VisualCustomizationManager(private val context: Context) {
     fun getPhotoOpacity(): Int = prefs.getInt(PREF_PHOTO_OPACITY, DEFAULT_OPACITY)
     
     /**
+     * Get photo tint intensity
+     */
+    fun getPhotoTintIntensity(): Int = prefs.getInt(PREF_PHOTO_TINT_INTENSITY, DEFAULT_TINT_INTENSITY)
+    
+    /**
      * Check if background effects are enabled
      */
     fun isParallaxEnabled(): Boolean = prefs.getBoolean(PREF_BACKGROUND_PARALLAX, true)
     fun isBreathingEnabled(): Boolean = prefs.getBoolean(PREF_BACKGROUND_BREATHING, false)
     fun isColorShiftEnabled(): Boolean = prefs.getBoolean(PREF_COLOR_SHIFT_ENABLED, true)
+    
+    /**
+     * Set animation preferences
+     */
+    fun setParallaxEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(PREF_BACKGROUND_PARALLAX, enabled).apply()
+    }
+    
+    fun setBreathingEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(PREF_BACKGROUND_BREATHING, enabled).apply()
+    }
+    
+    fun setColorShiftEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(PREF_COLOR_SHIFT_ENABLED, enabled).apply()
+    }
     
     /**
      * Clear current photo background

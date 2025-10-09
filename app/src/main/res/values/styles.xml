@@ -95,5 +95,18 @@
         <item name="colorPrimaryVariant">@color/secondary_dark_color</item>
         <item name="colorOnPrimary">@color/white</item>
     </style>
-
+    
+    <!-- Custom Styles for Enhanced Features -->
+    <style name="RoundedCorners8dp">
+        <item name="android:background">@drawable/rounded_corner_bg</item>
+    </style>
+    
+    <style name="PlayerControlButton.Mini">
+        <item name="android:layout_width">36dp</item>
+        <item name="android:layout_height">36dp</item>
+        <item name="android:background">@drawable/circle_button_background</item>
+        <item name="android:scaleType">centerInside</item>
+        <item name="android:padding">8dp</item>
+    </style>
+    
 </resources>
