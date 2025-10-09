@@ -72,13 +72,13 @@ class NowPlayingActivity : AppCompatActivity() {
         
         metadataExtractor = MetadataExtractor(this)
         
-        // Apply appearance preferences to SynthWave
+        // Apply appearance preferences to EnhancedSynthWave
         try {
             val appearancePrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(this)
-            binding.synthWaveView.applyAppearancePreferences(appearancePrefs)
+            binding.enhancedSynthWaveView.applyAppearancePreferences(appearancePrefs)
             
-            // Set up seek listener for SynthWave progress line
-            binding.synthWaveView.setOnSeekListener { seekPosition ->
+            // Set up seek listener for EnhancedSynthWave progress line
+            binding.enhancedSynthWaveView.setOnSeekListener { seekPosition ->
                 mediaController?.let { controller ->
                     if (controller.duration > 0) {
                         val targetPosition = (seekPosition * controller.duration).toLong()
@@ -88,7 +88,7 @@ class NowPlayingActivity : AppCompatActivity() {
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.w("NowPlayingActivity", "Error applying appearance preferences to SynthWave", e)
+            android.util.Log.w("NowPlayingActivity", "Error applying appearance preferences to EnhancedSynthWave", e)
         }
         
         setupUI()
@@ -747,7 +747,7 @@ else -> com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActi
             setupMediaControllerListeners()
             updateUIFromController()
             
-            // Connect SynthWave to the media controller's audio session
+            // Connect EnhancedSynthWave to the media controller's audio session
             try {
                 mediaController?.let { controller ->
                     val audioSessionId = controller.audioAttributes?.let { 
@@ -758,10 +758,10 @@ else -> com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActi
                             0 // Fall back to global session
                         }
                     } ?: 0
-                    binding.synthWaveView.setAudioSession(audioSessionId)
+                    binding.enhancedSynthWaveView.setAudioSession(audioSessionId)
                 }
             } catch (e: Exception) {
-                android.util.Log.w("NowPlayingActivity", "Could not connect SynthWave to audio session", e)
+                android.util.Log.w("NowPlayingActivity", "Could not connect EnhancedSynthWave to audio session", e)
             }
         }, MoreExecutors.directExecutor())
     }
@@ -1033,11 +1033,11 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
                     val duration = controller.duration
                     updateSeekBar(currentPos, duration)
                     
-                    // Update SynthWave progress
+                    // Update EnhancedSynthWave progress
                     try {
-                        binding.synthWaveView.updateProgress(currentPos, duration)
+                        binding.enhancedSynthWaveView.updateProgress(currentPos, duration)
                     } catch (e: Exception) {
-                        android.util.Log.w("NowPlayingActivity", "Error updating SynthWave progress", e)
+                        android.util.Log.w("NowPlayingActivity", "Error updating EnhancedSynthWave progress", e)
                     }
                 }
                 progressHandler.postDelayed(this, 1000)
