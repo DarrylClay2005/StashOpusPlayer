@@ -186,9 +186,18 @@ class VisualCustomizationManager(private val context: Context) {
      */
     private fun applyBlurEffect(bitmap: Bitmap, radius: Float): Bitmap {
         return try {
-            // Use RenderScript blur or fallback to a simple blur
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN_MR1) {
-                applyRenderScriptBlur(bitmap, radius)
+            // RenderScript is deprecated, use safer alternatives
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                // Use stack blur for Android 12+ (RenderScript deprecated)
+                applyStackBlur(bitmap, radius.toInt())
+            } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN_MR1) {
+                // Use RenderScript for older versions with proper error handling
+                try {
+                    applyRenderScriptBlur(bitmap, radius)
+                } catch (e: Exception) {
+                    // Fallback to stack blur if RenderScript fails
+                    applyStackBlur(bitmap, radius.toInt())
+                }
             } else {
                 applyStackBlur(bitmap, radius.toInt())
             }
@@ -198,24 +207,43 @@ class VisualCustomizationManager(private val context: Context) {
     }
     
     @androidx.annotation.RequiresApi(android.os.Build.VERSION_CODES.JELLY_BEAN_MR1)
+    @Suppress("DEPRECATION") // RenderScript is deprecated but still needed for Android < 12
     private fun applyRenderScriptBlur(bitmap: Bitmap, radius: Float): Bitmap {
-        val outputBitmap = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+        var renderScript: android.renderscript.RenderScript? = null
+        var blurScript: android.renderscript.ScriptIntrinsicBlur? = null
+        var inputAllocation: android.renderscript.Allocation? = null
+        var outputAllocation: android.renderscript.Allocation? = null
         
-        val renderScript = android.renderscript.RenderScript.create(context)
-        val blurScript = android.renderscript.ScriptIntrinsicBlur.create(renderScript, android.renderscript.Element.U8_4(renderScript))
-        
-        val inputAllocation = android.renderscript.Allocation.createFromBitmap(renderScript, bitmap)
-        val outputAllocation = android.renderscript.Allocation.createFromBitmap(renderScript, outputBitmap)
-        
-        blurScript.setRadius(radius.coerceIn(0f, 25f))
-        blurScript.setInput(inputAllocation)
-        blurScript.forEach(outputAllocation)
-        
-        outputAllocation.copyTo(outputBitmap)
-        
-        renderScript.destroy()
-        
-        return outputBitmap
+        return try {
+            val outputBitmap = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+            
+            renderScript = android.renderscript.RenderScript.create(context)
+            blurScript = android.renderscript.ScriptIntrinsicBlur.create(renderScript, android.renderscript.Element.U8_4(renderScript))
+            
+            inputAllocation = android.renderscript.Allocation.createFromBitmap(renderScript, bitmap)
+            outputAllocation = android.renderscript.Allocation.createFromBitmap(renderScript, outputBitmap)
+            
+            blurScript.setRadius(radius.coerceIn(0f, 25f))
+            blurScript.setInput(inputAllocation)
+            blurScript.forEach(outputAllocation)
+            
+            outputAllocation.copyTo(outputBitmap)
+            
+            outputBitmap
+        } catch (e: Exception) {
+            // If RenderScript fails, fallback to stack blur
+            applyStackBlur(bitmap, radius.toInt())
+        } finally {
+            // Cleanup resources to prevent memory leaks
+            try {
+                inputAllocation?.destroy()
+                outputAllocation?.destroy()
+                blurScript?.destroy()
+                renderScript?.destroy()
+            } catch (e: Exception) {
+                // Ignore cleanup errors
+            }
+        }
     }
     
     /**

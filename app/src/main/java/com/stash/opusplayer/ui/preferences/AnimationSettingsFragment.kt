@@ -1,12 +1,14 @@
 package com.stash.opusplayer.ui.preferences
 
 import android.os.Bundle
+import android.view.View
 import android.widget.Toast
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SwitchPreferenceCompat
 import androidx.preference.SeekBarPreference
 import androidx.preference.ListPreference
 import androidx.preference.Preference
+import androidx.appcompat.app.AppCompatActivity
 import com.stash.opusplayer.R
 
 /**
@@ -23,6 +25,21 @@ class AnimationSettingsFragment : PreferenceFragmentCompat() {
             // Show error to user
             Toast.makeText(requireContext(), "Error loading animation settings: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+    
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        
+        // Set up action bar with back button
+        val activity = requireActivity() as? AppCompatActivity
+        activity?.supportActionBar?.apply {
+            setDisplayHomeAsUpEnabled(true)
+            setDisplayShowHomeEnabled(true)
+            title = "Animation Settings"
+        }
+        
+        // Enable options menu to handle back button
+        setHasOptionsMenu(true)
     }
     
     private fun setupPreferences() {
@@ -56,13 +73,15 @@ class AnimationSettingsFragment : PreferenceFragmentCompat() {
         val performanceMode = findPreference<ListPreference>("animation_performance_mode")
         val reduceAnimationsBattery = findPreference<SwitchPreferenceCompat>("reduce_animations_battery")
         
-            // Set up listeners for important settings with null checks
+        // Set up listeners for important settings with null checks
             uiAnimationsEnabled?.setOnPreferenceChangeListener { _, newValue ->
                 val enabled = newValue as Boolean
                 // Update dependent animations
                 buttonAnimationsEnabled?.isEnabled = enabled
                 listAnimationsEnabled?.isEnabled = enabled
                 slideAnimationsEnabled?.isEnabled = enabled
+                // Broadcast change for live update
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
                 true
             }
         
@@ -73,6 +92,8 @@ class AnimationSettingsFragment : PreferenceFragmentCompat() {
             preferenceManager.sharedPreferences?.edit()
                 ?.putFloat("synthwave_intensity", intensity)
                 ?.apply()
+            // Broadcast change for live update
+            com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
             true
         }
         
@@ -92,6 +113,8 @@ class AnimationSettingsFragment : PreferenceFragmentCompat() {
                     enableBatterySaverAnimations()
                 }
             }
+            // Broadcast change for live update
+            com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
             true
         }
         
@@ -103,6 +126,8 @@ class AnimationSettingsFragment : PreferenceFragmentCompat() {
             } else {
                 enableBalancedAnimations()
             }
+            // Broadcast change for live update
+            com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
             true
         }
         
@@ -140,6 +165,9 @@ class AnimationSettingsFragment : PreferenceFragmentCompat() {
         
         // Update UI
         refreshPreferences()
+        
+        // Broadcast change for live update
+        com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
     }
     
     private fun enableBalancedAnimations() {
@@ -165,6 +193,9 @@ class AnimationSettingsFragment : PreferenceFragmentCompat() {
         
         // Update UI
         refreshPreferences()
+        
+        // Broadcast change for live update
+        com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
     }
     
     private fun enableBatterySaverAnimations() {
@@ -208,6 +239,27 @@ class AnimationSettingsFragment : PreferenceFragmentCompat() {
                     }
                 }
             }
+        }
+    }
+    
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
+        return when (item.itemId) {
+            android.R.id.home -> {
+                // Handle back button press
+                parentFragmentManager.popBackStack()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+    
+    override fun onDestroyView() {
+        super.onDestroyView()
+        // Reset action bar title when leaving
+        val activity = requireActivity() as? AppCompatActivity
+        activity?.supportActionBar?.apply {
+            setDisplayHomeAsUpEnabled(true)
+            title = "Settings"
         }
     }
 }

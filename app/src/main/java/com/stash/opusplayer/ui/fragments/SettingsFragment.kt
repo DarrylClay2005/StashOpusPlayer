@@ -1814,7 +1814,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
                 try {
                     val fragment = com.stash.opusplayer.ui.preferences.AnimationSettingsFragment()
                     parentFragmentManager.beginTransaction()
-                        .replace(android.R.id.content, fragment)
+                        .replace(com.stash.opusplayer.R.id.main_content, fragment)
                         .addToBackStack("animation_settings")
                         .commit()
                 } catch (e: Exception) {
@@ -1844,7 +1844,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
                 try {
                     val fragment = com.stash.opusplayer.ui.customization.VisualCustomizationFragment()
                     parentFragmentManager.beginTransaction()
-                        .replace(android.R.id.content, fragment)
+                        .replace(com.stash.opusplayer.R.id.main_content, fragment)
                         .addToBackStack("visual_customization")
                         .commit()
                 } catch (e: Exception) {
@@ -2326,7 +2326,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
                 try {
                     val fragment = com.stash.opusplayer.ui.preferences.AnimationSettingsFragment()
                     parentFragmentManager.beginTransaction()
-                        .replace(android.R.id.content, fragment)
+                        .replace(com.stash.opusplayer.R.id.main_content, fragment)
                         .addToBackStack("animation_settings")
                         .commit()
                 } catch (e: Exception) {
@@ -2347,7 +2347,7 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
                 try {
                     val fragment = com.stash.opusplayer.ui.customization.VisualCustomizationFragment()
                     parentFragmentManager.beginTransaction()
-                        .replace(android.R.id.content, fragment)
+                        .replace(com.stash.opusplayer.R.id.main_content, fragment)
                         .addToBackStack("visual_customization")
                         .commit()
                 } catch (e: Exception) {
