@@ -201,9 +201,16 @@ class UpdateChecker(private val context: Context) {
     fun getUpdatePreferences(): UpdatePreferences {
         return UpdatePreferences(
             autoCheckEnabled = prefs.getBoolean(PREF_AUTO_CHECK_ENABLED, true),
-            checkFrequency = prefs.getLong(PREF_UPDATE_FREQUENCY, FREQUENCY_DAILY),
+            checkFrequency = when (prefs.getLong(PREF_UPDATE_FREQUENCY, FREQUENCY_DAILY)) {
+                FREQUENCY_NEVER -> UpdateFrequency.NEVER
+                FREQUENCY_WEEKLY -> UpdateFrequency.WEEKLY
+                FREQUENCY_MONTHLY -> UpdateFrequency.MONTHLY
+                else -> UpdateFrequency.DAILY
+            },
             includeBetaUpdates = prefs.getBoolean(PREF_BETA_UPDATES, false),
-            lastCheckTime = prefs.getLong(PREF_LAST_CHECK, 0)
+            notifyForMinorUpdates = prefs.getBoolean("notify_minor_updates", true),
+            downloadOverWifiOnly = prefs.getBoolean("download_wifi_only", true),
+            autoInstallCriticalUpdates = prefs.getBoolean("auto_install_critical", false)
         )
     }
     
@@ -213,32 +220,12 @@ class UpdateChecker(private val context: Context) {
     fun updatePreferences(preferences: UpdatePreferences) {
         prefs.edit().apply {
             putBoolean(PREF_AUTO_CHECK_ENABLED, preferences.autoCheckEnabled)
-            putLong(PREF_UPDATE_FREQUENCY, preferences.checkFrequency)
+            putLong(PREF_UPDATE_FREQUENCY, preferences.checkFrequency.hours)
             putBoolean(PREF_BETA_UPDATES, preferences.includeBetaUpdates)
+            putBoolean("notify_minor_updates", preferences.notifyForMinorUpdates)
+            putBoolean("download_wifi_only", preferences.downloadOverWifiOnly)
+            putBoolean("auto_install_critical", preferences.autoInstallCriticalUpdates)
             apply()
         }
     }
-}
-
-sealed class UpdateCheckResult {
-    object NoCheckNeeded : UpdateCheckResult()
-    object NoUpdate : UpdateCheckResult()
-    data class UpdateAvailable(val updateInfo: UpdateInfo, val notificationStrategy: NotificationStrategy) : UpdateCheckResult()
-    data class UpdateAvailableButHidden(val updateInfo: UpdateInfo) : UpdateCheckResult()
-    data class Error(val message: String) : UpdateCheckResult()
-}
-
-enum class UpdateDecision {
-    UPDATED, SKIPPED, POSTPONED, IGNORED
-}
-
-data class UpdatePreferences(
-    val autoCheckEnabled: Boolean,
-    val checkFrequency: Long, // in hours
-    val includeBetaUpdates: Boolean,
-    val lastCheckTime: Long
-)
-
-enum class NotificationStrategy {
-    SUBTLE, STANDARD, PROMINENT, URGENT
 }

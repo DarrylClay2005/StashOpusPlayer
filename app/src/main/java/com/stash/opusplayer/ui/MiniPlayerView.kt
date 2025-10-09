@@ -27,6 +27,18 @@ import android.animation.ObjectAnimator
 import android.view.animation.LinearInterpolator
 import com.stash.opusplayer.utils.AnimationUtils
 import kotlinx.coroutines.launch
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.VelocityTracker
+import android.animation.ValueAnimator
+import android.animation.AnimatorSet
+import android.graphics.*
+import android.media.AudioManager
+import android.view.View
+import kotlin.math.*
+import kotlin.random.Random
+import android.animation.AnimatorListenerAdapter
+import android.animation.Animator
 
 class MiniPlayerView @JvmOverloads constructor(
     context: Context,
@@ -45,10 +57,43 @@ class MiniPlayerView @JvmOverloads constructor(
     private var currentSong: Song? = null
     private var lifecycleOwner: LifecycleOwner? = null
     private var spinningAnimator: ObjectAnimator? = null
+    
+    // Enhanced gesture controls
+    private lateinit var gestureDetector: GestureDetector
+    private var velocityTracker: VelocityTracker? = null
+    private val audioManager by lazy { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    
+    // Mini visualizer
+    private var miniVisualizerAnimator: ValueAnimator? = null
+    private var audioData: FloatArray = FloatArray(16) { Random.nextFloat() }
+    private val miniVisualizerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        shader = LinearGradient(
+            0f, 0f, 0f, 20f,
+            Color.parseColor("#FF00FF"),
+            Color.parseColor("#00FFFF"),
+            Shader.TileMode.CLAMP
+        )
+    }
+    
+    // Progress ring
+    private val progressRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 6f
+        color = Color.parseColor("#FF00FF")
+        strokeCap = Paint.Cap.ROUND
+    }
+    
+    // Album art carousel
+    private var queuePosition = 0
+    private var carouselOffset = 0f
+    private var carouselAnimator: ValueAnimator? = null
 
     init {
         binding = MiniPlayerBinding.inflate(LayoutInflater.from(context), this, true)
+        setupEnhancedGestureSystem()
         setupUI()
+        startMiniVisualizer()
         visibility = GONE // Initially hidden
     }
 
@@ -58,6 +103,299 @@ class MiniPlayerView @JvmOverloads constructor(
         
         connectToMediaController()
         observePlayerState()
+    }
+    
+    /**
+     * Enhanced gesture system for advanced mini player controls
+     */
+    private fun setupEnhancedGestureSystem() {
+        gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+                if (e1 == null || e2 == null) return false
+                
+                val deltaX = e2.x - e1.x
+                val deltaY = e2.y - e1.y
+                
+                // Determine if it's a horizontal or vertical swipe
+                if (abs(deltaX) > abs(deltaY)) {
+                    // Horizontal swipe - track control
+                    if (abs(deltaX) > 100 && abs(velocityX) > 500) {
+                        if (deltaX > 0) {
+                            // Swipe right - next track
+                            handleNextTrack()
+                            animateSwipeGesture("Next Track ⏭️")
+                        } else {
+                            // Swipe left - previous track
+                            handlePreviousTrack()
+                            animateSwipeGesture("Previous Track ⏮️")
+                        }
+                        return true
+                    }
+                } else {
+                    // Vertical swipe - volume control
+                    if (abs(deltaY) > 80 && abs(velocityY) > 400) {
+                        if (deltaY < 0) {
+                            // Swipe up - volume up
+                            adjustVolume(true)
+                            animateSwipeGesture("Volume Up 🔊")
+                        } else {
+                            // Swipe down - volume down
+                            adjustVolume(false)
+                            animateSwipeGesture("Volume Down 🔉")
+                        }
+                        return true
+                    }
+                }
+                return false
+            }
+            
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                // Double tap - play/pause
+                handlePlayPause()
+                animateDoubleTap()
+                return true
+            }
+            
+            override fun onLongPress(e: MotionEvent) {
+                // Long press - show queue or options
+                showQueuePreview()
+            }
+        })
+        
+        // Set up touch handling for the entire mini player
+        setOnTouchListener { _, event ->
+            velocityTracker = velocityTracker ?: VelocityTracker.obtain()
+            velocityTracker?.addMovement(event)
+            
+            when (event.action) {
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    velocityTracker?.recycle()
+                    velocityTracker = null
+                }
+            }
+            
+            gestureDetector.onTouchEvent(event)
+        }
+        
+        // Enable focus for gesture detection
+        isFocusable = true
+        isFocusableInTouchMode = true
+    }
+    
+    private fun handleNextTrack() {
+        try {
+            mediaController?.seekToNext() ?: musicPlayerManager?.skipToNext()
+        } catch (e: Exception) {
+            android.util.Log.w("MiniPlayerView", "Next track failed", e)
+        }
+    }
+    
+    private fun handlePreviousTrack() {
+        try {
+            mediaController?.seekToPrevious() ?: musicPlayerManager?.skipToPrevious()
+        } catch (e: Exception) {
+            android.util.Log.w("MiniPlayerView", "Previous track failed", e)
+        }
+    }
+    
+    private fun handlePlayPause() {
+        try {
+            mediaController?.let { controller ->
+                if (controller.isPlaying) {
+                    controller.pause()
+                } else {
+                    controller.play()
+                }
+            } ?: run {
+                musicPlayerManager?.let { manager ->
+                    if (manager.isPlaying.value) {
+                        manager.pause()
+                    } else {
+                        manager.play()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MiniPlayerView", "Play/pause failed", e)
+        }
+    }
+    
+    private fun adjustVolume(increase: Boolean) {
+        try {
+            if (increase) {
+                audioManager.adjustStreamVolume(
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.ADJUST_RAISE,
+                    AudioManager.FLAG_SHOW_UI
+                )
+            } else {
+                audioManager.adjustStreamVolume(
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.ADJUST_LOWER,
+                    AudioManager.FLAG_SHOW_UI
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MiniPlayerView", "Volume adjustment failed", e)
+        }
+    }
+    
+    private fun animateSwipeGesture(message: String) {
+        // Create a ripple effect from the gesture
+        animate()
+            .scaleX(1.05f)
+            .scaleY(1.05f)
+            .setDuration(150)
+            .withEndAction {
+                animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(150)
+                    .start()
+            }
+            .start()
+        
+        showVisualFeedbackViaParent(message)
+    }
+    
+    private fun animateDoubleTap() {
+        // Pulsing animation for double tap
+        val pulseAnimator = ValueAnimator.ofFloat(1f, 1.2f, 1f).apply {
+            duration = 300
+            addUpdateListener { animation ->
+                val scale = animation.animatedValue as Float
+                binding.miniPlayPauseButton.scaleX = scale
+                binding.miniPlayPauseButton.scaleY = scale
+            }
+        }
+        pulseAnimator.start()
+    }
+    
+    private fun showQueuePreview() {
+        // Show a preview of the queue or additional options
+        showVisualFeedbackViaParent("Queue: ${getQueueInfo()}")
+        
+        // Optional: Navigate to queue or show popup
+        // This could be expanded to show a mini queue preview
+    }
+    
+    private fun getQueueInfo(): String {
+        return try {
+            val playlist = musicPlayerManager?.playlist?.value
+            if (playlist != null && playlist.isNotEmpty()) {
+                "${playlist.size} tracks"
+            } else {
+                "Empty"
+            }
+        } catch (e: Exception) {
+            "Unknown"
+        }
+    }
+    
+    /**
+     * Mini visualizer for the collapsed mini player
+     */
+    private fun startMiniVisualizer() {
+        miniVisualizerAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 100
+            repeatCount = ValueAnimator.INFINITE
+            addUpdateListener {
+                // Generate fake audio data for visualization
+                for (i in audioData.indices) {
+                    audioData[i] = (audioData[i] * 0.8f + Random.nextFloat() * 0.2f).coerceIn(0f, 1f)
+                }
+                
+                // Only invalidate the progress bar area to show mini visualizer
+                binding.miniProgressBar.invalidate()
+            }
+        }
+    }
+    
+    private fun stopMiniVisualizer() {
+        miniVisualizerAnimator?.cancel()
+        miniVisualizerAnimator = null
+    }
+    
+    /**
+     * Custom drawing for progress ring around album art
+     */
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        
+        // Draw progress ring around album art
+        drawProgressRing(canvas)
+        
+        // Draw mini visualizer on progress bar
+        if (mediaController?.isPlaying == true) {
+            drawMiniVisualizer(canvas)
+        }
+    }
+    
+    private fun drawProgressRing(canvas: Canvas) {
+        try {
+            val albumArt = binding.miniAlbumArt
+            val centerX = albumArt.x + albumArt.width / 2f
+            val centerY = albumArt.y + albumArt.height / 2f
+            val radius = max(albumArt.width, albumArt.height) / 2f + 8f
+            
+            // Get current progress
+            val progress = mediaController?.let { controller ->
+                if (controller.duration > 0) {
+                    controller.currentPosition.toFloat() / controller.duration.toFloat()
+                } else 0f
+            } ?: 0f
+            
+            // Draw background circle
+            val backgroundPaint = Paint(progressRingPaint).apply {
+                alpha = 50
+                color = Color.GRAY
+            }
+            canvas.drawCircle(centerX, centerY, radius, backgroundPaint)
+            
+            // Draw progress arc
+            if (progress > 0f) {
+                val sweepAngle = progress * 360f
+                val rect = RectF(
+                    centerX - radius,
+                    centerY - radius,
+                    centerX + radius,
+                    centerY + radius
+                )
+                
+                canvas.drawArc(rect, -90f, sweepAngle, false, progressRingPaint)
+            }
+        } catch (e: Exception) {
+            // Ignore drawing errors
+        }
+    }
+    
+    private fun drawMiniVisualizer(canvas: Canvas) {
+        try {
+            val progressBar = binding.miniProgressBar
+            val barWidth = progressBar.width.toFloat()
+            val barHeight = progressBar.height.toFloat()
+            val barX = progressBar.x
+            val barY = progressBar.y
+            
+            val barSpacing = barWidth / audioData.size
+            
+            for (i in audioData.indices) {
+                val barLeft = barX + i * barSpacing
+                val barRight = barLeft + barSpacing * 0.8f
+                val barTop = barY + barHeight * (1f - audioData[i])
+                val barBottom = barY + barHeight
+                
+                canvas.drawRect(
+                    barLeft,
+                    barTop,
+                    barRight,
+                    barBottom,
+                    miniVisualizerPaint
+                )
+            }
+        } catch (e: Exception) {
+            // Ignore drawing errors
+        }
     }
 
     private fun setupUI() {
@@ -175,10 +513,12 @@ class MiniPlayerView @JvmOverloads constructor(
                 updatePlayPauseButton(isPlaying)
                 if (isPlaying) {
                     startProgressUpdates()
+                    miniVisualizerAnimator?.start()
                     show()
                 } else {
                     // Keep visible when paused, only hide if idle with no item
                     stopProgressUpdates()
+                    miniVisualizerAnimator?.pause()
                     if (mediaController?.playbackState == Player.STATE_IDLE && mediaController?.currentMediaItem == null) hide() else show()
                 }
             }
@@ -545,6 +885,10 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
     fun release() {
         stopProgressUpdates()
         stopSpinningAnimation()
+        stopMiniVisualizer()
+        carouselAnimator?.cancel()
+        velocityTracker?.recycle()
+        velocityTracker = null
         mediaController?.release()
     }
     

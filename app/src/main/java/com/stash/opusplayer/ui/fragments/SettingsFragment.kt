@@ -499,8 +499,15 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
                     }
                     val updateFreqPrefs = updateManager2?.getUpdatePreferences()
                     if (updateFreqPrefs != null) {
+                        val updateFrequency = when (frequency) {
+                            24L -> com.stash.opusplayer.updates.UpdateFrequency.DAILY
+                            168L -> com.stash.opusplayer.updates.UpdateFrequency.WEEKLY
+                            720L -> com.stash.opusplayer.updates.UpdateFrequency.MONTHLY
+                            -1L -> com.stash.opusplayer.updates.UpdateFrequency.NEVER
+                            else -> com.stash.opusplayer.updates.UpdateFrequency.DAILY
+                        }
                         (activity as? MainActivity)?.getUpdateManager()?.updatePreferences(
-                            updateFreqPrefs.copy(checkFrequency = frequency)
+                            updateFreqPrefs.copy(checkFrequency = updateFrequency)
                         )
                     }
                 }
@@ -1903,7 +1910,47 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
         layout.addView(animSpeedSpinner)
         
         // Mini Player Section
-        addSectionHeader(layout, getString(com.stash.opusplayer.R.string.settings_appearance_mini_player))
+        addSectionHeader(layout, "🎵 Mini Player Settings")
+        
+        // Mini Player Style Selection
+        val miniPlayerToggleManager = com.stash.opusplayer.ui.managers.MiniPlayerToggleManager(requireContext())
+        
+        val styleLabel = TextView(requireContext()).apply {
+            text = "Mini Player Style"
+            textSize = 16f
+            setPadding(0, 8, 0, 8)
+            setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_primary))
+        }
+        layout.addView(styleLabel)
+        
+        val styleSpinner = Spinner(requireContext())
+        val availableStyles = miniPlayerToggleManager.getAvailableStyles()
+        val styleAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, availableStyles.map { it.second })
+        styleAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        styleSpinner.adapter = styleAdapter
+        
+        val currentStyle = miniPlayerToggleManager.getMiniPlayerStyle()
+        val currentIndex = availableStyles.indexOfFirst { it.first == currentStyle }.coerceAtLeast(0)
+        styleSpinner.setSelection(currentIndex)
+        
+        styleSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selectedStyle = availableStyles[position].first
+                miniPlayerToggleManager.setMiniPlayerStyle(selectedStyle)
+                updateStyleFeaturesDisplay(layout, miniPlayerToggleManager, selectedStyle)
+                Toast.makeText(requireContext(), "Mini Player style changed to: ${availableStyles[position].second}", Toast.LENGTH_SHORT).show()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        layout.addView(styleSpinner)
+        
+        // Features display
+        val featuresContainer = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            id = View.generateViewId()
+        }
+        layout.addView(featuresContainer)
+        updateStyleFeaturesDisplay(featuresContainer, miniPlayerToggleManager, currentStyle)
         
         // Show Album Art Toggle
         val showArtToggle = CheckBox(requireContext()).apply {
@@ -2225,6 +2272,31 @@ presetSpinner.setSelection(com.stash.opusplayer.audio.EqualizerPreset.values().i
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+    
+    private fun updateStyleFeaturesDisplay(container: LinearLayout, manager: com.stash.opusplayer.ui.managers.MiniPlayerToggleManager, style: String) {
+        container.removeAllViews()
+        
+        val features = manager.getStyleFeatures(style)
+        if (features.isNotEmpty()) {
+            val featuresLabel = TextView(requireContext()).apply {
+                text = "Features:"
+                textSize = 14f
+                setPadding(0, 16, 0, 8)
+                setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_secondary))
+            }
+            container.addView(featuresLabel)
+            
+            features.forEach { feature ->
+                val featureView = TextView(requireContext()).apply {
+                    text = "• $feature"
+                    textSize = 12f
+                    setPadding(16, 2, 0, 2)
+                    setTextColor(ContextCompat.getColor(requireContext(), com.stash.opusplayer.R.color.text_secondary))
+                }
+                container.addView(featureView)
+            }
+        }
     }
     
     private fun buildEnhancedFeaturesContent(): View {

@@ -93,17 +93,17 @@ class UpdateDialog(
     
     private fun setupAIRecommendation() {
         val aiText = when (notificationStrategy) {
-            NotificationStrategy.URGENT -> "AI strongly recommends installing this update immediately"
-            NotificationStrategy.PROMINENT -> "AI recommends this update based on your usage patterns"
+            NotificationStrategy.CRITICAL -> "AI strongly recommends installing this update immediately"
+            NotificationStrategy.AGGRESSIVE -> "AI recommends this update based on your usage patterns"
             NotificationStrategy.STANDARD -> "AI suggests considering this update when convenient"
-            NotificationStrategy.SUBTLE -> "AI notes this update is available but not urgent for your usage"
+            NotificationStrategy.LOW_KEY -> "AI notes this update is available but not urgent for your usage"
         }
         
         binding.aiRecommendationText.text = aiText
         
         // Show/hide AI recommendation based on strategy
         binding.aiRecommendation.visibility = when (notificationStrategy) {
-            NotificationStrategy.SUBTLE -> View.GONE
+            NotificationStrategy.LOW_KEY -> View.GONE
             else -> View.VISIBLE
         }
     }

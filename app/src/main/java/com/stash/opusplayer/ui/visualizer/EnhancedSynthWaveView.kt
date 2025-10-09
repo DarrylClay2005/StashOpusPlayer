@@ -84,6 +84,47 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
         strokeWidth = 3f
         color = Color.parseColor("#00FFFF")
     }
+    
+    // Additional paint objects for different visualizer modes
+    private val mountainPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = LinearGradient(
+            0f, 0f, 0f, 400f,
+            intArrayOf(
+                Color.parseColor("#FF4444"),
+                Color.parseColor("#FF8844"),
+                Color.parseColor("#44FF44")
+            ),
+            floatArrayOf(0f, 0.5f, 1f),
+            Shader.TileMode.CLAMP
+        )
+    }
+    
+    private val oscilloscopePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#00FF00")
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        setShadowLayer(8f, 0f, 0f, Color.parseColor("#00FF00"))
+    }
+    
+    private val vuMeterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        shader = LinearGradient(
+            0f, 0f, 200f, 0f,
+            intArrayOf(
+                Color.parseColor("#00FF00"),
+                Color.parseColor("#FFFF00"),
+                Color.parseColor("#FF0000")
+            ),
+            floatArrayOf(0f, 0.7f, 1f),
+            Shader.TileMode.CLAMP
+        )
+    }
+    
+    private val fractalPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        color = Color.parseColor("#FF00FF")
+    }
 
     // Animation data
     private var waveformData: ByteArray? = null
@@ -136,6 +177,23 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
         get() = prefs.getFloat("synthwave_intensity", 1f)
         set(value) = prefs.edit().putFloat("synthwave_intensity", value).apply()
     
+    // Visualizer mode selection
+    enum class VisualizerMode {
+        SYNTHWAVE,      // Original synthwave style
+        FREQUENCY_MOUNTAIN,  // 3D frequency mountains
+        PARTICLE_GALAXY,     // Particle constellation
+        RETRO_OSCILLOSCOPE,  // Classic green oscilloscope
+        VU_METERS,          // Analog VU meters
+        FRACTAL_PATTERNS    // Mathematical fractals
+    }
+    
+    private var currentMode: VisualizerMode
+        get() = VisualizerMode.valueOf(
+            prefs.getString("synthwave_visualizer_mode", VisualizerMode.SYNTHWAVE.name) 
+                ?: VisualizerMode.SYNTHWAVE.name
+        )
+        set(value) = prefs.edit().putString("synthwave_visualizer_mode", value.name).apply()
+    
     // Audio visualizer support
     private var visualizer: Visualizer? = null
     private var audioSessionId: Int = 0
@@ -151,10 +209,23 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
     
     // Seek listener
     private var onSeekListener: ((Float) -> Unit)? = null
+    
+    // Particle galaxy data
+    private data class Star(var x: Float, var y: Float, var brightness: Float, var size: Float, var velocity: Float)
+    private val galaxyStars = mutableListOf<Star>()
+    
+    // VU meter data
+    private var leftChannelLevel = 0f
+    private var rightChannelLevel = 0f
+    
+    // Fractal data
+    private var fractalIterations = 0
+    private val fractalPath = Path()
 
     init {
         setupAnimations()
         initializeParticles()
+        initializeGalaxyStars()
         setLayerType(LAYER_TYPE_HARDWARE, null)
         setupPreferenceListener()
     }
@@ -267,6 +338,21 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
         }
     }
     
+    private fun initializeGalaxyStars() {
+        galaxyStars.clear()
+        repeat(100) {
+            galaxyStars.add(
+                Star(
+                    x = Random.nextFloat() * width,
+                    y = Random.nextFloat() * height,
+                    brightness = Random.nextFloat(),
+                    size = Random.nextFloat() * 8f + 2f,
+                    velocity = Random.nextFloat() * 2f + 0.5f
+                )
+            )
+        }
+    }
+    
     private fun updateShaders() {
         if (enableColorShift && height > 0) {
             val hueShift = (colorShiftPhase * 180 / PI).toFloat()
@@ -308,22 +394,349 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
             canvas.scale(scale, scale, width / 2f, height / 2f)
         }
         
-        // Draw background grid
+        // Draw based on current visualizer mode
+        when (currentMode) {
+            VisualizerMode.SYNTHWAVE -> drawSynthWaveMode(canvas)
+            VisualizerMode.FREQUENCY_MOUNTAIN -> drawFrequencyMountain(canvas)
+            VisualizerMode.PARTICLE_GALAXY -> drawParticleGalaxy(canvas)
+            VisualizerMode.RETRO_OSCILLOSCOPE -> drawRetroOscilloscope(canvas)
+            VisualizerMode.VU_METERS -> drawVUMeters(canvas)
+            VisualizerMode.FRACTAL_PATTERNS -> drawFractalPatterns(canvas)
+        }
+        
+        // Draw progress line (common to all modes)
+        drawProgressLine(canvas)
+    }
+    
+    private fun drawSynthWaveMode(canvas: Canvas) {
+        // Original synthwave visualization
         drawGrid(canvas)
-        
-        // Draw spectrum analyzer
         drawSpectrum(canvas)
-        
-        // Draw waveform
         drawWaveform(canvas)
         
         // Draw effects
         if (enableLightning) drawLightning(canvas)
         if (enableParticles) drawParticles(canvas)
         if (enableRipples) drawRipples(canvas)
+    }
+    
+    private fun drawFrequencyMountain(canvas: Canvas) {
+        val spectrum = spectrumData ?: return
+        if (width <= 0 || height <= 0) return
         
-        // Draw progress line
-        drawProgressLine(canvas)
+        canvas.drawColor(Color.BLACK) // Dark background
+        
+        val barWidth = width.toFloat() / spectrum.size
+        val path = Path()
+        
+        // Create mountain silhouette
+        path.moveTo(0f, height.toFloat())
+        
+        for (i in spectrum.indices) {
+            val amplitude = spectrum[i] * animationIntensity
+            val barHeight = (amplitude / MAX_AMPLITUDE) * height * 0.8f
+            val x = i * barWidth
+            val y = height - barHeight
+            
+            if (i == 0) {
+                path.lineTo(x, y)
+            } else {
+                // Add some curve smoothing
+                val prevX = (i - 1) * barWidth
+                val controlX = (prevX + x) / 2f
+                path.quadTo(controlX, y, x, y)
+            }
+        }
+        
+        path.lineTo(width.toFloat(), height.toFloat())
+        path.close()
+        
+        canvas.drawPath(path, mountainPaint)
+        
+        // Add peaks with glow effect
+        for (i in spectrum.indices) {
+            val amplitude = spectrum[i] * animationIntensity
+            if (amplitude > MAX_AMPLITUDE * 0.6f) {
+                val x = i * barWidth
+                val y = height - (amplitude / MAX_AMPLITUDE) * height * 0.8f
+                
+                val glowPaint = Paint(mountainPaint).apply {
+                    setShadowLayer(20f, 0f, 0f, Color.WHITE)
+                }
+                canvas.drawCircle(x, y, 8f, glowPaint)
+            }
+        }
+    }
+    
+    private fun drawParticleGalaxy(canvas: Canvas) {
+        canvas.drawColor(Color.BLACK) // Space background
+        
+        // Update and draw stars
+        val spectrum = spectrumData ?: FloatArray(16) { 0f }
+        
+        galaxyStars.forEachIndexed { index, star ->
+            // Make stars react to audio
+            val audioIndex = (index * spectrum.size / galaxyStars.size).coerceIn(0, spectrum.lastIndex)
+            val audioInfluence = spectrum[audioIndex] / MAX_AMPLITUDE
+            
+            star.brightness = (star.brightness * 0.9f + audioInfluence * 0.1f).coerceIn(0f, 1f)
+            star.size = star.size + audioInfluence * 3f
+            
+            // Move stars
+            star.x -= star.velocity * animationIntensity
+            if (star.x < -star.size) {
+                star.x = width + star.size
+                star.y = Random.nextFloat() * height
+            }
+            
+            // Draw star with brightness-based alpha
+            particlePaint.alpha = (star.brightness * 255).toInt()
+            particlePaint.color = Color.HSVToColor(
+                floatArrayOf(
+                    (index * 360f / galaxyStars.size) % 360f,
+                    0.8f,
+                    star.brightness
+                )
+            )
+            
+            canvas.drawCircle(star.x, star.y, star.size, particlePaint)
+            
+            // Add connecting lines for constellation effect
+            if (index > 0 && star.brightness > 0.5f) {
+                val prevStar = galaxyStars[index - 1]
+                val distance = sqrt((star.x - prevStar.x).pow(2) + (star.y - prevStar.y).pow(2))
+                if (distance < 150f && prevStar.brightness > 0.5f) {
+                    val linePaint = Paint(particlePaint).apply {
+                        strokeWidth = 2f
+                        alpha = ((star.brightness + prevStar.brightness) * 127).toInt()
+                    }
+                    canvas.drawLine(star.x, star.y, prevStar.x, prevStar.y, linePaint)
+                }
+            }
+        }
+    }
+    
+    private fun drawRetroOscilloscope(canvas: Canvas) {
+        canvas.drawColor(Color.parseColor("#001100")) // Dark green background
+        
+        val waveform = waveformData ?: return
+        if (width <= 0 || height <= 0) return
+        
+        val path = Path()
+        val centerY = height / 2f
+        val stepX = width.toFloat() / waveform.size
+        
+        // Draw grid lines (classic oscilloscope look)
+        val gridPaint = Paint(oscilloscopePaint).apply {
+            alpha = 50
+            strokeWidth = 1f
+        }
+        
+        // Horizontal grid lines
+        for (i in 0..8) {
+            val y = (height / 8f) * i
+            canvas.drawLine(0f, y, width.toFloat(), y, gridPaint)
+        }
+        
+        // Vertical grid lines
+        for (i in 0..10) {
+            val x = (width / 10f) * i
+            canvas.drawLine(x, 0f, x, height.toFloat(), gridPaint)
+        }
+        
+        // Draw waveform
+        path.moveTo(0f, centerY)
+        
+        for (i in waveform.indices) {
+            val amplitude = (waveform[i].toInt() and 0xFF) - 128
+            val normalizedAmplitude = amplitude / 128f * animationIntensity
+            val y = centerY + normalizedAmplitude * height * 0.4f
+            val x = i * stepX
+            
+            if (i == 0) {
+                path.moveTo(x, y)
+            } else {
+                path.lineTo(x, y)
+            }
+        }
+        
+        canvas.drawPath(path, oscilloscopePaint)
+        
+        // Add phosphor glow effect
+        val glowPaint = Paint(oscilloscopePaint).apply {
+            strokeWidth = 8f
+            alpha = 100
+        }
+        canvas.drawPath(path, glowPaint)
+    }
+    
+    private fun drawVUMeters(canvas: Canvas) {
+        canvas.drawColor(Color.parseColor("#222222")) // Dark background
+        
+        val spectrum = spectrumData ?: return
+        if (width <= 0 || height <= 0) return
+        
+        // Calculate stereo levels from spectrum data
+        leftChannelLevel = spectrum.take(spectrum.size / 2).maxOrNull() ?: 0f
+        rightChannelLevel = spectrum.drop(spectrum.size / 2).maxOrNull() ?: 0f
+        
+        val meterWidth = width * 0.8f
+        val meterHeight = 40f
+        val centerY = height / 2f
+        
+        // Left channel VU meter
+        val leftY = centerY - 60f
+        drawVUMeter(canvas, width * 0.1f, leftY, meterWidth, meterHeight, leftChannelLevel / MAX_AMPLITUDE, "L")
+        
+        // Right channel VU meter
+        val rightY = centerY + 20f
+        drawVUMeter(canvas, width * 0.1f, rightY, meterWidth, meterHeight, rightChannelLevel / MAX_AMPLITUDE, "R")
+        
+        // Add peak indicators
+        drawPeakIndicators(canvas)
+    }
+    
+    private fun drawVUMeter(canvas: Canvas, x: Float, y: Float, width: Float, height: Float, level: Float, label: String) {
+        // Background
+        val bgPaint = Paint().apply {
+            color = Color.parseColor("#444444")
+            style = Paint.Style.FILL
+        }
+        canvas.drawRect(x, y, x + width, y + height, bgPaint)
+        
+        // Level bar
+        val levelWidth = width * level.coerceIn(0f, 1f)
+        canvas.drawRect(x, y, x + levelWidth, y + height, vuMeterPaint)
+        
+        // Scale markings
+        val markPaint = Paint().apply {
+            color = Color.WHITE
+            textSize = 12f
+            textAlign = Paint.Align.CENTER
+        }
+        
+        // dB scale markings
+        val dbMarks = arrayOf(-20, -10, -6, -3, 0)
+        dbMarks.forEach { db ->
+            val markX = x + width * ((db + 20f) / 20f)
+            canvas.drawLine(markX, y + height, markX, y + height + 10f, markPaint)
+            canvas.drawText(db.toString(), markX, y + height + 25f, markPaint)
+        }
+        
+        // Channel label
+        val labelPaint = Paint().apply {
+            color = Color.WHITE
+            textSize = 16f
+            textAlign = Paint.Align.CENTER
+        }
+        canvas.drawText(label, x - 20f, y + height / 2f + 6f, labelPaint)
+    }
+    
+    private fun drawPeakIndicators(canvas: Canvas) {
+        val spectrum = spectrumData ?: return
+        
+        // Find peaks in spectrum
+        val peakThreshold = MAX_AMPLITUDE * 0.7f
+        spectrum.forEachIndexed { index, value ->
+            if (value > peakThreshold) {
+                val x = (index.toFloat() / spectrum.size) * width
+                val y = height * 0.1f
+                
+                val peakPaint = Paint().apply {
+                    color = Color.RED
+                    style = Paint.Style.FILL
+                }
+                
+                canvas.drawCircle(x, y, 8f, peakPaint)
+            }
+        }
+    }
+    
+    private fun drawFractalPatterns(canvas: Canvas) {
+        canvas.drawColor(Color.BLACK)
+        
+        val spectrum = spectrumData ?: return
+        if (width <= 0 || height <= 0) return
+        
+        // Use audio data to influence fractal generation
+        val audioEnergy = spectrum.average()
+        fractalIterations = (audioEnergy / MAX_AMPLITUDE * 8).toInt().coerceIn(3, 8)
+        
+        val centerX = width / 2f
+        val centerY = height / 2f
+        val radius = min(width, height) / 4f * animationIntensity
+        
+        // Draw fractal tree
+        drawFractalBranch(canvas, centerX, centerY + radius / 2f, -90f, radius, fractalIterations)
+        
+        // Draw fractal spirals based on frequency bands
+        spectrum.forEachIndexed { index, amplitude ->
+            if (amplitude > MAX_AMPLITUDE * 0.3f) {
+                val angle = (index.toFloat() / spectrum.size) * 360f
+                val spiralRadius = (amplitude / MAX_AMPLITUDE) * radius * 0.5f
+                drawFractalSpiral(canvas, centerX, centerY, angle, spiralRadius)
+            }
+        }
+    }
+    
+    private fun drawFractalBranch(canvas: Canvas, x: Float, y: Float, angle: Float, length: Float, iterations: Int) {
+        if (iterations <= 0 || length < 5f) return
+        
+        val radians = angle * PI.toFloat() / 180f
+        val endX = x + cos(radians) * length
+        val endY = y + sin(radians) * length
+        
+        // Draw branch with color based on iteration depth
+        val branchPaint = Paint(fractalPaint).apply {
+            color = Color.HSVToColor(
+                floatArrayOf(
+                    (iterations * 60f) % 360f,
+                    0.8f,
+                    1f
+                )
+            )
+            strokeWidth = iterations.toFloat()
+        }
+        
+        canvas.drawLine(x, y, endX, endY, branchPaint)
+        
+        // Recursive branches
+        val newLength = length * 0.7f
+        drawFractalBranch(canvas, endX, endY, angle - 30f, newLength, iterations - 1)
+        drawFractalBranch(canvas, endX, endY, angle + 30f, newLength, iterations - 1)
+    }
+    
+    private fun drawFractalSpiral(canvas: Canvas, centerX: Float, centerY: Float, baseAngle: Float, radius: Float) {
+        val path = Path()
+        val steps = 50
+        
+        for (i in 0..steps) {
+            val progress = i.toFloat() / steps
+            val angle = baseAngle + progress * 720f // 2 full rotations
+            val currentRadius = radius * (1f - progress)
+            
+            val radians = angle * PI.toFloat() / 180f
+            val x = centerX + cos(radians) * currentRadius
+            val y = centerY + sin(radians) * currentRadius
+            
+            if (i == 0) {
+                path.moveTo(x, y)
+            } else {
+                path.lineTo(x, y)
+            }
+        }
+        
+        val spiralPaint = Paint(fractalPaint).apply {
+            color = Color.HSVToColor(
+                floatArrayOf(
+                    baseAngle % 360f,
+                    1f,
+                    0.8f
+                )
+            )
+        }
+        
+        canvas.drawPath(path, spiralPaint)
     }
     
     private fun drawGrid(canvas: Canvas) {
@@ -666,6 +1079,19 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
     fun setOnSeekListener(listener: ((Float) -> Unit)?) {
         onSeekListener = listener
     }
+    
+    /**
+     * Set the visualizer mode
+     */
+    fun setVisualizerMode(mode: VisualizerMode) {
+        currentMode = mode
+        invalidate()
+    }
+    
+    /**
+     * Get the current visualizer mode
+     */
+    fun getVisualizerMode(): VisualizerMode = currentMode
     
     /**
      * Set audio session for visualizer
