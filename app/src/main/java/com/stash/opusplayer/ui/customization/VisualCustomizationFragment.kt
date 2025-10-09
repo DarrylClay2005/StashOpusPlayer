@@ -76,11 +76,15 @@ class VisualCustomizationFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         
-        customizationManager = VisualCustomizationManager(requireContext())
-        
-        initializeViews(view)
-        setupListeners()
-        loadCurrentSettings()
+        try {
+            customizationManager = VisualCustomizationManager(requireContext())
+            initializeViews(view)
+            setupListeners()
+            loadCurrentSettings()
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Error initializing visual customization", e)
+            Toast.makeText(requireContext(), "Error loading visual settings", Toast.LENGTH_SHORT).show()
+        }
     }
     
     private fun initializeViews(view: View) {
@@ -197,17 +201,33 @@ class VisualCustomizationFragment : Fragment() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
         
-        // Animation switches
+        // Animation switches with error handling
         parallaxSwitch.setOnCheckedChangeListener { _, isChecked ->
-            customizationManager.setParallaxEnabled(isChecked)
+            try {
+                customizationManager.setParallaxEnabled(isChecked)
+                // Broadcast the change to update UI immediately
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Error setting parallax", e)
+            }
         }
         
         breathingSwitch.setOnCheckedChangeListener { _, isChecked ->
-            customizationManager.setBreathingEnabled(isChecked)
+            try {
+                customizationManager.setBreathingEnabled(isChecked)
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Error setting breathing", e)
+            }
         }
         
         colorShiftSwitch.setOnCheckedChangeListener { _, isChecked ->
-            customizationManager.setColorShiftEnabled(isChecked)
+            try {
+                customizationManager.setColorShiftEnabled(isChecked)
+                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Error setting color shift", e)
+            }
         }
         
         // Action buttons
@@ -262,14 +282,27 @@ class VisualCustomizationFragment : Fragment() {
     
     
     private fun updatePreview() {
-        // Update the preview with current background settings
-        previewBackground.background = customizationManager.getCurrentBackground()
+        try {
+            // Update the preview with current background settings
+            previewBackground.background = customizationManager.getCurrentBackground()
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Error updating preview", e)
+        }
     }
     
     private fun applyCustomization() {
-        // Settings are already applied when changed
-        Toast.makeText(requireContext(), "Visual customization applied", Toast.LENGTH_SHORT).show()
-        requireActivity().recreate() // Recreate activity to apply changes fully
+        try {
+            // Broadcast settings change to apply immediately without recreation
+            com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), true)
+            
+            Toast.makeText(requireContext(), "Visual customization applied", Toast.LENGTH_SHORT).show()
+            
+            // Optional: recreate activity for full effect (commented out to prevent disruption)
+            // requireActivity().recreate() 
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Error applying customization", e)
+            Toast.makeText(requireContext(), "Error applying changes", Toast.LENGTH_SHORT).show()
+        }
     }
     
     private fun resetToDefaults() {

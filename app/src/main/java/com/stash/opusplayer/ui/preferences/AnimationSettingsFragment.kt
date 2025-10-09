@@ -1,10 +1,12 @@
 package com.stash.opusplayer.ui.preferences
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SwitchPreferenceCompat
 import androidx.preference.SeekBarPreference
 import androidx.preference.ListPreference
+import androidx.preference.Preference
 import com.stash.opusplayer.R
 
 /**
@@ -13,17 +15,23 @@ import com.stash.opusplayer.R
 class AnimationSettingsFragment : PreferenceFragmentCompat() {
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
-        setPreferencesFromResource(R.xml.animation_preferences, rootKey)
-        
-        setupPreferences()
+        try {
+            setPreferencesFromResource(R.xml.animation_preferences, rootKey)
+            setupPreferences()
+        } catch (e: Exception) {
+            android.util.Log.e("AnimationSettingsFragment", "Error creating preferences", e)
+            // Show error to user
+            Toast.makeText(requireContext(), "Error loading animation settings: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
     
     private fun setupPreferences() {
-        // UI Animation toggles
-        val uiAnimationsEnabled = findPreference<SwitchPreferenceCompat>("ui_animations_enabled")
-        val buttonAnimationsEnabled = findPreference<SwitchPreferenceCompat>("button_animations_enabled")
-        val listAnimationsEnabled = findPreference<SwitchPreferenceCompat>("list_animations_enabled")
-        val slideAnimationsEnabled = findPreference<SwitchPreferenceCompat>("slide_animations_enabled")
+        try {
+            // UI Animation toggles
+            val uiAnimationsEnabled = findPreference<SwitchPreferenceCompat>("ui_animations_enabled")
+            val buttonAnimationsEnabled = findPreference<SwitchPreferenceCompat>("button_animations_enabled")
+            val listAnimationsEnabled = findPreference<SwitchPreferenceCompat>("list_animations_enabled")
+            val slideAnimationsEnabled = findPreference<SwitchPreferenceCompat>("slide_animations_enabled")
         
         // SynthWave visualizer toggles - using correct keys
         val synthwaveLightning = findPreference<SwitchPreferenceCompat>("synthwave_lightning_enabled")
@@ -48,15 +56,15 @@ class AnimationSettingsFragment : PreferenceFragmentCompat() {
         val performanceMode = findPreference<ListPreference>("animation_performance_mode")
         val reduceAnimationsBattery = findPreference<SwitchPreferenceCompat>("reduce_animations_battery")
         
-        // Set up listeners for important settings
-        uiAnimationsEnabled?.setOnPreferenceChangeListener { _, newValue ->
-            val enabled = newValue as Boolean
-            // Update dependent animations
-            buttonAnimationsEnabled?.isEnabled = enabled
-            listAnimationsEnabled?.isEnabled = enabled
-            slideAnimationsEnabled?.isEnabled = enabled
-            true
-        }
+            // Set up listeners for important settings with null checks
+            uiAnimationsEnabled?.setOnPreferenceChangeListener { _, newValue ->
+                val enabled = newValue as Boolean
+                // Update dependent animations
+                buttonAnimationsEnabled?.isEnabled = enabled
+                listAnimationsEnabled?.isEnabled = enabled
+                slideAnimationsEnabled?.isEnabled = enabled
+                true
+            }
         
         // Set up SynthWave intensity listener
         synthwaveIntensity?.setOnPreferenceChangeListener { _, newValue ->
@@ -98,11 +106,16 @@ class AnimationSettingsFragment : PreferenceFragmentCompat() {
             true
         }
         
-        // Initialize dependent preferences state
-        val currentUiAnimationsEnabled = uiAnimationsEnabled?.isChecked ?: true
-        buttonAnimationsEnabled?.isEnabled = currentUiAnimationsEnabled
-        listAnimationsEnabled?.isEnabled = currentUiAnimationsEnabled
-        slideAnimationsEnabled?.isEnabled = currentUiAnimationsEnabled
+            // Initialize dependent preferences state
+            val currentUiAnimationsEnabled = uiAnimationsEnabled?.isChecked ?: true
+            buttonAnimationsEnabled?.isEnabled = currentUiAnimationsEnabled
+            listAnimationsEnabled?.isEnabled = currentUiAnimationsEnabled
+            slideAnimationsEnabled?.isEnabled = currentUiAnimationsEnabled
+            
+        } catch (e: Exception) {
+            android.util.Log.e("AnimationSettingsFragment", "Error setting up preferences", e)
+            Toast.makeText(requireContext(), "Some animation settings may not work properly", Toast.LENGTH_SHORT).show()
+        }
     }
     
     private fun enableAllAnimations(enable: Boolean) {

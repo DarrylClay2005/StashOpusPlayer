@@ -11,8 +11,16 @@ import android.view.animation.BounceInterpolator
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentTransaction
 import com.stash.opusplayer.R
+import com.stash.opusplayer.ui.physics.PhysicsAnimationEngine
 
 object AnimationUtils {
+    
+    // Physics animation engine - lazy initialized to avoid circular dependencies
+    private var physicsEngine: PhysicsAnimationEngine? = null
+    
+    fun setPhysicsEngine(engine: PhysicsAnimationEngine) {
+        physicsEngine = engine
+    }
     
     // Activity transition animations
     fun startActivityWithSlideIn(activity: Activity) {
@@ -87,21 +95,27 @@ object AnimationUtils {
     }
     
     fun animateButtonPress(view: View, onAnimationEnd: (() -> Unit)? = null) {
-        view.animate()
-            .scaleX(0.95f)
-            .scaleY(0.95f)
-            .setDuration(100)
-            .setInterpolator(DecelerateInterpolator())
-            .withEndAction {
-                view.animate()
-                    .scaleX(1.0f)
-                    .scaleY(1.0f)
-                    .setDuration(150)
-                    .setInterpolator(BounceInterpolator())
-                    .withEndAction { onAnimationEnd?.invoke() }
-                    .start()
-            }
-            .start()
+        // Try to use physics engine first, fallback to traditional animation
+        physicsEngine?.let { engine ->
+            engine.animateButtonPress(view, onAnimationEnd)
+        } ?: run {
+            // Fallback to traditional animation
+            view.animate()
+                .scaleX(0.95f)
+                .scaleY(0.95f)
+                .setDuration(100)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction {
+                    view.animate()
+                        .scaleX(1.0f)
+                        .scaleY(1.0f)
+                        .setDuration(150)
+                        .setInterpolator(BounceInterpolator())
+                        .withEndAction { onAnimationEnd?.invoke() }
+                        .start()
+                }
+                .start()
+        }
     }
     
     fun fadeIn(view: View, duration: Long = 300, onAnimationEnd: (() -> Unit)? = null) {
@@ -192,6 +206,51 @@ object AnimationUtils {
             .start()
     }
     
+    // Methods used by RevampedMiniPlayerView
+    fun animateSlideOut(view: View, toRight: Boolean, onComplete: (() -> Unit)? = null) {
+        val translationX = if (toRight) view.width.toFloat() else -view.width.toFloat()
+        view.animate()
+            .translationX(translationX)
+            .setDuration(300)
+            .setInterpolator(AccelerateInterpolator())
+            .withEndAction { onComplete?.invoke() }
+            .start()
+    }
+    
+    fun animateSlideIn(view: View, fromRight: Boolean, onComplete: (() -> Unit)? = null) {
+        val startX = if (fromRight) view.width.toFloat() else -view.width.toFloat()
+        view.translationX = startX
+        view.animate()
+            .translationX(0f)
+            .setDuration(300)
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction { onComplete?.invoke() }
+            .start()
+    }
+    
+    fun animateFadeIn(view: View, onComplete: (() -> Unit)? = null) {
+        view.alpha = 0f
+        view.visibility = View.VISIBLE
+        view.animate()
+            .alpha(1f)
+            .setDuration(300)
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction { onComplete?.invoke() }
+            .start()
+    }
+    
+    fun animateFadeOut(view: View, onComplete: (() -> Unit)? = null) {
+        view.animate()
+            .alpha(0f)
+            .setDuration(300)
+            .setInterpolator(AccelerateInterpolator())
+            .withEndAction { 
+                view.visibility = View.GONE
+                onComplete?.invoke() 
+            }
+            .start()
+    }
+    
     fun pulseView(view: View, pulseCount: Int = 3, duration: Long = 400) {
         var count = 0
         
@@ -229,17 +288,33 @@ object AnimationUtils {
     
     // List item animations with stagger effect
     fun animateListItems(views: List<View>, startDelay: Long = 0, itemDelay: Long = 50) {
-        views.forEachIndexed { index, view ->
-            view.alpha = 0f
-            view.translationY = 50f
-            view.animate()
-                .alpha(1f)
-                .translationY(0f)
-                .setStartDelay(startDelay + (index * itemDelay))
-                .setDuration(400)
-                .setInterpolator(DecelerateInterpolator())
-                .start()
+        physicsEngine?.let { engine ->
+            // Use physics-based falling animation
+            views.forEachIndexed { index, view ->
+                val delay = startDelay + (index * itemDelay)
+                engine.animateItemFall(view, delay)
+            }
+        } ?: run {
+            // Fallback to traditional animation
+            views.forEachIndexed { index, view ->
+                view.alpha = 0f
+                view.translationY = 50f
+                view.animate()
+                    .alpha(1f)
+                    .translationY(0f)
+                    .setStartDelay(startDelay + (index * itemDelay))
+                    .setDuration(400)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            }
         }
+    }
+    
+    /**
+     * Enhanced list animations with physics effects
+     */
+    fun animateListWithPhysics(views: List<View>, effect: PhysicsAnimationEngine.ChainEffect = PhysicsAnimationEngine.ChainEffect.FALL) {
+        physicsEngine?.animateChainReaction(views, effect)
     }
     
     // Loading animation for progress indicators

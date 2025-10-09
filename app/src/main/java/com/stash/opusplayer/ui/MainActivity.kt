@@ -44,11 +44,13 @@ import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.ui.appearance.ThemeManager
 import com.stash.opusplayer.ui.appearance.AppearancePreferences
 import com.stash.opusplayer.ui.appearance.VisualCustomizationManager
-import android.content.BroadcastReceiver
 import android.content.IntentFilter
-import com.stash.opusplayer.utils.AnimationUtils
+import android.content.BroadcastReceiver
+import com.stash.opusplayer.ui.themes.GenreBasedThemeManager
+import com.stash.opusplayer.ui.physics.PhysicsAnimationEngine
 import com.stash.opusplayer.utils.UIPerformanceOptimizer
 import com.stash.opusplayer.utils.AnimationDurationManager
+import com.stash.opusplayer.utils.AnimationUtils
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
     
@@ -62,6 +64,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     // Appearance customization
     private var appearanceReceiver: BroadcastReceiver? = null
     private lateinit var visualCustomizationManager: VisualCustomizationManager
+    private lateinit var genreThemeManager: GenreBasedThemeManager
+    private lateinit var physicsAnimationEngine: PhysicsAnimationEngine
     
     private val imagePickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -90,6 +94,11 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this)
         updateManager = UpdateManager(this)
         visualCustomizationManager = VisualCustomizationManager(this)
+        genreThemeManager = GenreBasedThemeManager(this)
+        physicsAnimationEngine = PhysicsAnimationEngine(this)
+        
+        // Set physics engine in AnimationUtils for global use
+        AnimationUtils.setPhysicsEngine(physicsAnimationEngine)
         
         setupMusicPlayer()
         setupMiniPlayer()
@@ -709,6 +718,16 @@ Check for updates anytime from Settings.""")
     private fun setupMiniPlayer() {
         miniPlayerView = binding.miniPlayer
         miniPlayerView.initialize(this, musicPlayerManager)
+        
+        // Observe current song changes for genre-based theming
+        lifecycleScope.launch {
+            musicPlayerManager.currentSong.collect { song ->
+                song?.let { 
+                    // Apply genre-based theme to main content area
+                    genreThemeManager.applyThemeForSong(it, binding.mainContent)
+                }
+            }
+        }
     }
     
     // Music player functionality
@@ -850,6 +869,12 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@MainActivity)
         }
         if (::musicPlayerManager.isInitialized) {
             musicPlayerManager.release()
+        }
+        if (::genreThemeManager.isInitialized) {
+            genreThemeManager.release()
+        }
+        if (::physicsAnimationEngine.isInitialized) {
+            physicsAnimationEngine.release()
         }
     }
     

@@ -88,13 +88,13 @@ class UpdateAIAnalyzer {
         val userProfile = analyzeUserBehavior(prefs)
         
         return when {
-            updateInfo.isForced -> NotificationStrategy.URGENT
-            updateInfo.isCritical -> NotificationStrategy.PROMINENT
+            updateInfo.isForced -> NotificationStrategy.CRITICAL
+            updateInfo.isCritical -> NotificationStrategy.AGGRESSIVE
             updateInfo.updatePriority >= UpdatePriority.HIGH -> {
                 if (userProfile.isFrequentUpdater) NotificationStrategy.STANDARD
-                else NotificationStrategy.PROMINENT
+                else NotificationStrategy.AGGRESSIVE
             }
-            userProfile.isSkipHappy -> NotificationStrategy.SUBTLE
+            userProfile.isSkipHappy -> NotificationStrategy.LOW_KEY
             userProfile.isFrequentUpdater -> NotificationStrategy.STANDARD
             else -> NotificationStrategy.STANDARD
         }
