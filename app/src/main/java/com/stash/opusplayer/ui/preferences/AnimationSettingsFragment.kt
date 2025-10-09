@@ -18,12 +18,47 @@ class AnimationSettingsFragment : PreferenceFragmentCompat() {
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         try {
+            // Set preferences from resource
             setPreferencesFromResource(R.xml.animation_preferences, rootKey)
+            
+            android.util.Log.d("AnimationSettingsFragment", "Animation preferences loaded successfully")
+            android.util.Log.d("AnimationSettingsFragment", "Preference screen count: ${preferenceScreen?.preferenceCount ?: 0}")
+            
             setupPreferences()
         } catch (e: Exception) {
             android.util.Log.e("AnimationSettingsFragment", "Error creating preferences", e)
-            // Show error to user
-            Toast.makeText(requireContext(), "Error loading animation settings: ${e.message}", Toast.LENGTH_LONG).show()
+            e.printStackTrace()
+            
+            // Show more detailed error to user
+            val errorMsg = "Error loading animation settings: ${e.javaClass.simpleName} - ${e.message}"
+            Toast.makeText(requireContext(), errorMsg, Toast.LENGTH_LONG).show()
+            
+            // Try to create minimal preferences programmatically as fallback
+            createFallbackPreferences()
+        }
+    }
+    
+    private fun createFallbackPreferences() {
+        try {
+            android.util.Log.d("AnimationSettingsFragment", "Creating fallback preferences")
+            
+            val context = preferenceManager.context
+            val screen = preferenceManager.createPreferenceScreen(context)
+            
+            // Create a simple switch preference as test
+            val testPref = SwitchPreferenceCompat(context).apply {
+                key = "ui_animations_enabled"
+                title = "Enable UI Animations"
+                summary = "Enable smooth transitions and animations throughout the app"
+                setDefaultValue(true)
+            }
+            
+            screen.addPreference(testPref)
+            preferenceScreen = screen
+            
+            android.util.Log.d("AnimationSettingsFragment", "Fallback preferences created")
+        } catch (e: Exception) {
+            android.util.Log.e("AnimationSettingsFragment", "Even fallback failed", e)
         }
     }
     
