@@ -7,10 +7,14 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
 import android.view.LayoutInflater
+import android.view.Menu
+import android.view.MenuInflater
+import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.stash.opusplayer.R
@@ -75,6 +79,17 @@ class VisualCustomizationFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        
+        // Set up action bar with back button
+        val activity = requireActivity() as? AppCompatActivity
+        activity?.supportActionBar?.apply {
+            setDisplayHomeAsUpEnabled(true)
+            setDisplayShowHomeEnabled(true)
+            title = "Visual Customization"
+        }
+        
+        // Enable options menu to handle back button
+        setHasOptionsMenu(true)
         
         try {
             customizationManager = VisualCustomizationManager(requireContext())
@@ -205,8 +220,8 @@ class VisualCustomizationFragment : Fragment() {
         parallaxSwitch.setOnCheckedChangeListener { _, isChecked ->
             try {
                 customizationManager.setParallaxEnabled(isChecked)
-                // Broadcast the change to update UI immediately
-                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+                // Update preview and broadcast the change to update UI immediately
+                updatePreview()
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Error setting parallax", e)
             }
@@ -215,7 +230,8 @@ class VisualCustomizationFragment : Fragment() {
         breathingSwitch.setOnCheckedChangeListener { _, isChecked ->
             try {
                 customizationManager.setBreathingEnabled(isChecked)
-                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+                // Update preview and broadcast the change to update UI immediately
+                updatePreview()
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Error setting breathing", e)
             }
@@ -224,7 +240,8 @@ class VisualCustomizationFragment : Fragment() {
         colorShiftSwitch.setOnCheckedChangeListener { _, isChecked ->
             try {
                 customizationManager.setColorShiftEnabled(isChecked)
-                com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
+                // Update preview and broadcast the change to update UI immediately
+                updatePreview()
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Error setting color shift", e)
             }
@@ -284,7 +301,11 @@ class VisualCustomizationFragment : Fragment() {
     private fun updatePreview() {
         try {
             // Update the preview with current background settings
-            previewBackground.background = customizationManager.getCurrentBackground()
+            val currentBackground = customizationManager.getCurrentBackground()
+            previewBackground.background = currentBackground
+            
+            // Also broadcast change to update main app background immediately
+            com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Error updating preview", e)
         }
@@ -316,6 +337,36 @@ class VisualCustomizationFragment : Fragment() {
         customizationManager.setBackgroundType(VisualCustomizationManager.BACKGROUND_TYPE_GRADIENT)
         
         loadCurrentSettings()
+        
+        // Update preview and broadcast the change
+        updatePreview()
+        
         Toast.makeText(requireContext(), "Settings reset to defaults", Toast.LENGTH_SHORT).show()
+    }
+    
+    override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
+        super.onCreateOptionsMenu(menu, inflater)
+        // We don't need any menu items, just need to handle back button
+    }
+    
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            android.R.id.home -> {
+                // Handle back button press
+                parentFragmentManager.popBackStack()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+    
+    override fun onDestroyView() {
+        super.onDestroyView()
+        // Reset action bar title when leaving
+        val activity = requireActivity() as? AppCompatActivity
+        activity?.supportActionBar?.apply {
+            setDisplayHomeAsUpEnabled(true)
+            title = "Settings"
+        }
     }
 }

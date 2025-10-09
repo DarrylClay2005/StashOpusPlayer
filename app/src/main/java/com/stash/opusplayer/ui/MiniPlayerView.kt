@@ -18,7 +18,7 @@ import com.bumptech.glide.Glide
 import com.google.common.util.concurrent.MoreExecutors
 import com.stash.opusplayer.R
 import com.stash.opusplayer.data.Song
-import com.stash.opusplayer.databinding.MiniPlayerBinding
+import com.stash.opusplayer.databinding.LayoutMiniPlayerBinding
 import com.stash.opusplayer.player.MusicPlayerManager
 import com.stash.opusplayer.service.MusicService
 import com.stash.opusplayer.utils.MetadataExtractor
@@ -46,7 +46,7 @@ class MiniPlayerView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : FrameLayout(context, attrs, defStyleAttr) {
 
-    private val binding: MiniPlayerBinding
+    private val binding: LayoutMiniPlayerBinding
     private var mediaController: MediaController? = null
     private var musicPlayerManager: MusicPlayerManager? = null
     private val metadataExtractor = MetadataExtractor(context)
@@ -90,7 +90,7 @@ class MiniPlayerView @JvmOverloads constructor(
     private var carouselAnimator: ValueAnimator? = null
 
     init {
-        binding = MiniPlayerBinding.inflate(LayoutInflater.from(context), this, true)
+        binding = LayoutMiniPlayerBinding.inflate(LayoutInflater.from(context), this, true)
         setupEnhancedGestureSystem()
         setupUI()
         startMiniVisualizer()
@@ -264,8 +264,8 @@ class MiniPlayerView @JvmOverloads constructor(
             duration = 300
             addUpdateListener { animation ->
                 val scale = animation.animatedValue as Float
-                binding.miniPlayPauseButton.scaleX = scale
-                binding.miniPlayPauseButton.scaleY = scale
+                binding.miniPlayPause.scaleX = scale
+                binding.miniPlayPause.scaleY = scale
             }
         }
         pulseAnimator.start()
@@ -305,8 +305,8 @@ class MiniPlayerView @JvmOverloads constructor(
                     audioData[i] = (audioData[i] * 0.8f + Random.nextFloat() * 0.2f).coerceIn(0f, 1f)
                 }
                 
-                // Only invalidate the progress bar area to show mini visualizer
-                binding.miniProgressBar.invalidate()
+                // Progress bar not available in this layout
+                // binding.miniProgressBar.invalidate()
             }
         }
     }
@@ -371,11 +371,11 @@ class MiniPlayerView @JvmOverloads constructor(
     
     private fun drawMiniVisualizer(canvas: Canvas) {
         try {
-            val progressBar = binding.miniProgressBar
-            val barWidth = progressBar.width.toFloat()
-            val barHeight = progressBar.height.toFloat()
-            val barX = progressBar.x
-            val barY = progressBar.y
+            // Progress bar not available in this layout - use mini player dimensions
+            val barWidth = width.toFloat()
+            val barHeight = 4f // Small visualizer height
+            val barX = 0f
+            val barY = height.toFloat() - barHeight
             
             val barSpacing = barWidth / audioData.size
             
@@ -414,7 +414,7 @@ class MiniPlayerView @JvmOverloads constructor(
         }
 
         // Control button listeners with improved responsiveness and visual feedback
-        binding.miniPlayPauseButton.setOnClickListener { view ->
+        binding.miniPlayPause.setOnClickListener { view ->
             AnimationUtils.animateButtonPress(view)
             
             // Immediate action with fallback
@@ -440,17 +440,9 @@ class MiniPlayerView @JvmOverloads constructor(
             }
         }
 
-        binding.miniPreviousButton.setOnClickListener { view ->
-            AnimationUtils.animateButtonPress(view)
-            
-            try {
-                mediaController?.seekToPrevious() ?: musicPlayerManager?.skipToPrevious()
-            } catch (e: Exception) {
-                android.util.Log.w("MiniPlayerView", "Previous action failed", e)
-            }
-        }
+        // Previous functionality handled by gestures
         
-        binding.miniNextButton.setOnClickListener { view ->
+        binding.miniNext.setOnClickListener { view ->
             AnimationUtils.animateButtonPress(view)
             
             try {
@@ -460,32 +452,7 @@ class MiniPlayerView @JvmOverloads constructor(
             }
         }
 
-        binding.miniFastForwardButton.setOnClickListener { view ->
-            AnimationUtils.animateButtonPress(view)
-            
-            try {
-                mediaController?.let { controller ->
-                    val currentPos = controller.currentPosition
-                    val duration = controller.duration
-                    if (duration > 0) {
-                        val newPos = (currentPos + 30000).coerceAtMost(duration)
-                        controller.seekTo(newPos)
-                        // Show visual feedback for seek via parent activity
-                        showVisualFeedbackViaParent("+30s")
-                    }
-                } ?: run {
-                    // Fallback to player manager
-                    musicPlayerManager?.let { manager ->
-                        val currentPos = manager.currentPosition.value
-                        val newPos = currentPos + 30000
-                        manager.seekTo(newPos)
-                        showVisualFeedbackViaParent("+30s")
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("MiniPlayerView", "Fast forward action failed", e)
-            }
-        }
+        // Fast forward functionality handled by gestures
         
         // Add rewind functionality to album artwork
         setupAlbumArtworkSeekGesture()
@@ -710,9 +677,9 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
 
     private fun updatePlayPauseButton(isPlaying: Boolean) {
         if (isPlaying) {
-            binding.miniPlayPauseButton.setImageResource(R.drawable.ic_pause_24)
+            binding.miniPlayPause.setImageResource(R.drawable.ic_pause_24)
         } else {
-            binding.miniPlayPauseButton.setImageResource(R.drawable.ic_play_arrow_24)
+            binding.miniPlayPause.setImageResource(R.drawable.ic_play_arrow_24)
         }
     }
 
@@ -735,10 +702,11 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
     }
 
     private fun updateProgressBar(currentPosition: Long, duration: Long) {
-        if (duration > 0) {
-            val progress = ((currentPosition.toFloat() / duration.toFloat()) * 100).toInt()
-            binding.miniProgressBar.progress = progress
-        }
+        // Progress bar not available in this layout - could be added later
+        // if (duration > 0) {
+        //     val progress = ((currentPosition.toFloat() / duration.toFloat()) * 100).toInt()
+        //     binding.miniProgressBar.progress = progress
+        // }
     }
 
     fun show() {
@@ -836,8 +804,8 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
      */
     fun applyAppearancePreferences(prefs: AppearancePreferences) {
         try {
-            // Show/hide album art
-            binding.miniAlbumArtCard.visibility = if (prefs.miniPlayerShowArt) VISIBLE else GONE
+            // Album art card not available in this layout
+            // binding.miniAlbumArt.visibility = if (prefs.miniPlayerShowArt) VISIBLE else GONE
             
             // Show/hide artist name
             binding.miniArtistName.visibility = if (prefs.miniPlayerShowArtist) VISIBLE else GONE
@@ -921,10 +889,9 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
             binding.miniAlbumArt,
             binding.miniSongTitle,
             binding.miniArtistName,
-            binding.miniPlayPauseButton,
-            binding.miniPreviousButton,
-            binding.miniNextButton,
-            binding.miniFastForwardButton
+            binding.miniPlayPause,
+            binding.miniNext
+            // Other buttons not available in this layout
         )
         
         if (isShowing) {
