@@ -160,7 +160,7 @@
             app:itemPaddingBottom="8dp" />
 
         <!-- Mini Player Container -->
-        <com.stash.opusplayer.ui.MiniPlayerView
+        <com.stash.opusplayer.ui.views.RevampedMiniPlayerView
             android:id="@+id/mini_player"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

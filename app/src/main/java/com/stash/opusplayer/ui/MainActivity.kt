@@ -40,6 +40,8 @@ import com.stash.opusplayer.ui.fragments.YouTubeSearchFragment
 import com.stash.opusplayer.utils.PermissionUtils
 import com.stash.opusplayer.updates.UpdateManager
 import com.stash.opusplayer.player.MusicPlayerManager
+import com.stash.opusplayer.ui.views.RevampedMiniPlayerView
+import android.content.Intent as AndroidIntent
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.ui.appearance.ThemeManager
 import com.stash.opusplayer.ui.appearance.AppearancePreferences
@@ -59,7 +61,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var sharedPreferences: SharedPreferences
     private lateinit var updateManager: UpdateManager
     private lateinit var musicPlayerManager: MusicPlayerManager
-    private lateinit var miniPlayerView: MiniPlayerView
+    private lateinit var miniPlayerView: RevampedMiniPlayerView
     
     // Appearance customization
     private var appearanceReceiver: BroadcastReceiver? = null
@@ -77,7 +79,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         // Start performance tracking
         UIPerformanceOptimizer.startPerformanceTracking("MainActivity.onCreate")
         
-        // Apply appearance theme BEFORE setting content view
+        // Apply appearance theme BEFORE setting content view (only font scale, not colors)
         applyAppearanceTheme()
         
         // Apply activity-level optimizations
@@ -107,8 +109,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         setupBackgroundImage()
         applyVisualCustomization()
         
-        // Apply appearance customizations after views are set up
-        applyAppearanceToViews()
+        // NOTE: Appearance customizations disabled by default to prevent forced colors
+        // Users can customize through Settings > Appearance tab
+        // applyAppearanceToViews()
         
         setupBottomNavigation()
         checkPermissionsAndSetup()
@@ -182,9 +185,37 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         })
     }
     
+    private val loginLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode != android.app.Activity.RESULT_OK) {
+            // If user backed out from login, close app
+            finish()
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         registerAppearanceReceiver()
+
+        // Enforce sign-in at app start
+        try {
+            com.amplifyframework.core.Amplify.Auth.fetchAuthSession({ session ->
+                if (!session.isSignedIn) {
+                    runOnUiThread {
+                        val intent = Intent(this, LoginActivity::class.java)
+                        loginLauncher.launch(intent)
+                    }
+                }
+            }, { _ ->
+                runOnUiThread {
+                    val intent = Intent(this, LoginActivity::class.java)
+                    loginLauncher.launch(intent)
+                }
+            })
+        } catch (_: Exception) {
+            // If Amplify not ready, try launching login defensively
+            val intent = Intent(this, LoginActivity::class.java)
+            loginLauncher.launch(intent)
+        }
     }
     
     override fun onStop() {
@@ -278,6 +309,11 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 R.id.nav_settings -> {
                     loadFragment(SettingsFragment())
                     supportActionBar?.title = getString(R.string.menu_settings)
+                    true
+                }
+                R.id.nav_profile -> {
+                    loadFragment(com.stash.opusplayer.ui.fragments.ProfileFragment())
+                    supportActionBar?.title = "Profile"
                     true
                 }
                 else -> false
@@ -398,10 +434,26 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             // Schedule periodic metadata scanning (runs every 6 hours when device is idle)
             com.stash.opusplayer.work.MetadataScanWorker.schedulePeriodicMetadataScan(this)
             
-            // Also do an initial one-time scan for any new files (low priority)
-            lifecycleScope.launch {
-                kotlinx.coroutines.delay(5000) // Wait 5 seconds after app start
-                com.stash.opusplayer.work.MetadataScanWorker.scheduleMetadataScan(this@MainActivity)
+            // Eagerly trigger metadata extraction for the library on app start
+            // This ensures metadata is ready immediately in notifications and UI
+            lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val repo = com.stash.opusplayer.data.MusicRepository(this@MainActivity)
+                    val songs = repo.getAllSongs()
+                    
+                    // Extract metadata for all songs (this runs in background)
+                    songs.take(100).forEach { song -> // Limit initial batch to avoid blocking
+                        com.stash.opusplayer.utils.MetadataExtractor(this@MainActivity).extractMetadata(song)
+                    }
+                    
+                    // Schedule remaining songs for background processing
+                    if (songs.size > 100) {
+                        kotlinx.coroutines.delay(5000)
+                        com.stash.opusplayer.work.MetadataScanWorker.scheduleMetadataScan(this@MainActivity)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("MainActivity", "Failed to extract metadata eagerly", e)
+                }
             }
         } catch (e: Exception) {
             android.util.Log.w("MainActivity", "Failed to initialize background metadata scanning", e)
@@ -537,7 +589,7 @@ Check for updates anytime from Settings.""")
                 val repo = com.stash.opusplayer.data.MusicRepository(this)
                 lifecycleScope.launch {
                     val songs = repo.getSongsInAlbum(album)
-                    val fragment = com.stash.opusplayer.ui.fragments.FolderDetailFragment.newInstance(album, ArrayList(songs))
+                    val fragment = com.stash.opusplayer.ui.fragments.ArtistSongsFragment.newInstance(album, ArrayList(songs))
                     loadFragment(fragment)
                 }
             }
@@ -586,7 +638,8 @@ Check for updates anytime from Settings.""")
      */
     private fun updateMiniPlayerFromPrefs(prefs: AppearancePreferences) {
         try {
-            ThemeManager.applyMiniPlayerSettings(miniPlayerView, prefs)
+            // Apply appearance preferences to mini player
+            miniPlayerView.applyAppearancePreferences()
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Error updating mini player", e)
         }
@@ -669,7 +722,7 @@ Check for updates anytime from Settings.""")
                 val repo = com.stash.opusplayer.data.MusicRepository(this)
                 lifecycleScope.launch {
                     val songs = repo.getSongsInFolder(arg)
-                    val fragment = com.stash.opusplayer.ui.fragments.FolderDetailFragment.newInstance(arg, ArrayList(songs))
+                    val fragment = com.stash.opusplayer.ui.fragments.ArtistSongsFragment.newInstance(arg, ArrayList(songs))
                     loadFragment(fragment)
                 }
             }
@@ -690,7 +743,7 @@ Check for updates anytime from Settings.""")
     }
     
     private fun setupMusicPlayer() {
-        musicPlayerManager = (application as com.stash.opusplayer.StashWaveApplication).playerManager
+        musicPlayerManager = (application as com.stash.opusplayer.RevolutionaryApplication).playerManager
     }
     
     private var playingBannerDismissRunnable: Runnable? = null
@@ -717,7 +770,48 @@ Check for updates anytime from Settings.""")
     
     private fun setupMiniPlayer() {
         miniPlayerView = binding.miniPlayer
-        miniPlayerView.initialize(this, musicPlayerManager)
+        
+        // Set the music player manager
+        miniPlayerView.setMusicPlayerManager(musicPlayerManager)
+        
+        // Configure callbacks for the revamped mini player
+        miniPlayerView.setOnExpandListener {
+            // Open Now Playing Activity
+            musicPlayerManager.currentSong.value?.let { song ->
+                val intent = AndroidIntent(this, NowPlayingActivity::class.java).apply {
+                    putExtra("song", song)
+                }
+                startActivity(intent)
+            }
+        }
+        
+        miniPlayerView.setOnPlayPauseListener {
+            lifecycleScope.launch {
+                if (musicPlayerManager.isPlaying.value) {
+                    musicPlayerManager.pause()
+                } else {
+                    musicPlayerManager.play()
+                }
+            }
+        }
+        
+        miniPlayerView.setOnNextListener {
+            lifecycleScope.launch {
+                musicPlayerManager.skipToNext()
+            }
+        }
+        
+        miniPlayerView.setOnPreviousListener {
+            lifecycleScope.launch {
+                musicPlayerManager.skipToPrevious()
+            }
+        }
+        
+        miniPlayerView.setOnSeekListener { position ->
+            lifecycleScope.launch {
+                musicPlayerManager.seekTo(position)
+            }
+        }
         
         // Observe current song changes for genre-based theming
         lifecycleScope.launch {
@@ -857,16 +951,13 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@MainActivity)
     
     override fun onResume() {
         super.onResume()
-        if (::miniPlayerView.isInitialized) {
-            try { miniPlayerView.resync() } catch (_: Exception) {}
-        }
+        // RevampedMiniPlayerView handles state synchronization automatically through flows
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        if (::miniPlayerView.isInitialized) {
-            miniPlayerView.release()
-        }
+        // RevampedMiniPlayerView handles cleanup automatically in onDetachedFromWindow
+        
         if (::musicPlayerManager.isInitialized) {
             musicPlayerManager.release()
         }

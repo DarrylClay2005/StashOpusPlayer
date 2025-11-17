@@ -550,28 +550,18 @@ com.stash.opusplayer.utils.YouTubeCommentsCache.get(videoId, commentsOrder)?.let
 val extractor = com.stash.opusplayer.utils.YtDlpExtractor(this@YouTubeStreamingActivity)
                 val url = extractor.getBestAudioStreamUrl(video.formattedUrl)
                 if (url.isNullOrBlank()) {
-                    // Prefetch thumbnail into cache before delegating to Seal
+                    // Prefetch thumbnail into MetadataStorageManager
                     try {
                         val meta = com.stash.opusplayer.utils.MetadataExtractor(this@YouTubeStreamingActivity)
                         val b64 = meta.downloadYouTubeThumbnail(video.id)
                         if (b64 != null) {
                             val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                            val cache = com.stash.opusplayer.artwork.ArtworkCache(this@YouTubeStreamingActivity)
-                            val variants = listOf(
-                                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "YouTube", 0L, ""),
-                                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "Unknown Album", 0L, ""),
-                                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "", 0L, ""),
-                                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "YouTube", 0L, ""),
-                                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "Unknown Album", 0L, ""),
-                                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "", 0L, "")
+                            // Save using video title as primary identifier
+                            com.stash.opusplayer.utils.MetadataStorageManager.saveArtwork(
+                                this@YouTubeStreamingActivity,
+                                video.title,
+                                bytes
                             )
-                            variants.forEach { s ->
-                                val f = cache.fileFor(s)
-                                if (!f.exists()) cache.saveJpeg(bytes, f)
-                            }
-                            // Also save by title-only key
-                            val tf = cache.fileForTitleOnly(video.title)
-                            if (!tf.exists()) cache.saveJpeg(bytes, tf)
                         }
                     } catch (_: Exception) {}
 
@@ -640,14 +630,6 @@ val opened = com.stash.opusplayer.integration.SealIntegration.openInSeal(this@Yo
         WindowCompat.setDecorFitsSystemWindows(window, true)
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (isFullscreen) {
-            toggleFullscreen()
-            return
-        }
-        super.onBackPressed()
-    }
 
     override fun onDestroy() {
         youTubePlayer?.let {

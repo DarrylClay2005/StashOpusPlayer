@@ -14,7 +14,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.utils.FfmpegEmbedder
-import com.stash.opusplayer.artwork.ArtworkCache
+import com.stash.opusplayer.utils.MetadataStorageManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -130,30 +130,26 @@ class AutoEmbedWorker(appContext: Context, params: WorkerParameters) : Coroutine
     }
 
     private fun findArtworkBytesByTitle(title: String): ByteArray? {
-        val cache = ArtworkCache(applicationContext)
-        // Try title as-is
-        loadFromCache(cache, title)?.let { return it }
-        // Try after splitting on " - " and taking right part
-        if (title.contains(" - ")) {
-            val t = title.substringAfter(" - ").trim()
-            loadFromCache(cache, t)?.let { return it }
-        }
-        // Strip bracketed / parenthetical content
-        val t2 = title
-            .replace(Regex("\\([^)]*\\)"), "")
-            .replace(Regex("\\[[^]]*\\]"), "")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-        loadFromCache(cache, t2)?.let { return it }
-        return null
-    }
-
-    private fun loadFromCache(cache: ArtworkCache, title: String): ByteArray? {
+        // Try loading from MetadataStorageManager
         return try {
-            val bmp = cache.loadBitmapByTitleIfPresent(title, 512) ?: return null
-            val baos = ByteArrayOutputStream()
-            bmp.compress(Bitmap.CompressFormat.JPEG, 85, baos)
-            baos.toByteArray()
+            // Try title as-is
+            MetadataStorageManager.loadArtwork(applicationContext, title)
+                ?: run {
+                    // Try after splitting on " - " and taking right part
+                    if (title.contains(" - ")) {
+                        val t = title.substringAfter(" - ").trim()
+                        MetadataStorageManager.loadArtwork(applicationContext, t)
+                    } else null
+                }
+                ?: run {
+                    // Strip bracketed / parenthetical content
+                    val t2 = title
+                        .replace(Regex("\\([^)]*\\)"), "")
+                        .replace(Regex("\\[[^]]*\\]"), "")
+                        .replace(Regex("\\s+"), " ")
+                        .trim()
+                    MetadataStorageManager.loadArtwork(applicationContext, t2)
+                }
         } catch (_: Exception) {
             null
         }

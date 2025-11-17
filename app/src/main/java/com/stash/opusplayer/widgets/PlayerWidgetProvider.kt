@@ -135,16 +135,8 @@ class PlayerWidgetProvider : AppWidgetProvider() {
 
     private fun loadArtworkBitmap(context: Context, title: String, artist: String, album: String): Bitmap? {
         return try {
-            val fake = com.stash.opusplayer.data.Song(
-                id = 0L,
-                title = title,
-                artist = artist,
-                album = album,
-                duration = 0L,
-                path = ""
-            )
-            val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
-            cache.loadBitmapIfPresent(fake, 256)
+            val identifier = title.ifBlank { "$artist-$album" }
+            com.stash.opusplayer.utils.MetadataStorageManager.loadArtworkBitmap(context, identifier)
         } catch (_: Exception) {
             null
         }

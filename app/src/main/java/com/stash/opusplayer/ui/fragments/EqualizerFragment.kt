@@ -249,7 +249,7 @@ val token = SessionToken(requireContext(), android.content.ComponentName(require
             binding.equalizerSwitch.isChecked = enabled
             updateBandControlsEnabled(enabled)
 
-val presetName = loadPrefs.getString("equalizer_preset", com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name) ?: com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name
+val presetName = loadPrefs.getString("equalizer_preset", com.stash.opusplayer.audio.EqualizerPreset.FLAT.name) ?: com.stash.opusplayer.audio.EqualizerPreset.FLAT.name
 val index = com.stash.opusplayer.audio.EqualizerPreset.values().indexOfFirst { it.name == presetName }.coerceAtLeast(0)
             binding.presetSpinner.setSelection(index)
 

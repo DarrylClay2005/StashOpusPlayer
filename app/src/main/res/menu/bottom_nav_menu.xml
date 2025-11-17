@@ -16,4 +16,12 @@
         android:id="@+id/nav_youtube"
         android:title="YouTube"
         android:icon="@android:drawable/ic_menu_search" />
+    <item
+        android:id="@+id/nav_settings"
+        android:title="Settings"
+        android:icon="@drawable/ic_settings" />
+    <item
+        android:id="@+id/nav_profile"
+        android:title="Profile"
+        android:icon="@android:drawable/ic_menu_myplaces" />
 </menu>

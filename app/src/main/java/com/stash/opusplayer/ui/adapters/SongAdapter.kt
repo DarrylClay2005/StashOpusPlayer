@@ -5,6 +5,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.PopupMenu
+import androidx.lifecycle.LifecycleCoroutineScope
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
@@ -15,7 +16,11 @@ import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.databinding.ItemSongBinding
 import com.stash.opusplayer.databinding.ItemSongGridBinding
 import com.stash.opusplayer.utils.MetadataExtractor
+import com.stash.opusplayer.utils.MetadataStorageManager
 import com.stash.opusplayer.utils.AnimationUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SongAdapter(
     private val onSongClick: (Song) -> Unit,
@@ -24,7 +29,8 @@ class SongAdapter(
     private val onPlayNext: (Song) -> Unit = {},
     private val onAddToQueue: (Song) -> Unit = {},
     private val onShowFeedback: (String) -> Unit = {},
-    private val metadataExtractor: MetadataExtractor? = null
+    private val metadataExtractor: MetadataExtractor? = null,
+    private val lifecycleScope: LifecycleCoroutineScope? = null
 ) : ListAdapter<Song, RecyclerView.ViewHolder>(SongDiffCallback()) {
 
     companion object {
@@ -117,28 +123,118 @@ class SongAdapter(
             is ItemSongGridBinding -> { rootView = binding.root; artworkView = binding.songArtwork }
             else -> return
         }
-        // Try cached artwork first (fast path)
-        val cached = try { metadataExtractor?.loadCachedArtwork(rootView.context, song, 256) } catch (_: Exception) { null }
-        if (cached != null) {
-            Glide.with(rootView.context).load(cached).centerCrop().into(artworkView)
-            return
+        
+        val identifier = song.path.ifBlank { song.title }
+        android.util.Log.d("SongAdapter", "[ARTWORK] Loading for: '${song.displayName}', path: '${song.path}', hasAlbumArt: ${!song.albumArt.isNullOrEmpty()}, identifier: '$identifier'")
+        
+        // Priority 1: Check MetadataStorageManager first (dedicated storage)
+        val hasStoredArtwork = MetadataStorageManager.hasArtwork(rootView.context, identifier)
+        android.util.Log.d("SongAdapter", "[ARTWORK] Priority 1 - Stored artwork exists: $hasStoredArtwork for identifier: '$identifier'")
+        if (hasStoredArtwork) {
+            val storedBytes = MetadataStorageManager.loadArtwork(rootView.context, identifier)
+            android.util.Log.d("SongAdapter", "[ARTWORK] Priority 1 - Loaded bytes: ${if (storedBytes != null) "${storedBytes.size} bytes" else "null"}")
+            if (storedBytes != null && storedBytes.isNotEmpty()) {
+                android.util.Log.d("SongAdapter", "[ARTWORK] Priority 1 - Loading ${storedBytes.size} bytes into Glide for: ${song.displayName}")
+                try {
+                    Glide.with(rootView.context)
+                        .load(storedBytes)
+                        .signature(com.bumptech.glide.signature.ObjectKey(identifier))
+                        .placeholder(R.drawable.ic_music_note)
+                        .error(R.drawable.ic_music_note)
+                        .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
+                        .centerCrop()
+                        .into(artworkView)
+                    android.util.Log.d("SongAdapter", "[ARTWORK] Priority 1 - Glide load initiated successfully")
+                } catch (e: Exception) {
+                    android.util.Log.e("SongAdapter", "[ARTWORK] Priority 1 - Glide load FAILED: ${e.message}", e)
+                }
+                return
+            } else {
+                android.util.Log.w("SongAdapter", "[ARTWORK] Priority 1 - File exists but bytes are ${if (storedBytes == null) "null" else "empty"}")
+            }
         }
-        // Fallback to embedded bytes
+        
+        // Priority 2: Check if embedded artwork exists in Song object
+        android.util.Log.d("SongAdapter", "[ARTWORK] Priority 2 - Checking embedded artwork in Song object")
         if (!song.albumArt.isNullOrEmpty()) {
+            android.util.Log.d("SongAdapter", "[ARTWORK] Priority 2 - Song has albumArt field (${song.albumArt?.length ?: 0} chars)")
             val artBytes = try { Base64.decode(song.albumArt, Base64.DEFAULT) } catch (_: IllegalArgumentException) { null }
             if (artBytes != null && artBytes.isNotEmpty()) {
+                android.util.Log.d("SongAdapter", "[ARTWORK] Priority 2 - Successfully decoded embedded artwork (${artBytes.size} bytes)")
                 Glide.with(rootView.context)
                     .load(artBytes)
+                    .signature(com.bumptech.glide.signature.ObjectKey(identifier))
                     .placeholder(R.drawable.ic_music_note)
                     .error(R.drawable.ic_music_note)
                     .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
                     .centerCrop()
                     .into(artworkView)
+                // Save to MetadataStorageManager for faster future loads
+                lifecycleScope?.launch(Dispatchers.IO) {
+                    try {
+                        MetadataStorageManager.saveArtwork(rootView.context, identifier, artBytes)
+                    } catch (_: Exception) {}
+                }
                 return
             }
         }
-        // Default artwork
-        Glide.with(rootView.context).load(R.drawable.ic_music_note).into(artworkView)
+        
+        // Priority 3: Try legacy cached artwork
+        android.util.Log.d("SongAdapter", "[ARTWORK] Priority 3 - Checking legacy cached artwork")
+        val cached = try { metadataExtractor?.loadCachedArtwork(rootView.context, song, 256) } catch (_: Exception) { null }
+        android.util.Log.d("SongAdapter", "[ARTWORK] Priority 3 - Legacy cache result: ${if (cached != null) "found" else "not found"}")
+        if (cached != null) {
+            Glide.with(rootView.context)
+                .load(cached)
+                .signature(com.bumptech.glide.signature.ObjectKey(identifier))
+                .placeholder(R.drawable.ic_music_note)
+                .error(R.drawable.ic_music_note)
+                .centerCrop()
+                .into(artworkView)
+            return
+        }
+        
+        // Priority 4: Extract artwork on-demand in background
+        android.util.Log.d("SongAdapter", "[ARTWORK] Priority 4 - Attempting on-demand extraction, lifecycleScope: ${lifecycleScope != null}, metadataExtractor: ${metadataExtractor != null}")
+        if (lifecycleScope != null && metadataExtractor != null) {
+            android.util.Log.d("SongAdapter", "[ARTWORK] Priority 4 - Starting background extraction for: ${song.displayName}")
+            // Show placeholder while loading
+            Glide.with(rootView.context)
+                .load(R.drawable.ic_music_note)
+                .signature(com.bumptech.glide.signature.ObjectKey(identifier))
+                .into(artworkView)
+                
+            lifecycleScope.launch(Dispatchers.IO) {
+                android.util.Log.d("SongAdapter", "[ARTWORK] Priority 4 - Background thread started for: ${song.displayName}")
+                try {
+                    val updatedSong = metadataExtractor.extractMetadata(song, forceArtworkExtraction = true)
+                    if (updatedSong.albumArt != null) {
+                        val artBytes = try { Base64.decode(updatedSong.albumArt, Base64.DEFAULT) } catch (_: Exception) { null }
+                        if (artBytes != null && artBytes.isNotEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                try {
+                                    Glide.with(rootView.context)
+                                        .asBitmap()
+                                        .load(artBytes)
+                                        .signature(com.bumptech.glide.signature.ObjectKey(identifier))
+                                        .placeholder(R.drawable.ic_music_note)
+                                        .error(R.drawable.ic_music_note)
+                                        .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
+                                        .centerCrop()
+                                        .into(artworkView)
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        } else {
+            // No lifecycle scope - just show placeholder
+            Glide.with(rootView.context)
+                .load(R.drawable.ic_music_note)
+                .signature(com.bumptech.glide.signature.ObjectKey(identifier))
+                .into(artworkView)
+        }
     }
 
     private fun showContextMenu(root: View, song: Song, anchor: View) {

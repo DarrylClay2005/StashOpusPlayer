@@ -27,22 +27,25 @@ import androidx.media3.session.SessionCommands
 import com.stash.opusplayer.R
 import androidx.preference.PreferenceManager
 import com.stash.opusplayer.audio.EqualizerManager
+import com.stash.opusplayer.audio.EqualizerPreset
 import com.stash.opusplayer.audio.EnhancedAudioManager
-import com.stash.opusplayer.audio.TrackMetadata
 import com.stash.opusplayer.audio.ProfessionalAudioProcessor
-import com.stash.opusplayer.audio.AudioProfile
 import com.stash.opusplayer.audio.SpectrumAnalyzer
+import com.stash.opusplayer.audio.True8DAudioProcessor
 import com.stash.opusplayer.audio.settings.EnhancedAudioSettings
-import com.stash.opusplayer.cloud.services.CloudSyncService
-import com.stash.opusplayer.cloud.services.AnalyticsService
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.ui.MainActivity
 import kotlin.math.pow
 import kotlin.math.log10
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 class MusicService : MediaSessionService() {
+    // Service-wide scope for background work
+    private val serviceJob = SupervisorJob()
+    private val serviceScope = CoroutineScope(serviceJob + Dispatchers.Main)
     
     companion object {
         private const val NOTIFICATION_ID = 1
@@ -58,9 +61,8 @@ private lateinit var activePlayer: ExoPlayer
     private lateinit var enhancedAudioManager: EnhancedAudioManager
     private lateinit var professionalAudioProcessor: ProfessionalAudioProcessor
     private lateinit var spectrumAnalyzer: SpectrumAnalyzer
+    private lateinit var true8DAudioProcessor: True8DAudioProcessor
     private lateinit var enhancedAudioSettings: EnhancedAudioSettings
-    private lateinit var cloudSyncService: CloudSyncService
-    private lateinit var analyticsService: AnalyticsService
 
     // Sleep timer state
     private var sleepTimerHandler: android.os.Handler? = null
@@ -126,29 +128,6 @@ private lateinit var activePlayer: ExoPlayer
         // Initialize enhanced audio settings manager
         enhancedAudioSettings = EnhancedAudioSettings(this)
         
-        // Initialize cloud sync service
-        cloudSyncService = CloudSyncService.getInstance(this)
-        
-        // Initialize analytics service
-        analyticsService = AnalyticsService.getInstance(this)
-        
-        // Initialize cloud services in background
-        GlobalScope.launch {
-            try {
-                // Initialize analytics first (it's used by other services)
-                analyticsService.initialize()
-                
-                // Then initialize cloud sync
-                cloudSyncService.initialize()
-                if (cloudSyncService.shouldAutoSync()) {
-                    cloudSyncService.syncAll()
-                }
-            } catch (e: Exception) {
-                // Cloud services are optional, don't crash if they fail
-                android.util.Log.w("MusicService", "Cloud services initialization failed: ${e.message}")
-            }
-        }
-        
         // Register preference listeners so audio settings persist and apply instantly
         registerPreferenceListeners()
         
@@ -157,6 +136,7 @@ private lateinit var activePlayer: ExoPlayer
         initializeEnhancedAudio()
         initializeProfessionalAudioProcessor()
         initializeSpectrumAnalyzer()
+        initialize8DAudioEngine()
         initializeMediaSession()
         setupPlayerListener()
         // Attempt to restore last session queue before showing notification
@@ -165,6 +145,9 @@ private lateinit var activePlayer: ExoPlayer
     }
     
 private fun initializePlayers() {
+        // Initialize 8D audio processor first
+        true8DAudioProcessor = True8DAudioProcessor(this)
+        
         // Configure a custom HTTP data source with a modern mobile user-agent for broader CDN compatibility
         val httpFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
             .setUserAgent("Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 StashAudio/8.1.6")
@@ -173,7 +156,14 @@ private fun initializePlayers() {
         val defaultDsFactory = androidx.media3.datasource.DefaultDataSource.Factory(this, httpFactory)
         val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(defaultDsFactory)
 
+        // Create custom renderers factory with audio processor
+        val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(this).apply {
+            setEnableAudioTrackPlaybackParams(true)
+            // Note: 8D audio processor will be integrated via effect system in future versions
+        }
+
 activePlayer = ExoPlayer.Builder(this)
+            .setRenderersFactory(renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .build()
 
@@ -402,7 +392,10 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
                         "SET_CROSSFEED_ENABLED",
                         "SET_TUBE_WARMTH",
                         "LOAD_AUDIO_PROFILE",
-                        "TOGGLE_SPECTRUM_ANALYZER"
+                        "TOGGLE_SPECTRUM_ANALYZER",
+                        "SET_8D_AUDIO_ENABLED",
+                        "SET_8D_AUDIO_INTENSITY",
+                        "SET_8D_ROTATION_SPEED"
                     ).forEach { add(SessionCommand(it, android.os.Bundle.EMPTY)) }
                     // AB repeat controls
                     add(SessionCommand("SET_AB_ENABLED", android.os.Bundle.EMPTY))
@@ -701,6 +694,19 @@ equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(na
                                 spectrumAnalyzer.setEnabled(enabled)
                             }
                         }
+                        // 8D Audio Commands
+                        "SET_8D_AUDIO_ENABLED" -> {
+                            val enabled = args.getBoolean("enabled", false)
+                            set8DAudioEnabled(enabled)
+                        }
+                        "SET_8D_AUDIO_INTENSITY" -> {
+                            val intensity = args.getFloat("intensity", 1.0f)
+                            set8DAudioIntensity(intensity)
+                        }
+                        "SET_8D_ROTATION_SPEED" -> {
+                            val speed = args.getFloat("speed", 1.0f)
+                            set8DAudioRotationSpeed(speed)
+                        }
                     }
                 } catch (_: Exception) {}
                 return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -840,6 +846,27 @@ equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(na
                 android.util.Log.e("MusicService", "Failed to initialize spectrum analyzer", e)
             }
         }
+        
+        // Initialize 8D Audio processor
+        if (::true8DAudioProcessor.isInitialized) {
+            try {
+                true8DAudioProcessor.initialize(sessionId)
+                // Load saved settings
+                val prefs = getSharedPreferences("settings", 0)
+                val enabled = prefs.getBoolean("audio_8d_enabled", false)
+                val intensity = prefs.getFloat("audio_8d_intensity", 1.0f)
+                val speed = prefs.getFloat("audio_8d_rotation_speed", 1.0f)
+                
+                true8DAudioProcessor.setIntensity(intensity)
+                true8DAudioProcessor.setRotationSpeed(speed)
+                if (enabled) {
+                    true8DAudioProcessor.setEnabled(true)
+                }
+                android.util.Log.d("MusicService", "8D Audio processor initialized with session")
+            } catch (e: Exception) {
+                android.util.Log.e("MusicService", "Failed to initialize 8D Audio processor", e)
+            }
+        }
     }
     
     private fun maintainAudioEffectsAfterTransition() {
@@ -974,6 +1001,8 @@ val sessionId = activePlayer.audioSessionId
         val sessionId = activePlayer.audioSessionId
         if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
             spectrumAnalyzer.initialize(sessionId)
+            // Disable by default to save CPU - only enable when visualizer is actually shown
+            spectrumAnalyzer.setEnabled(false)
             loadSpectrumAnalyzerSettings()
         }
     }
@@ -1092,6 +1121,8 @@ val sessionId = activePlayer.audioSessionId
                 try { abRepeatManager.onTrackChanged(currentTrackKey() ?: "") } catch (_: Exception) {}
                 
                 // Analyze new track for enhanced audio processing
+                // TODO: Implement TrackMetadata class if needed
+                /* 
                 if (::enhancedAudioManager.isInitialized) {
                     try {
                         val metadata = TrackMetadata(
@@ -1103,7 +1134,7 @@ val sessionId = activePlayer.audioSessionId
                             } catch (_: Exception) { null }
                         )
                         // Start audio analysis in background
-                        GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+serviceScope.launch(Dispatchers.IO) {
                             // This would normally get actual audio samples from the player
                             // For now we'll use a placeholder to enable the system
                             val dummySamples = FloatArray(1024) { 0.0f }
@@ -1111,6 +1142,7 @@ val sessionId = activePlayer.audioSessionId
                         }
                     } catch (_: Exception) {}
                 }
+                */
             }
         })
     }
@@ -1423,23 +1455,14 @@ val sessionId = activePlayer.audioSessionId
     
     
     private fun getCurrentLargeIcon(): android.graphics.Bitmap? {
-        // Attempt to retrieve cached artwork for current media item using minimal overhead.
-        // We derive a pseudo Song-like structure from MediaMetadata for cache key stability.
-val title = activePlayer.mediaMetadata.title?.toString() ?: ""
+        // Attempt to retrieve cached artwork for current media item using MetadataStorageManager
+        val title = activePlayer.mediaMetadata.title?.toString() ?: ""
         val artist = activePlayer.mediaMetadata.artist?.toString() ?: ""
         val album = activePlayer.mediaMetadata.albumTitle?.toString() ?: ""
         if (title.isBlank() && artist.isBlank() && album.isBlank()) return null
         return try {
-            val fakeSong = com.stash.opusplayer.data.Song(
-                id = 0L,
-                title = title,
-                artist = artist,
-                album = album,
-                duration = 0L,
-                path = ""
-            )
-            val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
-            cache.loadBitmapIfPresent(fakeSong)
+            val identifier = title.ifBlank { "$artist-$album" }
+            com.stash.opusplayer.utils.MetadataStorageManager.loadArtworkBitmap(this, identifier)
         } catch (_: Exception) {
             null
         }
@@ -1583,9 +1606,7 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
 
     private fun startCrossfadePolling() {
         if (crossfadeCheckRunnable != null) return
-        val prefs = getSharedPreferences("settings", 0)
-        val exp = prefs.getBoolean("experimental_true_crossfade", true)
-        if (!crossfadePollingEnabled || !exp || !crossfadeEnabled || crossfadeDurationMs <= 0L) return
+        if (!crossfadePollingEnabled || !crossfadeEnabled || crossfadeDurationMs <= 0L) return
         crossfadeCheckRunnable = object : Runnable {
             override fun run() {
                 try {
@@ -1656,26 +1677,74 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
         val nextItem = try { activePlayer.getMediaItemAt(nextIndex) } catch (_: Exception) { null } ?: return
         val spare = sparePlayer ?: return
         isCrossfading = true
-        try {
-            spare.stop()
-            spare.clearMediaItems()
-            spare.volume = 0f
-            spare.setAudioAttributes(audioAttributes, audioFocusEnabled)
-            spare.setHandleAudioBecomingNoisy(true)
-            spare.setMediaItem(nextItem)
-            spare.prepare()
-            spare.play()
-        } catch (_: Exception) {
-            isCrossfading = false
-            return
+        
+        // Prepare spare player with proper async handling to prevent any freezing
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+            try {
+                // All player operations on background thread
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    try {
+                        spare.stop()
+                        spare.clearMediaItems()
+                    } catch (_: Exception) {}
+                }
+                
+                // Brief delay to ensure cleanup completes
+                kotlinx.coroutines.delay(50)
+                
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    try {
+                        spare.setAudioAttributes(audioAttributes, audioFocusEnabled)
+                        spare.setHandleAudioBecomingNoisy(true)
+                        spare.setMediaItem(nextItem)
+                        
+                        // Apply enhancement flags before prepare
+                        try { spare.setSkipSilenceEnabled(skipSilenceEnabled) } catch (_: Exception) {}
+                        try { spare.setPauseAtEndOfMediaItems(false) } catch (_: Exception) {}
+                        
+                        // Prepare asynchronously
+                        spare.prepare()
+                    } catch (_: Exception) {
+                        isCrossfading = false
+                        return@withContext
+                    }
+                }
+                
+                // Wait for player to be ready with timeout
+                val readyTimeout = System.currentTimeMillis() + 2000L
+                while (!spare.isCommandAvailable(androidx.media3.common.Player.COMMAND_PLAY_PAUSE) && 
+                       System.currentTimeMillis() < readyTimeout) {
+                    kotlinx.coroutines.delay(50)
+                }
+                
+                // Start crossfade on main thread
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    try {
+                        if (spare.isCommandAvailable(androidx.media3.common.Player.COMMAND_PLAY_PAUSE)) {
+                            spare.volume = 0f
+                            spare.play()
+                            startCrossfadeFade(spare)
+                        } else {
+                            isCrossfading = false
+                        }
+                    } catch (_: Exception) {
+                        isCrossfading = false
+                    }
+                }
+            } catch (_: Exception) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    isCrossfading = false
+                }
+            }
         }
-        // Apply enhancement flags to spare as well
-        try { spare.setSkipSilenceEnabled(skipSilenceEnabled) } catch (_: Exception) {}
-        try { spare.setPauseAtEndOfMediaItems(false) } catch (_: Exception) {}
+    }
+    
+    private fun startCrossfadeFade(spare: ExoPlayer) {
         val startTime = System.currentTimeMillis()
         val baseAmp = uiToAmp(appVolumeUi)
         val fromVol = baseAmp
         val toVol = baseAmp
+        val savedNextIndex = try { activePlayer.nextMediaItemIndex } catch (_: Exception) { C.INDEX_UNSET }
         fadeRunnable?.let { mainHandler.removeCallbacks(it) }
         val runnable = object : Runnable {
             override fun run() {
@@ -1694,7 +1763,7 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
                         val activeSession = try { activePlayer.audioSessionId } catch (_: Exception) { C.AUDIO_SESSION_ID_UNSET }
                         android.util.Log.d(
                             "MusicService",
-                            "crossfade swap: fromSession=$activeSession toSession=$spareSession nextIdx=$nextIndex"
+                            "crossfade swap: fromSession=$activeSession toSession=$spareSession nextIdx=$savedNextIndex"
                         )
                         mediaSession?.setPlayer(spare)
                         try { equalizerManager.initialize(spare.audioSessionId) } catch (_: Exception) {}
@@ -1703,7 +1772,7 @@ try { activePlayer.volume = vol } catch (_: Exception) {}
                         android.util.Log.e("MusicService", "crossfade swap setPlayer failed", e)
                     }
                     try { activePlayer.pause() } catch (_: Exception) {}
-                    try { activePlayer.seekToDefaultPosition(nextIndex) } catch (_: Exception) {}
+                    try { activePlayer.seekToDefaultPosition(savedNextIndex) } catch (_: Exception) {}
                     try { activePlayer.stop() } catch (_: Exception) {}
                     // Make the old player a new spare
                     val old = activePlayer
@@ -1794,7 +1863,7 @@ val sessionId = activePlayer.audioSessionId
         try {
             val uri = activePlayer.currentMediaItem?.localConfiguration?.uri ?: return
             // Compute asynchronously to avoid blocking the main thread
-            GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+serviceScope.launch(Dispatchers.IO) {
                 val info = com.stash.opusplayer.utils.ReplayGainUtil.parseWithCache(this@MusicService, uri.toString())
                 val pair = computeReplayGainFor(info)
                 val amp = pair.first
@@ -1860,7 +1929,8 @@ try { activePlayer.pause() } catch (_: Exception) {}
         super.onTaskRemoved(rootIntent)
     }
 
-    override fun onDestroy() {
+override fun onDestroy() {
+        try { serviceJob.cancel() } catch (_: Exception) {}
         // Persist last-known queue state
         try { saveQueueState() } catch (_: Exception) {}
         // Unregister preference listeners
@@ -1875,6 +1945,9 @@ try { activePlayer.pause() } catch (_: Exception) {}
         }
         if (::spectrumAnalyzer.isInitialized) {
             spectrumAnalyzer.release()
+        }
+        if (::true8DAudioProcessor.isInitialized) {
+            try { true8DAudioProcessor.shutdown() } catch (_: Exception) {}
         }
         mediaSession?.run {
             try { activePlayer.release() } catch (_: Exception) {}
@@ -1943,8 +2016,8 @@ try { activePlayer.pause() } catch (_: Exception) {}
             when (key) {
                 "equalizer_enabled" -> equalizerManager.setEnabled(prefs.getBoolean("equalizer_enabled", false))
                 "equalizer_preset" -> {
-                    val name = prefs.getString("equalizer_preset", com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name)
-                    try { equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(name ?: "NORMAL")) } catch (_: Exception) {}
+                    val name = prefs.getString("equalizer_preset", com.stash.opusplayer.audio.EqualizerPreset.FLAT.name)
+                    try { equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(name ?: "FLAT")) } catch (_: Exception) {}
                 }
                 "bass_boost_strength" -> equalizerManager.setBassBoost(prefs.getInt("bass_boost_strength", 0))
                 "virtualizer_strength" -> equalizerManager.setVirtualizer(prefs.getInt("virtualizer_strength", 0))
@@ -1975,16 +2048,81 @@ try { activePlayer.pause() } catch (_: Exception) {}
                 val album = mi.mediaMetadata.albumTitle?.toString() ?: ""
                 if (title.isBlank() && artist.isBlank() && album.isBlank()) continue
                 try {
-                    val fakeSong = com.stash.opusplayer.data.Song(0L, title, artist, album, 0L, "")
-                    val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
-                    val bmp = cache.loadBitmapIfPresent(fakeSong, 256)
+                    val identifier = title.ifBlank { "$artist-$album" }
+                    val bmp = com.stash.opusplayer.utils.MetadataStorageManager.loadArtworkBitmap(this, identifier)
                     if (bmp == null) {
-                        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            try { com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@MusicService).getOrFetch(fakeSong) } catch (_: Exception) {}
+                        // Skip online fetching for neighbor prefetch - focus on local storage only
+serviceScope.launch(Dispatchers.IO) {
+                            try {
+                                val fakeSong = com.stash.opusplayer.data.Song(0L, title, artist, album, 0L, "")
+                                com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@MusicService).getOrFetch(fakeSong)
+                            } catch (_: Exception) {}
                         }
                     }
                 } catch (_: Exception) {}
             }
         } catch (_: Exception) {}
+    }
+    
+    // True 8D Audio Processor initialization
+    private fun initialize8DAudioEngine() {
+        try {
+            // Already initialized in initializePlayers() with ExoPlayer integration
+            // Load saved settings and apply
+            val prefs = getSharedPreferences("settings", 0)
+            val enabled = prefs.getBoolean("audio_8d_enabled", false)
+            val intensity = prefs.getFloat("audio_8d_intensity", 1.0f)
+            val speed = prefs.getFloat("audio_8d_rotation_speed", 1.0f)
+            
+            true8DAudioProcessor.setIntensity(intensity)
+            true8DAudioProcessor.setRotationSpeed(speed)
+            if (enabled) {
+                true8DAudioProcessor.setEnabled(true)
+            }
+            
+            android.util.Log.d("MusicService", "True 8D Audio Processor initialized with real stereo panning")
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Failed to initialize 8D Audio Processor", e)
+        }
+    }
+    
+    // 8D Audio control methods
+    private fun set8DAudioEnabled(enabled: Boolean) {
+        try {
+            getSharedPreferences("settings", 0).edit()
+                .putBoolean("audio_8d_enabled", enabled)
+                .apply()
+            
+            true8DAudioProcessor.setEnabled(enabled)
+            android.util.Log.d("MusicService", "True 8D Audio: ${if (enabled) "enabled" else "disabled"} (with real L/R panning)")
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Failed to set 8D Audio enabled state", e)
+        }
+    }
+    
+    private fun set8DAudioIntensity(intensity: Float) {
+        try {
+            getSharedPreferences("settings", 0).edit()
+                .putFloat("audio_8d_intensity", intensity)
+                .apply()
+            
+            true8DAudioProcessor.setIntensity(intensity)
+            android.util.Log.d("MusicService", "True 8D Audio intensity set to: $intensity")
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Failed to set 8D Audio intensity", e)
+        }
+    }
+    
+    private fun set8DAudioRotationSpeed(speed: Float) {
+        try {
+            getSharedPreferences("settings", 0).edit()
+                .putFloat("audio_8d_rotation_speed", speed)
+                .apply()
+            
+            true8DAudioProcessor.setRotationSpeed(speed)
+            android.util.Log.d("MusicService", "True 8D Audio rotation speed set to: $speed")
+        } catch (e: Exception) {
+            android.util.Log.e("MusicService", "Failed to set 8D Audio rotation speed", e)
+        }
     }
 }

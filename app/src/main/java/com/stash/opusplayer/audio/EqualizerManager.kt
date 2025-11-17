@@ -41,7 +41,7 @@ class EqualizerManager(private val context: Context) {
     private val _isEnabled = MutableStateFlow(false)
     val isEnabled: StateFlow<Boolean> = _isEnabled.asStateFlow()
     
-    private val _currentPreset = MutableStateFlow(EqualizerPreset.NORMAL)
+    private val _currentPreset = MutableStateFlow(EqualizerPreset.FLAT)
     val currentPreset: StateFlow<EqualizerPreset> = _currentPreset.asStateFlow()
     
     private val _bandLevels = MutableStateFlow<List<Float>>(emptyList())
@@ -172,6 +172,7 @@ class EqualizerManager(private val context: Context) {
         val totalEffects = 6
         
         // Enable/disable each effect independently with isolated error handling
+        // For auxiliary effects, only enable if they have non-zero values
         try {
             equalizer?.enabled = enabled
             successfulEffects++
@@ -180,36 +181,54 @@ class EqualizerManager(private val context: Context) {
         }
         
         try {
-            bassBoost?.enabled = enabled
-            successfulEffects++
+            bassBoost?.let { bb ->
+                // Only enable if the effect has a non-zero strength
+                bb.enabled = enabled && (bb.roundedStrength > 0)
+                successfulEffects++
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to set bassBoost enabled state", e)
         }
         
         try {
-            virtualizer?.enabled = enabled
-            successfulEffects++
+            virtualizer?.let { v ->
+                // Only enable if the effect has a non-zero strength
+                v.enabled = enabled && (v.roundedStrength > 0)
+                successfulEffects++
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to set virtualizer enabled state", e)
         }
         
         try {
-            presetReverb?.enabled = enabled
-            successfulEffects++
+            presetReverb?.let { r ->
+                // Only enable if preset is not NONE
+                r.enabled = enabled && (r.preset != PresetReverb.PRESET_NONE)
+                successfulEffects++
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to set presetReverb enabled state", e)
         }
         
         try {
-            loudnessEnhancer?.enabled = enabled
-            successfulEffects++
+            loudnessEnhancer?.let { le ->
+                // Only enable if gain is non-zero
+                val currentGain = prefs.getInt(PREF_LOUDNESS_ENHANCER, 0)
+                le.enabled = enabled && (currentGain > 0)
+                successfulEffects++
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to set loudnessEnhancer enabled state", e)
         }
         
         try {
-            environmentalReverb?.enabled = enabled
-            successfulEffects++
+            environmentalReverb?.let { er ->
+                // Only enable if room size or decay time is significant
+                val roomSize = prefs.getInt(PREF_ENV_REVERB_ROOM_SIZE, 0)
+                val decayTime = prefs.getInt(PREF_ENV_REVERB_DECAY_TIME, 1000)
+                er.enabled = enabled && (roomSize > 0 || decayTime > 1000)
+                successfulEffects++
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to set environmentalReverb enabled state", e)
         }
@@ -233,38 +252,48 @@ class EqualizerManager(private val context: Context) {
                 // Reset all auxiliary effects to sane defaults before applying the preset
                 resetEffectsToDefaults()
                 when (preset) {
-                    EqualizerPreset.NORMAL -> {
+                    EqualizerPreset.FLAT -> {
                         // Reset all bands to 0
                         for (i in 0 until eq.numberOfBands) {
                             eq.setBandLevel(i.toShort(), 0)
                         }
                     }
-                    EqualizerPreset.ROCK -> applyRockPreset(eq)
-                    EqualizerPreset.POP -> applyPopPreset(eq)
-                    EqualizerPreset.JAZZ -> applyJazzPreset(eq)
-                    EqualizerPreset.CLASSICAL -> applyClassicalPreset(eq)
-                    EqualizerPreset.DANCE -> applyDancePreset(eq)
-                    EqualizerPreset.METAL -> applyMetalPreset(eq)
                     EqualizerPreset.BASS_BOOST -> applyBassBoostPreset(eq)
-                    EqualizerPreset.VOCAL -> applyVocalPreset(eq)
-                    EqualizerPreset.SURROUND_3D -> applySurround3DPreset(eq)
-                    EqualizerPreset.CONCERT_HALL -> applyConcertHallPreset(eq)
-                    EqualizerPreset.STADIUM -> applyStadiumPreset(eq)
-                    EqualizerPreset.ACOUSTIC -> applyAcousticPreset(eq)
+                    EqualizerPreset.VOCAL_CLARITY -> applyVocalClarityPreset(eq)
+                    EqualizerPreset.CLASSICAL -> applyClassicalPreset(eq)
+                    EqualizerPreset.ROCK -> applyRockPreset(eq)
+                    EqualizerPreset.JAZZ -> applyJazzPreset(eq)
                     EqualizerPreset.ELECTRONIC -> applyElectronicPreset(eq)
-                    EqualizerPreset.LOUNGE -> applyLoungePreset(eq)
-                    EqualizerPreset.SUPER_BASS_BOOST -> applySuperBassBoostPreset(eq)
-                    EqualizerPreset.SUPER_REVERB -> applySuperReverbPreset(eq)
-                    EqualizerPreset.HIGH_RESOLUTION -> applyHighResolutionPreset(eq)
-                    EqualizerPreset.LOFI -> applyLoFiPreset(eq)
-                    EqualizerPreset.AUTOTUNE -> applyAutotunePreset(eq)
-                    EqualizerPreset.FAN_EFFECT -> applyFanEffectPreset(eq)
+                    EqualizerPreset.HIP_HOP -> applyHipHopPreset(eq)
+                    EqualizerPreset.ACOUSTIC -> applyAcousticPreset(eq)
+                    EqualizerPreset.TREBLE_BOOST -> applyTrebleBoostPreset(eq)
                     EqualizerPreset.CUSTOM -> loadCustomBands(eq)
                 }
                 
                 _currentPreset.value = preset
                 prefs.edit().putString(PREF_EQ_PRESET, preset.name).apply()
                 updateBandLevels()
+                
+                // Always enable the equalizer when a preset is applied (except FLAT)
+                if (preset != EqualizerPreset.FLAT) {
+                    // Enable the equalizer effect itself first
+                    try {
+                        eq.enabled = true
+                        _isEnabled.value = true
+                        prefs.edit().putBoolean(PREF_EQ_ENABLED, true).apply()
+                        Log.d(TAG, "Enabled equalizer for preset: $preset")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to enable equalizer for preset", e)
+                    }
+                    
+                    // Then re-enable all effects with new values
+                    setEnabled(true)
+                    Log.d(TAG, "Applied and enabled preset: $preset")
+                }
+                if (_isEnabled.value && preset == EqualizerPreset.FLAT) {
+                    // For FLAT preset, just re-evaluate if already enabled
+                    setEnabled(true)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error setting equalizer preset", e)
@@ -291,7 +320,13 @@ class EqualizerManager(private val context: Context) {
     
     fun setBassBoost(strength: Int) {
         try {
-            bassBoost?.setStrength(strength.toShort())
+            bassBoost?.let { bb ->
+                bb.setStrength(strength.toShort())
+                // Enable the effect if strength > 0 and equalizer is enabled
+                if (_isEnabled.value) {
+                    bb.enabled = (strength > 0)
+                }
+            }
             _bassBoostLevel.value = strength
             prefs.edit().putInt(PREF_BASS_BOOST, strength).apply()
         } catch (e: Exception) {
@@ -301,7 +336,13 @@ class EqualizerManager(private val context: Context) {
     
     fun setVirtualizer(strength: Int) {
         try {
-            virtualizer?.setStrength(strength.toShort())
+            virtualizer?.let { v ->
+                v.setStrength(strength.toShort())
+                // Enable the effect if strength > 0 and equalizer is enabled
+                if (_isEnabled.value) {
+                    v.enabled = (strength > 0)
+                }
+            }
             _virtualizerLevel.value = strength
             prefs.edit().putInt(PREF_VIRTUALIZER, strength).apply()
         } catch (e: Exception) {
@@ -311,7 +352,13 @@ class EqualizerManager(private val context: Context) {
     
     fun setReverbPreset(preset: Int) {
         try {
-            presetReverb?.preset = preset.toShort()
+            presetReverb?.let { r ->
+                r.preset = preset.toShort()
+                // Enable the effect if preset is not NONE and equalizer is enabled
+                if (_isEnabled.value) {
+                    r.enabled = (preset != PresetReverb.PRESET_NONE.toInt())
+                }
+            }
             _reverbPreset.value = preset
             prefs.edit().putInt(PREF_REVERB, preset).apply()
         } catch (e: Exception) {
@@ -322,7 +369,13 @@ class EqualizerManager(private val context: Context) {
     fun setLoudnessGain(gain: Int) {
         try {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
-                loudnessEnhancer?.setTargetGain(gain)
+                loudnessEnhancer?.let { le ->
+                    le.setTargetGain(gain)
+                    // Enable the effect if gain > 0 and equalizer is enabled
+                    if (_isEnabled.value) {
+                        le.enabled = (gain > 0)
+                    }
+                }
                 _loudnessGain.value = gain
                 prefs.edit().putInt(PREF_LOUDNESS_ENHANCER, gain).apply()
             }
@@ -336,6 +389,10 @@ class EqualizerManager(private val context: Context) {
             environmentalReverb?.let { reverb ->
                 reverb.setRoomLevel(roomSize.toShort())
                 reverb.decayTime = decayTime
+                // Enable the effect if roomSize > 0 and equalizer is enabled
+                if (_isEnabled.value) {
+                    reverb.enabled = (roomSize > 0 || decayTime > 1000)
+                }
                 _envReverbRoomSize.value = roomSize
                 _envReverbDecayTime.value = decayTime
                 prefs.edit()
@@ -377,11 +434,11 @@ class EqualizerManager(private val context: Context) {
     
     private fun loadSettings() {
         val enabled = prefs.getBoolean(PREF_EQ_ENABLED, false)
-        val presetName = prefs.getString(PREF_EQ_PRESET, EqualizerPreset.NORMAL.name)
+        val presetName = prefs.getString(PREF_EQ_PRESET, EqualizerPreset.FLAT.name)
         val preset = try {
-            EqualizerPreset.valueOf(presetName ?: EqualizerPreset.NORMAL.name)
+            EqualizerPreset.valueOf(presetName ?: EqualizerPreset.FLAT.name)
         } catch (e: Exception) {
-            EqualizerPreset.NORMAL
+            EqualizerPreset.FLAT
         }
         
         setEnabled(enabled)
@@ -446,162 +503,72 @@ class EqualizerManager(private val context: Context) {
         } catch (_: Exception) {}
     }
     
-    // Enhanced preset implementations with more sophisticated curves
-    private fun applyRockPreset(eq: Equalizer) {
-        val levels = intArrayOf(800, 600, 300, -200, -400, -200, 400, 700, 1000, 1200, 1300, 1200)
-        applyLevels(eq, levels)
-        setBassBoost(600)  // Enhanced bass for rock
-        setVirtualizer(400)  // Moderate spatial enhancement
-    }
-    
-    private fun applyPopPreset(eq: Equalizer) {
-        val levels = intArrayOf(-100, 300, 600, 800, 700, 500, 200, -100, -200, -300, -200, -100)
-        applyLevels(eq, levels)
-        setBassBoost(400)  // Controlled bass
-        setVirtualizer(600)  // Enhanced stereo imaging for pop
-        setLoudnessGain(300)  // Slight loudness enhancement
-    }
-    
-    private fun applyJazzPreset(eq: Equalizer) {
-        val levels = intArrayOf(300, 200, 100, 300, 400, 300, 200, 300, 400, 500, 400, 300)
-        applyLevels(eq, levels)
-        setBassBoost(200)  // Subtle bass enhancement
-        setVirtualizer(700)  // Enhanced spatial for jazz instruments
-        setEnvironmentalReverb(400, 2000)  // Jazz club ambiance
-    }
-    
-    private fun applyClassicalPreset(eq: Equalizer) {
-        val levels = intArrayOf(400, 300, 100, -100, -200, -100, 200, 400, 600, 700, 800, 600)
-        applyLevels(eq, levels)
-        setBassBoost(100)  // Natural bass response
-        setVirtualizer(800)  // Wide soundstage for orchestral music
-        setEnvironmentalReverb(600, 3500)  // Concert hall acoustics
-        setLoudnessGain(200)  // Maintain dynamic range
-    }
-    
-    private fun applyDancePreset(eq: Equalizer) {
-        val levels = intArrayOf(1200, 1000, 600, 200, 100, -200, -400, -300, 200, 400, 600, 500)
-        applyLevels(eq, levels)
-        setBassBoost(800)  // Strong bass for dance music
-        setVirtualizer(700)  // Enhanced spatial imaging
-        setLoudnessGain(500)  // Increased perceived loudness
-    }
-    
-    private fun applyMetalPreset(eq: Equalizer) {
-        val levels = intArrayOf(1000, 800, 600, 1000, 1200, 800, 600, 1000, 1100, 1300, 1400, 1300)
-        applyLevels(eq, levels)
-        setBassBoost(700)  // Powerful bass for metal
-        setVirtualizer(500)  // Controlled spatial enhancement
-        setLoudnessGain(400)  // Enhanced punch and presence
-    }
-    
+    // AI-Powered preset implementations
     private fun applyBassBoostPreset(eq: Equalizer) {
-        val levels = intArrayOf(1200, 800, 400, 0, 0, 0, 0, 0, 0, 0)
+        val levels = intArrayOf(800, 600, 400, 200, 0, -100, -200, -200, -200, -200)
         applyLevels(eq, levels)
-    }
-    
-    private fun applyVocalPreset(eq: Equalizer) {
-        val levels = intArrayOf(-200, -300, -300, 200, 400, 400, 300, 200, 0, -200)
-        applyLevels(eq, levels)
-    }
-    
-    private fun applySurround3DPreset(eq: Equalizer) {
-        // Enhance spatial frequencies and add depth
-        val levels = intArrayOf(300, 200, 100, 300, 500, 600, 700, 800, 600, 400)
-        applyLevels(eq, levels)
-        // Enable virtualizer for 3D effect
-        setVirtualizer(800)
-    }
-    
-    private fun applyConcertHallPreset(eq: Equalizer) {
-        // Simulate concert hall acoustics with enhanced reverb
-        val levels = intArrayOf(200, 300, 100, 200, 300, 400, 500, 400, 300, 200)
-        applyLevels(eq, levels)
-        setVirtualizer(600)
-    }
-    
-    private fun applyStadiumPreset(eq: Equalizer) {
-        // Large venue sound with powerful bass and clear highs
-        val levels = intArrayOf(800, 600, 400, 200, 100, 200, 400, 600, 800, 900)
-        applyLevels(eq, levels)
-        setBassBoost(700)
+        setBassBoost(800)
         setVirtualizer(500)
     }
     
-    private fun applyAcousticPreset(eq: Equalizer) {
-        // Natural acoustic sound with warm mids
-        val levels = intArrayOf(300, 400, 300, 400, 500, 400, 300, 200, 100, 100)
+    private fun applyVocalClarityPreset(eq: Equalizer) {
+        val levels = intArrayOf(-200, -100, 0, 200, 400, 500, 400, 200, 0, -100)
         applyLevels(eq, levels)
+        setBassBoost(0)
         setVirtualizer(300)
     }
     
-    private fun applyElectronicPreset(eq: Equalizer) {
-        // Electronic music with enhanced bass and treble
-        val levels = intArrayOf(1000, 800, 600, 200, 100, 200, 600, 800, 1000, 1100)
+    private fun applyClassicalPreset(eq: Equalizer) {
+        val levels = intArrayOf(0, 0, 0, 0, 0, 0, -200, -200, -300, -400)
         applyLevels(eq, levels)
-        setBassBoost(800)
+        setBassBoost(0)
+        setVirtualizer(600)
+        setReverbPreset(android.media.audiofx.PresetReverb.PRESET_LARGEHALL.toInt())
+    }
+    
+    private fun applyRockPreset(eq: Equalizer) {
+        val levels = intArrayOf(500, 400, 300, 200, 0, 200, 400, 500, 500, 500)
+        applyLevels(eq, levels)
+        setBassBoost(400)
+        setVirtualizer(400)
+        setReverbPreset(android.media.audiofx.PresetReverb.PRESET_LARGEROOM.toInt())
+    }
+    
+    private fun applyJazzPreset(eq: Equalizer) {
+        val levels = intArrayOf(400, 300, 200, 100, 0, 0, 0, 100, 200, 300)
+        applyLevels(eq, levels)
+        setBassBoost(200)
+        setVirtualizer(500)
+        setReverbPreset(android.media.audiofx.PresetReverb.PRESET_PLATE.toInt())
+    }
+    
+    private fun applyElectronicPreset(eq: Equalizer) {
+        val levels = intArrayOf(600, 500, 400, 0, -100, 0, 300, 500, 600, 700)
+        applyLevels(eq, levels)
+        setBassBoost(600)
         setVirtualizer(700)
     }
     
-    private fun applyLoungePreset(eq: Equalizer) {
-        // Smooth, relaxed sound for ambient music
-        val levels = intArrayOf(200, 300, 400, 500, 400, 300, 200, 100, 0, -100)
+    private fun applyHipHopPreset(eq: Equalizer) {
+        val levels = intArrayOf(700, 600, 500, 200, 0, 100, 200, 300, 300, 300)
         applyLevels(eq, levels)
+        setBassBoost(900)
         setVirtualizer(400)
     }
     
-    private fun applySuperBassBoostPreset(eq: Equalizer) {
-        // Extreme bass enhancement with sub-bass focus
-        val levels = intArrayOf(1500, 1200, 800, 400, 200, 100, 0, 0, 200, 400)
+    private fun applyAcousticPreset(eq: Equalizer) {
+        val levels = intArrayOf(300, 200, 100, 0, 100, 200, 200, 200, 100, 0)
         applyLevels(eq, levels)
-        setBassBoost(1000) // Maximum bass boost
-        setLoudnessGain(800) // Enhanced loudness for impact
-        setVirtualizer(600)
+        setBassBoost(100)
+        setVirtualizer(300)
+        setReverbPreset(android.media.audiofx.PresetReverb.PRESET_SMALLROOM.toInt())
     }
     
-    private fun applySuperReverbPreset(eq: Equalizer) {
-        // Cathedral-like reverb with spatial enhancement
-        val levels = intArrayOf(400, 300, 200, 400, 600, 700, 600, 500, 400, 300)
+    private fun applyTrebleBoostPreset(eq: Equalizer) {
+        val levels = intArrayOf(-200, -200, -100, 0, 100, 200, 400, 600, 700, 800)
         applyLevels(eq, levels)
-        setReverbPreset(PresetReverb.PRESET_LARGEHALL.toInt())
-        setEnvironmentalReverb(800, 5000) // Large room, long decay
-        setVirtualizer(900)
-    }
-    
-    private fun applyHighResolutionPreset(eq: Equalizer) {
-        // Audiophile-grade clarity and detail enhancement
-        val levels = intArrayOf(100, 200, 300, 400, 500, 600, 700, 800, 900, 1000)
-        applyLevels(eq, levels)
-        setLoudnessGain(600) // Enhance dynamic range
-        setVirtualizer(700) // Spatial clarity
-        setBassBoost(300) // Controlled bass
-    }
-    
-    private fun applyLoFiPreset(eq: Equalizer) {
-        // Vintage lo-fi sound with warm, compressed characteristics
-        val levels = intArrayOf(600, 400, 200, 300, 400, 200, -200, -400, -600, -800)
-        applyLevels(eq, levels)
-        setBassBoost(600) // Warm bass
-        setVirtualizer(200) // Reduced spatial to simulate analog
-        setReverbPreset(PresetReverb.PRESET_SMALLROOM.toInt()) // Intimate space
-    }
-    
-    private fun applyAutotunePreset(eq: Equalizer) {
-        // Vocal enhancement with harmonic emphasis
-        val levels = intArrayOf(-200, -100, 200, 600, 800, 700, 500, 300, 100, -100)
-        applyLevels(eq, levels)
-        setVirtualizer(800) // Spatial vocal enhancement
-        setEnvironmentalReverb(300, 1500) // Studio-like reverb
-        setLoudnessGain(400) // Vocal presence
-    }
-    
-    private fun applyFanEffectPreset(eq: Equalizer) {
-        // Simulates the whooshing effect of a fan with modulated frequencies
-        val levels = intArrayOf(800, 600, 400, 600, 800, 600, 400, 200, 400, 600)
-        applyLevels(eq, levels)
-        setVirtualizer(900) // Maximum spatial effect
-        setEnvironmentalReverb(600, 2000) // Medium room with moderate decay
-        setBassBoost(400) // Low-frequency emphasis for whoosh effect
+        setBassBoost(0)
+        setVirtualizer(400)
     }
     
     private fun applyLevels(eq: Equalizer, levels: IntArray) {
@@ -639,26 +606,15 @@ class EqualizerManager(private val context: Context) {
 }
 
 enum class EqualizerPreset {
-    NORMAL,
-    ROCK,
-    POP,
-    JAZZ,
-    CLASSICAL,
-    DANCE,
-    METAL,
+    FLAT,
     BASS_BOOST,
-    VOCAL,
-    SURROUND_3D,
-    CONCERT_HALL,
-    STADIUM,
-    ACOUSTIC,
+    VOCAL_CLARITY,
+    CLASSICAL,
+    ROCK,
+    JAZZ,
     ELECTRONIC,
-    LOUNGE,
-    SUPER_BASS_BOOST,
-    SUPER_REVERB,
-    HIGH_RESOLUTION,
-    LOFI,
-    AUTOTUNE,
-    FAN_EFFECT,
+    HIP_HOP,
+    ACOUSTIC,
+    TREBLE_BOOST,
     CUSTOM
 }

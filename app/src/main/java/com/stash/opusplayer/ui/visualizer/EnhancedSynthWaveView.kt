@@ -223,11 +223,16 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
     private val fractalPath = Path()
 
     init {
-        setupAnimations()
-        initializeParticles()
-        initializeGalaxyStars()
         setLayerType(LAYER_TYPE_HARDWARE, null)
         setupPreferenceListener()
+        // Delay animations and particle initialization until view has dimensions
+        post {
+            if (width > 0 && height > 0) {
+                setupAnimations()
+                initializeParticles()
+                initializeGalaxyStars()
+            }
+        }
     }
     
     private fun setupPreferenceListener() {
@@ -340,6 +345,8 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
     
     private fun initializeGalaxyStars() {
         galaxyStars.clear()
+        if (width <= 0 || height <= 0) return
+        
         repeat(100) {
             galaxyStars.add(
                 Star(
@@ -381,31 +388,49 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        updateShaders()
-        initializeParticles()
+        if (w > 0 && h > 0) {
+            updateShaders()
+            initializeParticles()
+            initializeGalaxyStars()
+            // Setup animations if not already running
+            if (!isAnimating) {
+                setupAnimations()
+            }
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         
-        // Apply breathing effect
-        if (enableBreathing) {
-            val scale = 1f + sin(breathingPhase) * 0.05f * animationIntensity
-            canvas.scale(scale, scale, width / 2f, height / 2f)
+        // Safety check - don't draw if dimensions are invalid
+        if (width <= 0 || height <= 0) {
+            return
         }
         
-        // Draw based on current visualizer mode
-        when (currentMode) {
-            VisualizerMode.SYNTHWAVE -> drawSynthWaveMode(canvas)
-            VisualizerMode.FREQUENCY_MOUNTAIN -> drawFrequencyMountain(canvas)
-            VisualizerMode.PARTICLE_GALAXY -> drawParticleGalaxy(canvas)
-            VisualizerMode.RETRO_OSCILLOSCOPE -> drawRetroOscilloscope(canvas)
-            VisualizerMode.VU_METERS -> drawVUMeters(canvas)
-            VisualizerMode.FRACTAL_PATTERNS -> drawFractalPatterns(canvas)
+        try {
+            // Apply breathing effect
+            if (enableBreathing) {
+                val scale = 1f + sin(breathingPhase) * 0.05f * animationIntensity
+                canvas.scale(scale, scale, width / 2f, height / 2f)
+            }
+            
+            // Draw based on current visualizer mode
+            when (currentMode) {
+                VisualizerMode.SYNTHWAVE -> drawSynthWaveMode(canvas)
+                VisualizerMode.FREQUENCY_MOUNTAIN -> drawFrequencyMountain(canvas)
+                VisualizerMode.PARTICLE_GALAXY -> drawParticleGalaxy(canvas)
+                VisualizerMode.RETRO_OSCILLOSCOPE -> drawRetroOscilloscope(canvas)
+                VisualizerMode.VU_METERS -> drawVUMeters(canvas)
+                VisualizerMode.FRACTAL_PATTERNS -> drawFractalPatterns(canvas)
+            }
+            
+            // Draw progress line (common to all modes)
+            drawProgressLine(canvas)
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Error during onDraw", e)
+            // Draw a simple fallback to avoid blank screen
+            canvas.drawColor(Color.parseColor("#1a1a1a"))
         }
-        
-        // Draw progress line (common to all modes)
-        drawProgressLine(canvas)
     }
     
     private fun drawSynthWaveMode(canvas: Canvas) {
@@ -886,6 +911,8 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
     }
     
     private fun updateParticles() {
+        if (width <= 0 || height <= 0) return
+        
         particles.forEach { particle ->
             particle.x += particle.vx
             particle.y += particle.vy
@@ -1115,40 +1142,49 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
         try {
             releaseVisualizer()
             
+            // Only setup if we have a valid audio session (not 0 which is the global session)
             if (audioSessionId != 0) {
-                visualizer = Visualizer(audioSessionId).apply {
-                    captureSize = Visualizer.getCaptureSizeRange()[1]
-                    setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
-                        override fun onWaveFormDataCapture(
-                            visualizer: Visualizer,
-                            waveform: ByteArray,
-                            samplingRate: Int
-                        ) {
-                            post {
-                                setWaveformData(waveform)
+                try {
+                    visualizer = Visualizer(audioSessionId).apply {
+                        captureSize = Visualizer.getCaptureSizeRange()[1]
+                        setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
+                            override fun onWaveFormDataCapture(
+                                visualizer: Visualizer,
+                                waveform: ByteArray,
+                                samplingRate: Int
+                            ) {
+                                post {
+                                    setWaveformData(waveform)
+                                }
                             }
-                        }
+                            
+                            override fun onFftDataCapture(
+                                visualizer: Visualizer,
+                                fft: ByteArray,
+                                samplingRate: Int
+                            ) {
+                                // Convert FFT data to spectrum data
+                                val spectrum = FloatArray(fft.size / 2)
+                                for (i in spectrum.indices) {
+                                    val real = fft[i * 2].toFloat()
+                                    val imaginary = fft[i * 2 + 1].toFloat()
+                                    spectrum[i] = sqrt(real * real + imaginary * imaginary)
+                                }
+                                post {
+                                    setSpectrumData(spectrum)
+                                }
+                            }
+                        }, Visualizer.getMaxCaptureRate() / 2, true, true)
                         
-                        override fun onFftDataCapture(
-                            visualizer: Visualizer,
-                            fft: ByteArray,
-                            samplingRate: Int
-                        ) {
-                            // Convert FFT data to spectrum data
-                            val spectrum = FloatArray(fft.size / 2)
-                            for (i in spectrum.indices) {
-                                val real = fft[i * 2].toFloat()
-                                val imaginary = fft[i * 2 + 1].toFloat()
-                                spectrum[i] = sqrt(real * real + imaginary * imaginary)
-                            }
-                            post {
-                                setSpectrumData(spectrum)
-                            }
-                        }
-                    }, Visualizer.getMaxCaptureRate() / 2, true, true)
-                    
-                    enabled = true
+                        enabled = true
+                    }
+                } catch (ve: Exception) {
+                    android.util.Log.w(TAG, "Could not create Visualizer with session $audioSessionId: ${ve.message}")
+                    visualizer = null
+                    // Continue without visualizer - view will still render with default animations
                 }
+            } else {
+                android.util.Log.d(TAG, "Audio session ID is 0 (global session), skipping visualizer setup")
             }
         } catch (e: Exception) {
             android.util.Log.w(TAG, "Error setting up visualizer", e)

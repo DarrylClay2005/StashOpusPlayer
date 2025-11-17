@@ -15,7 +15,7 @@ class MetadataActivity : AppCompatActivity() {
     }
 
     private fun populate() {
-        val mgr = (application as com.stash.opusplayer.StashWaveApplication).playerManager
+        val mgr = ((application as? com.stash.opusplayer.RevolutionaryApplication) ?: (application as com.stash.opusplayer.RevolutionaryApplication)).playerManager
         val current = mgr.currentSong.value
         if (current != null) {
             setText(R.id.fileNameValue, java.io.File(current.path).name)

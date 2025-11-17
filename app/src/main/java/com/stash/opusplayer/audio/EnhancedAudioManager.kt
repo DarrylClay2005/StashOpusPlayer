@@ -230,6 +230,11 @@ class EnhancedAudioManager(private val context: Context) {
                     AudioProfile.ROCK_METAL -> applyRockMetalProfile()
                     AudioProfile.JAZZ_ACOUSTIC -> applyJazzAcousticProfile()
                     AudioProfile.BALANCED -> applyBalancedProfile()
+                    AudioProfile.AI_GENRE_DETECT -> {
+                        // Enable auto switching and start with a neutral profile; system will adapt
+                        setAutoProfileSwitching(true)
+                        applyBalancedProfile()
+                    }
                     AudioProfile.CUSTOM -> applyCustomProfile()
                 }
                 
@@ -609,6 +614,7 @@ enum class AudioProfile {
     ROCK_METAL,
     JAZZ_ACOUSTIC,
     BALANCED,
+    AI_GENRE_DETECT,
     CUSTOM
 }
 

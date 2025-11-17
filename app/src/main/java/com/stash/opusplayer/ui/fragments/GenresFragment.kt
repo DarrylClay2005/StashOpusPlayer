@@ -39,9 +39,9 @@ class GenresFragment : Fragment() {
     private fun setupRecyclerView() {
         adapter = GenreAdapter { genre ->
             // Navigate to show songs in this genre
-            val fragment = com.stash.opusplayer.ui.fragments.FolderDetailFragment.newInstance(
-                title = "Genre: ${genre.name}", 
-                songs = ArrayList(genre.songs)
+            val fragment = com.stash.opusplayer.ui.fragments.ArtistSongsFragment.newInstance(
+                "Genre: ${genre.name}", 
+                ArrayList(genre.songs)
             )
             parentFragmentManager.beginTransaction()
                 .replace(com.stash.opusplayer.R.id.main_content, fragment)

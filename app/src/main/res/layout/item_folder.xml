@@ -1,29 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_marginStart="8dp"
-    android:layout_marginEnd="8dp"
-    android:layout_marginTop="6dp"
-    android:layout_marginBottom="6dp"
-    app:cardCornerRadius="12dp"
-    app:cardElevation="4dp"
-    app:strokeColor="@color/border_gray"
-    app:strokeWidth="1dp">
-
-<LinearLayout
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
-    android:padding="12dp">
+    android:padding="8dp">
 
     <ImageView
-        android:id="@+id/folderIcon"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:src="@drawable/ic_folder"
-        android:contentDescription="Folder" />
+        android:id="@+id/folder_artwork"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:contentDescription="Folder artwork"
+        android:scaleType="centerCrop"
+        android:src="@drawable/ic_folder" />
 
     <LinearLayout
         android:layout_width="0dp"
@@ -33,21 +21,23 @@
         android:paddingStart="12dp">
 
         <TextView
-            android:id="@+id/folderPath"
-            android:layout_width="wrap_content"
+            android:id="@+id/folder_title"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="/storage/Music"
-            android:textSize="16sp"
-            android:textStyle="bold" />
+            android:textAppearance="?android:attr/textAppearanceMedium"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:text="Folder name" />
 
         <TextView
-            android:id="@+id/folderCount"
-            android:layout_width="wrap_content"
+            android:id="@+id/folder_subtitle"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="0 songs"
-            android:textSize="12sp" />
+            android:textAppearance="?android:attr/textAppearanceSmall"
+            android:textColor="#888"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:text="12 songs — /path/to/folder" />
     </LinearLayout>
 
 </LinearLayout>
-
-</com.google.android.material.card.MaterialCardView>
