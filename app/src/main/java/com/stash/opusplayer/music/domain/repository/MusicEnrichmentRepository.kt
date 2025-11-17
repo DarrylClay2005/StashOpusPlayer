@@ -1,0 +1,3 @@
+package com.stash.opusplayer.music.domain.repository
+interface MusicEnrichmentRepository
+class MusicEnrichmentRepositoryStub : MusicEnrichmentRepository

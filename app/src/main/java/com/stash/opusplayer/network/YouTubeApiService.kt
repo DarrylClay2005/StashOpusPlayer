@@ -24,8 +24,7 @@ class YouTubeApiService(private val context: android.content.Context) {
         get() {
             // Allow runtime override from app settings; fallback to BuildConfig value
             return try {
-                val prefs = context.getSharedPreferences("settings", 0)
-                val override = prefs.getString("user_youtube_api_key", null)
+                val override = com.stash.opusplayer.utils.YouTubeApiKeyManager.loadApiKey(context)
                 if (!override.isNullOrBlank()) override else BuildConfig.YOUTUBE_API_KEY
             } catch (_: Exception) {
                 BuildConfig.YOUTUBE_API_KEY

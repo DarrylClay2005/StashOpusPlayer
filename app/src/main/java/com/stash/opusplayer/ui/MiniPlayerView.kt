@@ -95,6 +95,18 @@ class MiniPlayerView @JvmOverloads constructor(
         setupUI()
         startMiniVisualizer()
         visibility = GONE // Initially hidden
+        applyBottomMargin()
+    }
+    
+    private fun applyBottomMargin() {
+        try {
+            val prefs = context.getSharedPreferences("settings", 0)
+            val bottomOffset = prefs.getInt("miniplayer_bottom_offset", 72)
+            val dp = (bottomOffset * context.resources.displayMetrics.density).toInt()
+            (layoutParams as? MarginLayoutParams)?.bottomMargin = dp
+        } catch (e: Exception) {
+            android.util.Log.w("MiniPlayerView", "Failed to apply bottom margin", e)
+        }
     }
 
     fun initialize(lifecycleOwner: LifecycleOwner, musicPlayerManager: MusicPlayerManager) {
@@ -332,41 +344,8 @@ class MiniPlayerView @JvmOverloads constructor(
     }
     
     private fun drawProgressRing(canvas: Canvas) {
-        try {
-            val albumArt = binding.miniAlbumArt
-            val centerX = albumArt.x + albumArt.width / 2f
-            val centerY = albumArt.y + albumArt.height / 2f
-            val radius = max(albumArt.width, albumArt.height) / 2f + 8f
-            
-            // Get current progress
-            val progress = mediaController?.let { controller ->
-                if (controller.duration > 0) {
-                    controller.currentPosition.toFloat() / controller.duration.toFloat()
-                } else 0f
-            } ?: 0f
-            
-            // Draw background circle
-            val backgroundPaint = Paint(progressRingPaint).apply {
-                alpha = 50
-                color = Color.GRAY
-            }
-            canvas.drawCircle(centerX, centerY, radius, backgroundPaint)
-            
-            // Draw progress arc
-            if (progress > 0f) {
-                val sweepAngle = progress * 360f
-                val rect = RectF(
-                    centerX - radius,
-                    centerY - radius,
-                    centerX + radius,
-                    centerY + radius
-                )
-                
-                canvas.drawArc(rect, -90f, sweepAngle, false, progressRingPaint)
-            }
-        } catch (e: Exception) {
-            // Ignore drawing errors
-        }
+        // Progress ring removed to fix fitting issues and performance
+        // Progress is still visible in the top progress bar
     }
     
     private fun drawMiniVisualizer(canvas: Canvas) {
@@ -632,17 +611,8 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
             val artist = controller.mediaMetadata.artist?.toString() ?: ""
             val album = controller.mediaMetadata.albumTitle?.toString() ?: ""
             
-            val fakeSong = Song(
-                id = 0L,
-                title = title,
-                artist = artist,
-                album = album,
-                duration = 0L,
-                path = ""
-            )
-            
-            val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
-            val bmp = cache.loadBitmapIfPresent(fakeSong, 256)
+            val identifier = title.ifBlank { "$artist-$album" }
+            val bmp = com.stash.opusplayer.utils.MetadataStorageManager.loadArtworkBitmap(context, identifier)
             
             if (bmp != null) {
                 Glide.with(context)

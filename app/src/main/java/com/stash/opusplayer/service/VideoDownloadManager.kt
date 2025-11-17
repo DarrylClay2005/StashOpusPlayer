@@ -14,7 +14,7 @@ import com.stash.opusplayer.utils.MetadataExtractor
 import com.stash.opusplayer.utils.YtDlpExtractor
 import com.stash.opusplayer.utils.FfmpegEmbedder
 import com.stash.opusplayer.utils.TagEditor
-import com.stash.opusplayer.artwork.ArtworkCache
+import com.stash.opusplayer.utils.MetadataStorageManager
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
@@ -486,27 +486,9 @@ class VideoDownloadManager(private val context: Context) {
 
     private fun tryLoadArtworkFromCache(title: String, artist: String, album: String): ByteArray? {
         return try {
-            val cache = ArtworkCache(context)
-            // Build a lightweight Song only for cache keying
-            val song = Song(
-                id = (title + artist + album).hashCode().toLong(),
-                title = title,
-                artist = artist,
-                album = album,
-                duration = 0L,
-                path = "",
-                size = 0L,
-                mimeType = "",
-                dateAdded = 0L
-            )
-            val bmp = cache.loadBitmapIfPresent(song, 512)
-                ?: cache.loadBitmapByTitleIfPresent(title, 512)
-            if (bmp != null) {
-                ByteArrayOutputStream().use { baos ->
-                    bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, baos)
-                    baos.toByteArray()
-                }
-            } else null
+            // Try loading from MetadataStorageManager using title as identifier
+            val identifier = title.ifBlank { "$artist-$album" }
+            MetadataStorageManager.loadArtwork(context, identifier)
         } catch (_: Exception) {
             null
         }

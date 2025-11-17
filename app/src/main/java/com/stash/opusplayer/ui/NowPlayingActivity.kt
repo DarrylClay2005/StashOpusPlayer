@@ -18,6 +18,8 @@ import com.bumptech.glide.Glide
 import com.google.common.util.concurrent.MoreExecutors
 import com.stash.opusplayer.R
 import com.stash.opusplayer.audio.EqualizerManager
+import com.stash.opusplayer.audio.AIAudioPresetManager
+import com.stash.opusplayer.audio.AudioPreset
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.databinding.ActivityNowPlayingBinding
 import com.stash.opusplayer.player.MusicPlayerManager
@@ -34,6 +36,7 @@ class NowPlayingActivity : AppCompatActivity() {
     private var mediaController: MediaController? = null
     private var musicPlayerManager: MusicPlayerManager? = null
     private lateinit var metadataExtractor: MetadataExtractor
+    private lateinit var aiPresetManager: AIAudioPresetManager
     
     private val progressHandler = Handler(Looper.getMainLooper())
     private var progressRunnable: Runnable? = null
@@ -71,27 +74,35 @@ class NowPlayingActivity : AppCompatActivity() {
         animateActivityEntrance()
         
         metadataExtractor = MetadataExtractor(this)
+        aiPresetManager = AIAudioPresetManager(this)
         
         // Apply appearance preferences to EnhancedSynthWave
         try {
             val appearancePrefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(this)
-            binding.enhancedSynthWaveView.applyAppearancePreferences(appearancePrefs)
-            
-            // Set up seek listener for EnhancedSynthWave progress line
-            binding.enhancedSynthWaveView.setOnSeekListener { seekPosition ->
-                mediaController?.let { controller ->
-                    if (controller.duration > 0) {
-                        val targetPosition = (seekPosition * controller.duration).toLong()
-                        controller.seekTo(targetPosition)
-                        showVisualFeedback("${formatTime(targetPosition)}")
+            binding.enhancedSynthWaveView?.let { synthWave ->
+                try {
+                    synthWave.applyAppearancePreferences(appearancePrefs)
+                    
+                    // Set up seek listener for EnhancedSynthWave progress line
+                    synthWave.setOnSeekListener { seekPosition ->
+                        mediaController?.let { controller ->
+                            if (controller.duration > 0) {
+                                val targetPosition = (seekPosition * controller.duration).toLong()
+                                controller.seekTo(targetPosition)
+                                showVisualFeedback("${formatTime(targetPosition)}")
+                            }
+                        }
                     }
+                } catch (e: Exception) {
+                    android.util.Log.e("NowPlayingActivity", "Error initializing EnhancedSynthWaveView", e)
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.w("NowPlayingActivity", "Error applying appearance preferences to EnhancedSynthWave", e)
+            android.util.Log.e("NowPlayingActivity", "Error applying appearance preferences to EnhancedSynthWave", e)
         }
         
         setupUI()
+        setupAIPresets()
         connectToMediaController()
         setupPlayerManager()
         
@@ -205,28 +216,85 @@ class NowPlayingActivity : AppCompatActivity() {
             mediaController?.seekToNext()
         }
         
-        binding.shuffleButton.setOnClickListener {
+        binding.shuffleButton.setOnClickListener { view ->
+            // Add visual feedback
+            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
+                .withEndAction {
+                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                }.start()
+            
             mediaController?.let { controller ->
-                val enabled = !controller.shuffleModeEnabled
-                controller.shuffleModeEnabled = enabled
-                updateShuffleButton(enabled)
-                // Persist shuffle state
-                try { getSharedPreferences("settings", 0).edit().putBoolean("playback_shuffle", enabled).apply() } catch (_: Exception) {}
+                try {
+                    val currentEnabled = controller.shuffleModeEnabled
+                    val newEnabled = !currentEnabled
+                    controller.shuffleModeEnabled = newEnabled
+                    
+                    // Immediately update UI to provide feedback
+                    updateShuffleButton(newEnabled)
+                    
+                    // Show visual feedback
+                    showVisualFeedback(if (newEnabled) "Shuffle ON" else "Shuffle OFF")
+                    
+                    // Persist shuffle state
+                    try { 
+                        getSharedPreferences("settings", 0).edit()
+                            .putBoolean("playback_shuffle", newEnabled)
+                            .apply() 
+                    } catch (_: Exception) {}
+                    
+                    android.util.Log.d("NowPlayingActivity", "Shuffle toggled: $currentEnabled -> $newEnabled")
+                } catch (e: Exception) {
+                    android.util.Log.e("NowPlayingActivity", "Error toggling shuffle", e)
+                    showVisualFeedback("Shuffle toggle failed")
+                }
+            } ?: run {
+                showVisualFeedback("Player not ready")
             }
         }
         
-        binding.repeatButton.setOnClickListener {
+        binding.repeatButton.setOnClickListener { view ->
+            // Add visual feedback
+            view.animate().scaleX(0.9f).scaleY(0.9f).setDuration(100)
+                .withEndAction {
+                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                }.start()
+            
             mediaController?.let { controller ->
-                val nextMode = when (controller.repeatMode) {
-                    Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
-                    Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
-                    else -> Player.REPEAT_MODE_OFF
+                try {
+                    val currentMode = controller.repeatMode
+                    val nextMode = when (currentMode) {
+                        Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                        Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                        else -> Player.REPEAT_MODE_OFF
+                    }
+                    controller.repeatMode = nextMode
+                    
+                    // Immediately update UI to provide feedback
+                    updateRepeatButton(nextMode)
+                    
+                    // Show visual feedback
+                    val modeName = when (nextMode) {
+                        Player.REPEAT_MODE_OFF -> "Repeat OFF"
+                        Player.REPEAT_MODE_ALL -> "Repeat ALL"
+                        Player.REPEAT_MODE_ONE -> "Repeat ONE"
+                        else -> "Repeat"
+                    }
+                    showVisualFeedback(modeName)
+                    
+                    // Persist repeat mode
+                    try { 
+                        getSharedPreferences("settings", 0).edit()
+                            .putInt("playback_repeat_mode", nextMode)
+                            .apply() 
+                    } catch (_: Exception) {}
+                    
+                    android.util.Log.d("NowPlayingActivity", "Repeat mode changed: $currentMode -> $nextMode")
+                } catch (e: Exception) {
+                    android.util.Log.e("NowPlayingActivity", "Error toggling repeat", e)
+                    showVisualFeedback("Repeat toggle failed")
                 }
-                controller.repeatMode = nextMode
-                updateRepeatButton(nextMode)
-                
-                // Persist repeat mode
-                try { getSharedPreferences("settings", 0).edit().putInt("playback_repeat_mode", nextMode).apply() } catch (_: Exception) {}
+            } ?: run {
+                showVisualFeedback("Player not ready")
             }
         }
 
@@ -407,6 +475,94 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
         binding.metadataBackButton.setOnClickListener { hideMetadataView() }
 
         // Audio controls have moved to Settings
+    }
+    
+    private fun setupAIPresets() {
+        val presets = aiPresetManager.getAllPresets()
+        
+        presets.forEach { preset ->
+            val button = com.google.android.material.button.MaterialButton(this).apply {
+                text = preset.name
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(8, 8, 8, 8)
+                }
+                setOnClickListener {
+                    applyAIPreset(preset)
+                }
+            }
+            binding.presetButtonContainer.addView(button)
+        }
+        
+        // Add "AI Suggest" button
+        val aiSuggestButton = com.google.android.material.button.MaterialButton(this).apply {
+            text = "🤖 AI Suggest"
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(8, 8, 8, 8)
+            }
+            setOnClickListener {
+                currentSong?.let { song ->
+                    lifecycleScope.launch {
+                        try {
+                            val suggested = aiPresetManager.analyzeAndSuggestPreset(song.path)
+                            suggested?.let { preset ->
+                                applyAIPreset(preset)
+                                showVisualFeedback("🤖 AI Suggested: ${preset.name}")
+                            }
+                        } catch (e: Exception) {
+                            showVisualFeedback("AI analysis failed")
+                        }
+                    }
+                }
+            }
+        }
+        binding.presetButtonContainer.addView(aiSuggestButton, 0) // Add at the beginning
+    }
+    
+    private fun applyAIPreset(preset: AudioPreset) {
+        try {
+            // Apply EQ bands
+            preset.eqBands.forEachIndexed { index, level ->
+                mediaController?.sendCustomCommand(
+                    androidx.media3.session.SessionCommand("SET_EQ_BAND", android.os.Bundle.EMPTY),
+                    bundleOf("band" to index, "level" to level)
+                )
+            }
+            
+            // Apply reverb preset
+            mediaController?.sendCustomCommand(
+                androidx.media3.session.SessionCommand("SET_REVERB", android.os.Bundle.EMPTY),
+                bundleOf("preset" to preset.reverbPreset)
+            )
+            
+            // Apply bass boost
+            mediaController?.sendCustomCommand(
+                androidx.media3.session.SessionCommand("SET_BASS_BOOST", android.os.Bundle.EMPTY),
+                bundleOf("strength" to preset.bassBoost)
+            )
+            
+            // Apply virtualizer
+            mediaController?.sendCustomCommand(
+                androidx.media3.session.SessionCommand("SET_VIRTUALIZER", android.os.Bundle.EMPTY),
+                bundleOf("strength" to preset.virtualizer)
+            )
+            
+            // Enable equalizer (this will auto-enable from the SET_EQ_BAND, SET_BASS_BOOST, SET_VIRTUALIZER commands)
+            mediaController?.sendCustomCommand(
+                androidx.media3.session.SessionCommand("SET_EQ_ENABLED", android.os.Bundle.EMPTY),
+                bundleOf("enabled" to true)
+            )
+            
+            showVisualFeedback("✨ Applied ${preset.name}")
+        } catch (e: Exception) {
+            android.util.Log.e("NowPlayingActivity", "Error applying AI preset", e)
+            showVisualFeedback("Failed to apply preset")
+        }
     }
     
     private fun showReplayGainBadgeIfEnabled() {
@@ -758,16 +914,16 @@ else -> com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActi
                             0 // Fall back to global session
                         }
                     } ?: 0
-                    binding.enhancedSynthWaveView.setAudioSession(audioSessionId)
+                    binding.enhancedSynthWaveView?.setAudioSession(audioSessionId)
                 }
             } catch (e: Exception) {
-                android.util.Log.w("NowPlayingActivity", "Could not connect EnhancedSynthWave to audio session", e)
+                android.util.Log.e("NowPlayingActivity", "Could not connect EnhancedSynthWave to audio session", e)
             }
         }, MoreExecutors.directExecutor())
     }
     
     private fun setupPlayerManager() {
-        musicPlayerManager = (application as com.stash.opusplayer.StashWaveApplication).playerManager
+        musicPlayerManager = ((application as? com.stash.opusplayer.RevolutionaryApplication) ?: (application as com.stash.opusplayer.RevolutionaryApplication)).playerManager
         
         // Observe player state changes (shared manager)
         lifecycleScope.launch {
@@ -936,16 +1092,8 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
             val title = controller.mediaMetadata.title?.toString() ?: return
             val artist = controller.mediaMetadata.artist?.toString() ?: ""
             val album = controller.mediaMetadata.albumTitle?.toString() ?: ""
-            val fakeSong = com.stash.opusplayer.data.Song(
-                id = 0L,
-                title = title,
-                artist = artist,
-                album = album,
-                duration = controller.duration.takeIf { it > 0 } ?: 0L,
-                path = ""
-            )
-            val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
-            val bmp = cache.loadBitmapIfPresent(fakeSong, 512)
+            val identifier = title.ifBlank { "$artist-$album" }
+            val bmp = com.stash.opusplayer.utils.MetadataStorageManager.loadArtworkBitmap(this, identifier)
             if (bmp != null) {
                 Glide.with(this)
                     .load(bmp)
@@ -1035,7 +1183,7 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
                     
                     // Update EnhancedSynthWave progress
                     try {
-                        binding.enhancedSynthWaveView.updateProgress(currentPos, duration)
+                        binding.enhancedSynthWaveView?.updateProgress(currentPos, duration)
                     } catch (e: Exception) {
                         android.util.Log.w("NowPlayingActivity", "Error updating EnhancedSynthWave progress", e)
                     }
@@ -1088,7 +1236,7 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
     }
     
     private fun showQueueDialog() {
-        val mgr = (application as? com.stash.opusplayer.StashWaveApplication)?.playerManager
+        val mgr = (application as? com.stash.opusplayer.RevolutionaryApplication)?.playerManager
         val list = mgr?.playlist?.value ?: emptyList()
         if (list.isEmpty()) {
             showVisualFeedback("Queue is empty")

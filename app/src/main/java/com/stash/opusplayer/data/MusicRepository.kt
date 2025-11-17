@@ -167,12 +167,21 @@ private fun isValidAudioFile(path: String): Boolean {
             return true
         }
         val extension = path.substringAfterLast(".", "").lowercase()
-        // Accept all common audio file extensions
+        // Accept all common audio file extensions including modern codecs
         return extension in setOf(
-            "mp3", "opus", "ogg", "oga", "flac", "m4a", "aac", "wav", "wma", "mka",
-            "mp4", "3gp", "webm", "mkv", "wv", "ape", "mpc", "ac3", "dts", "tta",
-            "ra", "rm", "amr", "awb", "au", "snd", "aiff", "aifc", "caf", "mp2",
-            "m4p", "m4b", "3g2", "asf", "wma", "wmv"
+            // Lossy formats
+            "mp3", "opus", "ogg", "oga", "m4a", "aac", "mp2", "wma", "webm",
+            // Lossless formats
+            "flac", "wav", "ape", "wv", "tta", "aiff", "aifc", "alac",
+            // Container formats that may contain audio
+            "mp4", "mkv", "mka", "3gp", "3g2", "asf", "wmv", "caf",
+            // Less common/legacy formats
+            "mpc", "ac3", "dts", "ra", "rm", "amr", "awb", "au", "snd",
+            "m4p", "m4b", "mp1", "mp2", "mpa", "mpga",
+            // Module/tracker formats (if supported)
+            "mod", "s3m", "xm", "it",
+            // Speech/voice formats
+            "spx", "speex"
         )
     }
     
@@ -283,10 +292,18 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
             path = song.path
         )
         favoriteDao.insertFavorite(favorite)
+        // Push to cloud (best-effort)
+        try {
+            com.stash.opusplayer.cloud.CloudFavoritesRepository.pushFavorites(context, favoriteDao)
+        } catch (_: Exception) {}
     }
     
     suspend fun removeFromFavorites(songId: Long) {
         favoriteDao.deleteFavoriteById(songId)
+        // Push to cloud (best-effort)
+        try {
+            com.stash.opusplayer.cloud.CloudFavoritesRepository.pushFavorites(context, favoriteDao)
+        } catch (_: Exception) {}
     }
     
     suspend fun isFavorite(songId: Long): Boolean {

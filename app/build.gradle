@@ -2,7 +2,7 @@ plugins {
     id 'com.android.application'
     id 'kotlin-android'
     id 'kotlin-parcelize'
-    id 'org.jetbrains.kotlin.kapt'
+    id 'com.google.devtools.ksp'
 }
 
 // Enable Google Play publishing plugin
@@ -34,9 +34,27 @@ android {
         versionCode 146
         versionName "13.2.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        
-        // Inject YouTube API key into BuildConfig
-        buildConfigField "String", "YOUTUBE_API_KEY", "\"${youtubeApiKey}\""
+
+        // Limit native ABIs to reduce size (TFLite native libs)
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
+
+        // Inject YouTube API key into BuildConfig (empty by default, overridden in debug)
+        buildConfigField "String", "YOUTUBE_API_KEY", "\"\""
+    }
+
+    // API level flavors to allow a minSdk 24 debug build without changing global minSdk
+    flavorDimensions "api"
+    productFlavors {
+        min21 {
+            dimension "api"
+            minSdk 21
+        }
+        min24 {
+            dimension "api"
+            minSdk 24
+        }
     }
 
     // Load release keystore from local.properties if available
@@ -68,6 +86,8 @@ android {
             minifyEnabled false
             shrinkResources false
             signingConfig signingConfigs.debug
+            // Provide API key only in debug builds
+            buildConfigField "String", "YOUTUBE_API_KEY", "\"${youtubeApiKey}\""
         }
         
         release {
@@ -86,6 +106,8 @@ android {
                 // Fallback: sign release with debug keystore to avoid invalid package installs
                 signingConfig signingConfigs.debug
             }
+            // Ensure no API key is embedded in release
+            buildConfigField "String", "YOUTUBE_API_KEY", "\"\""
         }
         
         // Beta build variant for testing
@@ -100,16 +122,15 @@ android {
     }
     
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
-        incremental true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
     
     kotlinOptions {
-        jvmTarget = '1.8'
+        jvmTarget = '17'
         freeCompilerArgs += [
             '-Xjsr305=strict',
-            '-Xopt-in=kotlin.RequiresOptIn'
+            '-opt-in=kotlin.RequiresOptIn'
         ]
     }
     
@@ -122,14 +143,8 @@ android {
     lint {
         abortOnError false
         checkReleaseBuilds false
-        // Disable lint checks that are not critical for performance
-        disable 'UnusedResources', 'IconMissingDensityFolder'
-    }
-    
-    // Performance optimizations for build
-    dexOptions {
-        javaMaxHeapSize "4g"
-        preDexLibraries = true
+        // Re-enable checks for better feedback during development
+        // (kept non-fatal)
     }
     
     
@@ -139,6 +154,25 @@ android {
         exclude 'META-INF/LICENSE.txt'
         exclude 'META-INF/NOTICE'
         exclude 'META-INF/NOTICE.txt'
+    }
+
+        // Room KSP arguments (schema export & incremental)
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
+        arg("room.incremental", "true")
+        arg("room.expandProjection", "true")
+    }
+    // Disable min21 debug in legacy variantFilter (kept for compatibility)
+}
+
+// AGP 8+ preferred variant API to disable min21 debug at configuration time
+androidComponents {
+    beforeVariants(selector().all()) { builder ->
+        def isDebug = builder.buildType == "debug"
+        def hasMin21 = builder.productFlavors.any { it.second == "min21" }
+        if (isDebug && hasMin21) {
+            builder.enable = false
+        }
     }
 }
 
@@ -157,6 +191,15 @@ play {
 }
 
 dependencies {
+    // BOMs
+    implementation platform('com.squareup.okhttp3:okhttp-bom:4.11.0')
+    implementation platform('com.squareup.retrofit2:retrofit-bom:2.11.0')
+    // AWS Amplify (requires minSdk 24) — restrict to min24 flavor
+    min24Implementation 'com.amplifyframework:core:2.18.0'
+    min24Implementation 'com.amplifyframework:aws-auth-cognito:2.18.0'
+    min24Implementation 'com.amplifyframework:aws-storage-s3:2.18.0'
+    min24Implementation 'com.amplifyframework:aws-api:2.18.0'
+
     // Glide transformations for blurred backdrops, etc.
     implementation 'jp.wasabeef:glide-transformations:4.3.0'
     // MP3 tag editing (used for embedding artwork into MP3 files)
@@ -173,11 +216,11 @@ dependencies {
     implementation 'androidx.navigation:navigation-ui-ktx:2.7.5'
     
     // Media playback
-    implementation 'androidx.media3:media3-exoplayer:1.2.0'
-    implementation 'androidx.media3:media3-exoplayer-dash:1.2.0'
-    implementation 'androidx.media3:media3-ui:1.2.0'
-    implementation 'androidx.media3:media3-common:1.2.0'
-    implementation 'androidx.media3:media3-session:1.2.0'
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-exoplayer-dash:1.4.1'
+    implementation 'androidx.media3:media3-ui:1.4.1'
+    implementation 'androidx.media3:media3-common:1.4.1'
+    implementation 'androidx.media3:media3-session:1.4.1'
     
     // Media library for notifications
     implementation 'androidx.media:media:1.7.0'
@@ -188,14 +231,14 @@ dependencies {
     // Image loading
     implementation 'com.github.bumptech.glide:glide:4.16.0'
     
-    // Networking for update checker
-    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
-    implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
-    implementation 'com.squareup.okhttp3:logging-interceptor:4.11.0'
+    // Networking for update checker (managed by BOMs)
+    implementation 'com.squareup.retrofit2:retrofit'
+    implementation 'com.squareup.retrofit2:converter-gson'
+    implementation 'com.squareup.okhttp3:logging-interceptor'
     implementation 'com.google.code.gson:gson:2.10.1'
 
-    // Networking for online artwork
-    implementation 'com.squareup.okhttp3:okhttp:4.11.0'
+    // Networking for online artwork (managed by BOM)
+    implementation 'com.squareup.okhttp3:okhttp'
     
     // YouTube Data API and video downloading
     implementation 'com.google.apis:google-api-services-youtube:v3-rev20220719-2.0.0'
@@ -207,9 +250,6 @@ dependencies {
     
     // YouTube Player for direct streaming
     implementation 'com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0'
-    
-    // Additional HTTP client for downloads
-    implementation 'com.squareup.okhttp3:okhttp:4.11.0'
     
     // JSON parsing
     implementation 'org.json:json:20230618'
@@ -229,6 +269,9 @@ dependencies {
     // WorkManager for background rescans
     implementation 'androidx.work:work-runtime-ktx:2.9.1'
     
+    // Timber logging
+    implementation 'com.jakewharton.timber:timber:5.0.1'
+    
     // CardView (used in mini player layout)
     implementation 'androidx.cardview:cardview:1.0.0'
     
@@ -238,25 +281,22 @@ dependencies {
     // Fragment
     implementation 'androidx.fragment:fragment-ktx:1.6.2'
     
-    // Room database
+    // Room database (migrated to KSP)
     implementation 'androidx.room:room-runtime:2.6.1'
     implementation 'androidx.room:room-ktx:2.6.1'
-    kapt 'androidx.room:room-compiler:2.6.1'
+    ksp 'androidx.room:room-compiler:2.6.1'
     
     // Lifecycle components
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'
     implementation 'androidx.lifecycle:lifecycle-livedata-ktx:2.7.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
+
+    // Coroutines for lifecycleScope/Dispatchers/withContext
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
     
-    // AWS SDK for DynamoDB
-    implementation 'com.amazonaws:aws-android-sdk-core:2.77.0'
-    implementation 'com.amazonaws:aws-android-sdk-ddb:2.77.0'
-    implementation 'com.amazonaws:aws-android-sdk-ddb-mapper:2.77.0'
-    implementation 'com.amazonaws:aws-android-sdk-auth-core:2.77.0'
-    implementation 'com.amazonaws:aws-android-sdk-auth-userpools:2.77.0'
-    
-    // AWS SDK additional dependencies
-    implementation 'com.amazonaws:aws-android-sdk-cognitoidentityprovider:2.77.0'
+    // TensorFlow Lite for AI audio analysis
+    implementation 'org.tensorflow:tensorflow-lite:2.14.0'
+    implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
     
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'

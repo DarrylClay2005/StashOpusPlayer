@@ -18,11 +18,12 @@
         android:padding="12dp">
 
         <ImageView
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:id="@+id/folderIcon"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
             android:layout_gravity="center_horizontal"
+            android:scaleType="centerCrop"
             android:src="@drawable/ic_folder"
-            android:tint="@color/secondary_color"
             android:contentDescription="Folder" />
 
         <TextView

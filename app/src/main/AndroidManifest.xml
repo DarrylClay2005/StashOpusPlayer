@@ -32,6 +32,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
@@ -41,8 +42,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:targetApi="33" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
-    <application
-        android:name=".StashWaveApplication"
+<application
+        android:name=".RevolutionaryApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -52,6 +53,11 @@
         android:usesCleartextTraffic="true"
         tools:targetApi="31">
         
+        <activity
+            android:name=".ui.LoginActivity"
+            android:exported="false"
+            android:theme="@style/Theme.StashWavePlayer" />
+
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
@@ -102,6 +108,13 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </service>
+        
+        <!-- Revolutionary 8D Audio Service -->
+        <service
+            android:name=".audio.service.Revolutionary8DAudioService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <!-- Home screen widget provider -->
         <receiver

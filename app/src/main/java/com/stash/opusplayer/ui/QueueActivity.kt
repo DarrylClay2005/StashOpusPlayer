@@ -19,7 +19,7 @@ class QueueActivity : AppCompatActivity() {
     private lateinit var titleText: TextView
     private var adapter = QueueAdapter { index ->
         try {
-            val mgr = (application as com.stash.opusplayer.StashWaveApplication).playerManager
+            val mgr = ((application as? com.stash.opusplayer.RevolutionaryApplication) ?: (application as com.stash.opusplayer.RevolutionaryApplication)).playerManager
             mgr.playFromPlaylist(index)
             finish()
         } catch (_: Exception) {}
@@ -45,20 +45,20 @@ class QueueActivity : AppCompatActivity() {
                 val from = vh.bindingAdapterPosition
                 val to = target.bindingAdapterPosition
                 adapter.onItemMoved(from, to)
-                val mgr = (application as com.stash.opusplayer.StashWaveApplication).playerManager
+                val mgr = ((application as? com.stash.opusplayer.RevolutionaryApplication) ?: (application as com.stash.opusplayer.RevolutionaryApplication)).playerManager
                 mgr.moveItem(from, to)
                 return true
             }
             override fun onSwiped(vh: RecyclerView.ViewHolder, dir: Int) {
                 val pos = vh.bindingAdapterPosition
-                val mgr = (application as com.stash.opusplayer.StashWaveApplication).playerManager
+                val mgr = ((application as? com.stash.opusplayer.RevolutionaryApplication) ?: (application as com.stash.opusplayer.RevolutionaryApplication)).playerManager
                 mgr.removeItem(pos)
             }
             override fun isLongPressDragEnabled(): Boolean = true
         })
         touchHelper.attachToRecyclerView(recycler)
 
-        val mgr = (application as com.stash.opusplayer.StashWaveApplication).playerManager
+        val mgr = ((application as? com.stash.opusplayer.RevolutionaryApplication) ?: (application as com.stash.opusplayer.RevolutionaryApplication)).playerManager
         lifecycleScope.launch {
             mgr.playlist.collectLatest { list ->
                 adapter.submit(list, mgr.currentIndex.value)

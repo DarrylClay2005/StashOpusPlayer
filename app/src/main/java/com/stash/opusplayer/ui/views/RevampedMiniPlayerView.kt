@@ -15,6 +15,7 @@ import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.bumptech.glide.Glide
@@ -30,6 +31,7 @@ import com.stash.opusplayer.ui.appearance.VisualCustomizationManager
 import com.stash.opusplayer.utils.AnimationUtils
 import com.stash.opusplayer.data.Song
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import kotlin.math.*
 
 /**
@@ -59,6 +61,7 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
     private var isPlaying = false
     private var currentPosition = 0L
     private var duration = 0L
+    private val observationJobs = mutableListOf<Job>()
 
     // Gesture handling
     private var startX = 0f
@@ -90,6 +93,7 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
         setupUI()
         setupGestureHandling()
         setupAnimations()
+        applyAppearancePreferences()
     }
 
     private fun setupUI() {
@@ -356,35 +360,50 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
     fun setMusicPlayerManager(manager: MusicPlayerManager) {
         this.musicPlayerManager = manager
         
+        // Cancel any existing observation jobs
+        observationJobs.forEach { it.cancel() }
+        observationJobs.clear()
+        
+        val lifecycleOwner = findViewTreeLifecycleOwner() ?: return
+        
         // Observe player state
-        findViewTreeLifecycleOwner()?.lifecycleScope?.launch {
-            manager.isPlaying.collect { playing ->
-                updatePlayingState(playing)
+        lifecycleOwner.lifecycleScope.launch {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                manager.isPlaying.collect { playing ->
+                    updatePlayingState(playing)
+                }
             }
-        }
+        }.also { observationJobs.add(it) }
         
-        findViewTreeLifecycleOwner()?.lifecycleScope?.launch {
-            manager.currentSong.collect { song ->
-                updateCurrentSong(song)
+        lifecycleOwner.lifecycleScope.launch {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                manager.currentSong.collect { song ->
+                    updateCurrentSong(song)
+                }
             }
-        }
+        }.also { observationJobs.add(it) }
         
-        findViewTreeLifecycleOwner()?.lifecycleScope?.launch {
-            manager.currentPosition.collect { position ->
-                updatePosition(position)
+        lifecycleOwner.lifecycleScope.launch {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                manager.currentPosition.collect { position ->
+                    updatePosition(position)
+                }
             }
-        }
+        }.also { observationJobs.add(it) }
         
         // Update duration periodically since it's not a flow
-        findViewTreeLifecycleOwner()?.lifecycleScope?.launch {
-            while (true) {
-                val dur = manager.getDuration()
-                if (dur > 0 && dur != duration) {
-                    updateDuration(dur)
+        // Use repeatOnLifecycle to automatically cancel when view is not visible
+        lifecycleOwner.lifecycleScope.launch {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                while (true) {
+                    val dur = manager.getDuration()
+                    if (dur > 0 && dur != duration) {
+                        updateDuration(dur)
+                    }
+                    kotlinx.coroutines.delay(1000) // Check every second
                 }
-                kotlinx.coroutines.delay(1000) // Check every second
             }
-        }
+        }.also { observationJobs.add(it) }
     }
 
     fun setSpectrumData(spectrum: FloatArray) {
@@ -439,9 +458,19 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
             binding.trackTitle.text = song.displayName
             binding.trackArtist.text = song.artistName
             
+            // Apply visibility preferences
+            applyAppearancePreferences()
+            
             // Load album art with rounded corners and placeholder
+            // Handle null or empty album art gracefully
+            val artworkData = if (song.albumArt.isNullOrBlank()) {
+                android.R.drawable.ic_media_play
+            } else {
+                song.albumArt
+            }
+            
             Glide.with(context)
-                .load(song.albumArt)
+                .load(artworkData)
                 .transform(RoundedCorners(24))
                 .placeholder(android.R.drawable.ic_media_play)
                 .error(android.R.drawable.ic_media_play)
@@ -452,7 +481,7 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
                         target: Target<Drawable>, 
                         isFirstResource: Boolean
                     ): Boolean {
-                        Log.w(TAG, "Failed to load album art", e)
+                        Log.d(TAG, "Using placeholder for album art")
                         return false
                     }
                     
@@ -496,6 +525,10 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        // Cancel all coroutines observing player state
+        observationJobs.forEach { it.cancel() }
+        observationJobs.clear()
+        // Cancel animations
         progressAnimator?.cancel()
         pulseAnimator?.cancel()
         albumArtRotationAnimator?.cancel()
@@ -506,5 +539,62 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
     private fun setupCustomDrawing() {
         binding.visualizerView.setWillNotDraw(false)
         // Custom drawing is handled in the visualizer view's onDraw override
+    }
+    
+    /**
+     * Apply appearance preferences from settings
+     */
+    fun applyAppearancePreferences() {
+        try {
+            val prefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(context)
+            
+            // Show/hide album art
+            binding.albumArtContainer.visibility = if (prefs.miniPlayerShowArt) View.VISIBLE else View.GONE
+            
+            // Show/hide artist
+            binding.trackArtist.visibility = if (prefs.miniPlayerShowArtist) View.VISIBLE else View.GONE
+            
+            // Apply compact mode
+            if (prefs.miniPlayerCompactMode) {
+                // Reduce padding and text sizes for compact mode
+                binding.trackTitle.textSize = 12f
+                binding.trackArtist.textSize = 10f
+                binding.miniPlayerCard.apply {
+                    setPadding(8, 4, 8, 4)
+                    cardElevation = 8f
+                }
+            } else {
+                // Normal mode
+                binding.trackTitle.textSize = 14f
+                binding.trackArtist.textSize = 12f
+                binding.miniPlayerCard.apply {
+                    setPadding(12, 8, 12, 8)
+                    cardElevation = 12f
+                }
+            }
+            
+            // Apply bottom margin offset
+            val bottomOffset = context.getSharedPreferences("settings", 0)
+                .getInt("miniplayer_bottom_offset", 72)
+            
+            // Null-safe layout parameter handling with fallback
+            (layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let { params ->
+                params.bottomMargin = (bottomOffset * resources.displayMetrics.density).toInt()
+                layoutParams = params
+            } ?: run {
+                // Fallback: create new MarginLayoutParams if cast fails
+                val newParams = android.view.ViewGroup.MarginLayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (bottomOffset * resources.displayMetrics.density).toInt()
+                }
+                layoutParams = newParams
+            }
+            
+            requestLayout()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error applying appearance preferences", e)
+        }
     }
 }

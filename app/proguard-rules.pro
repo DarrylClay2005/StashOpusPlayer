@@ -70,6 +70,10 @@
 -dontwarn org.apache.commons.**
 -dontwarn org.apache.http.**
 
+# Keep Amplify classes (reflection-heavy)
+-keep class com.amplifyframework.** { *; }
+-dontwarn com.amplifyframework.**
+
 # Keep cloud service classes
 -keep class com.stash.opusplayer.cloud.** { *; }
 
@@ -87,6 +91,14 @@
 # YouTube API
 -keep class com.google.api.** { *; }
 -dontwarn com.google.api.**
+
+# TFLite
+-keep class org.tensorflow.** { *; }
+-dontwarn org.tensorflow.**
+
+# youtubedl-android
+-keep class com.yausername.** { *; }
+-dontwarn com.yausername.**
 
 # ===== PERMISSIONS AND SYSTEM =====
 # Keep permission handling

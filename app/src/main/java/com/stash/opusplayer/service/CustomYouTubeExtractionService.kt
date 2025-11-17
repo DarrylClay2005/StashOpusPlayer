@@ -439,10 +439,7 @@ class CustomYouTubeExtractionService(private val context: Context) {
             }
             
             // Handle the downloaded file
-            val responseBody = response.body
-            if (responseBody == null) {
-                throw Exception("Empty response from multi-platform service")
-            }
+            val responseBody = response.body // Non-null in OkHttp
             
             // Save the downloaded audio to specified directory
             val outputFile = File(outputDir, "audio_${System.currentTimeMillis()}.$format")

@@ -86,7 +86,8 @@ val metadataExtractor = com.stash.opusplayer.utils.MetadataExtractor(requireCont
             onPlayNext = { song -> (activity as? MainActivity)?.playNext(song) },
             onAddToQueue = { song -> (activity as? MainActivity)?.addToQueueTail(song) },
             onShowFeedback = { message -> (activity as? MainActivity)?.showPlayingBanner(message) },
-            metadataExtractor = metadataExtractor
+            metadataExtractor = metadataExtractor,
+            lifecycleScope = viewLifecycleOwner.lifecycleScope
         )
         
         binding.recyclerView.adapter = songAdapter
@@ -293,6 +294,149 @@ val favoritesFragment = com.stash.opusplayer.ui.fragments.FavoritesFragment()
                 
                 // Show results count via parent activity
                 (activity as? MainActivity)?.showPlayingBanner("Found ${filteredSongs.size} song${if (filteredSongs.size != 1) "s" else ""}")
+            }
+        }
+    }
+    
+    private fun searchFolders(query: String) {
+        // Show loading state
+        binding.emptyStateText.text = "Searching folders..."
+        binding.emptyStateContainer.visibility = View.VISIBLE
+        binding.recyclerView.visibility = View.GONE
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            kotlinx.coroutines.delay(300)
+            
+            try {
+                // Get all unique folder paths from songs, checking both path and relativePath
+                val folderPaths = mutableSetOf<String>()
+                
+                allSongs.forEach { song ->
+                    // Check file system path
+                    if (song.path.startsWith("/")) {
+                        java.io.File(song.path).parentFile?.absolutePath?.let { folderPaths.add(it) }
+                    }
+                    
+                    // Also check relativePath which might contain folder structure
+                    if (song.relativePath.isNotBlank()) {
+                        // relativePath is like "Music/Artist/Album/" or "Download/MLP/"
+                        val pathParts = song.relativePath.trim('/').split('/')
+                        // Build cumulative paths
+                        var cumulative = ""
+                        pathParts.forEach { part ->
+                            cumulative = if (cumulative.isEmpty()) part else "$cumulative/$part"
+                            folderPaths.add(cumulative)
+                        }
+                    }
+                }
+                
+                // Filter folders that match the query - check all parts of the path
+                val matchingFolders = folderPaths.filter { folderPath ->
+                    // Split path and check if any component matches
+                    val pathComponents = folderPath.split('/')
+                    pathComponents.any { component -> 
+                        component.contains(query, ignoreCase = true)
+                    }
+                }.toList()
+                
+                if (matchingFolders.isEmpty()) {
+                    binding.recyclerView.visibility = View.GONE
+                    binding.emptyStateText.text = "No folders found matching \"$query\""
+                    binding.emptyStateContainer.visibility = View.VISIBLE
+                    (activity as? MainActivity)?.showPlayingBanner("No folders found")
+                } else {
+                    // Show folders as a list - navigate to first folder or show selection
+                    if (matchingFolders.size == 1) {
+                        // Single folder - navigate directly
+                        navigateToFolder(matchingFolders[0])
+                    } else {
+                        // Multiple folders - show selection dialog
+                        showFolderSelectionDialog(matchingFolders, query)
+                    }
+                }
+            } catch (e: Exception) {
+                binding.recyclerView.visibility = View.GONE
+                binding.emptyStateText.text = "Error searching folders"
+                binding.emptyStateContainer.visibility = View.VISIBLE
+                (activity as? MainActivity)?.showPlayingBanner("Error: ${e.message}")
+            }
+        }
+    }
+    
+    private fun showFolderSelectionDialog(folders: List<String>, query: String) {
+        // Display the last component or full relative path for better readability
+        val folderDisplayNames = folders.map { path ->
+            if (path.startsWith("/")) {
+                java.io.File(path).name
+            } else {
+                path // Show relative path as-is
+            }
+        }.toTypedArray()
+        
+        AlertDialog.Builder(requireContext())
+            .setTitle("Select Folder (${folders.size} matches for \"$query\")")
+            .setItems(folderDisplayNames) { _, which ->
+                navigateToFolder(folders[which])
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                // Reset view
+                binding.recyclerView.visibility = View.VISIBLE
+                binding.emptyStateContainer.visibility = View.GONE
+                songAdapter.submitList(allSongs)
+            }
+            .show()
+    }
+    
+    private fun navigateToFolder(folderPath: String) {
+        (activity as? MainActivity)?.showPlayingBanner("Loading folder...")
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                // Filter songs that match this folder path
+                val folderSongs = if (folderPath.startsWith("/")) {
+                    // Absolute path - use repository method which includes metadata
+                    withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        musicRepository.getSongsInFolder(folderPath)
+                    }
+                } else {
+                    // Relative path - filter by relativePath or path containing this
+                    // These songs are from allSongs which may already have metadata
+                    allSongs.filter { song ->
+                        song.relativePath.contains(folderPath, ignoreCase = true) ||
+                        song.path.contains(folderPath, ignoreCase = true)
+                    }
+                }
+                
+                val folderName = if (folderPath.startsWith("/")) {
+                    java.io.File(folderPath).name
+                } else {
+                    folderPath.substringAfterLast('/').ifEmpty { folderPath }
+                }
+                
+                if (folderSongs.isEmpty()) {
+                    binding.recyclerView.visibility = View.GONE
+                    binding.emptyStateText.text = "No songs in folder \"$folderName\""
+                    binding.emptyStateContainer.visibility = View.VISIBLE
+                    (activity as? MainActivity)?.showPlayingBanner("Folder is empty")
+                } else {
+                    // Navigate to folder detail fragment
+                    // ArtistSongsFragment will handle artwork display via SongAdapter
+                    val fragment = com.stash.opusplayer.ui.fragments.ArtistSongsFragment.newInstance(
+                        folderName,
+                        ArrayList(folderSongs)
+                    )
+                    parentFragmentManager.beginTransaction()
+                        .replace(R.id.main_content, fragment)
+                        .addToBackStack(null)
+                        .commit()
+                    
+                    (activity as? MainActivity)?.showPlayingBanner("${folderSongs.size} songs in \"$folderName\"")
+                }
+            } catch (e: Exception) {
+                binding.recyclerView.visibility = View.GONE
+                binding.emptyStateText.text = "Error loading folder"
+                binding.emptyStateContainer.visibility = View.VISIBLE
+                (activity as? MainActivity)?.showPlayingBanner("Error: ${e.message}")
             }
         }
     }

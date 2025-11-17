@@ -67,7 +67,8 @@ class FavoritesFragment : Fragment() {
             onPlayNext = { song -> (activity as? MainActivity)?.playNext(song) },
             onAddToQueue = { song -> (activity as? MainActivity)?.addToQueueTail(song) },
             onShowFeedback = { message -> (activity as? MainActivity)?.showPlayingBanner(message) },
-            metadataExtractor = metadataExtractor
+            metadataExtractor = metadataExtractor,
+            lifecycleScope = viewLifecycleOwner.lifecycleScope
         )
         
         binding.recyclerView.apply {

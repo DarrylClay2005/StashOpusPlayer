@@ -190,6 +190,25 @@
             android:visibility="gone"
             tools:text="ReplayGain: -5.2 dB" />
 
+        <!-- 8D Audio Active Badge -->
+        <TextView
+            android:id="@+id/audio8dActiveBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:paddingTop="5dp"
+            android:paddingBottom="5dp"
+            android:layout_gravity="center"
+            android:background="@drawable/ai_recommendation_background"
+            android:textColor="@color/accent_color"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            android:text="🎵 8D Audio Active"
+            tools:visibility="visible" />
+
     </LinearLayout>
 
     <!-- Progress container -->
@@ -414,6 +433,41 @@
                     android:contentDescription="Show Metadata"
                     android:src="@drawable/ic_text_bubble_24"
                     android:tint="@color/text_primary" />
+
+            </LinearLayout>
+
+            <!-- AI Preset Controls -->
+            <LinearLayout
+                android:id="@+id/aiPresetContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="AI Audio Presets"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginBottom="12dp" />
+
+                <HorizontalScrollView
+                    android:id="@+id/presetScrollView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none">
+
+                    <LinearLayout
+                        android:id="@+id/presetButtonContainer"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:padding="4dp" />
+
+                </HorizontalScrollView>
 
             </LinearLayout>
 

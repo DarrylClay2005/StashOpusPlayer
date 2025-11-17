@@ -13,5 +13,5 @@
 - app/build.gradle: versionCode 146, versionName 13.2.1
 
 Artifacts built on external drive:
-- Debug APK: /run/media/liveuser/Steam_Recordings/StashOpusPlayer-build/app/outputs/apk/debug/app-debug.apk
-- Release APK: /run/media/liveuser/Steam_Recordings/StashOpusPlayer-build/app/outputs/apk/release/app-release.apk
+- Debug APK: /run/media/desmond/Steam_Recordings/StashOpusPlayer-build/app/outputs/apk/debug/app-debug.apk
+- Release APK: /run/media/desmond/Steam_Recordings/StashOpusPlayer-build/app/outputs/apk/release/app-release.apk

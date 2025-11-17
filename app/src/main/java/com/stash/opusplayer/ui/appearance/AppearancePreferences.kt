@@ -9,11 +9,11 @@ import org.json.JSONObject
 
 data class AppearancePreferences(
     // Colors
-    val primaryColor: Int = 0xFF4A5568.toInt(),
-    val accentColor: Int = 0xFFEC407A.toInt(),
-    val backgroundColor: Int = 0xFF2D3748.toInt(),
-    val textPrimaryColor: Int = 0xFFF7FAFC.toInt(),
-    val textSecondaryColor: Int = 0xFFCBD5E0.toInt(),
+    val primaryColor: Int = 0xFF6366F1.toInt(),  // Indigo
+    val accentColor: Int = 0xFF8B5CF6.toInt(),  // Purple  
+    val backgroundColor: Int = 0xFF1F2937.toInt(),  // Dark gray (not purple)
+    val textPrimaryColor: Int = 0xFFF9FAFB.toInt(),
+    val textSecondaryColor: Int = 0xFFD1D5DB.toInt(),
     
     // Typography
     val fontScale: Float = 1.0f,
@@ -75,11 +75,11 @@ data class AppearancePreferences(
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             
             return AppearancePreferences(
-                primaryColor = prefs.getInt(PrefsKeys.APPEARANCE_PRIMARY_COLOR, 0xFF4A5568.toInt()),
-                accentColor = prefs.getInt(PrefsKeys.APPEARANCE_ACCENT_COLOR, 0xFFEC407A.toInt()),
-                backgroundColor = prefs.getInt(PrefsKeys.APPEARANCE_BACKGROUND_COLOR, 0xFF2D3748.toInt()),
-                textPrimaryColor = prefs.getInt(PrefsKeys.APPEARANCE_TEXT_PRIMARY_COLOR, 0xFFF7FAFC.toInt()),
-                textSecondaryColor = prefs.getInt(PrefsKeys.APPEARANCE_TEXT_SECONDARY_COLOR, 0xFFCBD5E0.toInt()),
+                primaryColor = prefs.getInt(PrefsKeys.APPEARANCE_PRIMARY_COLOR, 0xFF6366F1.toInt()),
+                accentColor = prefs.getInt(PrefsKeys.APPEARANCE_ACCENT_COLOR, 0xFF8B5CF6.toInt()),
+                backgroundColor = prefs.getInt(PrefsKeys.APPEARANCE_BACKGROUND_COLOR, 0xFF1F2937.toInt()),
+                textPrimaryColor = prefs.getInt(PrefsKeys.APPEARANCE_TEXT_PRIMARY_COLOR, 0xFFF9FAFB.toInt()),
+                textSecondaryColor = prefs.getInt(PrefsKeys.APPEARANCE_TEXT_SECONDARY_COLOR, 0xFFD1D5DB.toInt()),
                 
                 fontScale = prefs.getFloat(PrefsKeys.APPEARANCE_FONT_SCALE, 1.0f).coerceIn(0.85f, 1.3f),
                 titleBold = prefs.getBoolean(PrefsKeys.APPEARANCE_TITLE_BOLD, false),

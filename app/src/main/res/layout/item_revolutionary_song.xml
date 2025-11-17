@@ -1,0 +1,314 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    style="@style/NeomorphicCard"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="8dp"
+    android:layout_marginEnd="8dp"
+    android:layout_marginTop="6dp"
+    android:layout_marginBottom="6dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <!-- Main Song Row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <!-- Album Artwork with Revolutionary Badge -->
+            <FrameLayout
+                android:layout_width="64dp"
+                android:layout_height="64dp">
+
+                <com.google.android.material.imageview.ShapeableImageView
+                    android:id="@+id/song_artwork"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="centerCrop"
+                    android:src="@drawable/ic_music_note"
+                    app:shapeAppearanceOverlay="@style/RoundedImageView" />
+
+                <!-- Hi-Res Audio Badge -->
+                <TextView
+                    android:id="@+id/song_quality_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="bottom|end"
+                    android:layout_margin="3dp"
+                    android:paddingStart="5dp"
+                    android:paddingEnd="5dp"
+                    android:paddingTop="1dp"
+                    android:paddingBottom="1dp"
+                    android:background="@drawable/ai_recommendation_background"
+                    android:text="FLAC"
+                    android:textColor="@color/accent_color"
+                    android:textSize="8sp"
+                    android:textStyle="bold"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+
+                <!-- Now Playing Indicator -->
+                <ImageView
+                    android:id="@+id/song_now_playing_indicator"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_play_arrow_24"
+                    android:tint="@color/accent_color"
+                    android:visibility="gone"
+                    tools:visibility="gone" />
+
+            </FrameLayout>
+
+            <!-- Song Info -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="14dp">
+
+                <TextView
+                    android:id="@+id/song_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Song Title"
+                    android:textColor="@color/text_primary"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    tools:text="Bohemian Rhapsody" />
+
+                <TextView
+                    android:id="@+id/song_artist"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Artist Name"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    tools:text="Queen" />
+
+                <!-- Revolutionary Metadata Row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="5dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/song_duration"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="7dp"
+                        android:paddingEnd="7dp"
+                        android:paddingTop="2dp"
+                        android:paddingBottom="2dp"
+                        android:background="@drawable/duration_background"
+                        android:text="3:45"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="10sp"
+                        tools:text="5:55" />
+
+                    <TextView
+                        android:id="@+id/song_bitrate"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:paddingStart="7dp"
+                        android:paddingEnd="7dp"
+                        android:paddingTop="2dp"
+                        android:paddingBottom="2dp"
+                        android:background="@drawable/duration_background"
+                        android:text="320kbps"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="10sp"
+                        android:visibility="gone"
+                        tools:visibility="visible"
+                        tools:text="1411kbps" />
+
+                    <TextView
+                        android:id="@+id/song_sample_rate"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:paddingStart="7dp"
+                        android:paddingEnd="7dp"
+                        android:paddingTop="2dp"
+                        android:paddingBottom="2dp"
+                        android:background="@drawable/duration_background"
+                        android:text="48kHz"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="10sp"
+                        android:visibility="gone"
+                        tools:visibility="visible"
+                        tools:text="192kHz" />
+
+                    <!-- AI Metadata Badge -->
+                    <TextView
+                        android:id="@+id/song_ai_metadata_badge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:paddingStart="7dp"
+                        android:paddingEnd="7dp"
+                        android:paddingTop="2dp"
+                        android:paddingBottom="2dp"
+                        android:background="@drawable/ai_recommendation_background"
+                        android:text="✨ AI"
+                        android:textColor="@color/accent_color"
+                        android:textSize="9sp"
+                        android:textStyle="bold"
+                        android:visibility="gone"
+                        tools:visibility="visible" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- Actions Column -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:layout_marginStart="8dp">
+
+                <!-- Favorite Button -->
+                <ImageButton
+                    android:id="@+id/song_favorite_button"
+                    style="@style/NeomorphicButton"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:src="@drawable/ic_favorite_border"
+                    android:tint="@color/text_secondary"
+                    android:contentDescription="Favorite" />
+
+                <!-- Menu Button -->
+                <ImageButton
+                    android:id="@+id/song_menu_button"
+                    style="@style/NeomorphicButton"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:layout_marginTop="6dp"
+                    android:src="@drawable/ic_more_vert_24"
+                    android:tint="@color/text_secondary"
+                    android:contentDescription="More options" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- AI-Powered Insights (Revolutionary Feature) -->
+        <LinearLayout
+            android:id="@+id/song_ai_insights_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="vertical"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:background="@drawable/ai_recommendation_background"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="✨ AI Insights"
+                android:textColor="@color/accent_color"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/song_ai_insight_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Energetic rock anthem with powerful vocals. Similar to your favorite tracks."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:maxLines="2"
+                android:ellipsize="end"
+                tools:text="Energetic rock anthem with powerful vocals" />
+
+        </LinearLayout>
+
+        <!-- Genre/Mood Tags (Revolutionary Feature) -->
+        <HorizontalScrollView
+            android:id="@+id/song_tags_scroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:scrollbars="none"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <LinearLayout
+                android:id="@+id/song_tags_container"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <!-- Tags will be added dynamically -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="5dp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="3dp"
+                    android:paddingBottom="3dp"
+                    android:background="@drawable/circular_background"
+                    android:text="Rock"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="10sp"
+                    tools:text="Rock" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="5dp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="3dp"
+                    android:paddingBottom="3dp"
+                    android:background="@drawable/circular_background"
+                    android:text="Classic"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="10sp"
+                    tools:text="Classic" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="3dp"
+                    android:paddingBottom="3dp"
+                    android:background="@drawable/circular_background"
+                    android:text="Energetic"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="10sp"
+                    tools:text="Energetic" />
+
+            </LinearLayout>
+
+        </HorizontalScrollView>
+
+    </LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>

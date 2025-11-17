@@ -69,6 +69,16 @@ class MetadataExtractor(private val context: Context) {
     
     private fun extractAlbumArt(retriever: MediaMetadataRetriever, song: Song, forceExtraction: Boolean = false): String? {
         return try {
+            // First check if we already have artwork in dedicated storage
+            val identifier = song.path.ifBlank { song.title }
+            if (!forceExtraction && MetadataStorageManager.hasArtwork(context, identifier)) {
+                val storedArtBytes = MetadataStorageManager.loadArtwork(context, identifier)
+                if (storedArtBytes != null && storedArtBytes.isNotEmpty()) {
+                    Log.d(TAG, "Using stored artwork for ${song.displayName}")
+                    return Base64.encodeToString(storedArtBytes, Base64.NO_WRAP)
+                }
+            }
+            
             // Try multiple methods to extract artwork for better format compatibility
             var artBytes = retriever.embeddedPicture
             
@@ -106,16 +116,15 @@ class MetadataExtractor(private val context: Context) {
             }
             val compressedBytes = stream.toByteArray()
 
-            // Save to on-device cache for fast reuse
+            // Save to dedicated metadata storage as primary storage
             try {
-val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
-                val outFile = cache.fileFor(song)
-                if (!outFile.exists()) {
-                    cache.saveJpeg(compressedBytes, outFile)
-                }
+                MetadataStorageManager.saveArtwork(context, identifier, compressedBytes)
+                Log.d(TAG, "Saved artwork to dedicated storage for ${song.displayName}")
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to write album art to cache", e)
+                Log.w(TAG, "Failed to save artwork to dedicated storage", e)
             }
+
+            // Legacy cache support removed - using MetadataStorageManager only
 
             // Use NO_WRAP to keep string compact
             val base64Art = Base64.encodeToString(compressedBytes, Base64.NO_WRAP)
@@ -227,22 +236,162 @@ val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
     
     private fun tryOggOpusArtworkExtraction(filePath: String): ByteArray? {
         return try {
-            Log.d(TAG, "Attempting OGG/OPUS artwork extraction")
-            // OGG/OPUS files may need special handling
+            Log.d(TAG, "Attempting OGG/OPUS artwork extraction with multiple methods")
+            
+            // Method 1: Try MediaMetadataRetriever first
             val retriever = MediaMetadataRetriever()
-            if (filePath.startsWith("content://")) {
-                retriever.setDataSource(context, Uri.parse(filePath))
-            } else {
-                retriever.setDataSource(filePath)
+            var artBytes: ByteArray? = null
+            
+            try {
+                if (filePath.startsWith("content://")) {
+                    retriever.setDataSource(context, Uri.parse(filePath))
+                } else {
+                    retriever.setDataSource(filePath)
+                }
+                artBytes = retriever.embeddedPicture
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaMetadataRetriever failed for OGG/OPUS", e)
+            } finally {
+                try { retriever.release() } catch (_: Exception) {}
             }
             
-            val artBytes = retriever.embeddedPicture
-            retriever.release()
+            // Method 2: If MediaMetadataRetriever fails, try raw file parsing for OGG Vorbis comments
+            if (artBytes == null || artBytes.isEmpty()) {
+                Log.d(TAG, "Trying raw OGG/OPUS file parsing for artwork")
+                artBytes = extractOggVorbisArtwork(filePath)
+            }
+            
+            if (artBytes != null && artBytes.isNotEmpty()) {
+                Log.d(TAG, "Successfully extracted OGG/OPUS artwork (${artBytes.size} bytes)")
+            } else {
+                Log.w(TAG, "No artwork found in OGG/OPUS file")
+            }
+            
             artBytes
         } catch (e: Exception) {
             Log.w(TAG, "OGG/OPUS artwork extraction failed", e)
             null
         }
+    }
+    
+    private fun extractOggVorbisArtwork(filePath: String): ByteArray? {
+        if (filePath.startsWith("content://")) {
+            // Can't do raw file parsing on content URIs
+            return null
+        }
+        
+        return try {
+            val file = File(filePath)
+            if (!file.exists() || !file.canRead()) return null
+            
+            file.inputStream().use { inputStream ->
+                val buffer = ByteArray(8192)
+                var totalRead = 0
+                val maxSearch = 1024 * 1024 // Search first 1MB
+                
+                while (totalRead < maxSearch) {
+                    val read = inputStream.read(buffer)
+                    if (read == -1) break
+                    
+                    // Look for METADATA_BLOCK_PICTURE in Vorbis comments
+                    // This is a base64-encoded FLAC picture block
+                    val chunk = String(buffer, 0, read, Charsets.ISO_8859_1)
+                    
+                    // Look for common patterns
+                    val pictureIndex = chunk.indexOf("METADATA_BLOCK_PICTURE=")
+                    if (pictureIndex >= 0) {
+                        Log.d(TAG, "Found METADATA_BLOCK_PICTURE in OGG file")
+                        // Extract the base64 data after the = sign
+                        val startIndex = pictureIndex + "METADATA_BLOCK_PICTURE=".length
+                        var endIndex = chunk.indexOf('\u0000', startIndex) // Null terminator
+                        if (endIndex < 0) endIndex = chunk.length
+                        
+                        val base64Data = chunk.substring(startIndex, endIndex).trim()
+                        if (base64Data.isNotEmpty()) {
+                            try {
+                                // Decode the base64 FLAC picture block
+                                val pictureBlock = Base64.decode(base64Data, Base64.DEFAULT)
+                                // Parse FLAC picture block format
+                                return parseFLACPictureBlock(pictureBlock)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to decode METADATA_BLOCK_PICTURE", e)
+                            }
+                        }
+                    }
+                    
+                    totalRead += read
+                }
+            }
+            
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Raw OGG parsing failed", e)
+            null
+        }
+    }
+    
+    private fun parseFLACPictureBlock(data: ByteArray): ByteArray? {
+        return try {
+            // FLAC picture block format:
+            // 4 bytes: picture type
+            // 4 bytes: MIME type length
+            // n bytes: MIME type
+            // 4 bytes: description length
+            // n bytes: description
+            // 4 bytes: width
+            // 4 bytes: height
+            // 4 bytes: color depth
+            // 4 bytes: number of colors
+            // 4 bytes: picture data length
+            // n bytes: picture data
+            
+            var offset = 0
+            
+            // Skip picture type (4 bytes)
+            offset += 4
+            if (offset + 4 > data.size) return null
+            
+            // Read MIME type length
+            val mimeLen = readInt32BE(data, offset)
+            offset += 4
+            if (offset + mimeLen > data.size) return null
+            
+            // Skip MIME type
+            offset += mimeLen
+            if (offset + 4 > data.size) return null
+            
+            // Read description length
+            val descLen = readInt32BE(data, offset)
+            offset += 4
+            if (offset + descLen > data.size) return null
+            
+            // Skip description
+            offset += descLen
+            
+            // Skip width, height, color depth, number of colors (4 bytes each = 16 bytes total)
+            offset += 16
+            if (offset + 4 > data.size) return null
+            
+            // Read picture data length
+            val pictureLen = readInt32BE(data, offset)
+            offset += 4
+            if (offset + pictureLen > data.size) return null
+            
+            // Extract picture data
+            val pictureData = data.copyOfRange(offset, offset + pictureLen)
+            Log.d(TAG, "Extracted picture data from FLAC block: ${pictureData.size} bytes")
+            pictureData
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse FLAC picture block", e)
+            null
+        }
+    }
+    
+    private fun readInt32BE(data: ByteArray, offset: Int): Int {
+        return ((data[offset].toInt() and 0xFF) shl 24) or
+               ((data[offset + 1].toInt() and 0xFF) shl 16) or
+               ((data[offset + 2].toInt() and 0xFF) shl 8) or
+               (data[offset + 3].toInt() and 0xFF)
     }
     
     fun decodeAlbumArt(albumArtBase64: String?): Bitmap? {
@@ -258,20 +407,8 @@ val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
 
     fun loadCachedArtwork(context: Context, song: Song, maxDim: Int = MAX_ART_DIMENSION): Bitmap? {
         return try {
-            val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
-            // Try exact match
-            cache.loadBitmapIfPresent(song, maxDim)
-                ?: run {
-                    // Try common album fallbacks for downloaded YouTube audio where album tag varies
-                    val candidates = listOf("YouTube", "Unknown Album", "")
-                    for (alb in candidates) {
-                        val alt = song.copy(album = alb)
-                        val bmp = cache.loadBitmapIfPresent(alt, maxDim)
-                        if (bmp != null) return bmp
-                    }
-                    // Fallback to title-only cache key (helps when tags are Unknown Artist/Album)
-                    cache.loadBitmapByTitleIfPresent(song.displayName, maxDim)
-                }
+            val identifier = song.path.ifBlank { song.title }
+            MetadataStorageManager.loadArtworkBitmap(context, identifier)
         } catch (e: Exception) {
             Log.e(TAG, "Error loading cached artwork", e)
             null
@@ -482,15 +619,12 @@ val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
             albumArt = thumbnailBase64
         )
         
-        // Cache the thumbnail for faster future loads
+        // Cache the thumbnail using MetadataStorageManager
         if (thumbnailBase64 != null) {
             try {
-                val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
                 val artBytes = Base64.decode(thumbnailBase64, Base64.DEFAULT)
-                val outFile = cache.fileFor(song)
-                if (!outFile.exists()) {
-                    cache.saveJpeg(artBytes, outFile)
-                }
+                val identifier = filePath.ifBlank { title }
+                MetadataStorageManager.saveArtwork(context, identifier, artBytes)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to cache YouTube thumbnail", e)
             }

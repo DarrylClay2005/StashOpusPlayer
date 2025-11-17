@@ -10,8 +10,8 @@ Build Configuration:
 - Shrink Resources: Yes
 
 Artifacts:
-- Release APK: /run/media/liveuser/Steam_Recordings/StashOpusPlayer/app/build/outputs/apk/release/app-release.apk (121M)
-- Release AAB: /run/media/liveuser/Steam_Recordings/StashOpusPlayer/app/build/outputs/bundle/release/app-release.aab (125M)
+- Release APK: /run/media/desmond/Steam_Recordings/StashOpusPlayer/app/build/outputs/apk/release/app-release.apk (121M)
+- Release AAB: /run/media/desmond/Steam_Recordings/StashOpusPlayer/app/build/outputs/bundle/release/app-release.aab (125M)
 
 Signing:
 - Keystore: Debug keystore
@@ -19,6 +19,6 @@ Signing:
 Environment:
 - Java Version: openjdk version "21.0.8" 2025-07-15
 - Gradle Version: Gradle 8.14.3
-- Android SDK: /run/media/liveuser/Steam_Recordings/android-sdk
+- Android SDK: /run/media/desmond/Steam_Recordings/android-sdk
 - Build Host: localhost-live
 

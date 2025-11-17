@@ -242,32 +242,19 @@ val intent = Intent(requireContext(), com.stash.opusplayer.ui.YouTubeStreamingAc
     }
 
     private fun handleDownloadClick(video: YouTubeVideo) {
-        // Pre-cache YouTube thumbnail into our artwork cache so playback shows cover art even if file tags lack artwork
+        // Pre-cache YouTube thumbnail using MetadataStorageManager
         lifecycleScope.launch {
             try {
                 val meta = com.stash.opusplayer.utils.MetadataExtractor(requireContext())
                 val b64 = meta.downloadYouTubeThumbnail(video.id)
                 if (b64 != null) {
                     val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                    val cache = com.stash.opusplayer.artwork.ArtworkCache(requireContext())
-                    // Save under a few likely variants so later scans can find it
-                    val variants = listOf(
-                        // Known channel as artist
-                        com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "YouTube", 0L, ""),
-                        com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "Unknown Album", 0L, ""),
-                        com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "", 0L, ""),
-                        // Unknown artist fallback (common after external downloads)
-                        com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "YouTube", 0L, ""),
-                        com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "Unknown Album", 0L, ""),
-                        com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "", 0L, "")
+                    // Save using video title as primary identifier
+                    com.stash.opusplayer.utils.MetadataStorageManager.saveArtwork(
+                        requireContext(),
+                        video.title,
+                        bytes
                     )
-                    variants.forEach { s ->
-                        val f = cache.fileFor(s)
-                        if (!f.exists()) cache.saveJpeg(bytes, f)
-                    }
-                    // Also save by title-only key to improve hit rate for unknown tags
-                    val tf = cache.fileForTitleOnly(video.title)
-                    if (!tf.exists()) cache.saveJpeg(bytes, tf)
                 }
             } catch (_: Exception) {}
         }
