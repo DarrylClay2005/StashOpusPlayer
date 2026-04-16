@@ -7,6 +7,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.OnBackPressedCallback
@@ -33,7 +36,7 @@ import com.karumi.dexter.listener.multi.MultiplePermissionsListener
 import com.stash.opusplayer.R
 import com.stash.opusplayer.databinding.ActivityMainBinding
 import com.stash.opusplayer.ui.fragments.MusicLibraryFragment
-import com.stash.opusplayer.ui.fragments.SimpleEnhancedEqualizerFragment
+import com.stash.opusplayer.ui.fragments.EqualizerFragment
 import com.stash.opusplayer.ui.fragments.SettingsFragment
 import com.stash.opusplayer.ui.fragments.PlaylistsFragment
 import com.stash.opusplayer.ui.fragments.YouTubeSearchFragment
@@ -44,6 +47,8 @@ import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.ui.appearance.ThemeManager
 import com.stash.opusplayer.ui.appearance.AppearancePreferences
 import com.stash.opusplayer.ui.appearance.VisualCustomizationManager
+import com.stash.opusplayer.ui.MiniPlayerSurface
+import com.stash.opusplayer.ui.managers.MiniPlayerToggleManager
 import android.content.IntentFilter
 import android.content.BroadcastReceiver
 import com.stash.opusplayer.ui.themes.GenreBasedThemeManager
@@ -59,7 +64,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var sharedPreferences: SharedPreferences
     private lateinit var updateManager: UpdateManager
     private lateinit var musicPlayerManager: MusicPlayerManager
-    private lateinit var miniPlayerView: MiniPlayerView
+    private lateinit var miniPlayerView: MiniPlayerSurface
+    private lateinit var miniPlayerToggleManager: MiniPlayerToggleManager
+    private var currentMiniPlayerStyle: String? = null
     
     // Appearance customization
     private var appearanceReceiver: BroadcastReceiver? = null
@@ -96,6 +103,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         visualCustomizationManager = VisualCustomizationManager(this)
         genreThemeManager = GenreBasedThemeManager(this)
         physicsAnimationEngine = PhysicsAnimationEngine(this)
+        miniPlayerToggleManager = MiniPlayerToggleManager(this)
         
         // Set physics engine in AnimationUtils for global use
         AnimationUtils.setPhysicsEngine(physicsAnimationEngine)
@@ -427,21 +435,16 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 supportActionBar?.title = "Genres"
             }
             R.id.nav_equalizer -> {
-                val fragment = SimpleEnhancedEqualizerFragment.newInstance()
-                // The fragment will connect to MediaController internally
-                loadFragment(fragment)
-                supportActionBar?.title = "Enhanced Audio"
+                loadFragment(EqualizerFragment())
+                supportActionBar?.title = "Equalizer"
             }
             R.id.nav_settings -> {
                 loadFragment(SettingsFragment())
                 supportActionBar?.title = getString(R.string.menu_settings)
             }
             R.id.nav_audio_settings -> {
-                val f = SettingsFragment().apply {
-                    arguments = android.os.Bundle().apply { putInt("initial_tab", 1) }
-                }
-                loadFragment(f)
-                supportActionBar?.title = "Audio Settings"
+                loadFragment(com.stash.opusplayer.ui.fragments.settings.PlaybackSettingsFragment())
+                supportActionBar?.title = "Playback Settings"
             }
             R.id.nav_about -> {
                 showAboutDialog()
@@ -466,6 +469,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         transaction
             .replace(R.id.main_content, fragment)
             .runOnCommit {
+                applyAppearanceToViews()
                 UIPerformanceOptimizer.endPerformanceTracking("loadFragment")
             }
             .commit()
@@ -569,6 +573,7 @@ Check for updates anytime from Settings.""")
             
             // Apply to activity (system bars, toolbar, etc.)
             ThemeManager.applyToActivity(this, prefs)
+            applyAdaptiveChromeScale(prefs)
             
             // Apply background overlay
             ThemeManager.applyBackgroundOverlay(this, prefs)
@@ -580,12 +585,55 @@ Check for updates anytime from Settings.""")
             android.util.Log.e("MainActivity", "Error applying appearance to views", e)
         }
     }
+
+    private fun applyAdaptiveChromeScale(prefs: AppearancePreferences) {
+        val toolbarHeight = ThemeManager.scaleDp(this, 52)
+        binding.toolbar.layoutParams = binding.toolbar.layoutParams.apply {
+            height = toolbarHeight
+        }
+
+        binding.bottomNav.itemIconSize = ThemeManager.scaleDp(this, 20)
+        binding.bottomNav.setPadding(0, ThemeManager.scaleDp(this, 2), 0, 0)
+
+        binding.scanningText.textSize = ThemeManager.scaleSp(this, 16f, prefs.fontScale)
+        binding.downloadText.textSize = ThemeManager.scaleSp(this, 16f, prefs.fontScale)
+        binding.playingText.textSize = ThemeManager.scaleSp(this, 16f, prefs.fontScale)
+        binding.playingActionButton.textSize = ThemeManager.scaleSp(this, 12f, prefs.fontScale)
+        val actionScale = (ThemeManager.getAdaptiveUiScale(this) * prefs.buttonSizeScale).coerceIn(0.76f, 1.0f)
+        binding.playingActionButton.scaleX = actionScale
+        binding.playingActionButton.scaleY = actionScale
+
+        scaleBottomNavigationLabels(prefs)
+    }
+
+    private fun scaleBottomNavigationLabels(prefs: AppearancePreferences) {
+        val menuView = binding.bottomNav.getChildAt(0) as? ViewGroup ?: return
+        val labelSize = ThemeManager.scaleSp(this, 10.5f, prefs.fontScale)
+        val itemPadding = ThemeManager.scaleDp(this, 4)
+        for (i in 0 until menuView.childCount) {
+            val itemView = menuView.getChildAt(i) as? ViewGroup ?: continue
+            itemView.setPadding(itemView.paddingLeft, itemPadding, itemView.paddingRight, itemPadding)
+            applyLabelScaleRecursively(itemView, labelSize)
+        }
+    }
+
+    private fun applyLabelScaleRecursively(view: View, labelSize: Float) {
+        when (view) {
+            is TextView -> view.textSize = labelSize
+            is ViewGroup -> {
+                for (index in 0 until view.childCount) {
+                    applyLabelScaleRecursively(view.getChildAt(index), labelSize)
+                }
+            }
+        }
+    }
     
     /**
      * Update mini player based on appearance preferences
      */
     private fun updateMiniPlayerFromPrefs(prefs: AppearancePreferences) {
         try {
+            ensureMiniPlayerView()
             ThemeManager.applyMiniPlayerSettings(miniPlayerView, prefs)
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Error updating mini player", e)
@@ -621,6 +669,7 @@ Check for updates anytime from Settings.""")
                         // Recreate activity for changes that require it
                         recreate()
                     } else {
+                        ensureMiniPlayerView()
                         // Apply changes dynamically
                         applyAppearanceToViews()
                         applyVisualCustomization()
@@ -630,7 +679,11 @@ Check for updates anytime from Settings.""")
         }
         
         val filter = IntentFilter(ThemeManager.ACTION_APPEARANCE_CHANGED)
-        registerReceiver(appearanceReceiver, filter)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(appearanceReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(appearanceReceiver, filter)
+        }
     }
     
     /**
@@ -716,8 +769,7 @@ Check for updates anytime from Settings.""")
     }
     
     private fun setupMiniPlayer() {
-        miniPlayerView = binding.miniPlayer
-        miniPlayerView.initialize(this, musicPlayerManager)
+        ensureMiniPlayerView()
         
         // Observe current song changes for genre-based theming
         lifecycleScope.launch {
@@ -728,6 +780,23 @@ Check for updates anytime from Settings.""")
                 }
             }
         }
+    }
+
+    private fun ensureMiniPlayerView() {
+        val requestedStyle = miniPlayerToggleManager.getMiniPlayerStyle()
+        if (::miniPlayerView.isInitialized && currentMiniPlayerStyle == requestedStyle) {
+            return
+        }
+
+        if (::miniPlayerView.isInitialized) {
+            runCatching { miniPlayerView.release() }
+        }
+
+        binding.miniPlayerContainer.removeAllViews()
+        miniPlayerView = miniPlayerToggleManager.createMiniPlayerView(binding.miniPlayerContainer)
+        binding.miniPlayerContainer.addView(miniPlayerView.asView())
+        miniPlayerView.initialize(this, musicPlayerManager)
+        currentMiniPlayerStyle = requestedStyle
     }
     
     // Music player functionality
@@ -866,9 +935,6 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@MainActivity)
         super.onDestroy()
         if (::miniPlayerView.isInitialized) {
             miniPlayerView.release()
-        }
-        if (::musicPlayerManager.isInitialized) {
-            musicPlayerManager.release()
         }
         if (::genreThemeManager.isInitialized) {
             genreThemeManager.release()

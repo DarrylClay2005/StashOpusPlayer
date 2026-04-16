@@ -1,24 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:background="@color/background_color"
+    android:padding="12dp">
 
-    <TextView
-        android:id="@+id/titleText"
+    <LinearLayout
+        android:id="@+id/genresHeader"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Genres"
-        android:textSize="22sp"
-        android:textStyle="bold"
-        android:paddingBottom="8dp" />
+        android:layout_marginBottom="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        style="@style/NeomorphicCard">
+
+        <ImageView
+            android:id="@+id/genresHeaderIcon"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_marginEnd="10dp"
+            android:src="@drawable/ic_category"
+            app:tint="@color/secondary_color" />
+
+        <TextView
+            android:id="@+id/titleText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Genres"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingTop="4dp" />
 
     <TextView
         android:id="@+id/emptyStateText"
@@ -27,6 +50,8 @@
         android:text="No genres found"
         android:gravity="center"
         android:visibility="gone"
-        android:padding="24dp" />
+        android:textColor="@color/text_secondary"
+        android:textSize="14sp"
+        android:padding="18dp" />
 
 </LinearLayout>

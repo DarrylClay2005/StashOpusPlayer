@@ -4,7 +4,7 @@
     <!-- Neomorphic Card Style -->
     <style name="NeomorphicCard">
         <item name="android:background">@drawable/neomorphic_card_background</item>
-        <item name="android:padding">16dp</item>
+        <item name="android:padding">10dp</item>
         <item name="android:elevation">0dp</item>
     </style>
 
@@ -35,14 +35,14 @@
     <!-- Neomorphic Mini Player Style -->
     <style name="NeomorphicMiniPlayer">
         <item name="android:background">@drawable/neomorphic_mini_player_background</item>
-        <item name="android:padding">12dp</item>
+        <item name="android:padding">6dp</item>
         <item name="android:elevation">0dp</item>
     </style>
 
     <!-- Neomorphic Now Playing Style -->
     <style name="NeomorphicNowPlaying">
         <item name="android:background">@drawable/neomorphic_now_playing_background</item>
-        <item name="android:padding">24dp</item>
+        <item name="android:padding">14dp</item>
         <item name="android:elevation">0dp</item>
     </style>
 
@@ -55,7 +55,7 @@
 
     <!-- Large Neomorphic Button Style -->
     <style name="NeomorphicButton.Large" parent="NeomorphicButton">
-        <item name="android:padding">8dp</item>
+        <item name="android:padding">5dp</item>
     </style>
 
     <!-- Rounded ImageView Style -->
@@ -66,9 +66,9 @@
 
     <!-- Enhanced Equalizer Styles -->
     <style name="NeomorphicButtonSmall" parent="NeomorphicButton">
-        <item name="android:padding">6dp</item>
-        <item name="android:minHeight">32dp</item>
-        <item name="android:textSize">12sp</item>
+        <item name="android:padding">3dp</item>
+        <item name="android:minHeight">26dp</item>
+        <item name="android:textSize">10sp</item>
     </style>
 
     <style name="NeomorphicSeekBar" parent="">

@@ -5,9 +5,13 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import com.bumptech.glide.Glide
+import com.bumptech.glide.load.engine.DiskCacheStrategy
+import com.stash.opusplayer.R
 import com.stash.opusplayer.databinding.ItemFolderBinding
 import com.stash.opusplayer.databinding.ItemFolderGridBinding
 import com.stash.opusplayer.ui.fragments.FolderInfo
+import com.stash.opusplayer.utils.MetadataExtractor
 
 class FolderAdapter(
     private val onClick: (FolderInfo) -> Unit
@@ -19,6 +23,7 @@ class FolderAdapter(
     }
 
     private var columns: Int = 1
+    private var metadataExtractor: MetadataExtractor? = null
 
     fun setColumns(cols: Int) {
         if (columns != cols) {
@@ -30,6 +35,9 @@ class FolderAdapter(
     override fun getItemViewType(position: Int): Int = if (columns == 1) VIEW_TYPE_LIST else VIEW_TYPE_GRID
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        if (metadataExtractor == null) {
+            metadataExtractor = MetadataExtractor(parent.context.applicationContext)
+        }
         val inflater = LayoutInflater.from(parent.context)
         return if (viewType == VIEW_TYPE_LIST) {
             val binding = ItemFolderBinding.inflate(inflater, parent, false)
@@ -52,8 +60,11 @@ class FolderAdapter(
         private val binding: ItemFolderBinding
     ) : RecyclerView.ViewHolder(binding.root) {
         fun bind(item: FolderInfo) {
-            binding.folderPath.text = item.path
-            binding.folderCount.text = "${item.songCount} song${if (item.songCount == 1) "" else "s"}"
+            binding.folderName.text = item.displayName
+            binding.folderPath.text = item.parentLabel
+            binding.folderPreview.text = "Starts with ${item.previewSongTitle}"
+            binding.folderCount.text = item.countLabel
+            loadFolderArtwork(binding.folderArtwork, item)
             binding.root.setOnClickListener { onClick(item) }
         }
     }
@@ -62,13 +73,40 @@ class FolderAdapter(
         private val binding: ItemFolderGridBinding
     ) : RecyclerView.ViewHolder(binding.root) {
         fun bind(item: FolderInfo) {
-            // Show only the last segment of the path for a cleaner tile title
-            val name = item.path.substringAfterLast('/')
-                .ifBlank { item.path }
-            binding.folderName.text = name
-            binding.folderCount.text = "${item.songCount}"
+            binding.folderName.text = item.displayName
+            binding.folderPath.text = item.parentLabel
+            binding.folderPreview.text = "Starts with ${item.previewSongTitle}"
+            binding.folderCount.text = item.countLabel
+            loadFolderArtwork(binding.folderArtwork, item)
             binding.root.setOnClickListener { onClick(item) }
         }
+    }
+
+    private fun loadFolderArtwork(imageView: android.widget.ImageView, item: FolderInfo) {
+        val song = item.thumbnailSong
+        if (song == null) {
+            Glide.with(imageView.context)
+                .load(R.drawable.ic_music_note)
+                .centerCrop()
+                .into(imageView)
+            return
+        }
+
+        val cached = runCatching { metadataExtractor?.loadCachedArtwork(imageView.context, song, 384) }.getOrNull()
+        val embedded = if (cached == null) {
+            runCatching { metadataExtractor?.decodeAlbumArt(song.albumArt) }.getOrNull()
+        } else {
+            null
+        }
+        val artModel: Any = cached ?: embedded ?: R.drawable.ic_music_note
+
+        Glide.with(imageView.context)
+            .load(artModel)
+            .placeholder(R.drawable.ic_music_note)
+            .error(R.drawable.ic_music_note)
+            .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
+            .centerCrop()
+            .into(imageView)
     }
 
     private class FolderDiffCallback : DiffUtil.ItemCallback<FolderInfo>() {

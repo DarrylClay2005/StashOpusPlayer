@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.view.ViewGroup
 import androidx.preference.PreferenceManager
+import com.stash.opusplayer.ui.MiniPlayerSurface
 import com.stash.opusplayer.ui.MiniPlayerView
 import com.stash.opusplayer.ui.views.RevampedMiniPlayerView
 
@@ -60,7 +61,7 @@ class MiniPlayerToggleManager(private val context: Context) {
     /**
      * Create the appropriate mini player view based on preferences
      */
-    fun createMiniPlayerView(parent: ViewGroup): Any {
+    fun createMiniPlayerView(parent: ViewGroup): MiniPlayerSurface {
         return when (getMiniPlayerStyle()) {
             STYLE_REVAMPED -> {
                 RevampedMiniPlayerView(context).apply {

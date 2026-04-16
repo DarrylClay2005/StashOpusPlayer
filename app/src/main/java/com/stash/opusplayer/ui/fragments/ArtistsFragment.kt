@@ -10,6 +10,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.stash.opusplayer.databinding.FragmentArtistsBinding
 import com.stash.opusplayer.data.MusicRepository
 import com.stash.opusplayer.ui.adapters.ArtistAdapter
+import com.stash.opusplayer.ui.appearance.ThemeManager
 import kotlinx.coroutines.launch
 
 class ArtistsFragment : Fragment() {
@@ -34,6 +35,7 @@ class ArtistsFragment : Fragment() {
         
         musicRepository = MusicRepository(requireContext())
         setupRecyclerView()
+        applyAdaptiveChrome()
         loadArtists()
     }
     
@@ -46,7 +48,31 @@ class ArtistsFragment : Fragment() {
         binding.recyclerView.apply {
             adapter = artistAdapter
             layoutManager = LinearLayoutManager(requireContext())
+            clipToPadding = false
+            setPadding(0, ThemeManager.scaleDp(requireContext(), 4), 0, ThemeManager.scaleDp(requireContext(), 28))
         }
+    }
+
+    private fun applyAdaptiveChrome() {
+        val context = requireContext()
+        val outerPadding = ThemeManager.scaleDp(context, 10)
+
+        binding.root.setPadding(outerPadding, outerPadding, outerPadding, outerPadding)
+        binding.artistsHeaderTitle.textSize = ThemeManager.scaleSp(context, 16f)
+        binding.artistsHeaderIcon.layoutParams = binding.artistsHeaderIcon.layoutParams.apply {
+            width = ThemeManager.scaleDp(context, 24)
+            height = ThemeManager.scaleDp(context, 24)
+        }
+        binding.artistsHeader.layoutParams = (binding.artistsHeader.layoutParams as? ViewGroup.MarginLayoutParams)?.apply {
+            bottomMargin = ThemeManager.scaleDp(context, 10)
+        } ?: binding.artistsHeader.layoutParams
+        binding.emptyStateText.textSize = ThemeManager.scaleSp(context, 14f)
+        binding.emptyStateText.setPadding(
+            ThemeManager.scaleDp(context, 16),
+            ThemeManager.scaleDp(context, 16),
+            ThemeManager.scaleDp(context, 16),
+            ThemeManager.scaleDp(context, 16)
+        )
     }
     
     private fun loadArtists() {

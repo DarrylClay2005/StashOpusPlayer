@@ -1,6 +1,7 @@
 package com.stash.opusplayer.ui.adapters
 
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -9,6 +10,7 @@ import com.stash.opusplayer.databinding.ItemArtistBinding
 import com.stash.opusplayer.ui.fragments.ArtistInfo
 import com.bumptech.glide.Glide
 import com.stash.opusplayer.artwork.ArtistGenreArtworkFetcher
+import com.stash.opusplayer.ui.appearance.ThemeManager
 import androidx.lifecycle.*
 import kotlinx.coroutines.launch
 
@@ -35,6 +37,7 @@ class ArtistAdapter(
     ) : RecyclerView.ViewHolder(binding.root) {
         
         fun bind(artist: ArtistInfo) {
+            applyAdaptiveSizing()
             binding.artistName.text = artist.name
             binding.songCount.text = "${artist.songCount} song${if (artist.songCount != 1) "s" else ""}"
 
@@ -57,6 +60,52 @@ class ArtistAdapter(
             binding.root.setOnClickListener {
                 onArtistClick(artist)
             }
+        }
+
+        private fun applyAdaptiveSizing() {
+            val context = binding.root.context
+            val density = context.resources.displayMetrics.density
+            val scale = ThemeManager.getAdaptiveUiScale(context)
+
+            fun px(baseDp: Int): Int = (baseDp * density * scale).toInt().coerceAtLeast(1)
+
+            val rootLayoutParams = binding.root.layoutParams as? ViewGroup.MarginLayoutParams
+            rootLayoutParams?.apply {
+                marginStart = px(6)
+                topMargin = px(5)
+                marginEnd = px(6)
+                bottomMargin = px(5)
+            }
+            if (rootLayoutParams != null) {
+                binding.root.layoutParams = rootLayoutParams
+            }
+
+            binding.root.radius = px(10).toFloat()
+            binding.root.cardElevation = px(2).toFloat()
+            binding.root.minimumHeight = px(78)
+            (binding.root.getChildAt(0) as? ViewGroup)?.setPadding(px(12), px(10), px(12), px(10))
+
+            binding.artistArtwork.layoutParams = binding.artistArtwork.layoutParams.apply {
+                width = px(56)
+                height = px(56)
+            }
+            val infoLayoutParams = (binding.artistName.parent as? View)?.layoutParams as? ViewGroup.MarginLayoutParams
+            infoLayoutParams?.marginStart = px(12)
+            if (infoLayoutParams != null) {
+                (binding.artistName.parent as View).layoutParams = infoLayoutParams
+            }
+            val arrowLayoutParams = binding.arrowForward.layoutParams as? ViewGroup.MarginLayoutParams
+            arrowLayoutParams?.marginStart = px(6)
+            if (arrowLayoutParams != null) {
+                binding.arrowForward.layoutParams = arrowLayoutParams
+            }
+
+            binding.arrowForward.layoutParams = binding.arrowForward.layoutParams.apply {
+                width = px(20)
+                height = px(20)
+            }
+            binding.artistName.textSize = ThemeManager.scaleSp(context, 16f)
+            binding.songCount.textSize = ThemeManager.scaleSp(context, 12f)
         }
     }
     

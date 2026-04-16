@@ -47,6 +47,7 @@ object PrefsKeys {
     const val APPEARANCE_MINI_PLAYER_SHOW_ARTIST = "appearance_mini_player_show_artist"
     const val APPEARANCE_MINI_PLAYER_COMPACT_MODE = "appearance_mini_player_compact_mode"
     const val APPEARANCE_MINI_PLAYER_SPINNING_ART = "appearance_mini_player_spinning_art"
+    const val APPEARANCE_NOW_PLAYING_LAYOUT = "appearance_now_playing_layout"
     
     // Appearance - SynthWave Visualizer
     const val APPEARANCE_SYNTHWAVE_PROGRESS_MODE = "appearance_synthwave_progress_mode"

@@ -9,6 +9,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.stash.opusplayer.databinding.FragmentPlaylistsBinding
 import com.stash.opusplayer.data.MusicRepository
+import com.stash.opusplayer.ui.appearance.ThemeManager
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -33,6 +34,7 @@ class PlaylistsFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         repository = MusicRepository(requireContext())
         setupRecycler()
+        applyAdaptiveChrome()
         binding.createButton.setOnClickListener { promptCreate() }
         observePlaylists()
     }
@@ -46,6 +48,44 @@ class PlaylistsFragment : Fragment() {
         }
         binding.recyclerView.layoutManager = LinearLayoutManager(requireContext())
         binding.recyclerView.adapter = adapter
+        binding.recyclerView.clipToPadding = false
+        binding.recyclerView.setPadding(0, ThemeManager.scaleDp(requireContext(), 4), 0, ThemeManager.scaleDp(requireContext(), 28))
+    }
+
+    private fun applyAdaptiveChrome() {
+        val context = requireContext()
+        val outerPadding = ThemeManager.scaleDp(context, 10)
+        val buttonHeight = ThemeManager.scaleDp(context, 34)
+        val buttonHorizontalPadding = ThemeManager.scaleDp(context, 10)
+
+        binding.root.setPadding(outerPadding, outerPadding, outerPadding, outerPadding)
+        binding.playlistsHeaderTitle.textSize = ThemeManager.scaleSp(context, 16f)
+        binding.playlistsHeaderIcon.layoutParams = binding.playlistsHeaderIcon.layoutParams.apply {
+            width = ThemeManager.scaleDp(context, 24)
+            height = ThemeManager.scaleDp(context, 24)
+        }
+        binding.playlistsHeader.layoutParams = (binding.playlistsHeader.layoutParams as? ViewGroup.MarginLayoutParams)?.apply {
+            bottomMargin = ThemeManager.scaleDp(context, 10)
+        } ?: binding.playlistsHeader.layoutParams
+
+        binding.createButton.layoutParams = binding.createButton.layoutParams.apply {
+            height = buttonHeight
+        }
+        binding.createButton.minimumHeight = buttonHeight
+        binding.createButton.iconSize = ThemeManager.scaleDp(context, 12)
+        binding.createButton.textSize = ThemeManager.scaleSp(context, 10.5f)
+        binding.createButton.insetTop = 0
+        binding.createButton.insetBottom = 0
+        binding.createButton.setPadding(buttonHorizontalPadding, 0, buttonHorizontalPadding, 0)
+
+        binding.emptyStateText.textSize = ThemeManager.scaleSp(context, 14f)
+        binding.emptyStateText.gravity = android.view.Gravity.CENTER
+        binding.emptyStateText.setPadding(
+            ThemeManager.scaleDp(context, 16),
+            ThemeManager.scaleDp(context, 16),
+            ThemeManager.scaleDp(context, 16),
+            ThemeManager.scaleDp(context, 16)
+        )
     }
 
     private fun observePlaylists() {
@@ -67,6 +107,10 @@ class PlaylistsFragment : Fragment() {
     private fun promptCreate() {
         val edit = android.widget.EditText(requireContext())
         edit.hint = "Playlist name"
+        edit.textSize = ThemeManager.scaleSp(requireContext(), 14f)
+        val horizontalPadding = ThemeManager.scaleDp(requireContext(), 16)
+        val verticalPadding = ThemeManager.scaleDp(requireContext(), 10)
+        edit.setPadding(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding)
         android.app.AlertDialog.Builder(requireContext())
             .setTitle("Create playlist")
             .setView(edit)
@@ -118,9 +162,46 @@ private class PlaylistsViewHolder(
     private val binding: com.stash.opusplayer.databinding.ItemPlaylistBinding,
     private val onClick: (Long) -> Unit
 ) : androidx.recyclerview.widget.RecyclerView.ViewHolder(binding.root) {
-fun bind(item: com.stash.opusplayer.data.database.PlaylistWithCount) {
+    fun bind(item: com.stash.opusplayer.data.database.PlaylistWithCount) {
+        applyAdaptiveSizing()
         binding.playlistName.text = item.name
         binding.playlistCount.text = "${item.songCount} song${if (item.songCount == 1) "" else "s"}"
         binding.root.setOnClickListener { onClick(item.id) }
+    }
+
+    private fun applyAdaptiveSizing() {
+        val context = binding.root.context
+        val density = context.resources.displayMetrics.density
+        val scale = ThemeManager.getAdaptiveUiScale(context)
+
+        fun px(baseDp: Int): Int = (baseDp * density * scale).toInt().coerceAtLeast(1)
+
+        val rootLayoutParams = binding.root.layoutParams as? ViewGroup.MarginLayoutParams
+        rootLayoutParams?.apply {
+            marginStart = px(6)
+            topMargin = px(5)
+            marginEnd = px(6)
+            bottomMargin = px(5)
+        }
+        if (rootLayoutParams != null) {
+            binding.root.layoutParams = rootLayoutParams
+        }
+
+        binding.root.radius = px(10).toFloat()
+        binding.root.cardElevation = px(2).toFloat()
+        binding.root.minimumHeight = px(70)
+        (binding.root.getChildAt(0) as? ViewGroup)?.setPadding(px(12), px(10), px(12), px(10))
+
+        binding.playlistIcon.layoutParams = binding.playlistIcon.layoutParams.apply {
+            width = px(34)
+            height = px(34)
+        }
+        binding.playlistArrow.layoutParams = binding.playlistArrow.layoutParams.apply {
+            width = px(18)
+            height = px(18)
+        }
+
+        binding.playlistName.textSize = ThemeManager.scaleSp(context, 15f)
+        binding.playlistCount.textSize = ThemeManager.scaleSp(context, 11f)
     }
 }

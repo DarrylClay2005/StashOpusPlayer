@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
@@ -61,9 +62,17 @@ class MusicPlayerManager(private val context: Context) {
             _isPlaying.value = isPlaying
         }
         
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                updateCurrentSong()
-            }
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            updateCurrentSong()
+        }
+
+        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+            updateCurrentSong()
+        }
+
+        override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+            syncFromController()
+        }
         
         override fun onRepeatModeChanged(repeatMode: Int) {
             _repeatMode.value = repeatMode
@@ -79,6 +88,7 @@ class MusicPlayerManager(private val context: Context) {
                 mediaController = controllerFuture?.get()
                 android.util.Log.d("MusicPlayerManager", "MediaController built: isConnected=${mediaController != null}")
                 mediaController?.addListener(playerListener)
+                syncFromController()
                 // Flush any queued actions
                 mediaController?.let { controller ->
                     val iterator = pendingControllerActions.iterator()
@@ -310,6 +320,34 @@ class MusicPlayerManager(private val context: Context) {
             )
             _currentSong.value = fallback
         }
+    }
+
+    private fun syncFromController() {
+        val controller = mediaController ?: return
+        _playbackState.value = controller.playbackState
+        _isPlaying.value = controller.isPlaying
+        _currentPosition.value = controller.currentPosition
+        _repeatMode.value = controller.repeatMode
+
+        val mirroredQueue = buildList {
+            for (i in 0 until controller.mediaItemCount) {
+                val item = runCatching { controller.getMediaItemAt(i) }.getOrNull() ?: continue
+                add(
+                    Song(
+                        id = 0L,
+                        title = item.mediaMetadata.title?.toString() ?: "",
+                        artist = item.mediaMetadata.artist?.toString() ?: "",
+                        album = item.mediaMetadata.albumTitle?.toString() ?: "",
+                        duration = 0L,
+                        path = item.localConfiguration?.uri?.toString() ?: ""
+                    )
+                )
+            }
+        }
+        if (mirroredQueue.isNotEmpty()) {
+            _playlist.value = mirroredQueue
+        }
+        updateCurrentSong()
     }
     
     // Position tracking (call this periodically)

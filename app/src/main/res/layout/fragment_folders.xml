@@ -4,37 +4,69 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:paddingStart="16dp"
+    android:paddingTop="16dp"
+    android:paddingEnd="16dp"
+    android:paddingBottom="0dp">
 
-    <LinearLayout
+    <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingBottom="8dp">
+        android:layout_marginBottom="16dp"
+        app:cardBackgroundColor="@color/surface_color"
+        app:cardCornerRadius="28dp"
+        app:cardElevation="2dp"
+        app:strokeColor="@color/border_gray"
+        app:strokeWidth="1dp">
 
-        <TextView
-            android:id="@+id/titleText"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Folders"
-            android:textSize="22sp"
-            android:textStyle="bold" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="18dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/layoutButton"
-            style="@style/NeomorphicButton"
-            android:layout_width="48dp"
-            android:layout_height="40dp"
-            app:icon="@drawable/ic_view_list"
-            app:iconTint="@color/secondary_color"
-            app:iconSize="20dp"
-            app:iconGravity="textStart"
-            app:iconPadding="0dp" />
-    </LinearLayout>
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
 
-<androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+                <TextView
+                    android:id="@+id/titleText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Folders"
+                    android:textAppearance="@style/TextAppearance.StashWave.Headline"
+                    android:textColor="@color/text_primary"
+                    android:textSize="24sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Artwork-led folder cards built from the first track in each folder."
+                    android:textAppearance="@style/TextAppearance.StashWave.Body"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/layoutButton"
+                style="@style/NeomorphicButton"
+                android:layout_width="48dp"
+                android:layout_height="40dp"
+                app:icon="@drawable/ic_view_list"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="20dp"
+                app:iconTint="@color/secondary_color" />
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>
+
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
         android:id="@+id/swipeRefresh"
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -43,16 +75,20 @@
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recyclerView"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:paddingBottom="24dp" />
     </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
     <TextView
         android:id="@+id/emptyStateText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="No music folders found"
         android:gravity="center"
-        android:visibility="gone"
-        android:padding="24dp" />
+        android:padding="24dp"
+        android:text="No music folders found"
+        android:textAppearance="@style/TextAppearance.StashWave.Body"
+        android:textColor="@color/text_secondary"
+        android:visibility="gone" />
 
 </LinearLayout>

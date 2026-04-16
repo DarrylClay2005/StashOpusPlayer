@@ -14,6 +14,7 @@ import com.stash.opusplayer.data.MusicRepository
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.ui.MainActivity
 import com.stash.opusplayer.ui.adapters.SongAdapter
+import com.stash.opusplayer.ui.appearance.ThemeManager
 import com.stash.opusplayer.utils.MetadataExtractor
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -44,6 +45,7 @@ class FavoritesFragment : Fragment() {
         metadataExtractor = MetadataExtractor(requireContext())
         setupRecyclerView()
         setupSearchButton()
+        applyAdaptiveChrome()
         loadFavorites()
     }
     
@@ -73,7 +75,39 @@ class FavoritesFragment : Fragment() {
         binding.recyclerView.apply {
             adapter = songAdapter
             layoutManager = LinearLayoutManager(requireContext())
+            clipToPadding = false
+            setPadding(0, ThemeManager.scaleDp(requireContext(), 4), 0, ThemeManager.scaleDp(requireContext(), 28))
         }
+    }
+
+    private fun applyAdaptiveChrome() {
+        val context = requireContext()
+        val outerPadding = ThemeManager.scaleDp(context, 10)
+        val compactButtonWidth = ThemeManager.scaleDp(context, 40)
+        val compactButtonHeight = ThemeManager.scaleDp(context, 34)
+
+        binding.root.setPadding(outerPadding, outerPadding, outerPadding, outerPadding)
+        binding.favoritesHeaderTitle.textSize = ThemeManager.scaleSp(context, 16f)
+        binding.favoritesHeaderIcon.layoutParams = binding.favoritesHeaderIcon.layoutParams.apply {
+            width = ThemeManager.scaleDp(context, 24)
+            height = ThemeManager.scaleDp(context, 24)
+        }
+        binding.favoritesHeader.layoutParams = (binding.favoritesHeader.layoutParams as? ViewGroup.MarginLayoutParams)?.apply {
+            bottomMargin = ThemeManager.scaleDp(context, 10)
+        } ?: binding.favoritesHeader.layoutParams
+
+        binding.searchButton.layoutParams = binding.searchButton.layoutParams.apply {
+            width = compactButtonWidth
+            height = compactButtonHeight
+        }
+        binding.searchButton.minimumWidth = compactButtonWidth
+        binding.searchButton.minimumHeight = compactButtonHeight
+        binding.searchButton.iconSize = ThemeManager.scaleDp(context, 16)
+        binding.searchButton.insetTop = 0
+        binding.searchButton.insetBottom = 0
+
+        binding.emptyStateText.textSize = ThemeManager.scaleSp(context, 15f)
+        binding.emptyStateSubtitle.textSize = ThemeManager.scaleSp(context, 11f)
     }
     
     private fun setupSearchButton() {
@@ -98,7 +132,10 @@ class FavoritesFragment : Fragment() {
     private fun showSearchDialog() {
         val searchView = EditText(requireContext()).apply {
             hint = "Search favorites..."
-            setPadding(32, 16, 32, 16)
+            val horizontalPadding = ThemeManager.scaleDp(requireContext(), 16)
+            val verticalPadding = ThemeManager.scaleDp(requireContext(), 10)
+            setPadding(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding)
+            textSize = ThemeManager.scaleSp(requireContext(), 14f)
         }
         
         AlertDialog.Builder(requireContext())

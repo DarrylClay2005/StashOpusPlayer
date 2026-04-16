@@ -7,43 +7,85 @@
     android:background="@color/background_primary"
     tools:context=".ui.NowPlayingActivity">
 
-    <!-- Blurred backdrop from album art -->
     <ImageView
         android:id="@+id/backdropImage"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:alpha="0.28"
         android:scaleType="centerCrop"
-        android:alpha="0.35"
-        app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- Subtle gradient overlay -->
     <View
         android:id="@+id/backdropScrim"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:background="@drawable/gradient_overlay"
-        app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <!-- Status bar gradient -->
-    <View
-        android:id="@+id/statusBarGradient"
-        android:layout_width="match_parent"
-        android:layout_height="40dp"
-        android:background="@drawable/gradient_background"
         app:layout_constraintTop_toTopOf="parent" />
-    
-    <!-- Visual Feedback Overlay -->
+
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="20dp"
+        android:paddingTop="18dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="8dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <ImageButton
+            android:id="@+id/backButton"
+            style="@style/NeomorphicButton"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:contentDescription="@string/back"
+            android:src="@drawable/ic_arrow_back_24"
+            android:tint="@color/text_primary" />
+
+        <TextView
+            android:id="@+id/layoutThemeBadge"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:background="@drawable/duration_background"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:paddingStart="14dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="8dp"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            tools:text="Aurora" />
+
+        <ImageButton
+            android:id="@+id/menuButton"
+            style="@style/NeomorphicButton"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:layout_marginStart="12dp"
+            android:contentDescription="@string/menu"
+            android:src="@drawable/ic_more_vert_24"
+            android:tint="@color/text_primary" />
+
+    </LinearLayout>
+
     <TextView
         android:id="@+id/feedbackOverlay"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="8dp"
         android:background="@drawable/feedback_overlay_background"
         android:elevation="8dp"
         android:paddingStart="16dp"
@@ -56,537 +98,536 @@
         android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/statusBarGradient"
+        app:layout_constraintTop_toBottomOf="@id/topBar"
         tools:text="Seeking to 2:15"
         tools:visibility="visible" />
 
-    <!-- Neomorphic Back button -->
-    <ImageButton
-        android:id="@+id/backButton"
-        style="@style/NeomorphicButton"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:layout_marginStart="20dp"
-        android:layout_marginTop="20dp"
-        android:contentDescription="@string/back"
-        android:src="@drawable/ic_arrow_back_24"
-        android:tint="@color/text_primary"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/statusBarGradient" />
-
-    <!-- Neomorphic Options menu -->
-    <ImageButton
-        android:id="@+id/menuButton"
-        style="@style/NeomorphicButton"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:layout_marginTop="20dp"
-        android:layout_marginEnd="20dp"
-        android:contentDescription="@string/menu"
-        android:src="@drawable/ic_more_vert_24"
-        android:tint="@color/text_primary"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/statusBarGradient" />
-
-    <!-- Neomorphic Album artwork -->
-    <FrameLayout
-        android:id="@+id/albumArtCard"
-        style="@style/NeomorphicAlbumArt"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginStart="40dp"
-        android:layout_marginTop="32dp"
-        android:layout_marginEnd="40dp"
-        app:layout_constraintDimensionRatio="1:1"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/backButton">
-
-        <com.google.android.material.imageview.ShapeableImageView
-            android:id="@+id/albumArtwork"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:layout_margin="8dp"
-            android:contentDescription="@string/album_artwork"
-            android:scaleType="centerCrop"
-            android:background="@drawable/circular_background"
-            android:src="@drawable/ic_music_note"
-            app:shapeAppearanceOverlay="@style/RoundedImageView"
-            tools:src="@drawable/ic_music_note" />
-
-    </FrameLayout>
-
-    <!-- Song info container -->
-    <LinearLayout
-        android:id="@+id/songInfoContainer"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="24dp"
-        android:layout_marginTop="32dp"
-        android:layout_marginEnd="24dp"
-        android:gravity="center"
-        android:orientation="vertical"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/albumArtCard">
-
-        <!-- Song title -->
-        <TextView
-            android:id="@+id/songTitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="marquee"
-            android:focusable="true"
-            android:focusableInTouchMode="true"
-            android:gravity="center"
-            android:marqueeRepeatLimit="marquee_forever"
-            android:scrollHorizontally="true"
-            android:singleLine="true"
-            android:textColor="@color/text_primary"
-            android:textSize="20sp"
-            android:textStyle="bold"
-            tools:text="Song Title" />
-
-        <!-- Artist name -->
-        <TextView
-            android:id="@+id/artistName"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="1"
-            android:textColor="@color/text_secondary"
-            android:textSize="16sp"
-            tools:text="Artist Name" />
-
-        <!-- Album name -->
-        <TextView
-            android:id="@+id/albumName"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="1"
-            android:textColor="@color/text_tertiary"
-            android:textSize="14sp"
-            tools:text="Album Name" />
-
-        <!-- ReplayGain badge -->
-        <TextView
-            android:id="@+id/replayGainLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:paddingLeft="10dp"
-            android:paddingRight="10dp"
-            android:paddingTop="4dp"
-            android:paddingBottom="4dp"
-            android:layout_gravity="center"
-            android:background="@drawable/duration_background"
-            android:textColor="@color/text_primary"
-            android:textSize="12sp"
-            android:visibility="gone"
-            tools:text="ReplayGain: -5.2 dB" />
-
-    </LinearLayout>
-
-    <!-- Progress container -->
-    <LinearLayout
-        android:id="@+id/progressContainer"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="24dp"
-        android:layout_marginTop="24dp"
-        android:layout_marginEnd="24dp"
-        android:orientation="vertical"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/songInfoContainer">
-
-        <!-- Enhanced Real-time Synth Wave visualization -->
-        <com.stash.opusplayer.ui.visualizer.EnhancedSynthWaveView
-            android:id="@+id/enhancedSynthWaveView"
-            android:layout_width="match_parent"
-            android:layout_height="120dp"
-            android:layout_marginTop="8dp" />
-
-        <!-- Legacy SeekBar (hidden, kept for compatibility) -->
-        <SeekBar
-            android:id="@+id/seekBar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:visibility="gone"
-            android:max="100"
-            android:progress="0"
-            android:progressDrawable="@drawable/seek_bar_progress"
-            android:thumb="@drawable/seek_bar_thumb" />
-
-        <!-- Time labels -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/currentTime"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp"
-                tools:text="0:00" />
-
-            <TextView
-                android:id="@+id/totalTime"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:gravity="end"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp"
-                tools:text="3:45" />
-
-        </LinearLayout>
-
-    </LinearLayout>
-
-    <!-- Control buttons container -->
-    <LinearLayout
-        android:id="@+id/controlsContainer"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="32dp"
-        android:layout_marginEnd="16dp"
-        android:gravity="center"
-        android:orientation="horizontal"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/progressContainer">
-
-        <!-- Neomorphic Shuffle button -->
-        <ImageButton
-            android:id="@+id/shuffleButton"
-            style="@style/NeomorphicButton"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:contentDescription="@string/shuffle"
-            android:src="@drawable/ic_shuffle"
-            android:tint="@color/text_primary" />
-
-        <Space
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
-        <!-- Neomorphic Previous button -->
-        <ImageButton
-            android:id="@+id/previousButton"
-            style="@style/NeomorphicButton.Large"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
-            android:contentDescription="@string/previous"
-            android:src="@drawable/ic_skip_previous_24"
-            android:tint="@color/text_primary" />
-
-        <!-- Neomorphic Play/Pause button -->
-        <ImageButton
-            android:id="@+id/playPauseButton"
-            style="@style/NeomorphicAccentButton"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:layout_marginStart="16dp"
-            android:layout_marginEnd="16dp"
-            android:contentDescription="@string/play_pause"
-            android:src="@drawable/ic_play_arrow_24"
-            android:tint="@color/white" />
-
-        <!-- Neomorphic Next button -->
-        <ImageButton
-            android:id="@+id/nextButton"
-            style="@style/NeomorphicButton.Large"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
-            android:contentDescription="@string/next"
-            android:src="@drawable/ic_skip_next_24"
-            android:tint="@color/text_primary" />
-
-        <Space
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
-        <!-- Neomorphic Repeat button -->
-        <ImageButton
-            android:id="@+id/repeatButton"
-            style="@style/NeomorphicButton"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:contentDescription="@string/repeat"
-            android:src="@drawable/ic_repeat"
-            android:tint="@color/text_primary" />
-
-    </LinearLayout>
-
-    <!-- Scrolling container for audio + secondary controls to ensure visibility on all screens -->
     <androidx.core.widget.NestedScrollView
-        android:id="@+id/controlsScrollView"
+        android:id="@+id/contentScroll"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:clipToPadding="false"
         android:fillViewport="true"
-        app:layout_constraintTop_toBottomOf="@id/controlsContainer"
+        android:paddingBottom="24dp"
         app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:layout_constraintTop_toBottomOf="@id/feedbackOverlay">
 
-        <LinearLayout
-            android:id="@+id/scrollContent"
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/contentContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingStart="24dp"
-            android:paddingEnd="24dp"
+            android:paddingStart="20dp"
+            android:paddingTop="12dp"
+            android:paddingEnd="20dp"
             android:paddingBottom="32dp">
 
-            <!-- Secondary controls -->
-            <LinearLayout
-                android:id="@+id/secondaryControlsContainer"
-                android:layout_width="match_parent"
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/albumArtCard"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_marginTop="8dp"
+                app:cardBackgroundColor="@color/elevated_surface"
+                app:cardCornerRadius="28dp"
+                app:cardElevation="0dp"
+                app:layout_constraintDimensionRatio="1:1"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent">
+
+                <com.google.android.material.imageview.ShapeableImageView
+                    android:id="@+id/albumArtwork"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="@string/album_artwork"
+                    android:padding="6dp"
+                    android:scaleType="centerCrop"
+                    android:src="@drawable/ic_music_note"
+                    app:shapeAppearanceOverlay="@style/RoundedImageView" />
+
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/songInfoCard"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
-                android:gravity="center"
-                android:orientation="horizontal">
+                android:layout_marginTop="18dp"
+                app:cardBackgroundColor="@color/surface_variant"
+                app:cardCornerRadius="26dp"
+                app:cardElevation="0dp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/albumArtCard">
 
-                <!-- Neomorphic Favorite button -->
-                <ImageButton
-                    android:id="@+id/favoriteButton"
-                    style="@style/NeomorphicButton"
-                    android:layout_width="56dp"
-                    android:layout_height="56dp"
-                    android:contentDescription="@string/favorite"
-                    android:src="@drawable/ic_favorite_border"
-                    android:tint="@color/text_primary" />
-
-                <Space
-                    android:layout_width="0dp"
-                    android:layout_height="1dp"
-                    android:layout_weight="1" />
-
-                <!-- Neomorphic Queue button -->
-                <ImageButton
-                    android:id="@+id/queueButton"
-                    style="@style/NeomorphicButton"
-                    android:layout_width="56dp"
-                    android:layout_height="56dp"
-                    android:contentDescription="@string/queue"
-                    android:src="@drawable/ic_queue_music"
-                    android:tint="@color/text_primary" />
-
-                <Space
-                    android:layout_width="0dp"
-                    android:layout_height="1dp"
-                    android:layout_weight="1" />
-
-                <!-- Neomorphic Fast Forward button -->
-                <ImageButton
-                    android:id="@+id/fastForwardButton"
-                    style="@style/NeomorphicButton"
-                    android:layout_width="56dp"
-                    android:layout_height="56dp"
-                    android:contentDescription="Fast Forward 30s"
-                    android:src="@drawable/ic_forward_30_24"
-                    android:tint="@color/text_primary" />
-
-                <Space
-                    android:layout_width="0dp"
-                    android:layout_height="1dp"
-                    android:layout_weight="1" />
-
-                <!-- Neomorphic Metadata toggle button -->
-                <ImageButton
-                    android:id="@+id/metadataButton"
-                    style="@style/NeomorphicButton"
-                    android:layout_width="56dp"
-                    android:layout_height="56dp"
-                    android:contentDescription="Show Metadata"
-                    android:src="@drawable/ic_text_bubble_24"
-                    android:tint="@color/text_primary" />
-
-            </LinearLayout>
-
-            <!-- Metadata view container -->
-            <LinearLayout
-                android:id="@+id/metadataContainer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
-                android:orientation="vertical"
-                android:padding="16dp"
-                android:background="@drawable/circular_background"
-                android:visibility="gone">
-
-                <!-- Metadata header with back button -->
                 <LinearLayout
+                    android:id="@+id/songInfoContainer"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginBottom="16dp">
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:paddingStart="20dp"
+                    android:paddingTop="20dp"
+                    android:paddingEnd="20dp"
+                    android:paddingBottom="20dp">
 
                     <TextView
-                        android:layout_width="0dp"
+                        android:id="@+id/songTitle"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Metadata"
+                        android:ellipsize="marquee"
+                        android:focusable="true"
+                        android:focusableInTouchMode="true"
+                        android:gravity="center"
+                        android:marqueeRepeatLimit="marquee_forever"
+                        android:scrollHorizontally="true"
+                        android:singleLine="true"
                         android:textColor="@color/text_primary"
-                        android:textSize="18sp"
-                        android:textStyle="bold" />
+                        android:textSize="24sp"
+                        android:textStyle="bold"
+                        tools:text="Song Title" />
 
-                    <ImageButton
-                        android:id="@+id/metadataBackButton"
-                        style="@style/NeomorphicButton"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:contentDescription="Back to Controls"
-                        android:src="@drawable/ic_arrow_back_24"
-                        android:tint="@color/text_primary" />
+                    <TextView
+                        android:id="@+id/artistName"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:ellipsize="end"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="16sp"
+                        tools:text="Artist Name" />
+
+                    <TextView
+                        android:id="@+id/albumName"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:ellipsize="end"
+                        android:gravity="center"
+                        android:maxLines="1"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="14sp"
+                        tools:text="Album Name" />
+
+                    <TextView
+                        android:id="@+id/replayGainLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:background="@drawable/duration_background"
+                        android:paddingStart="12dp"
+                        android:paddingTop="6dp"
+                        android:paddingEnd="12dp"
+                        android:paddingBottom="6dp"
+                        android:textColor="@color/text_primary"
+                        android:textSize="12sp"
+                        android:visibility="gone"
+                        tools:text="ReplayGain: -5.2 dB" />
 
                 </LinearLayout>
 
-                <!-- Metadata content -->
-                <ScrollView
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/progressCard"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                app:cardBackgroundColor="@color/surface_variant"
+                app:cardCornerRadius="26dp"
+                app:cardElevation="0dp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/songInfoCard">
+
+                <LinearLayout
+                    android:id="@+id/progressContainer"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:maxHeight="200dp">
+                    android:orientation="vertical"
+                    android:paddingStart="18dp"
+                    android:paddingTop="18dp"
+                    android:paddingEnd="18dp"
+                    android:paddingBottom="18dp">
+
+                    <com.stash.opusplayer.ui.visualizer.EnhancedSynthWaveView
+                        android:id="@+id/enhancedSynthWaveView"
+                        android:layout_width="match_parent"
+                        android:layout_height="126dp" />
+
+                    <SeekBar
+                        android:id="@+id/seekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="100"
+                        android:progress="0"
+                        android:progressDrawable="@drawable/seek_bar_progress"
+                        android:thumb="@drawable/seek_bar_thumb"
+                        android:visibility="gone" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="vertical">
-
-                        <!-- File Information -->
-                        <TextView
-                            android:id="@+id/metadataFileName"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp"
-                            android:textStyle="bold"
-                            android:text="File Name:" />
+                        android:layout_marginTop="10dp"
+                        android:orientation="horizontal">
 
                         <TextView
-                            android:id="@+id/metadataFileNameValue"
-                            android:layout_width="match_parent"
+                            android:id="@+id/currentTime"
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:layout_marginBottom="12dp"
+                            android:layout_weight="1"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
-
-                        <!-- Duration -->
-                        <TextView
-                            android:id="@+id/metadataDuration"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp"
-                            android:textStyle="bold"
-                            android:text="Duration:" />
+                            android:textSize="12sp"
+                            tools:text="0:00" />
 
                         <TextView
-                            android:id="@+id/metadataDurationValue"
-                            android:layout_width="match_parent"
+                            android:id="@+id/totalTime"
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:layout_marginBottom="12dp"
+                            android:layout_weight="1"
+                            android:gravity="end"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
-
-                        <!-- Bitrate -->
-                        <TextView
-                            android:id="@+id/metadataBitrate"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp"
-                            android:textStyle="bold"
-                            android:text="Bitrate:" />
-
-                        <TextView
-                            android:id="@+id/metadataBitrateValue"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="12dp"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
-
-                        <!-- Sample Rate -->
-                        <TextView
-                            android:id="@+id/metadataSampleRate"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp"
-                            android:textStyle="bold"
-                            android:text="Sample Rate:" />
-
-                        <TextView
-                            android:id="@+id/metadataSampleRateValue"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="12dp"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
-
-                        <!-- Format -->
-                        <TextView
-                            android:id="@+id/metadataFormat"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp"
-                            android:textStyle="bold"
-                            android:text="Format:" />
-
-                        <TextView
-                            android:id="@+id/metadataFormatValue"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="12dp"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
-
-                        <!-- File Path -->
-                        <TextView
-                            android:id="@+id/metadataPath"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp"
-                            android:textStyle="bold"
-                            android:text="File Path:" />
-
-                        <TextView
-                            android:id="@+id/metadataPathValue"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="12dp"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="12sp"
+                            tools:text="3:45" />
 
                     </LinearLayout>
-                </ScrollView>
 
-            </LinearLayout>
+                </LinearLayout>
 
-        </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/controlsCard"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                app:cardBackgroundColor="@color/surface_variant"
+                app:cardCornerRadius="30dp"
+                app:cardElevation="0dp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/progressCard">
+
+                <LinearLayout
+                    android:id="@+id/controlsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:orientation="horizontal"
+                    android:paddingStart="12dp"
+                    android:paddingTop="14dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="14dp">
+
+                    <ImageButton
+                        android:id="@+id/shuffleButton"
+                        style="@style/NeomorphicButton"
+                        android:layout_width="54dp"
+                        android:layout_height="54dp"
+                        android:contentDescription="@string/shuffle"
+                        android:src="@drawable/ic_shuffle"
+                        android:tint="@color/text_primary" />
+
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <ImageButton
+                        android:id="@+id/previousButton"
+                        style="@style/NeomorphicButton.Large"
+                        android:layout_width="60dp"
+                        android:layout_height="60dp"
+                        android:contentDescription="@string/previous"
+                        android:src="@drawable/ic_skip_previous_24"
+                        android:tint="@color/text_primary" />
+
+                    <ImageButton
+                        android:id="@+id/playPauseButton"
+                        style="@style/NeomorphicAccentButton"
+                        android:layout_width="78dp"
+                        android:layout_height="78dp"
+                        android:layout_marginStart="14dp"
+                        android:layout_marginEnd="14dp"
+                        android:contentDescription="@string/play_pause"
+                        android:src="@drawable/ic_play_arrow_24"
+                        android:tint="@color/white" />
+
+                    <ImageButton
+                        android:id="@+id/nextButton"
+                        style="@style/NeomorphicButton.Large"
+                        android:layout_width="60dp"
+                        android:layout_height="60dp"
+                        android:contentDescription="@string/next"
+                        android:src="@drawable/ic_skip_next_24"
+                        android:tint="@color/text_primary" />
+
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <ImageButton
+                        android:id="@+id/repeatButton"
+                        style="@style/NeomorphicButton"
+                        android:layout_width="54dp"
+                        android:layout_height="54dp"
+                        android:contentDescription="@string/repeat"
+                        android:src="@drawable/ic_repeat"
+                        android:tint="@color/text_primary" />
+
+                </LinearLayout>
+
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/secondaryActionsCard"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                app:cardBackgroundColor="@color/surface_variant"
+                app:cardCornerRadius="26dp"
+                app:cardElevation="0dp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/controlsCard">
+
+                <LinearLayout
+                    android:id="@+id/secondaryControlsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:orientation="horizontal"
+                    android:paddingStart="14dp"
+                    android:paddingTop="14dp"
+                    android:paddingEnd="14dp"
+                    android:paddingBottom="14dp">
+
+                    <ImageButton
+                        android:id="@+id/favoriteButton"
+                        style="@style/NeomorphicButton"
+                        android:layout_width="54dp"
+                        android:layout_height="54dp"
+                        android:contentDescription="@string/favorite"
+                        android:src="@drawable/ic_favorite_border"
+                        android:tint="@color/text_primary" />
+
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <ImageButton
+                        android:id="@+id/queueButton"
+                        style="@style/NeomorphicButton"
+                        android:layout_width="54dp"
+                        android:layout_height="54dp"
+                        android:contentDescription="@string/queue"
+                        android:src="@drawable/ic_queue_music"
+                        android:tint="@color/text_primary" />
+
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <ImageButton
+                        android:id="@+id/fastForwardButton"
+                        style="@style/NeomorphicButton"
+                        android:layout_width="54dp"
+                        android:layout_height="54dp"
+                        android:contentDescription="Fast Forward 30s"
+                        android:src="@drawable/ic_forward_30_24"
+                        android:tint="@color/text_primary" />
+
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <ImageButton
+                        android:id="@+id/metadataButton"
+                        style="@style/NeomorphicButton"
+                        android:layout_width="54dp"
+                        android:layout_height="54dp"
+                        android:contentDescription="Show Metadata"
+                        android:src="@drawable/ic_text_bubble_24"
+                        android:tint="@color/text_primary" />
+
+                </LinearLayout>
+
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/metadataContainer"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:visibility="gone"
+                app:cardBackgroundColor="@color/surface_variant"
+                app:cardCornerRadius="26dp"
+                app:cardElevation="0dp"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/secondaryActionsCard">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="18dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Track Details"
+                            android:textColor="@color/text_primary"
+                            android:textSize="18sp"
+                            android:textStyle="bold" />
+
+                        <ImageButton
+                            android:id="@+id/metadataBackButton"
+                            style="@style/NeomorphicButton"
+                            android:layout_width="46dp"
+                            android:layout_height="46dp"
+                            android:contentDescription="Back to Controls"
+                            android:src="@drawable/ic_arrow_back_24"
+                            android:tint="@color/text_primary" />
+
+                    </LinearLayout>
+
+                    <ScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:maxHeight="260dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="File Name"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/metadataFileNameValue"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:layout_marginBottom="14dp"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Duration"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/metadataDurationValue"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:layout_marginBottom="14dp"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Bitrate"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/metadataBitrateValue"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:layout_marginBottom="14dp"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Sample Rate"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/metadataSampleRateValue"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:layout_marginBottom="14dp"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Format"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/metadataFormatValue"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:layout_marginBottom="14dp"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="File Path"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/metadataPathValue"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp" />
+
+                        </LinearLayout>
+
+                    </ScrollView>
+
+                </LinearLayout>
+
+            </com.google.android.material.card.MaterialCardView>
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
+
     </androidx.core.widget.NestedScrollView>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

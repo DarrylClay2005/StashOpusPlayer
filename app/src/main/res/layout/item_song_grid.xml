@@ -3,9 +3,9 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_margin="8dp"
+    android:layout_margin="4dp"
     app:cardUseCompatPadding="true"
-    app:cardCornerRadius="12dp"
+    app:cardCornerRadius="9dp"
 app:cardElevation="2dp"
     app:cardBackgroundColor="@color/surface_color"
     app:strokeColor="@color/border_gray"
@@ -35,9 +35,9 @@ app:cardElevation="2dp"
 
             <ImageView
                 android:id="@+id/menu_button"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:layout_margin="8dp"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_margin="4dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@drawable/ic_more_vert"
                 android:contentDescription="More options"
@@ -49,7 +49,7 @@ app:cardElevation="2dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="12dp">
+            android:padding="8dp">
 
             <TextView
                 android:id="@+id/song_title"
@@ -58,7 +58,7 @@ app:cardElevation="2dp"
                 android:maxLines="2"
                 android:ellipsize="end"
                 android:textAppearance="@style/TextAppearance.StashWave.Body"
-                android:textSize="14sp"
+                android:textSize="12sp"
                 android:text="Song Title" />
 
             <TextView
@@ -69,7 +69,7 @@ app:cardElevation="2dp"
                 android:ellipsize="end"
                 android:layout_marginTop="2dp"
                 android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
-                android:textSize="12sp"
+                android:textSize="10sp"
                 android:text="Artist" />
 
         </LinearLayout>

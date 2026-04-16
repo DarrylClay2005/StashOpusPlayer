@@ -74,6 +74,7 @@ class FolderDetailFragment : Fragment() {
             com.stash.opusplayer.utils.PrefsKeys.DEFAULT_FOLDER_DETAIL_VIEW_COLUMNS,
             1
         )
+        applyAdaptiveHeaderSizing()
         setupRecycler()
         setupLayoutToggle()
         setupSortButton()
@@ -94,7 +95,11 @@ class FolderDetailFragment : Fragment() {
             onShowFeedback = { message -> (activity as? MainActivity)?.showPlayingBanner(message) },
             metadataExtractor = metadataExtractor
         )
+        songAdapter.setListStyle(SongAdapter.ListStyle.FOLDER_CARD)
         binding.recyclerView.adapter = songAdapter
+        binding.recyclerView.clipToPadding = false
+        val bottomPadding = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(requireContext(), 24)
+        binding.recyclerView.setPadding(0, 0, 0, bottomPadding)
         applyColumns(currentColumns)
     }
 
@@ -173,6 +178,22 @@ class FolderDetailFragment : Fragment() {
             showSortDialog()
         }
     }
+
+    private fun applyAdaptiveHeaderSizing() {
+        val context = requireContext()
+        val buttonSize = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(context, 44)
+        val titleSize = com.stash.opusplayer.ui.appearance.ThemeManager.scaleSp(context, 24f)
+
+        binding.titleText.textSize = titleSize
+        binding.layoutButton.layoutParams = binding.layoutButton.layoutParams.apply {
+            width = buttonSize
+            height = buttonSize
+        }
+        binding.sortButton.layoutParams = binding.sortButton.layoutParams.apply {
+            width = buttonSize
+            height = buttonSize
+        }
+    }
     
     private fun showSortDialog() {
         val sortOptions = arrayOf(
@@ -200,13 +221,14 @@ class FolderDetailFragment : Fragment() {
     }
     
     private fun bindData() {
-        binding.titleText.text = folderTitle
+        binding.titleText.text = folderTitle.ifBlank { "Folder" }
         songAdapter.submitList(songs)
         if (songs.isNotEmpty()) {
             binding.recyclerView.visibility = View.VISIBLE
             binding.emptyStateText.visibility = View.GONE
         } else {
             binding.recyclerView.visibility = View.GONE
+            binding.emptyStateText.text = "No songs found in this folder"
             binding.emptyStateText.visibility = View.VISIBLE
         }
     }
@@ -216,4 +238,3 @@ class FolderDetailFragment : Fragment() {
         _binding = null
     }
 }
-

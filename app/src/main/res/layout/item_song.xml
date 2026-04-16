@@ -3,13 +3,13 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginStart="8dp"
-    android:layout_marginEnd="8dp"
-    android:layout_marginTop="6dp"
-    android:layout_marginBottom="6dp"
+    android:layout_marginStart="4dp"
+    android:layout_marginEnd="4dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginBottom="4dp"
     app:cardUseCompatPadding="true"
-    app:cardCornerRadius="12dp"
-    app:cardElevation="4dp"
+    app:cardCornerRadius="9dp"
+    app:cardElevation="2dp"
     app:strokeColor="@color/border_gray"
     app:strokeWidth="1dp">
 
@@ -17,13 +17,13 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="14dp"
+        android:padding="10dp"
         android:gravity="center_vertical">
 
     <com.google.android.material.imageview.ShapeableImageView
         android:id="@+id/song_artwork"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
         android:scaleType="centerCrop"
         app:shapeAppearanceOverlay="@style/CircularImageView"
         android:src="@drawable/ic_music_note" />
@@ -33,7 +33,7 @@
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:orientation="vertical"
-        android:layout_marginStart="16dp">
+        android:layout_marginStart="10dp">
 
         <TextView
             android:id="@+id/song_title"
@@ -41,7 +41,7 @@
             android:layout_height="wrap_content"
             android:text="Song Title"
 android:textAppearance="@style/TextAppearance.StashWave.Body"
-            android:textSize="16sp"
+            android:textSize="14sp"
             android:maxLines="1"
             android:ellipsize="end" />
 
@@ -51,7 +51,7 @@ android:textAppearance="@style/TextAppearance.StashWave.Body"
             android:layout_height="wrap_content"
             android:text="Artist Name"
 android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
-            android:textSize="14sp"
+            android:textSize="11sp"
             android:maxLines="1"
             android:ellipsize="end"
             android:layout_marginTop="2dp" />
@@ -64,16 +64,16 @@ android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
         android:layout_height="wrap_content"
         android:text="3:45"
 android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
-        android:textSize="12sp"
-        android:layout_marginStart="8dp" />
+        android:textSize="10sp"
+        android:layout_marginStart="4dp" />
 
     <ImageView
         android:id="@+id/menu_button"
-        android:layout_width="24dp"
-        android:layout_height="24dp"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
         android:src="@drawable/ic_more_vert"
         android:background="?attr/selectableItemBackgroundBorderless"
-        android:layout_marginStart="8dp"
+        android:layout_marginStart="4dp"
         android:contentDescription="More options" />
 
     </LinearLayout>

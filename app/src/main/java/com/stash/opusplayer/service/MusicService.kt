@@ -33,13 +33,14 @@ import com.stash.opusplayer.audio.ProfessionalAudioProcessor
 import com.stash.opusplayer.audio.AudioProfile
 import com.stash.opusplayer.audio.SpectrumAnalyzer
 import com.stash.opusplayer.audio.settings.EnhancedAudioSettings
-import com.stash.opusplayer.cloud.services.CloudSyncService
-import com.stash.opusplayer.cloud.services.AnalyticsService
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.ui.MainActivity
 import kotlin.math.pow
 import kotlin.math.log10
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class MusicService : MediaSessionService() {
@@ -59,8 +60,7 @@ private lateinit var activePlayer: ExoPlayer
     private lateinit var professionalAudioProcessor: ProfessionalAudioProcessor
     private lateinit var spectrumAnalyzer: SpectrumAnalyzer
     private lateinit var enhancedAudioSettings: EnhancedAudioSettings
-    private lateinit var cloudSyncService: CloudSyncService
-    private lateinit var analyticsService: AnalyticsService
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     // Sleep timer state
     private var sleepTimerHandler: android.os.Handler? = null
@@ -126,29 +126,6 @@ private lateinit var activePlayer: ExoPlayer
         // Initialize enhanced audio settings manager
         enhancedAudioSettings = EnhancedAudioSettings(this)
         
-        // Initialize cloud sync service
-        cloudSyncService = CloudSyncService.getInstance(this)
-        
-        // Initialize analytics service
-        analyticsService = AnalyticsService.getInstance(this)
-        
-        // Initialize cloud services in background
-        GlobalScope.launch {
-            try {
-                // Initialize analytics first (it's used by other services)
-                analyticsService.initialize()
-                
-                // Then initialize cloud sync
-                cloudSyncService.initialize()
-                if (cloudSyncService.shouldAutoSync()) {
-                    cloudSyncService.syncAll()
-                }
-            } catch (e: Exception) {
-                // Cloud services are optional, don't crash if they fail
-                android.util.Log.w("MusicService", "Cloud services initialization failed: ${e.message}")
-            }
-        }
-        
         // Register preference listeners so audio settings persist and apply instantly
         registerPreferenceListeners()
         
@@ -163,7 +140,7 @@ private lateinit var activePlayer: ExoPlayer
         restoreQueueStateIfAny()
         setupPlayerNotification()
     }
-    
+
 private fun initializePlayers() {
         // Configure a custom HTTP data source with a modern mobile user-agent for broader CDN compatibility
         val httpFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
@@ -253,6 +230,11 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
             // Disable EQ in default prefs as well
             PreferenceManager.getDefaultSharedPreferences(this).edit()
                 .putBoolean("equalizer_enabled", false)
+                .putString("equalizer_preset", com.stash.opusplayer.audio.EqualizerPreset.NORMAL.name)
+                .putInt("bass_boost_strength", 0)
+                .putInt("virtualizer_strength", 0)
+                .putInt("loudness_enhancer_gain", 0)
+                .putString("custom_eq_bands", null)
                 .apply()
             // Apply live
             setAppVolume(1.0f)
@@ -371,6 +353,7 @@ val savedShuffle = prefs.getBoolean("playback_shuffle", false)
                         "SET_EQ_ENABLED",
                         "SET_EQ_PRESET",
                         "SET_EQ_BAND",
+                        "GET_EQ_STATE",
                         "SET_BASS_BOOST",
                         "SET_VIRTUALIZER",
                         "SET_SPEED",
@@ -451,6 +434,11 @@ equalizerManager.setPreset(com.stash.opusplayer.audio.EqualizerPreset.valueOf(na
                                     .putBoolean("equalizer_enabled", true)
                                     .apply()
                             } catch (_: Exception) {}
+                        }
+                        "GET_EQ_STATE" -> {
+                            return com.google.common.util.concurrent.Futures.immediateFuture(
+                                SessionResult(SessionResult.RESULT_SUCCESS, equalizerManager.createStateBundle())
+                            )
                         }
                         "SET_EQ_BAND" -> {
                             val band = args.getInt("band", 0)
@@ -1103,7 +1091,7 @@ val sessionId = activePlayer.audioSessionId
                             } catch (_: Exception) { null }
                         )
                         // Start audio analysis in background
-                        GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        serviceScope.launch(Dispatchers.IO) {
                             // This would normally get actual audio samples from the player
                             // For now we'll use a placeholder to enable the system
                             val dummySamples = FloatArray(1024) { 0.0f }
@@ -1238,7 +1226,7 @@ val sessionId = activePlayer.audioSessionId
             )
             val repo = com.stash.opusplayer.data.MusicRepository(this)
             // Do DB work off the main thread
-            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            serviceScope.launch(Dispatchers.IO) {
                 try {
                     val isFav = repo.isFavorite(fallback.id)
                     if (isFav) repo.removeFromFavorites(fallback.id) else repo.addToFavorites(fallback)
@@ -1794,7 +1782,7 @@ val sessionId = activePlayer.audioSessionId
         try {
             val uri = activePlayer.currentMediaItem?.localConfiguration?.uri ?: return
             // Compute asynchronously to avoid blocking the main thread
-            GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            serviceScope.launch(Dispatchers.IO) {
                 val info = com.stash.opusplayer.utils.ReplayGainUtil.parseWithCache(this@MusicService, uri.toString())
                 val pair = computeReplayGainFor(info)
                 val amp = pair.first
@@ -1863,6 +1851,7 @@ try { activePlayer.pause() } catch (_: Exception) {}
     override fun onDestroy() {
         // Persist last-known queue state
         try { saveQueueState() } catch (_: Exception) {}
+        serviceScope.cancel()
         // Unregister preference listeners
         try { unregisterPreferenceListeners() } catch (_: Exception) {}
         try { presetReverb?.release() } catch (_: Exception) {}
@@ -1979,7 +1968,7 @@ try { activePlayer.pause() } catch (_: Exception) {}
                     val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
                     val bmp = cache.loadBitmapIfPresent(fakeSong, 256)
                     if (bmp == null) {
-                        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        serviceScope.launch(Dispatchers.IO) {
                             try { com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@MusicService).getOrFetch(fakeSong) } catch (_: Exception) {}
                         }
                     }

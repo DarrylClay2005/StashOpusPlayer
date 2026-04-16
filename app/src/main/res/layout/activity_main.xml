@@ -139,7 +139,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:layout_below="@id/playing_banner"
-            android:layout_above="@id/mini_player" />
+            android:layout_above="@id/mini_player_container" />
 
         <!-- Neomorphic Bottom Navigation -->
         <com.google.android.material.bottomnavigation.BottomNavigationView
@@ -160,8 +160,8 @@
             app:itemPaddingBottom="8dp" />
 
         <!-- Mini Player Container -->
-        <com.stash.opusplayer.ui.MiniPlayerView
-            android:id="@+id/mini_player"
+        <FrameLayout
+            android:id="@+id/mini_player_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_above="@id/bottom_nav"

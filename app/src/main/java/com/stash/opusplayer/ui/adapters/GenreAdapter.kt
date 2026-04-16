@@ -9,6 +9,7 @@ import com.stash.opusplayer.databinding.ItemGenreBinding
 import com.stash.opusplayer.ui.fragments.GenreInfo
 import com.bumptech.glide.Glide
 import com.stash.opusplayer.artwork.ArtistGenreArtworkFetcher
+import com.stash.opusplayer.ui.appearance.ThemeManager
 import androidx.lifecycle.*
 import kotlinx.coroutines.launch
 
@@ -29,6 +30,7 @@ class GenreAdapter(
         private val binding: ItemGenreBinding
     ) : RecyclerView.ViewHolder(binding.root) {
         fun bind(item: GenreInfo) {
+            applyAdaptiveSizing()
             binding.genreName.text = item.name
             binding.genreCount.text = "${item.songCount} song${if (item.songCount == 1) "" else "s"}"
 
@@ -49,6 +51,37 @@ class GenreAdapter(
             }
 
             binding.root.setOnClickListener { onClick(item) }
+        }
+
+        private fun applyAdaptiveSizing() {
+            val context = binding.root.context
+            val density = context.resources.displayMetrics.density
+            val scale = ThemeManager.getAdaptiveUiScale(context)
+
+            fun px(baseDp: Int): Int = (baseDp * density * scale).toInt().coerceAtLeast(1)
+
+            val rootLayoutParams = binding.root.layoutParams as? ViewGroup.MarginLayoutParams
+            rootLayoutParams?.apply {
+                marginStart = px(6)
+                topMargin = px(5)
+                marginEnd = px(6)
+                bottomMargin = px(5)
+            }
+            if (rootLayoutParams != null) {
+                binding.root.layoutParams = rootLayoutParams
+            }
+
+            binding.root.radius = px(10).toFloat()
+            binding.root.cardElevation = px(2).toFloat()
+            binding.root.minimumHeight = px(62)
+            (binding.root.getChildAt(0) as? ViewGroup)?.setPadding(px(10), px(10), px(10), px(10))
+
+            binding.genreIcon.layoutParams = binding.genreIcon.layoutParams.apply {
+                width = px(36)
+                height = px(36)
+            }
+            binding.genreName.textSize = ThemeManager.scaleSp(context, 15f)
+            binding.genreCount.textSize = ThemeManager.scaleSp(context, 11f)
         }
     }
 

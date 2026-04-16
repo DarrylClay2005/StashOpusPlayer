@@ -173,9 +173,18 @@ class EnhancedSynthWaveView @JvmOverloads constructor(
         get() = prefs.getBoolean("synthwave_color_shift_enabled", true)
         set(value) = prefs.edit().putBoolean("synthwave_color_shift_enabled", value).apply()
     
+    private fun readAnimationIntensityPreference(): Float {
+        val raw = prefs.all["synthwave_intensity"]
+        val value = when (raw) {
+            is Number -> raw.toFloat()
+            else -> 1f
+        }
+        return (if (value > 2f) value / 100f else value).coerceIn(0.1f, 2f)
+    }
+
     private var animationIntensity: Float
-        get() = prefs.getFloat("synthwave_intensity", 1f)
-        set(value) = prefs.edit().putFloat("synthwave_intensity", value).apply()
+        get() = readAnimationIntensityPreference()
+        set(value) = prefs.edit().putFloat("synthwave_intensity", value.coerceIn(0.1f, 2f)).apply()
     
     // Visualizer mode selection
     enum class VisualizerMode {

@@ -115,7 +115,6 @@ android {
     
     buildFeatures {
         viewBinding true
-        dataBinding true
         buildConfig true
     }
     
@@ -132,6 +131,8 @@ android {
         exclude 'META-INF/LICENSE.txt'
         exclude 'META-INF/NOTICE'
         exclude 'META-INF/NOTICE.txt'
+        exclude 'META-INF/AL2.0'
+        exclude 'META-INF/LGPL2.1'
     }
 }
 
@@ -162,9 +163,6 @@ dependencies {
     implementation 'com.google.android.material:material:1.10.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'androidx.drawerlayout:drawerlayout:1.2.0'
-    implementation 'androidx.navigation:navigation-fragment-ktx:2.7.5'
-    implementation 'androidx.navigation:navigation-ui-ktx:2.7.5'
-    
     // Media playback
     implementation 'androidx.media3:media3-exoplayer:1.2.0'
     implementation 'androidx.media3:media3-exoplayer-dash:1.2.0'
@@ -200,9 +198,6 @@ dependencies {
     
     // YouTube Player for direct streaming
     implementation 'com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0'
-    
-    // Additional HTTP client for downloads
-    implementation 'com.squareup.okhttp3:okhttp:4.11.0'
     
     // JSON parsing
     implementation 'org.json:json:20230618'
@@ -240,16 +235,6 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'
     implementation 'androidx.lifecycle:lifecycle-livedata-ktx:2.7.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
-    
-    // AWS SDK for DynamoDB
-    implementation 'com.amazonaws:aws-android-sdk-core:2.77.0'
-    implementation 'com.amazonaws:aws-android-sdk-ddb:2.77.0'
-    implementation 'com.amazonaws:aws-android-sdk-ddb-mapper:2.77.0'
-    implementation 'com.amazonaws:aws-android-sdk-auth-core:2.77.0'
-    implementation 'com.amazonaws:aws-android-sdk-auth-userpools:2.77.0'
-    
-    // AWS SDK additional dependencies
-    implementation 'com.amazonaws:aws-android-sdk-cognitoidentityprovider:2.77.0'
     
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'

@@ -3,15 +3,12 @@ package com.stash.opusplayer.audio.settings
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.preference.PreferenceManager
-import com.stash.opusplayer.audio.EnhancedAudioManager
 
 /**
  * Manages persistence of enhanced audio settings
  */
 class EnhancedAudioSettings(private val context: Context) {
-    
-    // Cloud sync will be implemented later
-    
+
     companion object {
         // Professional Audio Processor Settings
         private const val PREF_PROFESSIONAL_PROCESSOR_ENABLED = "professional_processor_enabled"
@@ -283,64 +280,5 @@ class EnhancedAudioSettings(private val context: Context) {
             .putString(PREF_ENHANCED_EQ_PRESET, "NORMAL")
             .putString(PREF_ENHANCED_BAND_LEVELS, "")
             .apply()
-            
-        // Trigger cloud sync for default reset
-        triggerCloudSync()
-    }
-    
-    /**
-     * Trigger cloud synchronization of current settings
-     */
-    private fun triggerCloudSync() {
-        try {
-            // Cloud sync will be implemented later - for now just log
-            android.util.Log.d("EnhancedAudioSettings", "Cloud sync triggered (not yet implemented)")
-        } catch (e: Exception) {
-            // Cloud sync is optional, don't crash if it fails
-            android.util.Log.d("EnhancedAudioSettings", "Cloud sync failed: ${e.message}")
-        }
-    }
-    
-    /**
-     * Cloud sync methods - to be implemented later
-     */
-    fun enableCloudSync(): Boolean = false
-    fun disableCloudSync(): Boolean = false
-    fun isCloudSyncEnabled(): Boolean = false
-    fun getCloudSyncInfo(): Map<String, Any> = emptyMap()
-    
-    /**
-     * Override setter methods to include cloud sync trigger
-     */
-    
-    // Override existing setters to add cloud sync
-    fun setProfessionalProcessorEnabledWithSync(enabled: Boolean) {
-        setProfessionalProcessorEnabled(enabled)
-        triggerCloudSync()
-    }
-    
-    fun setCompressionEnabledWithSync(enabled: Boolean) {
-        setCompressionEnabled(enabled)
-        triggerCloudSync()
-    }
-    
-    fun setCompressionThresholdWithSync(threshold: Float) {
-        setCompressionThreshold(threshold)
-        triggerCloudSync()
-    }
-    
-    fun setCompressionRatioWithSync(ratio: Float) {
-        setCompressionRatio(ratio)
-        triggerCloudSync()
-    }
-    
-    fun setStereoWidthWithSync(width: Float) {
-        setStereoWidth(width)
-        triggerCloudSync()
-    }
-    
-    fun setCurrentAudioProfileWithSync(profile: String) {
-        setCurrentAudioProfile(profile)
-        triggerCloudSync()
     }
 }

@@ -1,5 +1,7 @@
 package com.stash.opusplayer.ui.views
 
+import android.content.Intent
+import android.content.res.ColorStateList
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.*
@@ -9,11 +11,12 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.cardview.widget.CardView
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.findViewTreeLifecycleOwner
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -26,8 +29,14 @@ import com.bumptech.glide.request.target.Target
 import com.stash.opusplayer.R
 import com.stash.opusplayer.databinding.ViewRevampedMiniPlayerBinding
 import com.stash.opusplayer.player.MusicPlayerManager
+import com.stash.opusplayer.ui.MiniPlayerSurface
+import com.stash.opusplayer.ui.NowPlayingActivity
+import com.stash.opusplayer.ui.QueueActivity
 import com.stash.opusplayer.ui.appearance.VisualCustomizationManager
+import com.stash.opusplayer.ui.appearance.AppearancePreferences
+import com.stash.opusplayer.ui.appearance.ThemeManager
 import com.stash.opusplayer.utils.AnimationUtils
+import com.stash.opusplayer.utils.MetadataExtractor
 import com.stash.opusplayer.data.Song
 import kotlinx.coroutines.launch
 import kotlin.math.*
@@ -39,7 +48,7 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
-) : ConstraintLayout(context, attrs, defStyleAttr) {
+) : ConstraintLayout(context, attrs, defStyleAttr), MiniPlayerSurface {
 
     companion object {
         private const val TAG = "RevampedMiniPlayerView"
@@ -52,9 +61,12 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
 
     private val binding: ViewRevampedMiniPlayerBinding
     private val customizationManager = VisualCustomizationManager(context)
+    private val metadataExtractor = MetadataExtractor(context)
 
     // Player management
     private var musicPlayerManager: MusicPlayerManager? = null
+    private var lifecycleOwner: LifecycleOwner? = null
+    private var hasBoundToManager = false
     private var currentSong: Song? = null
     private var isPlaying = false
     private var currentPosition = 0L
@@ -272,6 +284,7 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
     }
 
     private fun startProgressAnimation() {
+        if (duration <= 0L) return
         progressAnimator?.cancel()
         
         progressAnimator = ValueAnimator.ofInt(
@@ -322,15 +335,20 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 R.id.action_show_queue -> {
-                    // Show queue
+                    runCatching {
+                        context.startActivity(Intent(context, QueueActivity::class.java).apply {
+                            if (context !is android.app.Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        })
+                    }
                     true
                 }
                 R.id.action_add_to_favorites -> {
-                    // Add to favorites
+                    val song = currentSong ?: return@setOnMenuItemClickListener false
+                    (context as? com.stash.opusplayer.ui.MainActivity)?.toggleFavorite(song)
                     true
                 }
                 R.id.action_share -> {
-                    // Share track
+                    shareCurrentTrack()
                     true
                 }
                 else -> false
@@ -338,6 +356,18 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
         }
         
         popup.show()
+    }
+
+    private fun shareCurrentTrack() {
+        val song = currentSong ?: return
+        val text = "${song.displayName} - ${song.artistName}"
+        runCatching {
+            context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+                if (context !is android.app.Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }, context.getString(R.string.share)))
+        }
     }
 
     private fun formatTime(milliseconds: Long): String {
@@ -352,31 +382,59 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
         }
     }
 
-    // Public API methods
-    fun setMusicPlayerManager(manager: MusicPlayerManager) {
+    override fun initialize(lifecycleOwner: LifecycleOwner, musicPlayerManager: MusicPlayerManager) {
+        this.lifecycleOwner = lifecycleOwner
+        if (this.musicPlayerManager !== musicPlayerManager || !hasBoundToManager) {
+            this.musicPlayerManager = musicPlayerManager
+            observePlayerManager(lifecycleOwner, musicPlayerManager)
+            hasBoundToManager = true
+        }
+
+        setOnExpandListener { openNowPlaying() }
+        setOnPlayPauseListener {
+            val manager = this.musicPlayerManager ?: return@setOnPlayPauseListener
+            if (manager.isPlaying.value) manager.pause() else manager.play()
+        }
+        setOnNextListener { this.musicPlayerManager?.skipToNext() }
+        setOnPreviousListener { this.musicPlayerManager?.skipToPrevious() }
+        setOnSeekListener { position -> this.musicPlayerManager?.seekTo(position) }
+
+        resync()
+    }
+
+    private fun openNowPlaying() {
+        runCatching {
+            context.startActivity(Intent(context, NowPlayingActivity::class.java).apply {
+                currentSong?.let { putExtra("song", it) }
+                if (context !is android.app.Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }
+    }
+
+    private fun observePlayerManager(owner: LifecycleOwner, manager: MusicPlayerManager) {
         this.musicPlayerManager = manager
         
         // Observe player state
-        findViewTreeLifecycleOwner()?.lifecycleScope?.launch {
+        owner.lifecycleScope.launch {
             manager.isPlaying.collect { playing ->
                 updatePlayingState(playing)
             }
         }
         
-        findViewTreeLifecycleOwner()?.lifecycleScope?.launch {
+        owner.lifecycleScope.launch {
             manager.currentSong.collect { song ->
                 updateCurrentSong(song)
             }
         }
         
-        findViewTreeLifecycleOwner()?.lifecycleScope?.launch {
+        owner.lifecycleScope.launch {
             manager.currentPosition.collect { position ->
                 updatePosition(position)
             }
         }
         
         // Update duration periodically since it's not a flow
-        findViewTreeLifecycleOwner()?.lifecycleScope?.launch {
+        owner.lifecycleScope.launch {
             while (true) {
                 val dur = manager.getDuration()
                 if (dur > 0 && dur != duration) {
@@ -416,7 +474,7 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
         isPlaying = playing
         
         // Update play/pause button
-        val iconRes = if (playing) R.drawable.ic_pause_24 else R.drawable.ic_play_arrow
+        val iconRes = if (playing) R.drawable.ic_pause_24 else R.drawable.ic_play_arrow_24
         binding.playPauseButton.setImageResource(iconRes)
         
         // Start/stop animations
@@ -439,12 +497,15 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
             binding.trackTitle.text = song.displayName
             binding.trackArtist.text = song.artistName
             
-            // Load album art with rounded corners and placeholder
+            val cached = metadataExtractor.loadCachedArtwork(context, song)
+            val embedded = metadataExtractor.decodeAlbumArt(song.albumArt)
+            val artModel: Any = cached ?: embedded ?: song.albumArt ?: R.drawable.ic_music_note
+
             Glide.with(context)
-                .load(song.albumArt)
+                .load(artModel)
                 .transform(RoundedCorners(24))
-                .placeholder(android.R.drawable.ic_media_play)
-                .error(android.R.drawable.ic_media_play)
+                .placeholder(R.drawable.ic_music_note)
+                .error(R.drawable.ic_music_note)
                 .listener(object : RequestListener<Drawable> {
                     override fun onLoadFailed(
                         e: GlideException?, 
@@ -494,12 +555,97 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
         binding.progressBar.max = 100
     }
 
-    override fun onDetachedFromWindow() {
-        super.onDetachedFromWindow()
+    override fun resync() {
+        val manager = musicPlayerManager ?: return
+        updateCurrentSong(manager.currentSong.value)
+        updatePlayingState(manager.isPlaying.value)
+        updateDuration(manager.getDuration())
+        updatePosition(manager.currentPosition.value)
+    }
+
+    override fun applyAppearancePreferences(prefs: AppearancePreferences) {
+        val density = resources.displayMetrics.density
+        val uiScale = (ThemeManager.getAdaptiveUiScale(context) * if (prefs.miniPlayerCompactMode) 0.92f else 1.0f)
+            .coerceIn(0.74f, 0.96f)
+        val buttonScale = (uiScale * prefs.buttonSizeScale).coerceIn(0.72f, 1.0f)
+        val compactAlpha = if (prefs.miniPlayerCompactMode) 0.96f else 1f
+
+        fun px(baseDp: Int, scale: Float = uiScale): Int =
+            (baseDp * density * scale).roundToInt().coerceAtLeast(1)
+
+        fun updateSize(view: View, widthDp: Int, heightDp: Int, scale: Float = uiScale) {
+            view.layoutParams = view.layoutParams.apply {
+                width = px(widthDp, scale)
+                height = px(heightDp, scale)
+            }
+        }
+
+        fun updateMargins(
+            view: View,
+            startDp: Int? = null,
+            topDp: Int? = null,
+            endDp: Int? = null,
+            bottomDp: Int? = null,
+            scale: Float = uiScale
+        ) {
+            val lp = view.layoutParams as? MarginLayoutParams ?: return
+            startDp?.let { lp.marginStart = px(it, scale) }
+            topDp?.let { lp.topMargin = px(it, scale) }
+            endDp?.let { lp.marginEnd = px(it, scale) }
+            bottomDp?.let { lp.bottomMargin = px(it, scale) }
+            view.layoutParams = lp
+        }
+
+        binding.miniPlayerCard.radius = prefs.cardCornerRadiusDp * density * uiScale
+        binding.miniPlayerCard.setCardBackgroundColor(prefs.primaryColor)
+        binding.miniPlayerCard.cardElevation = px(if (prefs.miniPlayerCompactMode) 6 else 10, 1f).toFloat()
+        binding.miniPlayerCard.useCompatPadding = !prefs.miniPlayerCompactMode
+        updateMargins(binding.miniPlayerCard, startDp = 6, topDp = 6, endDp = 6, bottomDp = 6)
+
+        binding.root.layoutParams = binding.root.layoutParams.apply {
+            height = ViewGroup.LayoutParams.WRAP_CONTENT
+        }
+        binding.root.minimumHeight = px(if (prefs.miniPlayerCompactMode) 70 else 80, 1f)
+        binding.root.setPadding(px(if (prefs.miniPlayerCompactMode) 10 else 12, 1f), px(if (prefs.miniPlayerCompactMode) 10 else 12, 1f), px(if (prefs.miniPlayerCompactMode) 10 else 12, 1f), px(if (prefs.miniPlayerCompactMode) 10 else 12, 1f))
+
+        updateSize(binding.albumArtContainer, 52, 52)
+        updateMargins(binding.trackInfoContainer, startDp = 12, endDp = 12)
+        updateMargins(binding.progressContainer, startDp = 12, topDp = 6, endDp = 12)
+        updateSize(binding.previousButton, 32, 32, buttonScale)
+        updateSize(binding.playPauseButton, 42, 42, buttonScale)
+        updateSize(binding.nextButton, 32, 32, buttonScale)
+        updateMargins(binding.previousButton, endDp = 4, scale = buttonScale)
+        updateMargins(binding.playPauseButton, endDp = 4, scale = buttonScale)
+
+        binding.trackTitle.textSize = ThemeManager.scaleSp(context, if (prefs.miniPlayerCompactMode) 13f else 15f, prefs.fontScale)
+        binding.trackArtist.textSize = ThemeManager.scaleSp(context, if (prefs.miniPlayerCompactMode) 11f else 12f, prefs.fontScale)
+        binding.currentTimeText.textSize = ThemeManager.scaleSp(context, 11f, prefs.fontScale)
+        binding.totalTimeText.textSize = ThemeManager.scaleSp(context, 11f, prefs.fontScale)
+
+        binding.trackTitle.setTextColor(prefs.textPrimaryColor)
+        binding.trackArtist.setTextColor(prefs.textSecondaryColor)
+        binding.trackArtist.visibility = if (prefs.miniPlayerShowArtist) View.VISIBLE else View.GONE
+        binding.albumArtContainer.visibility = if (prefs.miniPlayerShowArt) View.VISIBLE else View.GONE
+        binding.previousButton.imageTintList = ColorStateList.valueOf(prefs.textSecondaryColor)
+        binding.nextButton.imageTintList = ColorStateList.valueOf(prefs.textSecondaryColor)
+        binding.playPauseButton.imageTintList = ColorStateList.valueOf(prefs.textPrimaryColor)
+        binding.currentTimeText.setTextColor(prefs.textSecondaryColor)
+        binding.totalTimeText.setTextColor(prefs.textSecondaryColor)
+        alpha = compactAlpha
+    }
+
+    override fun asView(): View = this
+
+    override fun release() {
         progressAnimator?.cancel()
         pulseAnimator?.cancel()
         albumArtRotationAnimator?.cancel()
         longPressRunnable?.let { removeCallbacks(it) }
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        release()
     }
 
     // Custom drawing setup - removed problematic onDraw access

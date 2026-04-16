@@ -18,6 +18,7 @@ import com.stash.opusplayer.data.MusicRepository
 import com.stash.opusplayer.data.Song
 import com.stash.opusplayer.ui.MainActivity
 import com.stash.opusplayer.ui.adapters.SongAdapter
+import com.stash.opusplayer.ui.appearance.ThemeManager
 import kotlinx.coroutines.*
 
 class MusicLibraryFragment : Fragment() {
@@ -58,6 +59,7 @@ class MusicLibraryFragment : Fragment() {
         setupSearchButton()
         setupSortButton()
         setupLikedButton()
+        applyAdaptiveChrome()
         loadSongs()
     }
     
@@ -90,7 +92,54 @@ val metadataExtractor = com.stash.opusplayer.utils.MetadataExtractor(requireCont
         )
         
         binding.recyclerView.adapter = songAdapter
+        binding.recyclerView.clipToPadding = false
         applyColumns(currentColumns)
+    }
+
+    private fun applyAdaptiveChrome() {
+        val context = requireContext()
+        val outerPadding = ThemeManager.scaleDp(context, 10)
+        val compactButtonWidth = ThemeManager.scaleDp(context, 40)
+        val compactButtonHeight = ThemeManager.scaleDp(context, 34)
+        val compactIconSize = ThemeManager.scaleDp(context, 16)
+        val scanHorizontalPadding = ThemeManager.scaleDp(context, 10)
+        val recyclerBottomPadding = ThemeManager.scaleDp(context, 22)
+
+        binding.root.setPadding(outerPadding, outerPadding, outerPadding, outerPadding)
+        binding.libraryHeaderTitle.textSize = ThemeManager.scaleSp(context, 16f)
+        binding.libraryHeaderIcon.layoutParams = binding.libraryHeaderIcon.layoutParams.apply {
+            width = ThemeManager.scaleDp(context, 24)
+            height = ThemeManager.scaleDp(context, 24)
+        }
+        binding.libraryHeader.layoutParams = (binding.libraryHeader.layoutParams as? ViewGroup.MarginLayoutParams)?.apply {
+            bottomMargin = ThemeManager.scaleDp(context, 10)
+        } ?: binding.libraryHeader.layoutParams
+
+        listOf(binding.likedButton, binding.searchButton, binding.sortButton, binding.layoutButton).forEach { button ->
+            button.layoutParams = button.layoutParams.apply {
+                width = compactButtonWidth
+                height = compactButtonHeight
+            }
+            button.minimumWidth = compactButtonWidth
+            button.minimumHeight = compactButtonHeight
+            button.iconSize = compactIconSize
+            button.insetTop = 0
+            button.insetBottom = 0
+        }
+
+        binding.scanButton.layoutParams = binding.scanButton.layoutParams.apply {
+            height = compactButtonHeight
+        }
+        binding.scanButton.minimumHeight = compactButtonHeight
+        binding.scanButton.iconSize = ThemeManager.scaleDp(context, 12)
+        binding.scanButton.textSize = ThemeManager.scaleSp(context, 10.5f)
+        binding.scanButton.insetTop = 0
+        binding.scanButton.insetBottom = 0
+        binding.scanButton.setPadding(scanHorizontalPadding, 0, scanHorizontalPadding, 0)
+
+        binding.recyclerView.setPadding(0, ThemeManager.scaleDp(context, 2), 0, recyclerBottomPadding)
+        binding.emptyStateText.textSize = ThemeManager.scaleSp(context, 15f)
+        binding.emptyStateSubtitle.textSize = ThemeManager.scaleSp(context, 11f)
     }
 
     private fun setupLayoutToggle() {
@@ -170,7 +219,7 @@ val metadataExtractor = com.stash.opusplayer.utils.MetadataExtractor(requireCont
         } else {
             binding.recyclerView.layoutManager = GridLayoutManager(requireContext(), cols)
             songAdapter.setColumns(cols)
-            val spacing = resources.getDimensionPixelSize(com.stash.opusplayer.R.dimen.grid_spacing)
+            val spacing = ThemeManager.scaleDp(requireContext(), 8)
             gridDecoration = com.stash.opusplayer.ui.widgets.GridSpacingItemDecoration(cols, spacing, true)
             binding.recyclerView.addItemDecoration(gridDecoration!!)
         }
@@ -235,7 +284,10 @@ val favoritesFragment = com.stash.opusplayer.ui.fragments.FavoritesFragment()
     private fun showSearchDialog() {
         val searchView = EditText(requireContext()).apply {
             hint = "Search songs..."
-            setPadding(32, 16, 32, 16)
+            val horizontalPadding = ThemeManager.scaleDp(requireContext(), 16)
+            val verticalPadding = ThemeManager.scaleDp(requireContext(), 10)
+            setPadding(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding)
+            textSize = ThemeManager.scaleSp(requireContext(), 14f)
         }
         
         AlertDialog.Builder(requireContext())

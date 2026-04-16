@@ -12,7 +12,10 @@ import androidx.recyclerview.widget.RecyclerView
 import com.stash.opusplayer.data.MusicRepository
 import com.stash.opusplayer.databinding.FragmentFoldersBinding
 import com.stash.opusplayer.ui.adapters.FolderAdapter
+import com.stash.opusplayer.utils.MetadataExtractor
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import android.net.Uri
 
@@ -55,7 +58,7 @@ class FoldersFragment : Fragment() {
 
     private fun setupRecyclerView() {
         adapter = FolderAdapter { info ->
-            val fragment = FolderDetailFragment.newInstance(info.path, ArrayList(info.songs))
+            val fragment = FolderDetailFragment.newInstance(info.displayName, ArrayList(info.songs))
             parentFragmentManager.beginTransaction()
                 .replace(com.stash.opusplayer.R.id.main_content, fragment)
                 .addToBackStack(null)
@@ -145,34 +148,56 @@ class FoldersFragment : Fragment() {
     private fun loadFolders() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
+                val appContext = context?.applicationContext ?: return@launch
                 val songs = repository.getAllSongsFromAllSourcesFast()
-                val folders = songs
-                    .groupBy { song ->
-                        if (song.path.startsWith("content://")) {
-                            // Use relativePath set during SAF scan; fallback to content URI host
-                            val rp = song.relativePath.ifBlank { "Content/${Uri.parse(song.path).host ?: "Music"}/" }
-                            // Normalize leading/trailing slashes
-                            rp.trimStart('/').trimEnd('/')
-                        } else {
-                            File(song.path).parent ?: "/"
+                val metadataExtractor = MetadataExtractor(appContext)
+                val folders = withContext(Dispatchers.IO) {
+                    songs
+                        .groupBy { song ->
+                            if (song.path.startsWith("content://")) {
+                                val rp = song.relativePath.ifBlank { "Content/${Uri.parse(song.path).host ?: "Music"}/" }
+                                rp.trimStart('/').trimEnd('/')
+                            } else {
+                                File(song.path).parent ?: "/"
+                            }
                         }
-                    }
-                    .map { (path, group) -> FolderInfo(path, group.size, group) }
-                    .sortedBy { it.path.lowercase() }
+                        .map { (path, group) ->
+                            val sortedGroup = group.sortedBy { it.displayName.lowercase() }
+                            val leadSong = sortedGroup.firstOrNull()?.let { firstSong ->
+                                if (!firstSong.albumArt.isNullOrEmpty()) {
+                                    firstSong
+                                } else {
+                                    metadataExtractor.extractMetadata(firstSong, forceArtworkExtraction = false)
+                                }
+                            }
+                            val folderSongs = if (leadSong != null && sortedGroup.isNotEmpty()) {
+                                listOf(leadSong) + sortedGroup.drop(1)
+                            } else {
+                                sortedGroup
+                            }
+                            FolderInfo(path, folderSongs.size, folderSongs)
+                        }
+                        .sortedWith(compareBy<FolderInfo> { it.displayName.lowercase() }.thenBy { it.path.lowercase() })
+                }
                 val b = _binding ?: return@launch
+                b.titleText.text = if (folders.isEmpty()) "Folders" else "Folders · ${folders.size}"
                 if (folders.isNotEmpty()) {
                     adapter.submitList(folders)
-b.recyclerView.visibility = View.VISIBLE
+                    b.recyclerView.visibility = View.VISIBLE
                     b.emptyStateText.visibility = View.GONE
                     b.swipeRefresh.isRefreshing = false
                 } else {
-b.recyclerView.visibility = View.GONE
+                    adapter.submitList(emptyList())
+                    b.recyclerView.visibility = View.GONE
+                    b.emptyStateText.text = "No folders in your library yet.\nPull to refresh after your next scan."
                     b.emptyStateText.visibility = View.VISIBLE
                     b.swipeRefresh.isRefreshing = false
                 }
             } catch (_: Exception) {
                 val b = _binding ?: return@launch
-b.recyclerView.visibility = View.GONE
+                adapter.submitList(emptyList())
+                b.recyclerView.visibility = View.GONE
+                b.emptyStateText.text = "Folders could not be loaded right now.\nTry refreshing again."
                 b.emptyStateText.visibility = View.VISIBLE
                 b.swipeRefresh.isRefreshing = false
             }
@@ -189,4 +214,35 @@ data class FolderInfo(
     val path: String,
     val songCount: Int,
     val songs: List<com.stash.opusplayer.data.Song>
-)
+) {
+    private val normalizedPath: String
+        get() = path.replace('\\', '/').trimEnd('/').ifBlank { path }
+
+    val displayName: String
+        get() = normalizedPath.substringAfterLast('/').ifBlank {
+            when {
+                normalizedPath == "/" -> "Root"
+                normalizedPath.isBlank() -> "Folder"
+                else -> normalizedPath
+            }
+        }
+
+    val parentLabel: String
+        get() {
+            val parent = normalizedPath.substringBeforeLast('/', missingDelimiterValue = "")
+            return when {
+                parent.isBlank() -> "Top level"
+                parent == normalizedPath -> "Top level"
+                else -> parent
+            }
+        }
+
+    val previewSongTitle: String
+        get() = songs.firstOrNull()?.displayName ?: "No preview track"
+
+    val thumbnailSong: com.stash.opusplayer.data.Song?
+        get() = songs.firstOrNull()
+
+    val countLabel: String
+        get() = "$songCount song${if (songCount == 1) "" else "s"}"
+}

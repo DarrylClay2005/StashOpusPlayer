@@ -15,7 +15,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.WindowCompat
 import com.google.android.material.card.MaterialCardView
-import com.stash.opusplayer.ui.MiniPlayerView
+import com.stash.opusplayer.ui.MiniPlayerSurface
+import com.stash.opusplayer.utils.ResponsiveUtils
+import kotlin.math.roundToInt
 
 object ThemeManager {
     
@@ -31,6 +33,42 @@ object ThemeManager {
      */
     fun load(context: Context): AppearancePreferences {
         return AppearancePreferences.fromPrefs(context)
+    }
+
+    fun getAdaptiveUiScale(context: Context): Float {
+        val screenInfo = ResponsiveUtils.getScreenInfo(context)
+        val widthScale = when {
+            screenInfo.widthDp < 340 -> 0.74f
+            screenInfo.widthDp < 360 -> 0.8f
+            screenInfo.widthDp < 392 -> 0.86f
+            screenInfo.widthDp < 430 -> 0.91f
+            else -> 0.95f
+        }
+        return minOf(screenInfo.scaleFactor, widthScale).coerceIn(0.74f, 0.95f)
+    }
+
+    fun scaleDp(context: Context, baseDp: Int, allowGrowth: Boolean = false): Int {
+        val scale = if (allowGrowth) {
+            ResponsiveUtils.getScreenInfo(context).scaleFactor.coerceIn(0.74f, 0.98f)
+        } else {
+            getAdaptiveUiScale(context)
+        }
+        val scaled = (baseDp * context.resources.displayMetrics.density * scale).roundToInt()
+        return if (baseDp > 0) scaled.coerceAtLeast(1) else scaled
+    }
+
+    fun scaleSp(
+        context: Context,
+        baseSp: Float,
+        fontScale: Float = 1.0f,
+        allowGrowth: Boolean = false
+    ): Float {
+        val scale = if (allowGrowth) {
+            ResponsiveUtils.getScreenInfo(context).scaleFactor.coerceIn(0.74f, 0.98f)
+        } else {
+            getAdaptiveUiScale(context)
+        }
+        return (baseSp * scale * fontScale).coerceIn(9f, 34f)
     }
     
     /**
@@ -218,12 +256,14 @@ object ThemeManager {
     /**
      * Apply mini player settings
      */
-    fun applyMiniPlayerSettings(miniPlayerView: MiniPlayerView, prefs: AppearancePreferences) {
+    fun applyMiniPlayerSettings(miniPlayerView: MiniPlayerSurface, prefs: AppearancePreferences) {
         try {
-            // Apply height
-            val layoutParams = miniPlayerView.layoutParams
-            layoutParams.height = (prefs.miniPlayerHeightDp * miniPlayerView.resources.displayMetrics.density).toInt()
-            miniPlayerView.layoutParams = layoutParams
+            val view = miniPlayerView.asView()
+            val minHeightPx = scaleDp(view.context, prefs.miniPlayerHeightDp)
+            val layoutParams = view.layoutParams
+            layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            view.layoutParams = layoutParams
+            view.minimumHeight = minHeightPx
             
             // Apply all appearance preferences using the new method
             miniPlayerView.applyAppearancePreferences(prefs)
@@ -386,7 +426,7 @@ object ThemeManager {
      */
     fun applyButtonScalingToContainer(container: ViewGroup, prefs: AppearancePreferences) {
         try {
-            val scale = prefs.buttonSizeScale
+            val scale = (prefs.buttonSizeScale * getAdaptiveUiScale(container.context)).coerceIn(0.78f, 1.08f)
             for (i in 0 until container.childCount) {
                 val child = container.getChildAt(i)
                 when (child) {

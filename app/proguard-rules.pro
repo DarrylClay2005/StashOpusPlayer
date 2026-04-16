@@ -63,16 +63,6 @@
   public static final android.os.Parcelable$Creator *;
 }
 
-# ===== CLOUD AND SYNC =====
-# Keep AWS SDK classes
--keep class com.amazonaws.** { *; }
--dontwarn com.amazonaws.**
--dontwarn org.apache.commons.**
--dontwarn org.apache.http.**
-
-# Keep cloud service classes
--keep class com.stash.opusplayer.cloud.** { *; }
-
 # ===== NETWORKING =====
 # Keep Retrofit and OkHttp
 -keep class retrofit2.** { *; }

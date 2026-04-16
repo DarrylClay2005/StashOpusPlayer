@@ -2,12 +2,19 @@ package com.stash.opusplayer.ui
 
 import android.content.ComponentName
 import android.content.Intent
+import android.animation.ObjectAnimator
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
+import android.view.View
 import android.widget.SeekBar
 import androidx.appcompat.app.AppCompatActivity
+import androidx.constraintlayout.widget.ConstraintSet
+import androidx.transition.AutoTransition
+import androidx.transition.TransitionManager
+import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -40,6 +47,8 @@ class NowPlayingActivity : AppCompatActivity() {
     
     private var currentSong: Song? = null
     private var isUserSeeking = false
+    private var currentLayoutTheme = com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.AURORA
+    private var artworkSpinAnimator: ObjectAnimator? = null
     
     private val feedbackHandler = Handler(Looper.getMainLooper())
     private var feedbackRunnable: Runnable? = null
@@ -71,6 +80,7 @@ class NowPlayingActivity : AppCompatActivity() {
         animateActivityEntrance()
         
         metadataExtractor = MetadataExtractor(this)
+        currentLayoutTheme = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(this).nowPlayingLayoutTheme
         
         // Apply appearance preferences to EnhancedSynthWave
         try {
@@ -92,8 +102,10 @@ class NowPlayingActivity : AppCompatActivity() {
         }
         
         setupUI()
+        applyNowPlayingLayout(currentLayoutTheme, animate = false)
         connectToMediaController()
         setupPlayerManager()
+        binding.songTitle.isSelected = true
         
         // SynthWave visualization is passive; seeking remains via buttons/album art
 
@@ -167,6 +179,10 @@ class NowPlayingActivity : AppCompatActivity() {
                 AnimationUtils.finishActivityWithSlideOut(this@NowPlayingActivity)
             }
         }
+
+        binding.layoutThemeBadge.setOnClickListener {
+            showLayoutThemePicker()
+        }
         
         // Playback controls with visual feedback
         binding.playPauseButton.setOnClickListener { view ->
@@ -236,6 +252,7 @@ class NowPlayingActivity : AppCompatActivity() {
             popup.menuInflater.inflate(R.menu.now_playing_menu, popup.menu)
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
+                    R.id.action_choose_layout_theme -> { showLayoutThemePicker(); true }
                     R.id.action_share -> { shareCurrentTrack(); true }
                     R.id.action_embed_artwork -> { embedArtworkIntoFile(); true }
                     R.id.action_toggle_crossfade -> {
@@ -332,6 +349,10 @@ class NowPlayingActivity : AppCompatActivity() {
                 startActivity(android.content.Intent(this, QueueActivity::class.java))
             } catch (_: Exception) {}
         }
+        binding.queueButton.setOnLongClickListener {
+            showQueueDialog()
+            true
+        }
         
         // Seek bar (hidden) handlers retained for compatibility
         binding.seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -396,11 +417,14 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
         // Add 10-second seek functionality to album artwork
         setupAlbumArtworkSeek()
 
-        // Metadata button now opens full-screen metadata screen
         binding.metadataButton.setOnClickListener {
+            toggleMetadataView()
+        }
+        binding.metadataButton.setOnLongClickListener {
             try {
                 startActivity(android.content.Intent(this, MetadataActivity::class.java))
             } catch (_: Exception) {}
+            true
         }
         
         // Metadata back button
@@ -841,6 +865,7 @@ else -> com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActi
         val cached = metadataExtractor.loadCachedArtwork(this, song)
         val embedded = metadataExtractor.decodeAlbumArt(song.albumArt)
         if (cached != null) {
+            applyArtworkAwareStyling(cached)
             Glide.with(this)
                 .load(cached)
                 .centerCrop()
@@ -853,6 +878,7 @@ else -> com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActi
                     .into(binding.backdropImage)
             } catch (_: Exception) {}
         } else if (embedded != null) {
+            applyArtworkAwareStyling(embedded)
             Glide.with(this)
                 .load(embedded)
                 .placeholder(R.drawable.ic_music_note)
@@ -878,6 +904,8 @@ else -> com.stash.opusplayer.utils.TagEditor.embedArtworkAny(this@NowPlayingActi
 val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingActivity)
                 val file = fetcher.getOrFetch(song)
                 if (file != null && song == currentSong) {
+                    val bitmap = runCatching { android.graphics.BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
+                    applyArtworkAwareStyling(bitmap)
                     Glide.with(this@NowPlayingActivity)
                         .load(file)
                         .placeholder(R.drawable.ic_music_note)
@@ -925,6 +953,7 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
     }
     
     private fun setDefaultArtwork() {
+        applyArtworkAwareStyling(null)
         Glide.with(this)
             .load(R.drawable.ic_music_note)
             .into(binding.albumArtwork)
@@ -947,6 +976,7 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
             val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
             val bmp = cache.loadBitmapIfPresent(fakeSong, 512)
             if (bmp != null) {
+                applyArtworkAwareStyling(bmp)
                 Glide.with(this)
                     .load(bmp)
                     .centerCrop()
@@ -991,6 +1021,7 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
         } else {
             binding.playPauseButton.setImageResource(R.drawable.ic_play_arrow_24)
         }
+        updateArtworkSpinState()
     }
     
     private fun updateShuffleButton(enabled: Boolean) {
@@ -1021,6 +1052,201 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
         } else {
             binding.favoriteButton.setImageResource(R.drawable.ic_favorite_border)
             binding.favoriteButton.alpha = 0.7f
+        }
+    }
+
+    private fun showLayoutThemePicker() {
+        val themes = com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.entries
+        val labels = themes.map { it.displayName }.toTypedArray()
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Now Playing Layout")
+            .setSingleChoiceItems(labels, themes.indexOf(currentLayoutTheme).coerceAtLeast(0)) { dialog, which ->
+                setNowPlayingLayoutTheme(themes[which])
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun setNowPlayingLayoutTheme(theme: com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme) {
+        if (theme == currentLayoutTheme) return
+        currentLayoutTheme = theme
+        val prefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(this)
+        prefs.copy(nowPlayingLayoutTheme = theme).saveToPrefs(this)
+        applyNowPlayingLayout(theme, animate = true)
+    }
+
+    private fun applyNowPlayingLayout(
+        theme: com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme,
+        animate: Boolean
+    ) {
+        val container = binding.contentContainer
+        if (animate) {
+            TransitionManager.beginDelayedTransition(container, AutoTransition().apply { duration = 260 })
+        }
+
+        val set = ConstraintSet().apply { clone(container) }
+        val ids = intArrayOf(
+            binding.albumArtCard.id,
+            binding.songInfoCard.id,
+            binding.progressCard.id,
+            binding.controlsCard.id,
+            binding.secondaryActionsCard.id,
+            binding.metadataContainer.id
+        )
+        ids.forEach { id ->
+            set.clear(id, ConstraintSet.START)
+            set.clear(id, ConstraintSet.END)
+            set.clear(id, ConstraintSet.TOP)
+            set.clear(id, ConstraintSet.BOTTOM)
+        }
+
+        set.constrainWidth(binding.albumArtCard.id, 0)
+        set.constrainHeight(binding.albumArtCard.id, 0)
+        set.constrainWidth(binding.songInfoCard.id, 0)
+        set.constrainHeight(binding.songInfoCard.id, ConstraintSet.WRAP_CONTENT)
+        set.constrainWidth(binding.progressCard.id, 0)
+        set.constrainHeight(binding.progressCard.id, ConstraintSet.WRAP_CONTENT)
+        set.constrainWidth(binding.controlsCard.id, 0)
+        set.constrainHeight(binding.controlsCard.id, ConstraintSet.WRAP_CONTENT)
+        set.constrainWidth(binding.secondaryActionsCard.id, 0)
+        set.constrainHeight(binding.secondaryActionsCard.id, ConstraintSet.WRAP_CONTENT)
+        set.constrainWidth(binding.metadataContainer.id, 0)
+        set.constrainHeight(binding.metadataContainer.id, ConstraintSet.WRAP_CONTENT)
+
+        when (theme) {
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.AURORA -> {
+                set.connect(binding.albumArtCard.id, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP)
+                set.connect(binding.albumArtCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.albumArtCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+
+                set.connect(binding.songInfoCard.id, ConstraintSet.TOP, binding.albumArtCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.songInfoCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.songInfoCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+
+                set.connect(binding.progressCard.id, ConstraintSet.TOP, binding.songInfoCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.progressCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.progressCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+
+                set.connect(binding.controlsCard.id, ConstraintSet.TOP, binding.progressCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.controlsCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.controlsCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+
+                set.connect(binding.secondaryActionsCard.id, ConstraintSet.TOP, binding.controlsCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.secondaryActionsCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.secondaryActionsCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+            }
+
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.VINYL -> {
+                set.connect(binding.albumArtCard.id, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP)
+                set.connect(binding.albumArtCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.albumArtCard.id, ConstraintSet.END, binding.songInfoCard.id, ConstraintSet.START)
+
+                set.connect(binding.songInfoCard.id, ConstraintSet.TOP, binding.albumArtCard.id, ConstraintSet.TOP)
+                set.connect(binding.songInfoCard.id, ConstraintSet.BOTTOM, binding.albumArtCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.songInfoCard.id, ConstraintSet.START, binding.albumArtCard.id, ConstraintSet.END)
+                set.connect(binding.songInfoCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+
+                set.connect(binding.progressCard.id, ConstraintSet.TOP, binding.albumArtCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.progressCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.progressCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+
+                set.connect(binding.controlsCard.id, ConstraintSet.TOP, binding.progressCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.controlsCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.controlsCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+
+                set.connect(binding.secondaryActionsCard.id, ConstraintSet.TOP, binding.controlsCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.secondaryActionsCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.secondaryActionsCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+            }
+
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.MINIMAL -> {
+                set.connect(binding.songInfoCard.id, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP)
+                set.connect(binding.songInfoCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.songInfoCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+
+                set.connect(binding.albumArtCard.id, ConstraintSet.TOP, binding.songInfoCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.albumArtCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.albumArtCard.id, ConstraintSet.END, binding.progressCard.id, ConstraintSet.START)
+
+                set.connect(binding.progressCard.id, ConstraintSet.TOP, binding.songInfoCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.progressCard.id, ConstraintSet.BOTTOM, binding.albumArtCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.progressCard.id, ConstraintSet.START, binding.albumArtCard.id, ConstraintSet.END)
+                set.connect(binding.progressCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+
+                set.connect(binding.controlsCard.id, ConstraintSet.TOP, binding.albumArtCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.controlsCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.controlsCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+
+                set.connect(binding.secondaryActionsCard.id, ConstraintSet.TOP, binding.controlsCard.id, ConstraintSet.BOTTOM)
+                set.connect(binding.secondaryActionsCard.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+                set.connect(binding.secondaryActionsCard.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+            }
+        }
+
+        set.connect(binding.metadataContainer.id, ConstraintSet.TOP, binding.secondaryActionsCard.id, ConstraintSet.BOTTOM)
+        set.connect(binding.metadataContainer.id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+        set.connect(binding.metadataContainer.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+        set.connect(binding.metadataContainer.id, ConstraintSet.BOTTOM, ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM)
+        set.applyTo(container)
+
+        val centered = theme == com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.AURORA
+        val textGravity = if (centered) Gravity.CENTER else Gravity.START
+        binding.songInfoContainer.gravity = textGravity
+        binding.songTitle.gravity = textGravity
+        binding.artistName.gravity = textGravity
+        binding.albumName.gravity = textGravity
+        binding.layoutThemeBadge.text = theme.displayName
+        binding.progressCard.alpha = if (theme == com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.MINIMAL) 0.94f else 1f
+        updateArtworkSpinState()
+    }
+
+    private fun applyArtworkAwareStyling(bitmap: android.graphics.Bitmap?) {
+        val prefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(this)
+        val accent = bitmap?.let { extractArtworkAccent(it) } ?: prefs.accentColor
+        val surface = ColorUtils.blendARGB(prefs.primaryColor, accent, 0.26f)
+        val elevated = ColorUtils.blendARGB(prefs.backgroundColor, accent, 0.18f)
+        val cardSurface = ColorUtils.blendARGB(surface, prefs.backgroundColor, 0.35f)
+
+        binding.songInfoCard.setCardBackgroundColor(surface)
+        binding.progressCard.setCardBackgroundColor(cardSurface)
+        binding.controlsCard.setCardBackgroundColor(cardSurface)
+        binding.secondaryActionsCard.setCardBackgroundColor(cardSurface)
+        binding.metadataContainer.setCardBackgroundColor(elevated)
+        binding.albumArtCard.setCardBackgroundColor(ColorUtils.blendARGB(accent, prefs.backgroundColor, 0.28f))
+        binding.layoutThemeBadge.text = currentLayoutTheme.displayName
+        binding.layoutThemeBadge.background.mutate().setTint(ColorUtils.blendARGB(accent, prefs.backgroundColor, 0.42f))
+    }
+
+    private fun extractArtworkAccent(bitmap: android.graphics.Bitmap): Int {
+        val scaled = android.graphics.Bitmap.createScaledBitmap(bitmap, 1, 1, true)
+        return try {
+            scaled.getPixel(0, 0)
+        } finally {
+            if (scaled != bitmap) {
+                scaled.recycle()
+            }
+        }
+    }
+
+    private fun updateArtworkSpinState() {
+        val shouldSpin = currentLayoutTheme == com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.VINYL &&
+            (mediaController?.isPlaying == true)
+        if (shouldSpin) {
+            if (artworkSpinAnimator == null) {
+                artworkSpinAnimator = ObjectAnimator.ofFloat(binding.albumArtwork, "rotation", binding.albumArtwork.rotation, binding.albumArtwork.rotation + 360f).apply {
+                    duration = 18000L
+                    repeatCount = ObjectAnimator.INFINITE
+                    interpolator = android.view.animation.LinearInterpolator()
+                }
+            }
+            artworkSpinAnimator?.start()
+        } else {
+            artworkSpinAnimator?.cancel()
+            artworkSpinAnimator = null
+            if (currentLayoutTheme != com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.VINYL) {
+                binding.albumArtwork.rotation = 0f
+            }
         }
     }
     
@@ -1077,8 +1303,8 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
     }
     
     private fun showMetadataView() {
-        // Hide secondary controls
-        binding.secondaryControlsContainer.visibility = android.view.View.GONE
+        // Hide action card while metadata is expanded
+        binding.secondaryActionsCard.visibility = android.view.View.GONE
         
         // Show metadata container
         binding.metadataContainer.visibility = android.view.View.VISIBLE
@@ -1113,7 +1339,7 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
         binding.metadataContainer.visibility = android.view.View.GONE
         
         // Show secondary controls
-        binding.secondaryControlsContainer.visibility = android.view.View.VISIBLE
+        binding.secondaryActionsCard.visibility = android.view.View.VISIBLE
     }
     
     private fun populateMetadata() {
@@ -1263,6 +1489,8 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
     override fun onDestroy() {
         super.onDestroy()
         stopProgressUpdates()
+        artworkSpinAnimator?.cancel()
+        artworkSpinAnimator = null
         // Do NOT release the shared MusicPlayerManager here — it's a singleton managed by the Application.
         // Releasing it would drop the MediaController connection app-wide and break playback.
         mediaController?.release()

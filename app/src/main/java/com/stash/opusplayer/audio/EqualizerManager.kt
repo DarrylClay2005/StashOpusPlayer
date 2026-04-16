@@ -8,6 +8,7 @@ import android.media.audiofx.Virtualizer
 import android.media.audiofx.PresetReverb
 import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.EnvironmentalReverb
+import android.os.Bundle
 import android.util.Log
 import androidx.preference.PreferenceManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -245,12 +246,12 @@ class EqualizerManager(private val context: Context) {
                 }
                 val millibels = clampBandLevel(eq, (level * 1000f).toInt())
                 eq.setBandLevel(band.toShort(), millibels)
-                
-                // If we're in custom mode, save the custom settings
-                if (_currentPreset.value == EqualizerPreset.CUSTOM) {
-                    saveCustomBands()
+
+                if (_currentPreset.value != EqualizerPreset.CUSTOM) {
+                    _currentPreset.value = EqualizerPreset.CUSTOM
+                    prefs.edit().putString(PREF_EQ_PRESET, EqualizerPreset.CUSTOM.name).apply()
                 }
-                
+                saveCustomBands()
                 updateBandLevels()
             }
         } catch (e: Exception) {
@@ -343,6 +344,46 @@ class EqualizerManager(private val context: Context) {
             equalizer?.numberOfBands?.toInt() ?: 5
         } catch (e: Exception) {
             5
+        }
+    }
+
+    fun getPreviewBandLevels(preset: EqualizerPreset = _currentPreset.value): List<Float> {
+        val bandCount = getNumberOfBands().coerceAtLeast(1)
+        if (preset == EqualizerPreset.CUSTOM) {
+            val customBands = prefs.getString(PREF_CUSTOM_BANDS, null)
+                ?.split(",")
+                ?.mapNotNull { it.toIntOrNull() }
+                .orEmpty()
+            return List(bandCount) { index ->
+                customBands.getOrNull(index)?.div(1000f) ?: 0f
+            }
+        }
+
+        val rawLevels = presetLevels(preset)
+        return List(bandCount) { index ->
+            rawLevels.getOrNull(index)?.div(1000f) ?: 0f
+        }
+    }
+
+    fun createStateBundle(): Bundle {
+        val range = getBandRange()
+        val frequencies = IntArray(getNumberOfBands()) { index -> getBandFrequency(index) }
+        val levels = if (_bandLevels.value.isNotEmpty()) {
+            _bandLevels.value.toFloatArray()
+        } else {
+            getPreviewBandLevels().toFloatArray()
+        }
+        return Bundle().apply {
+            putBoolean("enabled", _isEnabled.value)
+            putString("preset", _currentPreset.value.name)
+            putInt("band_range_min", range.first)
+            putInt("band_range_max", range.second)
+            putIntArray("band_frequencies", frequencies)
+            putFloatArray("band_levels", levels)
+            putInt("bass_boost", _bassBoostLevel.value)
+            putInt("virtualizer", _virtualizerLevel.value)
+            putInt("reverb_preset", _reverbPreset.value)
+            putInt("loudness_gain", _loudnessGain.value)
         }
     }
     
@@ -576,9 +617,13 @@ class EqualizerManager(private val context: Context) {
     }
     
     private fun applyLevels(eq: Equalizer, levels: IntArray) {
-        val numBands = minOf(eq.numberOfBands.toInt(), levels.size)
+        val totalBands = eq.numberOfBands.toInt()
+        val numBands = minOf(totalBands, levels.size)
         for (i in 0 until numBands) {
             eq.setBandLevel(i.toShort(), clampBandLevel(eq, levels[i]))
+        }
+        for (i in numBands until totalBands) {
+            eq.setBandLevel(i.toShort(), 0)
         }
     }
     
@@ -629,6 +674,35 @@ class EqualizerManager(private val context: Context) {
     private fun defaultBandFrequency(band: Int): Int {
         val fallbackBands = intArrayOf(60, 230, 910, 3600, 14000)
         return fallbackBands.getOrElse(band) { fallbackBands.last() }
+    }
+
+    private fun presetLevels(preset: EqualizerPreset): IntArray = when (preset) {
+        EqualizerPreset.NORMAL -> intArrayOf(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        EqualizerPreset.ROCK -> intArrayOf(800, 600, 300, -200, -400, -200, 400, 700, 1000, 1200, 1300, 1200)
+        EqualizerPreset.POP -> intArrayOf(-100, 300, 600, 800, 700, 500, 200, -100, -200, -300, -200, -100)
+        EqualizerPreset.JAZZ -> intArrayOf(300, 200, 100, 300, 400, 300, 200, 300, 400, 500, 400, 300)
+        EqualizerPreset.CLASSICAL -> intArrayOf(400, 300, 100, -100, -200, -100, 200, 400, 600, 700, 800, 600)
+        EqualizerPreset.DANCE -> intArrayOf(1200, 1000, 600, 200, 100, -200, -400, -300, 200, 400, 600, 500)
+        EqualizerPreset.METAL -> intArrayOf(1000, 800, 600, 1000, 1200, 800, 600, 1000, 1100, 1300, 1400, 1300)
+        EqualizerPreset.BASS_BOOST -> intArrayOf(1200, 800, 400, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        EqualizerPreset.VOCAL -> intArrayOf(-200, -300, -300, 200, 400, 400, 300, 200, 0, -200, 0, 0)
+        EqualizerPreset.SURROUND_3D -> intArrayOf(300, 200, 100, 300, 500, 600, 700, 800, 600, 400, 0, 0)
+        EqualizerPreset.CONCERT_HALL -> intArrayOf(200, 300, 100, 200, 300, 400, 500, 400, 300, 200, 0, 0)
+        EqualizerPreset.STADIUM -> intArrayOf(800, 600, 400, 200, 100, 200, 400, 600, 800, 900, 0, 0)
+        EqualizerPreset.ACOUSTIC -> intArrayOf(300, 400, 300, 400, 500, 400, 300, 200, 100, 100, 0, 0)
+        EqualizerPreset.ELECTRONIC -> intArrayOf(1000, 800, 600, 200, 100, 200, 600, 800, 1000, 1100, 0, 0)
+        EqualizerPreset.LOUNGE -> intArrayOf(200, 300, 400, 500, 400, 300, 200, 100, 0, -100, 0, 0)
+        EqualizerPreset.SUPER_BASS_BOOST -> intArrayOf(1500, 1200, 800, 400, 200, 100, 0, 0, 200, 400, 0, 0)
+        EqualizerPreset.SUPER_REVERB -> intArrayOf(400, 300, 200, 400, 600, 700, 600, 500, 400, 300, 0, 0)
+        EqualizerPreset.HIGH_RESOLUTION -> intArrayOf(100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 0, 0)
+        EqualizerPreset.LOFI -> intArrayOf(600, 400, 200, 300, 400, 200, -200, -400, -600, -800, 0, 0)
+        EqualizerPreset.AUTOTUNE -> intArrayOf(-200, -100, 200, 600, 800, 700, 500, 300, 100, -100, 0, 0)
+        EqualizerPreset.FAN_EFFECT -> intArrayOf(800, 600, 400, 600, 800, 600, 400, 200, 400, 600, 0, 0)
+        EqualizerPreset.CUSTOM -> prefs.getString(PREF_CUSTOM_BANDS, null)
+            ?.split(",")
+            ?.mapNotNull { it.toIntOrNull() }
+            ?.toIntArray()
+            ?: intArrayOf()
     }
 }
 

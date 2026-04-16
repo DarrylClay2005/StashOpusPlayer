@@ -41,6 +41,7 @@ data class AppearancePreferences(
     val miniPlayerShowArtist: Boolean = true,
     val miniPlayerCompactMode: Boolean = false,
     val miniPlayerSpinningArt: Boolean = false,
+    val nowPlayingLayoutTheme: NowPlayingLayoutTheme = NowPlayingLayoutTheme.AURORA,
     
     // SynthWave Visualizer
     val synthWaveEnabled: Boolean = true,
@@ -104,6 +105,9 @@ data class AppearancePreferences(
                 miniPlayerShowArtist = prefs.getBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_SHOW_ARTIST, true),
                 miniPlayerCompactMode = prefs.getBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_COMPACT_MODE, false),
                 miniPlayerSpinningArt = prefs.getBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_SPINNING_ART, false),
+                nowPlayingLayoutTheme = NowPlayingLayoutTheme.fromStorage(
+                    prefs.getString(PrefsKeys.APPEARANCE_NOW_PLAYING_LAYOUT, NowPlayingLayoutTheme.AURORA.storageValue)
+                ),
                 
                 synthWaveEnabled = prefs.getBoolean("synthwave_enabled", true),
                 synthWaveProgressMode = prefs.getBoolean(PrefsKeys.APPEARANCE_SYNTHWAVE_PROGRESS_MODE, true),
@@ -159,6 +163,9 @@ data class AppearancePreferences(
                 miniPlayerShowArtist = json.optBoolean("miniPlayerShowArtist", true),
                 miniPlayerCompactMode = json.optBoolean("miniPlayerCompactMode", false),
                 miniPlayerSpinningArt = json.optBoolean("miniPlayerSpinningArt", false),
+                nowPlayingLayoutTheme = NowPlayingLayoutTheme.fromStorage(
+                    json.optString("nowPlayingLayoutTheme", NowPlayingLayoutTheme.AURORA.storageValue)
+                ),
                 
                 synthWaveEnabled = json.optBoolean("synthWaveEnabled", true),
                 synthWaveProgressMode = json.optBoolean("synthWaveProgressMode", true),
@@ -259,6 +266,7 @@ data class AppearancePreferences(
             putBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_SHOW_ARTIST, miniPlayerShowArtist)
             putBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_COMPACT_MODE, miniPlayerCompactMode)
             putBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_SPINNING_ART, miniPlayerSpinningArt)
+            putString(PrefsKeys.APPEARANCE_NOW_PLAYING_LAYOUT, nowPlayingLayoutTheme.storageValue)
             
             putBoolean("synthwave_enabled", synthWaveEnabled)
             putBoolean(PrefsKeys.APPEARANCE_SYNTHWAVE_PROGRESS_MODE, synthWaveProgressMode)
@@ -312,6 +320,7 @@ data class AppearancePreferences(
         json.put("miniPlayerShowArtist", miniPlayerShowArtist)
         json.put("miniPlayerCompactMode", miniPlayerCompactMode)
         json.put("miniPlayerSpinningArt", miniPlayerSpinningArt)
+        json.put("nowPlayingLayoutTheme", nowPlayingLayoutTheme.storageValue)
         
         json.put("synthWaveEnabled", synthWaveEnabled)
         json.put("synthWaveProgressMode", synthWaveProgressMode)

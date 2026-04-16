@@ -6,10 +6,12 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.google.android.material.button.MaterialButton
@@ -18,6 +20,7 @@ import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.stash.opusplayer.R
 import com.stash.opusplayer.ui.MainActivity
+import com.stash.opusplayer.ui.managers.MiniPlayerToggleManager
 
 class AppearanceFragment : Fragment() {
     
@@ -46,6 +49,18 @@ class AppearanceFragment : Fragment() {
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         currentPrefs = AppearancePreferences.fromPrefs(requireContext())
         return createAppearanceView()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        val activity = requireActivity() as? AppCompatActivity
+        activity?.supportActionBar?.apply {
+            setDisplayHomeAsUpEnabled(true)
+            setDisplayShowHomeEnabled(true)
+            title = getString(R.string.settings_appearance_title)
+        }
+        setHasOptionsMenu(true)
     }
     
     private fun createAppearanceView(): View {
@@ -474,6 +489,7 @@ class AppearanceFragment : Fragment() {
         val section = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.VERTICAL
         }
+        val miniPlayerToggleManager = MiniPlayerToggleManager(requireContext())
         
         // Height
         section.addView(createSeekBarControl(
@@ -523,6 +539,90 @@ class AppearanceFragment : Fragment() {
             }
         }
         section.addView(compactToggle)
+
+        val miniPlayerStyleLabel = TextView(requireContext()).apply {
+            text = "Mini Player Style"
+            setTextColor(ContextCompat.getColor(requireContext(), R.color.text_secondary))
+            setPadding(0, 16, 0, 8)
+        }
+        section.addView(miniPlayerStyleLabel)
+
+        val styles = miniPlayerToggleManager.getAvailableStyles()
+        val styleSpinner = Spinner(requireContext())
+        val styleAdapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_item,
+            styles.map { it.second }
+        )
+        styleAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        styleSpinner.adapter = styleAdapter
+        val currentStyle = miniPlayerToggleManager.getMiniPlayerStyle()
+        styleSpinner.setSelection(styles.indexOfFirst { it.first == currentStyle }.coerceAtLeast(0))
+        section.addView(styleSpinner)
+
+        val styleFeaturesLabel = TextView(requireContext()).apply {
+            textSize = 12f
+            setTextColor(ContextCompat.getColor(requireContext(), R.color.text_secondary))
+            setPadding(0, 8, 0, 0)
+        }
+        section.addView(styleFeaturesLabel)
+
+        fun updateStyleFeatures(style: String) {
+            styleFeaturesLabel.text = miniPlayerToggleManager.getStyleFeatures(style).joinToString(" • ")
+        }
+        updateStyleFeatures(currentStyle)
+
+        var styleHydrated = false
+        styleSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selectedStyle = styles[position].first
+                updateStyleFeatures(selectedStyle)
+                if (!styleHydrated) {
+                    styleHydrated = true
+                    return
+                }
+                miniPlayerToggleManager.setMiniPlayerStyle(selectedStyle)
+                ThemeManager.broadcastChange(requireContext(), true)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+
+        val nowPlayingLabel = TextView(requireContext()).apply {
+            text = "Now Playing Layout"
+            setTextColor(ContextCompat.getColor(requireContext(), R.color.text_secondary))
+            setPadding(0, 16, 0, 8)
+        }
+        section.addView(nowPlayingLabel)
+
+        val nowPlayingThemes = NowPlayingLayoutTheme.entries
+        val nowPlayingSpinner = Spinner(requireContext())
+        val nowPlayingAdapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_item,
+            nowPlayingThemes.map { it.displayName }
+        )
+        nowPlayingAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        nowPlayingSpinner.adapter = nowPlayingAdapter
+        nowPlayingSpinner.setSelection(
+            nowPlayingThemes.indexOf(currentPrefs.nowPlayingLayoutTheme).coerceAtLeast(0)
+        )
+        section.addView(nowPlayingSpinner)
+
+        var nowPlayingHydrated = false
+        nowPlayingSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!nowPlayingHydrated) {
+                    nowPlayingHydrated = true
+                    return
+                }
+                currentPrefs = currentPrefs.copy(nowPlayingLayoutTheme = nowPlayingThemes[position])
+                currentPrefs.saveToPrefs(requireContext())
+                ThemeManager.broadcastChange(requireContext(), false)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
         
         // Spinning art animation
         val spinningArtToggle = CheckBox(requireContext()).apply {
@@ -987,5 +1087,23 @@ class AppearanceFragment : Fragment() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return if (item.itemId == android.R.id.home) {
+            parentFragmentManager.popBackStack()
+            true
+        } else {
+            super.onOptionsItemSelected(item)
+        }
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        val activity = requireActivity() as? AppCompatActivity
+        activity?.supportActionBar?.apply {
+            setDisplayHomeAsUpEnabled(true)
+            title = getString(R.string.menu_settings)
+        }
     }
 }

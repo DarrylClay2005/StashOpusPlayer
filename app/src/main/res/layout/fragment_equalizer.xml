@@ -3,7 +3,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="16dp">
+    android:background="@color/background_color"
+    android:padding="12dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -12,13 +13,14 @@
 
         <!-- Equalizer Header -->
         <TextView
+            android:id="@+id/equalizer_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Equalizer"
-android:textAppearance="@style/TextAppearance.StashWave.Headline"
-            android:textSize="24sp"
+            android:textAppearance="@style/TextAppearance.StashWave.Headline"
+            android:textSize="20sp"
             android:textStyle="bold"
-            android:layout_marginBottom="24dp" />
+            android:layout_marginBottom="16dp" />
 
         <!-- Equalizer Enable Switch -->
         <LinearLayout
@@ -26,17 +28,17 @@ android:textAppearance="@style/TextAppearance.StashWave.Headline"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="12dp">
 
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Enable Equalizer"
-android:textAppearance="@style/TextAppearance.StashWave.Body"
-                android:textSize="16sp" />
+                android:textAppearance="@style/TextAppearance.StashWave.Body"
+                android:textSize="14sp" />
 
-            <Switch
+            <com.google.android.material.switchmaterial.SwitchMaterial
                 android:id="@+id/equalizer_switch"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
@@ -48,15 +50,15 @@ android:textAppearance="@style/TextAppearance.StashWave.Body"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Presets"
-android:textAppearance="@style/TextAppearance.StashWave.Title"
-            android:textSize="18sp"
+            android:textAppearance="@style/TextAppearance.StashWave.Title"
+            android:textSize="16sp"
             android:layout_marginBottom="8dp" />
 
         <Spinner
             android:id="@+id/preset_spinner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="24dp" />
+            android:layout_marginBottom="16dp" />
 
         <!-- Equalizer Bands -->
         <TextView
@@ -64,15 +66,15 @@ android:textAppearance="@style/TextAppearance.StashWave.Title"
             android:layout_height="wrap_content"
             android:text="Frequency Bands"
             android:textAppearance="@style/TextAppearance.StashWave.Title"
-            android:textSize="18sp"
-            android:layout_marginBottom="16dp" />
+            android:textSize="16sp"
+            android:layout_marginBottom="12dp" />
 
         <LinearLayout
             android:id="@+id/bands_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginBottom="32dp" />
+            android:layout_marginBottom="20dp" />
 
         <!-- Bass Boost -->
         <TextView
@@ -80,7 +82,7 @@ android:textAppearance="@style/TextAppearance.StashWave.Title"
             android:layout_height="wrap_content"
             android:text="Bass Boost"
             android:textAppearance="@style/TextAppearance.StashWave.Title"
-            android:textSize="18sp"
+            android:textSize="16sp"
             android:layout_marginBottom="8dp" />
 
         <LinearLayout
@@ -88,7 +90,7 @@ android:textAppearance="@style/TextAppearance.StashWave.Title"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="12dp">
 
             <SeekBar
                 android:id="@+id/bass_boost_slider"
@@ -102,9 +104,9 @@ android:textAppearance="@style/TextAppearance.StashWave.Title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="0%"
-            android:textAppearance="@style/TextAppearance.StashWave.Body"
-                android:layout_marginStart="16dp"
-                android:minWidth="48dp"
+                android:textAppearance="@style/TextAppearance.StashWave.Body"
+                android:layout_marginStart="12dp"
+                android:minWidth="40dp"
                 android:gravity="center" />
 
         </LinearLayout>
@@ -115,7 +117,7 @@ android:textAppearance="@style/TextAppearance.StashWave.Title"
             android:layout_height="wrap_content"
             android:text="Virtualizer"
             android:textAppearance="@style/TextAppearance.StashWave.Title"
-            android:textSize="18sp"
+            android:textSize="16sp"
             android:layout_marginBottom="8dp" />
 
         <LinearLayout
@@ -123,7 +125,7 @@ android:textAppearance="@style/TextAppearance.StashWave.Title"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="12dp">
 
             <SeekBar
                 android:id="@+id/virtualizer_slider"
@@ -137,9 +139,9 @@ android:textAppearance="@style/TextAppearance.StashWave.Title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="0%"
-            android:textAppearance="@style/TextAppearance.StashWave.Body"
-                android:layout_marginStart="16dp"
-                android:minWidth="48dp"
+                android:textAppearance="@style/TextAppearance.StashWave.Body"
+                android:layout_marginStart="12dp"
+                android:minWidth="40dp"
                 android:gravity="center" />
 
         </LinearLayout>
@@ -150,8 +152,8 @@ android:textAppearance="@style/TextAppearance.StashWave.Title"
             android:layout_height="wrap_content"
             android:text="Equalizer settings are automatically saved and will be applied to all music playback."
             android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
-            android:textSize="12sp"
-            android:layout_marginTop="16dp"
+            android:textSize="11sp"
+            android:layout_marginTop="12dp"
             android:gravity="center"
             android:alpha="0.7" />
 

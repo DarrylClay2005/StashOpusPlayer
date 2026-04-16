@@ -39,12 +39,14 @@ import kotlin.math.*
 import kotlin.random.Random
 import android.animation.AnimatorListenerAdapter
 import android.animation.Animator
+import com.stash.opusplayer.ui.appearance.ThemeManager
+import kotlin.math.roundToInt
 
 class MiniPlayerView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
-) : FrameLayout(context, attrs, defStyleAttr) {
+) : FrameLayout(context, attrs, defStyleAttr), MiniPlayerSurface {
 
     private val binding: MiniPlayerBinding
     private var mediaController: MediaController? = null
@@ -97,7 +99,7 @@ class MiniPlayerView @JvmOverloads constructor(
         visibility = GONE // Initially hidden
     }
 
-    fun initialize(lifecycleOwner: LifecycleOwner, musicPlayerManager: MusicPlayerManager) {
+    override fun initialize(lifecycleOwner: LifecycleOwner, musicPlayerManager: MusicPlayerManager) {
         this.lifecycleOwner = lifecycleOwner
         this.musicPlayerManager = musicPlayerManager
         
@@ -306,7 +308,7 @@ class MiniPlayerView @JvmOverloads constructor(
                 }
                 
                 // Update progress bar if available
-                binding.miniProgressBar.invalidate()
+                invalidate()
             }
         }
     }
@@ -675,7 +677,7 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
         }
     }
 
-    fun resync() { resyncFromController() }
+    override fun resync() { resyncFromController() }
 
     private fun resyncFromController() {
         try {
@@ -683,6 +685,15 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
             if (controller.currentMediaItem != null || controller.playbackState == Player.STATE_READY || controller.isPlaying) {
                 updateMediaInfo()
                 setArtworkFromMetadata()
+                updatePlayPauseButton(controller.isPlaying)
+                updateProgressBar(controller.currentPosition, controller.duration)
+                if (controller.isPlaying) {
+                    startProgressUpdates()
+                    miniVisualizerAnimator?.start()
+                } else {
+                    stopProgressUpdates()
+                    miniVisualizerAnimator?.pause()
+                }
                 show()
             }
         } catch (_: Exception) {}
@@ -814,26 +825,87 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
     /**
      * Apply appearance preferences to the mini player
      */
-    fun applyAppearancePreferences(prefs: AppearancePreferences) {
+    override fun applyAppearancePreferences(prefs: AppearancePreferences) {
         try {
-            // Album art card not available in this layout
-            // binding.miniAlbumArt.visibility = if (prefs.miniPlayerShowArt) VISIBLE else GONE
+            val density = resources.displayMetrics.density
+            val uiScale = (ThemeManager.getAdaptiveUiScale(context) * if (prefs.miniPlayerCompactMode) 0.92f else 1.0f)
+                .coerceIn(0.74f, 0.96f)
+            val buttonScale = (uiScale * prefs.buttonSizeScale).coerceIn(0.72f, 1.0f)
+            val rootHeight = ((prefs.miniPlayerHeightDp.coerceIn(62, 76)) * density * uiScale).roundToInt()
+
+            fun px(baseDp: Int, scale: Float = uiScale): Int =
+                (baseDp * density * scale).roundToInt().coerceAtLeast(1)
+
+            fun updateSize(view: View, widthDp: Int, heightDp: Int, scale: Float = uiScale) {
+                view.layoutParams = view.layoutParams.apply {
+                    width = px(widthDp, scale)
+                    height = px(heightDp, scale)
+                }
+            }
+
+            fun updateMargins(
+                view: View,
+                startDp: Int? = null,
+                topDp: Int? = null,
+                endDp: Int? = null,
+                bottomDp: Int? = null,
+                scale: Float = uiScale
+            ) {
+                val lp = view.layoutParams as? MarginLayoutParams ?: return
+                startDp?.let { lp.marginStart = px(it, scale) }
+                topDp?.let { lp.topMargin = px(it, scale) }
+                endDp?.let { lp.marginEnd = px(it, scale) }
+                bottomDp?.let { lp.bottomMargin = px(it, scale) }
+                view.layoutParams = lp
+            }
+
+            layoutParams = layoutParams?.apply {
+                height = rootHeight
+            }
+            minimumHeight = rootHeight
+            setPadding(px(if (prefs.miniPlayerCompactMode) 3 else 6, 1f), px(if (prefs.miniPlayerCompactMode) 3 else 6, 1f), px(if (prefs.miniPlayerCompactMode) 3 else 6, 1f), px(if (prefs.miniPlayerCompactMode) 3 else 6, 1f))
+
+            updateSize(binding.miniAlbumArtCard, 52, 52)
+            updateMargins(binding.miniAlbumArtCard, startDp = 12)
+            updateSize(binding.miniAlbumArt, 40, 40)
+            updateMargins(binding.miniSongInfo, startDp = 10, endDp = 10)
+            updateSize(binding.miniPreviousButton, 44, 44, buttonScale)
+            updateSize(binding.miniPlayPauseButton, 52, 52, buttonScale)
+            updateSize(binding.miniNextButton, 44, 44, buttonScale)
+            updateSize(binding.miniFastForwardButton, 44, 44, buttonScale)
+            updateMargins(binding.miniPreviousButton, scale = buttonScale, topDp = 3, endDp = 0, bottomDp = 3, startDp = 3)
+            updateMargins(binding.miniPlayPauseButton, scale = buttonScale, topDp = 3, endDp = 0, bottomDp = 3, startDp = 3)
+            updateMargins(binding.miniNextButton, scale = buttonScale, topDp = 3, endDp = 0, bottomDp = 3, startDp = 3)
+            updateMargins(binding.miniFastForwardButton, scale = buttonScale, topDp = 3, endDp = 0, bottomDp = 3, startDp = 3)
+
+            binding.miniAlbumArtCard.visibility = if (prefs.miniPlayerShowArt) VISIBLE else GONE
             
             // Show/hide artist name
             binding.miniArtistName.visibility = if (prefs.miniPlayerShowArtist) VISIBLE else GONE
             
             // Apply compact mode
             if (prefs.miniPlayerCompactMode) {
-                val compactPadding = (4 * resources.displayMetrics.density).toInt()
+                val compactPadding = px(4, 1f)
                 setPadding(compactPadding, compactPadding, compactPadding, compactPadding)
                 binding.miniSongTitle.maxLines = 1
                 binding.miniArtistName.maxLines = 1
             } else {
-                val normalPadding = (8 * resources.displayMetrics.density).toInt()
+                val normalPadding = px(6, 1f)
                 setPadding(normalPadding, normalPadding, normalPadding, normalPadding)
                 binding.miniSongTitle.maxLines = 2
                 binding.miniArtistName.maxLines = 1
             }
+
+            binding.miniSongTitle.textSize = ThemeManager.scaleSp(
+                context,
+                if (prefs.miniPlayerCompactMode) 12f else 13f,
+                prefs.fontScale
+            )
+            binding.miniArtistName.textSize = ThemeManager.scaleSp(
+                context,
+                if (prefs.miniPlayerCompactMode) 10f else 11f,
+                prefs.fontScale
+            )
             
             // Apply colors
             setBackgroundColor(prefs.backgroundColor)
@@ -862,7 +934,7 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
         }
     }
     
-    fun release() {
+    override fun release() {
         stopProgressUpdates()
         stopSpinningAnimation()
         stopMiniVisualizer()
@@ -871,6 +943,8 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
         velocityTracker = null
         mediaController?.release()
     }
+
+    override fun asView(): View = this
     
     private fun updateSpinningAnimation(enabled: Boolean) {
         if (enabled && mediaController?.isPlaying == true) {

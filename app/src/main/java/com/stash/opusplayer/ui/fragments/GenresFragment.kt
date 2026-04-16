@@ -10,6 +10,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.stash.opusplayer.data.MusicRepository
 import com.stash.opusplayer.databinding.FragmentGenresBinding
 import com.stash.opusplayer.ui.adapters.GenreAdapter
+import com.stash.opusplayer.ui.appearance.ThemeManager
 import kotlinx.coroutines.launch
 
 class GenresFragment : Fragment() {
@@ -33,6 +34,7 @@ class GenresFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         repository = MusicRepository(requireContext())
         setupRecyclerView()
+        applyAdaptiveChrome()
         loadGenres()
     }
 
@@ -51,7 +53,31 @@ class GenresFragment : Fragment() {
         binding.recyclerView.apply {
             layoutManager = LinearLayoutManager(requireContext())
             adapter = this@GenresFragment.adapter
+            clipToPadding = false
+            setPadding(0, ThemeManager.scaleDp(requireContext(), 4), 0, ThemeManager.scaleDp(requireContext(), 28))
         }
+    }
+
+    private fun applyAdaptiveChrome() {
+        val context = requireContext()
+        val outerPadding = ThemeManager.scaleDp(context, 10)
+
+        binding.root.setPadding(outerPadding, outerPadding, outerPadding, outerPadding)
+        binding.titleText.textSize = ThemeManager.scaleSp(context, 16f)
+        binding.genresHeaderIcon.layoutParams = binding.genresHeaderIcon.layoutParams.apply {
+            width = ThemeManager.scaleDp(context, 24)
+            height = ThemeManager.scaleDp(context, 24)
+        }
+        binding.genresHeader.layoutParams = (binding.genresHeader.layoutParams as? ViewGroup.MarginLayoutParams)?.apply {
+            bottomMargin = ThemeManager.scaleDp(context, 10)
+        } ?: binding.genresHeader.layoutParams
+        binding.emptyStateText.textSize = ThemeManager.scaleSp(context, 14f)
+        binding.emptyStateText.setPadding(
+            ThemeManager.scaleDp(context, 16),
+            ThemeManager.scaleDp(context, 16),
+            ThemeManager.scaleDp(context, 16),
+            ThemeManager.scaleDp(context, 16)
+        )
     }
 
     private fun loadGenres() {

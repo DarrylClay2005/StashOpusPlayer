@@ -465,6 +465,15 @@ suspend fun scanCustomFolders(): List<Song> = withContext(Dispatchers.IO) {
         prefs.edit().putStringSet("custom_music_folders_tree", existing).apply()
     }
 
+    fun removeCustomMusicFolderTreeUri(treeUri: String) {
+        val existing = prefs.getStringSet("custom_music_folders_tree", setOf())
+            ?.toMutableSet()
+            ?: mutableSetOf()
+        if (existing.remove(treeUri)) {
+            prefs.edit().putStringSet("custom_music_folders_tree", existing).apply()
+        }
+    }
+
     fun getCustomMusicFolderTreeUris(): Set<String> {
         return prefs.getStringSet("custom_music_folders_tree", setOf()) ?: setOf()
     }
