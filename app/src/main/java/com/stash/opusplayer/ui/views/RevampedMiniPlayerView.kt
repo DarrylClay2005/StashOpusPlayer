@@ -16,6 +16,7 @@ import android.widget.*
 import androidx.cardview.widget.CardView
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
@@ -565,9 +566,9 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
 
     override fun applyAppearancePreferences(prefs: AppearancePreferences) {
         val density = resources.displayMetrics.density
-        val uiScale = (ThemeManager.getAdaptiveUiScale(context) * if (prefs.miniPlayerCompactMode) 0.92f else 1.0f)
-            .coerceIn(0.74f, 0.96f)
-        val buttonScale = (uiScale * prefs.buttonSizeScale).coerceIn(0.72f, 1.0f)
+        val uiScale = (ThemeManager.getAdaptiveUiScale(context) * if (prefs.miniPlayerCompactMode) 0.9f else 0.96f)
+            .coerceIn(0.68f, 0.9f)
+        val buttonScale = (uiScale * prefs.buttonSizeScale).coerceIn(0.66f, 0.92f)
         val compactAlpha = if (prefs.miniPlayerCompactMode) 0.96f else 1f
 
         fun px(baseDp: Int, scale: Float = uiScale): Int =
@@ -598,37 +599,47 @@ class RevampedMiniPlayerView @JvmOverloads constructor(
 
         binding.miniPlayerCard.radius = prefs.cardCornerRadiusDp * density * uiScale
         binding.miniPlayerCard.setCardBackgroundColor(prefs.primaryColor)
-        binding.miniPlayerCard.cardElevation = px(if (prefs.miniPlayerCompactMode) 6 else 10, 1f).toFloat()
+        binding.miniPlayerCard.cardElevation = px(if (prefs.miniPlayerCompactMode) 4 else 8, 1f).toFloat()
         binding.miniPlayerCard.useCompatPadding = !prefs.miniPlayerCompactMode
-        updateMargins(binding.miniPlayerCard, startDp = 6, topDp = 6, endDp = 6, bottomDp = 6)
+        updateMargins(binding.miniPlayerCard, startDp = 4, topDp = 4, endDp = 4, bottomDp = 4)
 
         binding.root.layoutParams = binding.root.layoutParams.apply {
             height = ViewGroup.LayoutParams.WRAP_CONTENT
         }
-        binding.root.minimumHeight = px(if (prefs.miniPlayerCompactMode) 70 else 80, 1f)
-        binding.root.setPadding(px(if (prefs.miniPlayerCompactMode) 10 else 12, 1f), px(if (prefs.miniPlayerCompactMode) 10 else 12, 1f), px(if (prefs.miniPlayerCompactMode) 10 else 12, 1f), px(if (prefs.miniPlayerCompactMode) 10 else 12, 1f))
+        binding.root.minimumHeight = px(if (prefs.miniPlayerCompactMode) 60 else 68, 1f)
+        binding.root.setPadding(px(if (prefs.miniPlayerCompactMode) 8 else 10, 1f), px(if (prefs.miniPlayerCompactMode) 8 else 10, 1f), px(if (prefs.miniPlayerCompactMode) 8 else 10, 1f), px(if (prefs.miniPlayerCompactMode) 8 else 10, 1f))
 
-        updateSize(binding.albumArtContainer, 52, 52)
-        updateMargins(binding.trackInfoContainer, startDp = 12, endDp = 12)
-        updateMargins(binding.progressContainer, startDp = 12, topDp = 6, endDp = 12)
-        updateSize(binding.previousButton, 32, 32, buttonScale)
-        updateSize(binding.playPauseButton, 42, 42, buttonScale)
-        updateSize(binding.nextButton, 32, 32, buttonScale)
-        updateMargins(binding.previousButton, endDp = 4, scale = buttonScale)
-        updateMargins(binding.playPauseButton, endDp = 4, scale = buttonScale)
+        updateSize(binding.albumArtContainer, 46, 46)
+        updateMargins(binding.trackInfoContainer, startDp = 8, endDp = 8)
+        updateMargins(binding.progressContainer, startDp = 8, topDp = 4, endDp = 8)
+        updateSize(binding.previousButton, 28, 28, buttonScale)
+        updateSize(binding.playPauseButton, 36, 36, buttonScale)
+        updateSize(binding.nextButton, 28, 28, buttonScale)
+        updateMargins(binding.previousButton, endDp = 2, scale = buttonScale)
+        updateMargins(binding.playPauseButton, endDp = 2, scale = buttonScale)
 
-        binding.trackTitle.textSize = ThemeManager.scaleSp(context, if (prefs.miniPlayerCompactMode) 13f else 15f, prefs.fontScale)
-        binding.trackArtist.textSize = ThemeManager.scaleSp(context, if (prefs.miniPlayerCompactMode) 11f else 12f, prefs.fontScale)
-        binding.currentTimeText.textSize = ThemeManager.scaleSp(context, 11f, prefs.fontScale)
-        binding.totalTimeText.textSize = ThemeManager.scaleSp(context, 11f, prefs.fontScale)
+        binding.trackTitle.textSize = ThemeManager.scaleSp(context, if (prefs.miniPlayerCompactMode) 12f else 13f, prefs.fontScale)
+        binding.trackArtist.textSize = ThemeManager.scaleSp(context, if (prefs.miniPlayerCompactMode) 9.5f else 10f, prefs.fontScale)
+        binding.currentTimeText.textSize = ThemeManager.scaleSp(context, 9f, prefs.fontScale)
+        binding.totalTimeText.textSize = ThemeManager.scaleSp(context, 9f, prefs.fontScale)
 
         binding.trackTitle.setTextColor(prefs.textPrimaryColor)
         binding.trackArtist.setTextColor(prefs.textSecondaryColor)
         binding.trackArtist.visibility = if (prefs.miniPlayerShowArtist) View.VISIBLE else View.GONE
         binding.albumArtContainer.visibility = if (prefs.miniPlayerShowArt) View.VISIBLE else View.GONE
+        val surface = ColorUtils.blendARGB(prefs.primaryColor, prefs.backgroundColor, 0.42f)
+        val accentSurface = ColorUtils.blendARGB(prefs.accentColor, prefs.primaryColor, 0.3f)
+        val subtleButton = ColorUtils.blendARGB(surface, prefs.backgroundColor, 0.16f)
+        binding.trackArtist.background?.mutate()?.setTint(ColorUtils.blendARGB(accentSurface, prefs.backgroundColor, 0.5f))
         binding.previousButton.imageTintList = ColorStateList.valueOf(prefs.textSecondaryColor)
         binding.nextButton.imageTintList = ColorStateList.valueOf(prefs.textSecondaryColor)
         binding.playPauseButton.imageTintList = ColorStateList.valueOf(prefs.textPrimaryColor)
+        binding.previousButton.backgroundTintList = ColorStateList.valueOf(subtleButton)
+        binding.nextButton.backgroundTintList = ColorStateList.valueOf(subtleButton)
+        binding.playPauseButton.backgroundTintList = ColorStateList.valueOf(accentSurface)
+        binding.progressBar.progressTintList = ColorStateList.valueOf(prefs.accentColor)
+        binding.progressBar.thumbTintList = ColorStateList.valueOf(prefs.accentColor)
+        binding.progressBar.progressBackgroundTintList = ColorStateList.valueOf(surface)
         binding.currentTimeText.setTextColor(prefs.textSecondaryColor)
         binding.totalTimeText.setTextColor(prefs.textSecondaryColor)
         alpha = compactAlpha

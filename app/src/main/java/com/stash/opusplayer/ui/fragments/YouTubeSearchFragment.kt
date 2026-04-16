@@ -1,32 +1,25 @@
 package com.stash.opusplayer.ui.fragments
 
-import android.app.Activity
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
-import android.provider.DocumentsContract
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.widget.addTextChangedListener
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.stash.opusplayer.data.DownloadRequest
 import com.stash.opusplayer.data.YouTubeVideo
-import com.stash.opusplayer.data.AudioFormat
-import com.stash.opusplayer.ui.dialogs.FormatSelectionDialog
 import com.stash.opusplayer.databinding.FragmentYoutubeSearchBinding
+import com.stash.opusplayer.integration.SealIntegration
 import com.stash.opusplayer.network.YouTubeApiService
-import com.stash.opusplayer.service.VideoDownloadManager
+import com.stash.opusplayer.ui.YouTubeStreamingActivity
 import com.stash.opusplayer.ui.adapters.YouTubeVideoAdapter
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import java.io.File
 
 class YouTubeSearchFragment : Fragment() {
 
@@ -35,13 +28,13 @@ class YouTubeSearchFragment : Fragment() {
 
     private lateinit var youTubeApiService: YouTubeApiService
     private lateinit var videoAdapter: YouTubeVideoAdapter
-    private lateinit var downloadManager: VideoDownloadManager
     private lateinit var linearLayoutManager: LinearLayoutManager
 
-    // Pagination state
     private val allVideos = mutableListOf<YouTubeVideo>()
     private var currentQuery: String? = null
     private var nextPageToken: String? = null
+    private var searchJob: Job? = null
+    private var loadMoreJob: Job? = null
     private var isLoadingMore: Boolean = false
 
     override fun onCreateView(
@@ -55,82 +48,61 @@ class YouTubeSearchFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
-        setupServices()
+        youTubeApiService = YouTubeApiService(requireContext())
         setupRecyclerView()
         setupSearchInput()
-        setupSealBanner()
+        setupDownloadRoutingUi()
+        showEmptyState(
+            title = "Search YouTube videos",
+            subtitle = "Enter a song, artist, or mix to preview it here and hand the download off to Seal."
+        )
     }
 
-    private fun setupSealBanner() {
-val installed = com.stash.opusplayer.integration.SealIntegration.isInstalled(requireContext())
-        if (installed) {
-            binding.sealInfoBanner.visibility = View.VISIBLE
-            binding.sealInfoText.text = "Downloads are handled by Seal and will open there. Tap Download to continue in Seal."
+    private fun setupDownloadRoutingUi() {
+        // Downloads are delegated to Seal now, so the old in-app location card was dead UI.
+        binding.downloadInfoCard.visibility = View.GONE
+
+        val sealInstalled = SealIntegration.isInstalled(requireContext())
+        binding.sealInfoBanner.visibility = View.VISIBLE
+        if (sealInstalled) {
+            binding.sealInfoText.text =
+                "Downloads open in Seal. Search here, preview in-app, then tap Download to continue there."
             binding.sealActionButton.visibility = View.GONE
         } else {
-            binding.sealInfoBanner.visibility = View.VISIBLE
-            binding.sealInfoText.text = "Install Seal to download videos reliably."
+            binding.sealInfoText.text =
+                "Install Seal to enable downloads. Playback previews still work inside the app."
             binding.sealActionButton.visibility = View.VISIBLE
             binding.sealActionButton.text = "Install Seal"
             binding.sealActionButton.setOnClickListener {
-com.stash.opusplayer.integration.SealIntegration.promptInstall(requireContext())
-            }
-        }
-    }
-
-    private fun setupServices() {
-        youTubeApiService = YouTubeApiService(requireContext())
-        downloadManager = VideoDownloadManager(requireContext())
-        
-        // Observe download progress
-        lifecycleScope.launch {
-            downloadManager.downloadProgress.collect { progress ->
-                videoAdapter.updateDownloadProgress(progress.videoId, progress)
+                SealIntegration.promptInstall(requireContext())
             }
         }
     }
 
     private fun setupRecyclerView() {
         videoAdapter = YouTubeVideoAdapter(
-            onVideoClick = { video ->
-                // Open built-in YouTube player activity
-                try {
-val intent = Intent(requireContext(), com.stash.opusplayer.ui.YouTubeStreamingActivity::class.java).apply {
-                        putExtra(com.stash.opusplayer.ui.YouTubeStreamingActivity.EXTRA_VIDEO, video)
-                    }
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    Toast.makeText(requireContext(), "Unable to open player: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-            },
-            onDownloadClick = { video ->
-                handleDownloadClick(video)
-            },
-            onPreviewClick = { video ->
-                // Also route preview to the in-app player for a consistent experience
-                try {
-val intent = Intent(requireContext(), com.stash.opusplayer.ui.YouTubeStreamingActivity::class.java).apply {
-                        putExtra(com.stash.opusplayer.ui.YouTubeStreamingActivity.EXTRA_VIDEO, video)
-                    }
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    Toast.makeText(requireContext(), "Unable to open player: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-            }
+            onVideoClick = ::openVideoPreview,
+            onDownloadClick = ::handleDownloadClick,
+            onPreviewClick = ::openVideoPreview
         )
 
+        linearLayoutManager = LinearLayoutManager(requireContext())
         binding.resultsRecyclerView.apply {
             adapter = videoAdapter
-            layoutManager = LinearLayoutManager(requireContext()).also { this@YouTubeSearchFragment.linearLayoutManager = it }
+            layoutManager = linearLayoutManager
             addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
-                override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
+                override fun onScrolled(
+                    recyclerView: androidx.recyclerview.widget.RecyclerView,
+                    dx: Int,
+                    dy: Int
+                ) {
                     super.onScrolled(recyclerView, dx, dy)
-                    if (dy <= 0) return
-                    val total = videoAdapter.itemCount
-                    val lastVisible = this@YouTubeSearchFragment.linearLayoutManager.findLastVisibleItemPosition()
-                    val nearEnd = total > 0 && lastVisible >= total - 5
-                    if (nearEnd && !isLoadingMore && !nextPageToken.isNullOrEmpty() && !currentQuery.isNullOrEmpty()) {
+                    if (dy <= 0 || isLoadingMore || nextPageToken.isNullOrEmpty() || currentQuery.isNullOrEmpty()) {
+                        return
+                    }
+                    val totalItems = videoAdapter.itemCount
+                    val lastVisibleItem = linearLayoutManager.findLastVisibleItemPosition()
+                    if (totalItems > 0 && lastVisibleItem >= totalItems - 5) {
                         loadMoreResults()
                     }
                 }
@@ -139,14 +111,15 @@ val intent = Intent(requireContext(), com.stash.opusplayer.ui.YouTubeStreamingAc
     }
 
     private fun setupSearchInput() {
+        binding.searchButton.isEnabled = false
         binding.searchEditText.addTextChangedListener { text ->
-            // Enable/disable search button based on input
             binding.searchButton.isEnabled = !text.isNullOrBlank()
         }
 
         binding.searchEditText.setOnEditorActionListener { _, actionId, event ->
-            if (actionId == EditorInfo.IME_ACTION_SEARCH || 
-                (event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN)) {
+            if (actionId == EditorInfo.IME_ACTION_SEARCH ||
+                (event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN)
+            ) {
                 performSearch()
                 true
             } else {
@@ -159,7 +132,6 @@ val intent = Intent(requireContext(), com.stash.opusplayer.ui.YouTubeStreamingAc
         }
     }
 
-
     private fun performSearch() {
         val query = binding.searchEditText.text?.toString()?.trim()
         if (query.isNullOrBlank()) {
@@ -167,150 +139,195 @@ val intent = Intent(requireContext(), com.stash.opusplayer.ui.YouTubeStreamingAc
             return
         }
 
-        // Reset pagination state
+        searchJob?.cancel()
+        loadMoreJob?.cancel()
+        isLoadingMore = false
         currentQuery = query
         nextPageToken = null
         allVideos.clear()
-
-        // Hide keyboard
+        videoAdapter.submitList(emptyList())
         binding.searchEditText.clearFocus()
+        showLoadingState(message = "Searching...", keepResultsVisible = false)
 
-        // Show progress
-        binding.progressContainer.visibility = View.VISIBLE
-        binding.progressText.text = "Searching..."
-        binding.emptyStateContainer.visibility = View.GONE
-        binding.resultsRecyclerView.visibility = View.GONE
+        searchJob = viewLifecycleOwner.lifecycleScope.launch {
+            val result = runCatching { youTubeApiService.searchVideos(query) }.getOrElse {
+                Result.failure(it)
+            }
 
-        lifecycleScope.launch {
-            try {
-                val result = youTubeApiService.searchVideos(query)
-                
-                result.onSuccess { searchResult ->
-                    binding.progressContainer.visibility = View.GONE
-                    
-                    if (searchResult.videos.isNotEmpty()) {
-                        allVideos.addAll(searchResult.videos)
-                        nextPageToken = searchResult.nextPageToken
-                        videoAdapter.submitList(allVideos.toList())
-                        binding.resultsRecyclerView.visibility = View.VISIBLE
-                        binding.emptyStateContainer.visibility = View.GONE
-                    } else {
-                        showEmptyResults()
-                    }
-                }
-                
-                result.onFailure { error ->
-                    binding.progressContainer.visibility = View.GONE
-                    showError("Search failed: ${error.message}")
-                }
-                
-            } catch (e: Exception) {
-                binding.progressContainer.visibility = View.GONE
-                showError("Search failed: ${e.message}")
+            result.onSuccess { searchResult ->
+                if (_binding == null || currentQuery != query) return@onSuccess
+                applySearchResults(searchResult.videos, searchResult.nextPageToken, append = false)
+            }
+
+            result.onFailure { error ->
+                if (_binding == null || currentQuery != query) return@onFailure
+                showError("Search failed: ${error.message ?: "Unknown error"}")
             }
         }
     }
 
     private fun loadMoreResults() {
-        val q = currentQuery ?: return
-        val token = nextPageToken ?: return
-        isLoadingMore = true
+        val query = currentQuery ?: return
+        val pageToken = nextPageToken ?: return
+        if (loadMoreJob?.isActive == true) return
 
-        // Optional: could show a small footer spinner; for now rely on smooth append
-        lifecycleScope.launch {
+        isLoadingMore = true
+        showLoadingState(message = "Loading more...", keepResultsVisible = true)
+
+        loadMoreJob = viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val result = youTubeApiService.searchVideos(q, pageToken = token)
+                val result = youTubeApiService.searchVideos(query, pageToken = pageToken)
                 result.onSuccess { searchResult ->
-                    nextPageToken = searchResult.nextPageToken
-                    if (searchResult.videos.isNotEmpty()) {
-                        val start = allVideos.size
-                        allVideos.addAll(searchResult.videos)
-                        // submit a new list instance to trigger DiffUtil
-                        videoAdapter.submitList(allVideos.toList())
-                        // Optionally scroll remains natural as user is at end
-                    }
+                    if (_binding == null || currentQuery != query) return@onSuccess
+                    applySearchResults(searchResult.videos, searchResult.nextPageToken, append = true)
                 }
                 result.onFailure { error ->
-                    Toast.makeText(requireContext(), "Failed to load more: ${error.message}", Toast.LENGTH_SHORT).show()
+                    if (_binding == null || currentQuery != query) return@onFailure
+                    Toast.makeText(
+                        requireContext(),
+                        "Failed to load more: ${error.message ?: "Unknown error"}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    binding.progressContainer.visibility = View.GONE
                 }
             } catch (e: Exception) {
-                Toast.makeText(requireContext(), "Failed to load more: ${e.message}", Toast.LENGTH_SHORT).show()
+                if (_binding != null && currentQuery == query) {
+                    binding.progressContainer.visibility = View.GONE
+                    Toast.makeText(
+                        requireContext(),
+                        "Failed to load more: ${e.message ?: "Unknown error"}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             } finally {
                 isLoadingMore = false
             }
         }
     }
 
-    private fun handleDownloadClick(video: YouTubeVideo) {
-        // Pre-cache YouTube thumbnail into our artwork cache so playback shows cover art even if file tags lack artwork
-        lifecycleScope.launch {
-            try {
-                val meta = com.stash.opusplayer.utils.MetadataExtractor(requireContext())
-                val b64 = meta.downloadYouTubeThumbnail(video.id)
-                if (b64 != null) {
-                    val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                    val cache = com.stash.opusplayer.artwork.ArtworkCache(requireContext())
-                    // Save under a few likely variants so later scans can find it
-                    val variants = listOf(
-                        // Known channel as artist
-                        com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "YouTube", 0L, ""),
-                        com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "Unknown Album", 0L, ""),
-                        com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "", 0L, ""),
-                        // Unknown artist fallback (common after external downloads)
-                        com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "YouTube", 0L, ""),
-                        com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "Unknown Album", 0L, ""),
-                        com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "", 0L, "")
-                    )
-                    variants.forEach { s ->
-                        val f = cache.fileFor(s)
-                        if (!f.exists()) cache.saveJpeg(bytes, f)
-                    }
-                    // Also save by title-only key to improve hit rate for unknown tags
-                    val tf = cache.fileForTitleOnly(video.title)
-                    if (!tf.exists()) cache.saveJpeg(bytes, tf)
-                }
-            } catch (_: Exception) {}
+    private fun applySearchResults(
+        videos: List<YouTubeVideo>,
+        upcomingPageToken: String?,
+        append: Boolean
+    ) {
+        nextPageToken = upcomingPageToken
+        if (append) {
+            val existingIds = allVideos.mapTo(mutableSetOf()) { it.id }
+            val freshVideos = videos.filter { existingIds.add(it.id) }
+            allVideos.addAll(freshVideos)
+        } else {
+            allVideos.clear()
+            allVideos.addAll(videos.distinctBy { it.id })
         }
 
-        // Simple handoff to Seal without trying to set download location
-        val ytUrl = if (video.url.startsWith("http")) video.url else video.formattedUrl
-        val opened = com.stash.opusplayer.integration.SealIntegration.openInSeal(requireContext(), ytUrl)
-        if (opened) {
-            Toast.makeText(requireContext(), "Opening Seal to download…", Toast.LENGTH_SHORT).show()
-        } else {
-            // Prompt install if not available
-            androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                .setTitle("Install Seal")
-                .setMessage("This app uses Seal as the downloader. Install Seal to continue?")
-                .setPositiveButton("Install") { _, _ ->
-                    com.stash.opusplayer.integration.SealIntegration.promptInstall(requireContext())
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
+        binding.progressContainer.visibility = View.GONE
+        if (allVideos.isEmpty()) {
+            showEmptyState(
+                title = "No results found",
+                subtitle = "Try a different title, artist, or paste a more specific search."
+            )
+            return
+        }
+
+        binding.emptyStateContainer.visibility = View.GONE
+        binding.resultsRecyclerView.visibility = View.VISIBLE
+        videoAdapter.submitList(allVideos.toList())
+    }
+
+    private fun showLoadingState(message: String, keepResultsVisible: Boolean) {
+        binding.progressContainer.visibility = View.VISIBLE
+        binding.progressText.text = message
+        if (!keepResultsVisible) {
+            binding.resultsRecyclerView.visibility = View.GONE
+            binding.emptyStateContainer.visibility = View.GONE
         }
     }
-    
 
-    private fun showEmptyResults() {
+    private fun showEmptyState(title: String, subtitle: String) {
+        binding.progressContainer.visibility = View.GONE
         binding.resultsRecyclerView.visibility = View.GONE
         binding.emptyStateContainer.visibility = View.VISIBLE
-        // Update empty state text for no results
+        binding.emptyStateTitle.text = title
+        binding.emptyStateSubtitle.text = subtitle
     }
 
     private fun showError(message: String) {
-        binding.resultsRecyclerView.visibility = View.GONE
-        binding.emptyStateContainer.visibility = View.VISIBLE
+        showEmptyState(
+            title = "Search unavailable",
+            subtitle = message
+        )
         Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show()
     }
 
-    private fun sanitizeFileName(fileName: String): String {
-        return fileName
-            .replace(Regex("""[^a-zA-Z0-9._\-\s]"""), "_")
-            .replace(Regex("""\s+"""), "_")
-            .take(100)
+    private fun openVideoPreview(video: YouTubeVideo) {
+        try {
+            val intent = Intent(requireContext(), YouTubeStreamingActivity::class.java).apply {
+                putExtra(YouTubeStreamingActivity.EXTRA_VIDEO, video)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(
+                requireContext(),
+                "Unable to open player: ${e.message ?: "Unknown error"}",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    private fun handleDownloadClick(video: YouTubeVideo) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            primeThumbnailCache(video)
+        }
+
+        val youTubeUrl = if (video.url.startsWith("http")) video.url else video.formattedUrl
+        val opened = SealIntegration.openInSeal(requireContext(), youTubeUrl)
+        if (opened) {
+            Toast.makeText(requireContext(), "Opening Seal to download...", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        androidx.appcompat.app.AlertDialog.Builder(requireContext())
+            .setTitle("Install Seal")
+            .setMessage("This app now hands downloads to Seal. Install it to continue?")
+            .setPositiveButton("Install") { _, _ ->
+                SealIntegration.promptInstall(requireContext())
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private suspend fun primeThumbnailCache(video: YouTubeVideo) {
+        runCatching {
+            val metadataExtractor = com.stash.opusplayer.utils.MetadataExtractor(requireContext())
+            val thumbnailBase64 = metadataExtractor.downloadYouTubeThumbnail(video.id) ?: return
+            val bytes = android.util.Base64.decode(thumbnailBase64, android.util.Base64.DEFAULT)
+            val cache = com.stash.opusplayer.artwork.ArtworkCache(requireContext())
+            val variants = listOf(
+                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "YouTube", 0L, ""),
+                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "Unknown Album", 0L, ""),
+                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "", 0L, ""),
+                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "YouTube", 0L, ""),
+                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "Unknown Album", 0L, ""),
+                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "", 0L, "")
+            )
+            variants.forEach { song ->
+                val file = cache.fileFor(song)
+                if (!file.exists()) {
+                    cache.saveJpeg(bytes, file)
+                }
+            }
+            val titleOnlyFile = cache.fileForTitleOnly(video.title)
+            if (!titleOnlyFile.exists()) {
+                cache.saveJpeg(bytes, titleOnlyFile)
+            }
+        }
     }
 
     override fun onDestroyView() {
+        searchJob?.cancel()
+        loadMoreJob?.cancel()
+        binding.resultsRecyclerView.adapter = null
+        allVideos.clear()
         super.onDestroyView()
         _binding = null
     }

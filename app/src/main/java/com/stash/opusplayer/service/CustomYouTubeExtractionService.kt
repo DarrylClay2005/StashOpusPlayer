@@ -1,7 +1,9 @@
 package com.stash.opusplayer.service
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
+import androidx.documentfile.provider.DocumentFile
 import com.stash.opusplayer.data.YouTubeVideo
 import com.stash.opusplayer.data.AudioFormat
 import com.stash.opusplayer.data.DownloadRequest
@@ -202,7 +204,13 @@ class CustomYouTubeExtractionService(private val context: Context) {
             )
             
             val outputDir = if (request.downloadPath.startsWith("content://")) {
-                context.getExternalFilesDir("downloads")!!.absolutePath
+                val externalDownloadsDir = context.getExternalFilesDir("downloads")
+                val fallbackDir = File(context.filesDir, "downloads")
+                val targetDir = externalDownloadsDir ?: fallbackDir
+                if (!targetDir.exists()) {
+                    targetDir.mkdirs()
+                }
+                targetDir.absolutePath
             } else {
                 File(request.downloadPath).let { dir ->
                     if (!dir.exists()) dir.mkdirs()
@@ -366,10 +374,45 @@ class CustomYouTubeExtractionService(private val context: Context) {
      */
     private suspend fun copyToSAFDestination(sourcePath: String, destinationUri: String, fileName: String): String {
         return try {
-            // Implementation would use DocumentFile API to copy to SAF location
-            // For now, return the source path as this is complex SAF implementation
-            Log.d(TAG, "SAF copy not implemented in this example, returning source path")
-            sourcePath
+            val sourceFile = File(sourcePath)
+            if (!sourceFile.exists()) {
+                Log.e(TAG, "Source file missing for SAF copy: $sourcePath")
+                return sourcePath
+            }
+
+            val treeUri = Uri.parse(destinationUri)
+            val tree = DocumentFile.fromTreeUri(context, treeUri)
+            if (tree == null || !tree.canWrite()) {
+                Log.e(TAG, "Unable to access SAF tree for copy: $destinationUri")
+                return sourcePath
+            }
+
+            val extension = sourceFile.extension.ifBlank { "mp3" }
+            val mimeType = when (extension.lowercase()) {
+                "mp3" -> "audio/mpeg"
+                "opus", "webm" -> "audio/webm"
+                "m4a" -> "audio/mp4"
+                "aac" -> "audio/aac"
+                "flac" -> "audio/flac"
+                "ogg" -> "audio/ogg"
+                else -> "audio/*"
+            }
+            val displayName = fileName.removeSuffix(".${sourceFile.extension}")
+            val destinationFile = tree.createFile(mimeType, displayName)
+            if (destinationFile == null) {
+                Log.e(TAG, "Failed to create SAF destination file for $fileName")
+                return sourcePath
+            }
+
+            context.contentResolver.openOutputStream(destinationFile.uri)?.use { output ->
+                sourceFile.inputStream().use { input ->
+                    input.copyTo(output)
+                }
+            } ?: return sourcePath
+
+            sourceFile.delete()
+            Log.i(TAG, "Copied download to SAF destination: ${destinationFile.uri}")
+            destinationFile.uri.toString()
         } catch (e: Exception) {
             Log.e(TAG, "SAF copy failed", e)
             sourcePath

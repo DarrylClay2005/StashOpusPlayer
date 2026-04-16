@@ -371,26 +371,26 @@ class VisualCustomizationManager(private val context: Context) {
      */
     suspend fun setPhotoBackground(uri: Uri): Boolean = withContext(Dispatchers.IO) {
         try {
-            val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
-            if (inputStream != null) {
-                val bitmap = BitmapFactory.decodeStream(inputStream)
-                inputStream.close()
-                
-                if (bitmap != null) {
-                    val file = File(backgroundsDir, "background_${System.currentTimeMillis()}.jpg")
-                    val outputStream = FileOutputStream(file)
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
-                    outputStream.close()
-                    
-                    prefs.edit()
-                        .putString(PREF_BACKGROUND_PHOTO_PATH, file.absolutePath)
-                        .putString(PREF_BACKGROUND_TYPE, BACKGROUND_TYPE_PHOTO)
-                        .apply()
-                    
-                    return@withContext true
-                }
+            val bitmap = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                BitmapFactory.decodeStream(inputStream)
+            } ?: return@withContext false
+
+            val previousPath = prefs.getString(PREF_BACKGROUND_PHOTO_PATH, null)
+            val file = File(backgroundsDir, "background_${System.currentTimeMillis()}.jpg")
+            FileOutputStream(file).use { outputStream ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
             }
-            false
+
+            previousPath
+                ?.takeIf { it != file.absolutePath }
+                ?.let { File(it).takeIf(File::exists)?.delete() }
+
+            prefs.edit()
+                .putString(PREF_BACKGROUND_PHOTO_PATH, file.absolutePath)
+                .putString(PREF_BACKGROUND_TYPE, BACKGROUND_TYPE_PHOTO)
+                .apply()
+
+            true
         } catch (e: Exception) {
             e.printStackTrace()
             false
@@ -452,11 +452,29 @@ class VisualCustomizationManager(private val context: Context) {
      * Get photo opacity
      */
     fun getPhotoOpacity(): Int = prefs.getInt(PREF_PHOTO_OPACITY, DEFAULT_OPACITY)
+
+    fun getPhotoTintColor(): Int = prefs.getInt(PREF_PHOTO_TINT_COLOR, Color.TRANSPARENT)
     
     /**
      * Get photo tint intensity
      */
     fun getPhotoTintIntensity(): Int = prefs.getInt(PREF_PHOTO_TINT_INTENSITY, DEFAULT_TINT_INTENSITY)
+    fun getPhotoBackgroundPath(): String? = prefs.getString(PREF_BACKGROUND_PHOTO_PATH, null)
+    fun hasPhotoBackground(): Boolean = getPhotoBackgroundPath()?.let { File(it).exists() } == true
+
+    fun updatePhotoPresentation(
+        blurRadius: Int = getPhotoBlurRadius(),
+        dimming: Int = getPhotoDimming(),
+        opacity: Int = getPhotoOpacity()
+    ) {
+        updatePhotoSettings(
+            blurRadius = blurRadius,
+            dimming = dimming,
+            opacity = opacity,
+            tintColor = getPhotoTintColor(),
+            tintIntensity = getPhotoTintIntensity()
+        )
+    }
     
     /**
      * Check if background effects are enabled
@@ -492,6 +510,37 @@ class VisualCustomizationManager(private val context: Context) {
         prefs.edit()
             .remove(PREF_BACKGROUND_PHOTO_PATH)
             .putString(PREF_BACKGROUND_TYPE, BACKGROUND_TYPE_GRADIENT)
+            .apply()
+    }
+
+    fun resetBackgroundDefaults(clearPhoto: Boolean = false) {
+        if (clearPhoto) {
+            getPhotoBackgroundPath()?.let { File(it).takeIf(File::exists)?.delete() }
+        }
+
+        prefs.edit()
+            .putString(PREF_BACKGROUND_TYPE, BACKGROUND_TYPE_GRADIENT)
+            .putInt(PREF_BACKGROUND_COLOR, Color.parseColor("#111827"))
+            .putInt(PREF_GRADIENT_START_COLOR, Color.parseColor("#2E1065"))
+            .putInt(PREF_GRADIENT_END_COLOR, Color.parseColor("#0F0F23"))
+            .putString(PREF_GRADIENT_ORIENTATION, GRADIENT_VERTICAL)
+            .putInt(PREF_PHOTO_BLUR_RADIUS, DEFAULT_BLUR_RADIUS)
+            .putInt(PREF_PHOTO_DIMMING, DEFAULT_DIMMING)
+            .putInt(PREF_PHOTO_OPACITY, DEFAULT_OPACITY)
+            .putInt(PREF_PHOTO_TINT_COLOR, Color.TRANSPARENT)
+            .putInt(PREF_PHOTO_TINT_INTENSITY, DEFAULT_TINT_INTENSITY)
+            .apply()
+
+        if (clearPhoto) {
+            prefs.edit().remove(PREF_BACKGROUND_PHOTO_PATH).apply()
+        }
+    }
+
+    fun resetMotionDefaults() {
+        prefs.edit()
+            .putBoolean(PREF_BACKGROUND_PARALLAX, true)
+            .putBoolean(PREF_BACKGROUND_BREATHING, false)
+            .putBoolean(PREF_COLOR_SHIFT_ENABLED, true)
             .apply()
     }
 }

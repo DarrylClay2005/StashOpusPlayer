@@ -4,73 +4,92 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_margin="4dp"
-    app:cardUseCompatPadding="true"
-    app:cardCornerRadius="9dp"
-app:cardElevation="2dp"
-    app:cardBackgroundColor="@color/surface_color"
-    app:strokeColor="@color/border_gray"
-    app:strokeWidth="1dp">
+    android:foreground="?attr/selectableItemBackground"
+    app:cardBackgroundColor="@android:color/transparent"
+    app:cardElevation="0dp"
+    app:cardUseCompatPadding="false"
+    app:strokeWidth="0dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:background="@drawable/song_grid_panel_background"
         android:orientation="vertical">
 
         <androidx.constraintlayout.widget.ConstraintLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:foreground="?attr/selectableItemBackground">
+            android:layout_height="wrap_content">
 
             <com.google.android.material.imageview.ShapeableImageView
                 android:id="@+id/song_artwork"
                 android:layout_width="0dp"
                 android:layout_height="0dp"
+                android:adjustViewBounds="true"
+                android:contentDescription="@string/album_artwork"
                 android:scaleType="centerCrop"
                 android:src="@drawable/ic_music_note"
-                app:layout_constraintTop_toTopOf="parent"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintDimensionRatio="1:1"
-                app:shapeAppearanceOverlay="@style/CircularImageView" />
-
-            <ImageView
-                android:id="@+id/menu_button"
-                android:layout_width="20dp"
-                android:layout_height="20dp"
-                android:layout_margin="4dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_more_vert"
-                android:contentDescription="More options"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toTopOf="parent"
-                app:layout_constraintEnd_toEndOf="parent" />
+                app:shapeAppearanceOverlay="@style/RoundedImageView" />
+
+            <View
+                android:id="@+id/song_grid_scrim"
+                android:layout_width="0dp"
+                android:layout_height="56dp"
+                android:background="@drawable/song_grid_scrim"
+                app:layout_constraintBottom_toBottomOf="@id/song_artwork"
+                app:layout_constraintEnd_toEndOf="@id/song_artwork"
+                app:layout_constraintStart_toStartOf="@id/song_artwork" />
+
+            <ImageButton
+                android:id="@+id/menu_button"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_margin="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="More options"
+                android:padding="2dp"
+                android:src="@drawable/ic_more_vert"
+                android:tint="@color/text_primary"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
         </androidx.constraintlayout.widget.ConstraintLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="8dp">
+            android:paddingStart="10dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="12dp">
 
             <TextView
                 android:id="@+id/song_title"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:maxLines="2"
                 android:ellipsize="end"
+                android:maxLines="2"
+                android:text="Song Title"
                 android:textAppearance="@style/TextAppearance.StashWave.Body"
+                android:textColor="@color/text_primary"
                 android:textSize="12sp"
-                android:text="Song Title" />
+                android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/song_artist"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:maxLines="1"
+                android:layout_marginTop="4dp"
                 android:ellipsize="end"
-                android:layout_marginTop="2dp"
+                android:maxLines="1"
+                android:text="Artist"
                 android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
-                android:textSize="10sp"
-                android:text="Artist" />
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp" />
 
         </LinearLayout>
 

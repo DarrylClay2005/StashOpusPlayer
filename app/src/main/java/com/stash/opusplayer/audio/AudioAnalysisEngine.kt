@@ -245,6 +245,69 @@ class AudioAnalysisEngine(private val context: Context) {
         _smoothingFactor.value = factor.coerceIn(0.1f, 0.95f)
         prefs.edit().putFloat(PREF_SMOOTHING_FACTOR, _smoothingFactor.value).apply()
     }
+
+    fun analyzeSamples(samples: FloatArray) {
+        if (!_analysisEnabled.value || samples.isEmpty()) return
+
+        try {
+            val normalizedSamples = samples.map { it.coerceIn(-1f, 1f) }.toFloatArray()
+            val rms = sqrt(normalizedSamples.map { it * it }.average()).toFloat()
+            val peak = normalizedSamples.maxOf { abs(it) }
+            val rmsDb = if (rms > 0) 20 * log10(rms) else -60.0f
+            val peakDb = if (peak > 0) 20 * log10(peak) else -60.0f
+            val smoothing = _smoothingFactor.value
+
+            _currentRmsDb.value = _currentRmsDb.value * smoothing + rmsDb * (1 - smoothing)
+            _currentPeakDb.value = _currentPeakDb.value * smoothing + peakDb * (1 - smoothing)
+
+            peakHistory.add(peakDb)
+            if (peakHistory.size > PEAK_HISTORY_SIZE) {
+                peakHistory.removeAt(0)
+            }
+            if (peakHistory.size >= 10) {
+                val sortedPeaks = peakHistory.sorted()
+                val p95 = sortedPeaks[(sortedPeaks.size * 0.95).toInt()]
+                val p5 = sortedPeaks[(sortedPeaks.size * 0.05).toInt()]
+                _dynamicRange.value = p95 - p5
+            }
+
+            lufsIntegrationBuffer.add(rms)
+            if (lufsIntegrationBuffer.size > SAMPLE_RATE.toInt() * 3) {
+                lufsIntegrationBuffer.removeAt(0)
+            }
+            if (lufsIntegrationBuffer.size >= SAMPLE_RATE.toInt()) {
+                _currentLufs.value = calculateLufs(lufsIntegrationBuffer)
+            }
+
+            if (_peakDetectionEnabled.value && peakDb > PEAK_THRESHOLD_DB) {
+                detectPeaks(normalizedSamples)
+            }
+            _thd.value = calculateTHD(normalizedSamples)
+
+            val spectrum = FloatArray(_spectrumResolution.value) { bin ->
+                val binFrequency = binToFrequency(bin, _spectrumResolution.value)
+                val amplitude = getFrequencyAmplitude(normalizedSamples, binFrequency).coerceAtLeast(1e-6f)
+                (20 * log10(amplitude)).coerceIn(-80.0f, 0.0f)
+            }
+
+            val smoothed = _spectrumData.value.clone()
+            for (i in spectrum.indices) {
+                if (i < smoothed.size) {
+                    smoothed[i] = smoothed[i] * smoothing + spectrum[i] * (1 - smoothing)
+                }
+            }
+
+            _spectrumData.value = smoothed
+            spectrumHistory[historyIndex] = smoothed.clone()
+            historyIndex = (historyIndex + 1) % spectrumHistory.size
+            _spectralCentroid.value = calculateSpectralCentroid(smoothed)
+            _spectralFlatness.value = calculateSpectralFlatness(smoothed)
+            _dominantFrequencies.value = findDominantFrequencies(smoothed)
+            updateAudioQuality()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error analyzing raw audio samples", e)
+        }
+    }
     
     private fun analyzeWaveform(waveform: ByteArray) {
         try {

@@ -67,6 +67,7 @@ class SettingsFragment : Fragment() {
             listOf(
                 "Playback" to { openSettingsScreen(PlaybackSettingsFragment(), "Playback Settings") },
                 "Appearance" to { openSettingsScreen(AppearanceFragment(), "Appearance") },
+                "Motion" to { openSettingsScreen(VisualCustomizationFragment(), "Animations & Background") },
                 "Rescan Library" to { startLibraryRescan() },
                 "Check Updates" to { checkForUpdates(force = true) }
             )
@@ -106,10 +107,10 @@ class SettingsFragment : Fragment() {
 
         addSettingsTile(
             section,
-            title = "Background & Motion",
-            summary = "Photo backgrounds, blur, dimming, and motion effects."
+            title = "Animations & Background",
+            summary = "Stable animation controls, background mode presets, and photo tuning."
         ) {
-            openSettingsScreen(VisualCustomizationFragment(), "Visual Customization")
+            openSettingsScreen(VisualCustomizationFragment(), "Animations & Background")
         }
 
         addSettingsTile(

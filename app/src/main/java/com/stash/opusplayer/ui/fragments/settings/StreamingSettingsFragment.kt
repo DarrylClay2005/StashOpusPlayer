@@ -25,6 +25,7 @@ class StreamingSettingsFragment : NavigableSettingsFragment() {
     override val screenTitle: String = "Streaming & Downloads"
 
     private lateinit var serviceStatusView: TextView
+    private lateinit var lavalinkStatusView: TextView
     private lateinit var lavalinkUrlInput: com.google.android.material.textfield.TextInputEditText
     private lateinit var lavalinkPasswordInput: com.google.android.material.textfield.TextInputEditText
 
@@ -41,7 +42,7 @@ class StreamingSettingsFragment : NavigableSettingsFragment() {
     ): View {
         val (scrollView, content) = createSettingsPage(
             title = "Streaming",
-            subtitle = "Stabilized YouTube playback, Lavalink routing, and download service control."
+            subtitle = "Stabilized YouTube playback, auto-detected Lavalink routing, and visible download service control."
         )
 
         buildYouTubeSection(content)
@@ -53,13 +54,14 @@ class StreamingSettingsFragment : NavigableSettingsFragment() {
     override fun onResume() {
         super.onResume()
         updateServiceStatus()
+        refreshLavalinkStatus(autoConfigure = true)
     }
 
     private fun buildYouTubeSection(parent: LinearLayout) {
         val section = addSettingsSection(
             parent,
             "YouTube Playback",
-            "Save the API key, choose the playback backend, and keep the Lavalink path visible."
+            "Save the API key, choose the playback backend, and let the app auto-wire a Lavalink node when one is available."
         )
 
         val apiKeyInput = addTextInputControl(
@@ -73,30 +75,32 @@ class StreamingSettingsFragment : NavigableSettingsFragment() {
         val backendSpinner = addSpinnerControl(
             section,
             title = "Playback backend",
-            summary = "Auto prefers the Lavalink node first, then falls back to local yt-dlp extraction.",
+            summary = "Auto tries Lavalink first, then falls back to local yt-dlp extraction when the node is unavailable.",
             entries = listOf(
-                "Auto (Lavalink -> yt-dlp)",
+                "Auto (smart Lavalink fallback)",
                 "yt-dlp only",
-                "Lavalink compatible"
+                "Lavalink only"
             )
         )
         backendSpinner.setSelection(
             backendValues.indexOf(YouTubePlaybackSettings.getBackend(requireContext())).coerceAtLeast(0)
         )
 
+        lavalinkStatusView = addBodyText(section, "Looking for a Lavalink node...")
+
         lavalinkUrlInput = addTextInputControl(
             section,
             title = "Lavalink URL",
-            summary = "Base URL for your node, for example http://192.168.1.10:2333.",
-            hint = "http://host:port",
+            summary = "Manual URL for your node. Leave this blank if you want the app to auto-detect a local node.",
+            hint = YouTubePlaybackSettings.getSuggestedUrls(requireContext()).firstOrNull() ?: "http://host:2333",
             initialText = YouTubePlaybackSettings.getLavalinkUrl(requireContext())
         )
 
         lavalinkPasswordInput = addTextInputControl(
             section,
             title = "Lavalink password",
-            summary = "Password used by your node. Leave it blank only if your server is configured that way.",
-            hint = "youshallnotpass",
+            summary = "The default Lavalink password is youshallnotpass. Auto-detected nodes use that unless you override it here.",
+            hint = YouTubePlaybackSettings.getDefaultPassword(),
             initialText = YouTubePlaybackSettings.getLavalinkPassword(requireContext()),
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         )
@@ -107,6 +111,7 @@ class StreamingSettingsFragment : NavigableSettingsFragment() {
             val visibility = if (visible) View.VISIBLE else View.GONE
             ((lavalinkUrlInput.parent as? View)?.parent as? View)?.visibility = visibility
             ((lavalinkPasswordInput.parent as? View)?.parent as? View)?.visibility = visibility
+            lavalinkStatusView.visibility = visibility
         }
         updateLavalinkVisibility()
         backendSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
@@ -118,22 +123,49 @@ class StreamingSettingsFragment : NavigableSettingsFragment() {
         }
 
         addActionButton(section, "Save playback settings") {
-            val backend = backendValues[backendSpinner.selectedItemPosition]
-            val lavalinkUrl = lavalinkUrlInput.text?.toString().orEmpty()
-            val lavalinkPassword = lavalinkPasswordInput.text?.toString().orEmpty()
+            lifecycleScope.launch {
+                val backend = backendValues[backendSpinner.selectedItemPosition]
+                val lavalinkUrl = lavalinkUrlInput.text?.toString().orEmpty()
+                val lavalinkPassword = lavalinkPasswordInput.text?.toString().orEmpty()
+                val normalizedUrl = YouTubePlaybackSettings.normalizeBaseUrl(lavalinkUrl)
 
-            if (backend == YouTubePlaybackBackend.LAVALINK && YouTubePlaybackSettings.normalizeBaseUrl(lavalinkUrl).isBlank()) {
-                Toast.makeText(requireContext(), "Enter a Lavalink URL before forcing Lavalink mode.", Toast.LENGTH_LONG).show()
-                return@addActionButton
+                val detectedEndpoint = if (backend != YouTubePlaybackBackend.YT_DLP && normalizedUrl.isBlank()) {
+                    withContext(Dispatchers.IO) {
+                        YouTubePlaybackSettings.resolveEndpoint(requireContext(), persistAutoDetected = true)
+                    }
+                } else {
+                    null
+                }
+
+                if (backend == YouTubePlaybackBackend.LAVALINK && normalizedUrl.isBlank() && detectedEndpoint == null) {
+                    Toast.makeText(
+                        requireContext(),
+                        "No Lavalink node was detected. Add a URL or keep playback on Auto.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
+
+                settingsPrefs().edit()
+                    .putString("user_youtube_api_key", apiKeyInput.text?.toString().orEmpty().trim())
+                    .apply()
+                YouTubePlaybackSettings.setBackend(requireContext(), backend)
+
+                if (normalizedUrl.isNotBlank()) {
+                    YouTubePlaybackSettings.setLavalinkUrl(requireContext(), normalizedUrl)
+                    YouTubePlaybackSettings.setLavalinkPassword(requireContext(), lavalinkPassword)
+                } else if (detectedEndpoint == null && backend == YouTubePlaybackBackend.YT_DLP) {
+                    YouTubePlaybackSettings.setLavalinkUrl(requireContext(), "")
+                    YouTubePlaybackSettings.setLavalinkPassword(requireContext(), "")
+                }
+
+                refreshLavalinkStatus(autoConfigure = backend != YouTubePlaybackBackend.YT_DLP)
+                Toast.makeText(requireContext(), "YouTube playback settings saved.", Toast.LENGTH_SHORT).show()
             }
+        }
 
-            settingsPrefs().edit()
-                .putString("user_youtube_api_key", apiKeyInput.text?.toString().orEmpty().trim())
-                .apply()
-            YouTubePlaybackSettings.setBackend(requireContext(), backend)
-            YouTubePlaybackSettings.setLavalinkUrl(requireContext(), lavalinkUrl)
-            YouTubePlaybackSettings.setLavalinkPassword(requireContext(), lavalinkPassword)
-            Toast.makeText(requireContext(), "YouTube playback settings saved.", Toast.LENGTH_SHORT).show()
+        addActionButton(section, "Auto-detect Lavalink", outlined = true) {
+            refreshLavalinkStatus(autoConfigure = true, showToast = true)
         }
 
         addActionButton(section, "Update bundled yt-dlp", outlined = true) {
@@ -203,6 +235,51 @@ class StreamingSettingsFragment : NavigableSettingsFragment() {
 
         addActionButton(section, "Open advanced service manager", outlined = true) {
             startActivity(Intent(requireContext(), DownloadServiceSettingsActivity::class.java))
+        }
+    }
+
+    private fun refreshLavalinkStatus(autoConfigure: Boolean, showToast: Boolean = false) {
+        if (!this::lavalinkStatusView.isInitialized) {
+            return
+        }
+        lifecycleScope.launch {
+            lavalinkStatusView.text = "Looking for a Lavalink node..."
+            val endpoint = withContext(Dispatchers.IO) {
+                if (autoConfigure) {
+                    YouTubePlaybackSettings.resolveEndpoint(requireContext(), persistAutoDetected = true)
+                } else {
+                    YouTubePlaybackSettings.resolveEndpoint(requireContext(), persistAutoDetected = false)
+                }
+            }
+
+            val storedUrl = YouTubePlaybackSettings.getLavalinkUrl(requireContext())
+            if (lavalinkUrlInput.text.isNullOrBlank()) {
+                lavalinkUrlInput.setText(storedUrl)
+            }
+            if (lavalinkPasswordInput.text.isNullOrBlank() && YouTubePlaybackSettings.isAutoConfigured(requireContext())) {
+                lavalinkPasswordInput.setText(YouTubePlaybackSettings.getLavalinkPassword(requireContext()))
+            }
+
+            lavalinkStatusView.text = when {
+                endpoint == null -> {
+                    val suggested = YouTubePlaybackSettings.getSuggestedUrls(requireContext()).firstOrNull()
+                    "No Lavalink node detected right now.${if (suggested != null) " Suggested local node: $suggested" else ""}"
+                }
+                endpoint.autoConfigured -> {
+                    "Auto-configured Lavalink: ${endpoint.baseUrl}"
+                }
+                else -> {
+                    "Using Lavalink node: ${endpoint.baseUrl}"
+                }
+            }
+
+            if (showToast) {
+                Toast.makeText(
+                    requireContext(),
+                    endpoint?.let { "Lavalink ready at ${it.baseUrl}" } ?: "No Lavalink node found",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
         }
     }
 

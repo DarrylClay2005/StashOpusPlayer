@@ -11,7 +11,7 @@
         android:id="@+id/backdropImage"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:alpha="0.28"
+        android:alpha="0.32"
         android:scaleType="centerCrop"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
@@ -34,9 +34,9 @@
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="20dp"
-        android:paddingTop="18dp"
-        android:paddingEnd="20dp"
+        android:paddingStart="18dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="18dp"
         android:paddingBottom="8dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -45,36 +45,51 @@
         <ImageButton
             android:id="@+id/backButton"
             style="@style/NeomorphicButton"
-            android:layout_width="52dp"
-            android:layout_height="52dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:contentDescription="@string/back"
             android:src="@drawable/ic_arrow_back_24"
             android:tint="@color/text_primary" />
 
-        <TextView
-            android:id="@+id/layoutThemeBadge"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginStart="12dp"
             android:layout_weight="1"
-            android:background="@drawable/duration_background"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:paddingStart="14dp"
-            android:paddingTop="8dp"
-            android:paddingEnd="14dp"
-            android:paddingBottom="8dp"
-            android:textColor="@color/text_primary"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            tools:text="Aurora" />
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Now Playing"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/layoutThemeBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:background="@drawable/song_duration_chip_background"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:paddingStart="12dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="6dp"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                tools:text="Aurora" />
+
+        </LinearLayout>
 
         <ImageButton
             android:id="@+id/menuButton"
             style="@style/NeomorphicButton"
-            android:layout_width="52dp"
-            android:layout_height="52dp"
-            android:layout_marginStart="12dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:contentDescription="@string/menu"
             android:src="@drawable/ic_more_vert_24"
             android:tint="@color/text_primary" />
@@ -85,15 +100,15 @@
         android:id="@+id/feedbackOverlay"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:background="@drawable/feedback_overlay_background"
+        android:layout_marginTop="4dp"
+        android:background="@drawable/song_duration_chip_background"
         android:elevation="8dp"
-        android:paddingStart="16dp"
+        android:paddingStart="14dp"
         android:paddingTop="8dp"
-        android:paddingEnd="16dp"
+        android:paddingEnd="14dp"
         android:paddingBottom="8dp"
-        android:textColor="@color/white"
-        android:textSize="14sp"
+        android:textColor="@color/text_primary"
+        android:textSize="13sp"
         android:textStyle="bold"
         android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"
@@ -118,10 +133,10 @@
             android:id="@+id/contentContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingStart="20dp"
-            android:paddingTop="12dp"
-            android:paddingEnd="20dp"
-            android:paddingBottom="32dp">
+            android:paddingStart="18dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="18dp"
+            android:paddingBottom="28dp">
 
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/albumArtCard"
@@ -129,22 +144,61 @@
                 android:layout_height="0dp"
                 android:layout_marginTop="8dp"
                 app:cardBackgroundColor="@color/elevated_surface"
-                app:cardCornerRadius="28dp"
+                app:cardCornerRadius="30dp"
                 app:cardElevation="0dp"
                 app:layout_constraintDimensionRatio="1:1"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toTopOf="parent">
+                app:layout_constraintTop_toTopOf="parent"
+                app:strokeColor="#33FFFFFF"
+                app:strokeWidth="1dp">
 
-                <com.google.android.material.imageview.ShapeableImageView
-                    android:id="@+id/albumArtwork"
+                <FrameLayout
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:contentDescription="@string/album_artwork"
-                    android:padding="6dp"
-                    android:scaleType="centerCrop"
-                    android:src="@drawable/ic_music_note"
-                    app:shapeAppearanceOverlay="@style/RoundedImageView" />
+                    android:padding="8dp">
+
+                    <com.google.android.material.imageview.ShapeableImageView
+                        android:id="@+id/albumArtwork"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:contentDescription="@string/album_artwork"
+                        android:scaleType="centerCrop"
+                        android:src="@drawable/ic_music_note"
+                        app:shapeAppearanceOverlay="@style/RoundedImageView" />
+
+                    <View
+                        android:id="@+id/vinylGrooveOverlay"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/vinyl_ring_overlay"
+                        android:visibility="gone" />
+
+                    <View
+                        android:id="@+id/vinylSpindleView"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/vinyl_spindle_background"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/artworkHintBadge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="bottom|end"
+                        android:layout_margin="12dp"
+                        android:background="@drawable/song_duration_chip_background"
+                        android:paddingStart="12dp"
+                        android:paddingTop="6dp"
+                        android:paddingEnd="12dp"
+                        android:paddingBottom="6dp"
+                        android:text="Tap edges to seek"
+                        android:textColor="@color/text_primary"
+                        android:textSize="10sp"
+                        android:textStyle="bold" />
+
+                </FrameLayout>
 
             </com.google.android.material.card.MaterialCardView>
 
@@ -152,13 +206,15 @@
                 android:id="@+id/songInfoCard"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
+                android:layout_marginTop="16dp"
                 app:cardBackgroundColor="@color/surface_variant"
-                app:cardCornerRadius="26dp"
+                app:cardCornerRadius="28dp"
                 app:cardElevation="0dp"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/albumArtCard">
+                app:layout_constraintTop_toBottomOf="@id/albumArtCard"
+                app:strokeColor="#24FFFFFF"
+                app:strokeWidth="1dp">
 
                 <LinearLayout
                     android:id="@+id/songInfoContainer"
@@ -191,24 +247,28 @@
                         android:id="@+id/artistName"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
+                        android:layout_marginTop="7dp"
                         android:ellipsize="end"
                         android:gravity="center"
                         android:maxLines="1"
                         android:textColor="@color/text_secondary"
-                        android:textSize="16sp"
+                        android:textSize="15sp"
                         tools:text="Artist Name" />
 
                     <TextView
                         android:id="@+id/albumName"
-                        android:layout_width="match_parent"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
+                        android:layout_marginTop="8dp"
+                        android:background="@drawable/song_duration_chip_background"
                         android:ellipsize="end"
-                        android:gravity="center"
                         android:maxLines="1"
+                        android:paddingStart="12dp"
+                        android:paddingTop="6dp"
+                        android:paddingEnd="12dp"
+                        android:paddingBottom="6dp"
                         android:textColor="@color/text_tertiary"
-                        android:textSize="14sp"
+                        android:textSize="12sp"
                         tools:text="Album Name" />
 
                     <TextView
@@ -216,7 +276,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
-                        android:background="@drawable/duration_background"
+                        android:background="@drawable/song_duration_chip_background"
                         android:paddingStart="12dp"
                         android:paddingTop="6dp"
                         android:paddingEnd="12dp"
@@ -234,13 +294,15 @@
                 android:id="@+id/progressCard"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
+                android:layout_marginTop="16dp"
                 app:cardBackgroundColor="@color/surface_variant"
-                app:cardCornerRadius="26dp"
+                app:cardCornerRadius="28dp"
                 app:cardElevation="0dp"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/songInfoCard">
+                app:layout_constraintTop_toBottomOf="@id/songInfoCard"
+                app:strokeColor="#24FFFFFF"
+                app:strokeWidth="1dp">
 
                 <LinearLayout
                     android:id="@+id/progressContainer"
@@ -255,7 +317,7 @@
                     <com.stash.opusplayer.ui.visualizer.EnhancedSynthWaveView
                         android:id="@+id/enhancedSynthWaveView"
                         android:layout_width="match_parent"
-                        android:layout_height="126dp" />
+                        android:layout_height="112dp" />
 
                     <SeekBar
                         android:id="@+id/seekBar"
@@ -271,25 +333,38 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
+                        android:gravity="center_vertical"
                         android:orientation="horizontal">
 
                         <TextView
                             android:id="@+id/currentTime"
-                            android:layout_width="0dp"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
+                            android:background="@drawable/song_duration_chip_background"
+                            android:paddingStart="10dp"
+                            android:paddingTop="6dp"
+                            android:paddingEnd="10dp"
+                            android:paddingBottom="6dp"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp"
+                            android:textSize="11sp"
                             tools:text="0:00" />
+
+                        <Space
+                            android:layout_width="0dp"
+                            android:layout_height="1dp"
+                            android:layout_weight="1" />
 
                         <TextView
                             android:id="@+id/totalTime"
-                            android:layout_width="0dp"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:gravity="end"
+                            android:background="@drawable/song_duration_chip_background"
+                            android:paddingStart="10dp"
+                            android:paddingTop="6dp"
+                            android:paddingEnd="10dp"
+                            android:paddingBottom="6dp"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp"
+                            android:textSize="11sp"
                             tools:text="3:45" />
 
                     </LinearLayout>
@@ -302,13 +377,15 @@
                 android:id="@+id/controlsCard"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
+                android:layout_marginTop="16dp"
                 app:cardBackgroundColor="@color/surface_variant"
                 app:cardCornerRadius="30dp"
                 app:cardElevation="0dp"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/progressCard">
+                app:layout_constraintTop_toBottomOf="@id/progressCard"
+                app:strokeColor="#24FFFFFF"
+                app:strokeWidth="1dp">
 
                 <LinearLayout
                     android:id="@+id/controlsContainer"
@@ -324,8 +401,8 @@
                     <ImageButton
                         android:id="@+id/shuffleButton"
                         style="@style/NeomorphicButton"
-                        android:layout_width="54dp"
-                        android:layout_height="54dp"
+                        android:layout_width="52dp"
+                        android:layout_height="52dp"
                         android:contentDescription="@string/shuffle"
                         android:src="@drawable/ic_shuffle"
                         android:tint="@color/text_primary" />
@@ -338,8 +415,8 @@
                     <ImageButton
                         android:id="@+id/previousButton"
                         style="@style/NeomorphicButton.Large"
-                        android:layout_width="60dp"
-                        android:layout_height="60dp"
+                        android:layout_width="58dp"
+                        android:layout_height="58dp"
                         android:contentDescription="@string/previous"
                         android:src="@drawable/ic_skip_previous_24"
                         android:tint="@color/text_primary" />
@@ -347,10 +424,10 @@
                     <ImageButton
                         android:id="@+id/playPauseButton"
                         style="@style/NeomorphicAccentButton"
-                        android:layout_width="78dp"
-                        android:layout_height="78dp"
-                        android:layout_marginStart="14dp"
-                        android:layout_marginEnd="14dp"
+                        android:layout_width="74dp"
+                        android:layout_height="74dp"
+                        android:layout_marginStart="12dp"
+                        android:layout_marginEnd="12dp"
                         android:contentDescription="@string/play_pause"
                         android:src="@drawable/ic_play_arrow_24"
                         android:tint="@color/white" />
@@ -358,8 +435,8 @@
                     <ImageButton
                         android:id="@+id/nextButton"
                         style="@style/NeomorphicButton.Large"
-                        android:layout_width="60dp"
-                        android:layout_height="60dp"
+                        android:layout_width="58dp"
+                        android:layout_height="58dp"
                         android:contentDescription="@string/next"
                         android:src="@drawable/ic_skip_next_24"
                         android:tint="@color/text_primary" />
@@ -372,8 +449,8 @@
                     <ImageButton
                         android:id="@+id/repeatButton"
                         style="@style/NeomorphicButton"
-                        android:layout_width="54dp"
-                        android:layout_height="54dp"
+                        android:layout_width="52dp"
+                        android:layout_height="52dp"
                         android:contentDescription="@string/repeat"
                         android:src="@drawable/ic_repeat"
                         android:tint="@color/text_primary" />
@@ -386,13 +463,15 @@
                 android:id="@+id/secondaryActionsCard"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
+                android:layout_marginTop="16dp"
                 app:cardBackgroundColor="@color/surface_variant"
-                app:cardCornerRadius="26dp"
+                app:cardCornerRadius="28dp"
                 app:cardElevation="0dp"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/controlsCard">
+                app:layout_constraintTop_toBottomOf="@id/controlsCard"
+                app:strokeColor="#24FFFFFF"
+                app:strokeWidth="1dp">
 
                 <LinearLayout
                     android:id="@+id/secondaryControlsContainer"
@@ -408,8 +487,8 @@
                     <ImageButton
                         android:id="@+id/favoriteButton"
                         style="@style/NeomorphicButton"
-                        android:layout_width="54dp"
-                        android:layout_height="54dp"
+                        android:layout_width="52dp"
+                        android:layout_height="52dp"
                         android:contentDescription="@string/favorite"
                         android:src="@drawable/ic_favorite_border"
                         android:tint="@color/text_primary" />
@@ -422,8 +501,8 @@
                     <ImageButton
                         android:id="@+id/queueButton"
                         style="@style/NeomorphicButton"
-                        android:layout_width="54dp"
-                        android:layout_height="54dp"
+                        android:layout_width="52dp"
+                        android:layout_height="52dp"
                         android:contentDescription="@string/queue"
                         android:src="@drawable/ic_queue_music"
                         android:tint="@color/text_primary" />
@@ -436,8 +515,8 @@
                     <ImageButton
                         android:id="@+id/fastForwardButton"
                         style="@style/NeomorphicButton"
-                        android:layout_width="54dp"
-                        android:layout_height="54dp"
+                        android:layout_width="52dp"
+                        android:layout_height="52dp"
                         android:contentDescription="Fast Forward 30s"
                         android:src="@drawable/ic_forward_30_24"
                         android:tint="@color/text_primary" />
@@ -450,8 +529,8 @@
                     <ImageButton
                         android:id="@+id/metadataButton"
                         style="@style/NeomorphicButton"
-                        android:layout_width="54dp"
-                        android:layout_height="54dp"
+                        android:layout_width="52dp"
+                        android:layout_height="52dp"
                         android:contentDescription="Show Metadata"
                         android:src="@drawable/ic_text_bubble_24"
                         android:tint="@color/text_primary" />
@@ -464,15 +543,17 @@
                 android:id="@+id/metadataContainer"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
+                android:layout_marginTop="16dp"
                 android:visibility="gone"
                 app:cardBackgroundColor="@color/surface_variant"
-                app:cardCornerRadius="26dp"
+                app:cardCornerRadius="28dp"
                 app:cardElevation="0dp"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/secondaryActionsCard">
+                app:layout_constraintTop_toBottomOf="@id/secondaryActionsCard"
+                app:strokeColor="#24FFFFFF"
+                app:strokeWidth="1dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -498,8 +579,8 @@
                         <ImageButton
                             android:id="@+id/metadataBackButton"
                             style="@style/NeomorphicButton"
-                            android:layout_width="46dp"
-                            android:layout_height="46dp"
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
                             android:contentDescription="Back to Controls"
                             android:src="@drawable/ic_arrow_back_24"
                             android:tint="@color/text_primary" />

@@ -162,13 +162,16 @@ class EnhancedAudioManager(private val context: Context) {
     // Audio content analysis integration
     fun analyzeCurrentTrack(samples: FloatArray, metadata: TrackMetadata? = null) {
         if (!_enhancedAudioEnabled.value) return
+        if (samples.isEmpty()) {
+            analyzeTrackMetadata(metadata)
+            return
+        }
         
         scope.launch(Dispatchers.Default) {
             try {
-                // Run analysis on all systems
-                // AudioAnalysisEngine doesn't have analyzeAudioContent method, skip for now
+                audioAnalysis.analyzeSamples(samples)
+                advancedEffects.analyzeAudioContent(samples)
                 intelligentEQ.analyzeAudioContent(samples, metadata?.genre)
-                // Advanced effects don't need direct audio samples
                 
                 // Auto-adjust profile if enabled
                 if (_autoProfileSwitching.value) {
@@ -185,6 +188,27 @@ class EnhancedAudioManager(private val context: Context) {
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error analyzing audio content", e)
+            }
+        }
+    }
+
+    fun analyzeTrackMetadata(metadata: TrackMetadata? = null) {
+        if (!_enhancedAudioEnabled.value) return
+
+        scope.launch(Dispatchers.Default) {
+            try {
+                if (_autoProfileSwitching.value) {
+                    val recommendedProfile = determineOptimalProfile(metadata)
+                    if (recommendedProfile != _currentProfile.value) {
+                        withContext(Dispatchers.Main) {
+                            setAudioProfile(recommendedProfile)
+                        }
+                    }
+                }
+
+                updateOverallAudioState()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error analyzing track metadata", e)
             }
         }
     }
@@ -409,7 +433,7 @@ class EnhancedAudioManager(private val context: Context) {
     // Auto profile switching based on content analysis
     private fun determineOptimalProfile(metadata: TrackMetadata?): AudioProfile {
         val genre = metadata?.genre?.lowercase() ?: "unknown"
-        val tempo = intelligentEQ.detectedTempo.value
+        val tempo = metadata?.tempo ?: intelligentEQ.detectedTempo.value
         val spectralBalance = intelligentEQ.spectralBalance.value
         
         return when {
@@ -419,7 +443,7 @@ class EnhancedAudioManager(private val context: Context) {
             genre.contains("jazz") || genre.contains("acoustic") -> AudioProfile.JAZZ_ACOUSTIC
             genre.contains("vocal") || genre.contains("speech") -> AudioProfile.VOCAL_CLARITY
             spectralBalance.bassEnergy > 0.5f -> AudioProfile.BASS_BOOST
-            tempo > 140 && spectralBalance.trebleEnergy > 0.4f -> AudioProfile.GAMING
+            tempo > 140f && spectralBalance.trebleEnergy > 0.4f -> AudioProfile.GAMING
             else -> AudioProfile.BALANCED
         }
     }

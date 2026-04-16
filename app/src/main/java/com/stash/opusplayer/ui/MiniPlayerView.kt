@@ -3,11 +3,13 @@ package com.stash.opusplayer.ui
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
 import android.view.LayoutInflater
 import android.widget.FrameLayout
+import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
@@ -36,7 +38,6 @@ import android.graphics.*
 import android.media.AudioManager
 import android.view.View
 import kotlin.math.*
-import kotlin.random.Random
 import android.animation.AnimatorListenerAdapter
 import android.animation.Animator
 import com.stash.opusplayer.ui.appearance.ThemeManager
@@ -67,7 +68,11 @@ class MiniPlayerView @JvmOverloads constructor(
     
     // Mini visualizer
     private var miniVisualizerAnimator: ValueAnimator? = null
-    private var audioData: FloatArray = FloatArray(16) { Random.nextFloat() }
+    private var audioData: FloatArray = FloatArray(16) { 0.12f }
+    private val visualizerShape = floatArrayOf(
+        0.32f, 0.46f, 0.58f, 0.73f, 0.82f, 0.68f, 0.54f, 0.4f,
+        0.36f, 0.5f, 0.66f, 0.78f, 0.7f, 0.56f, 0.42f, 0.3f
+    )
     private val miniVisualizerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         shader = LinearGradient(
@@ -113,7 +118,7 @@ class MiniPlayerView @JvmOverloads constructor(
     private fun setupEnhancedGestureSystem() {
         gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-                if (e1 == null || e2 == null) return false
+                if (e1 == null) return false
                 
                 val deltaX = e2.x - e1.x
                 val deltaY = e2.y - e1.y
@@ -299,17 +304,35 @@ class MiniPlayerView @JvmOverloads constructor(
      */
     private fun startMiniVisualizer() {
         miniVisualizerAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 100
+            duration = 110
             repeatCount = ValueAnimator.INFINITE
             addUpdateListener {
-                // Generate fake audio data for visualization
-                for (i in audioData.indices) {
-                    audioData[i] = (audioData[i] * 0.8f + Random.nextFloat() * 0.2f).coerceIn(0f, 1f)
-                }
-                
-                // Update progress bar if available
+                updateMiniVisualizerFrame()
                 invalidate()
             }
+        }
+    }
+
+    private fun updateMiniVisualizerFrame() {
+        val controller = mediaController
+        val isPlaying = controller?.isPlaying == true
+        val duration = controller?.duration?.takeIf { it > 0 } ?: 0L
+        val position = controller?.currentPosition ?: 0L
+        val progress = if (duration > 0L) {
+            (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        val phase = (System.currentTimeMillis() % 2400L) / 2400f * (Math.PI.toFloat() * 2f)
+
+        for (i in audioData.indices) {
+            val target = if (isPlaying) {
+                val wave = sin((phase + (i * 0.55f) + (progress * Math.PI.toFloat())).toDouble()).toFloat()
+                (0.16f + visualizerShape[i] * (0.45f + 0.35f * wave)).coerceIn(0.1f, 0.95f)
+            } else {
+                0.08f
+            }
+            audioData[i] += (target - audioData[i]) * if (isPlaying) 0.3f else 0.18f
         }
     }
     
@@ -633,18 +656,8 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
             val title = controller.mediaMetadata.title?.toString() ?: return
             val artist = controller.mediaMetadata.artist?.toString() ?: ""
             val album = controller.mediaMetadata.albumTitle?.toString() ?: ""
-            
-            val fakeSong = Song(
-                id = 0L,
-                title = title,
-                artist = artist,
-                album = album,
-                duration = 0L,
-                path = ""
-            )
-            
             val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
-            val bmp = cache.loadBitmapIfPresent(fakeSong, 256)
+            val bmp = cache.loadBitmapForMetadata(title, artist, album, 256)
             
             if (bmp != null) {
                 Glide.with(context)
@@ -828,10 +841,10 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
     override fun applyAppearancePreferences(prefs: AppearancePreferences) {
         try {
             val density = resources.displayMetrics.density
-            val uiScale = (ThemeManager.getAdaptiveUiScale(context) * if (prefs.miniPlayerCompactMode) 0.92f else 1.0f)
-                .coerceIn(0.74f, 0.96f)
-            val buttonScale = (uiScale * prefs.buttonSizeScale).coerceIn(0.72f, 1.0f)
-            val rootHeight = ((prefs.miniPlayerHeightDp.coerceIn(62, 76)) * density * uiScale).roundToInt()
+            val uiScale = (ThemeManager.getAdaptiveUiScale(context) * if (prefs.miniPlayerCompactMode) 0.9f else 0.96f)
+                .coerceIn(0.68f, 0.9f)
+            val buttonScale = (uiScale * prefs.buttonSizeScale).coerceIn(0.66f, 0.92f)
+            val rootHeight = ((prefs.miniPlayerHeightDp.coerceIn(56, 70)) * density * uiScale).roundToInt()
 
             fun px(baseDp: Int, scale: Float = uiScale): Int =
                 (baseDp * density * scale).roundToInt().coerceAtLeast(1)
@@ -863,20 +876,20 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
                 height = rootHeight
             }
             minimumHeight = rootHeight
-            setPadding(px(if (prefs.miniPlayerCompactMode) 3 else 6, 1f), px(if (prefs.miniPlayerCompactMode) 3 else 6, 1f), px(if (prefs.miniPlayerCompactMode) 3 else 6, 1f), px(if (prefs.miniPlayerCompactMode) 3 else 6, 1f))
+            setPadding(px(if (prefs.miniPlayerCompactMode) 2 else 4, 1f), px(if (prefs.miniPlayerCompactMode) 2 else 4, 1f), px(if (prefs.miniPlayerCompactMode) 2 else 4, 1f), px(if (prefs.miniPlayerCompactMode) 2 else 4, 1f))
 
-            updateSize(binding.miniAlbumArtCard, 52, 52)
-            updateMargins(binding.miniAlbumArtCard, startDp = 12)
-            updateSize(binding.miniAlbumArt, 40, 40)
-            updateMargins(binding.miniSongInfo, startDp = 10, endDp = 10)
-            updateSize(binding.miniPreviousButton, 44, 44, buttonScale)
-            updateSize(binding.miniPlayPauseButton, 52, 52, buttonScale)
-            updateSize(binding.miniNextButton, 44, 44, buttonScale)
-            updateSize(binding.miniFastForwardButton, 44, 44, buttonScale)
-            updateMargins(binding.miniPreviousButton, scale = buttonScale, topDp = 3, endDp = 0, bottomDp = 3, startDp = 3)
-            updateMargins(binding.miniPlayPauseButton, scale = buttonScale, topDp = 3, endDp = 0, bottomDp = 3, startDp = 3)
-            updateMargins(binding.miniNextButton, scale = buttonScale, topDp = 3, endDp = 0, bottomDp = 3, startDp = 3)
-            updateMargins(binding.miniFastForwardButton, scale = buttonScale, topDp = 3, endDp = 0, bottomDp = 3, startDp = 3)
+            updateSize(binding.miniAlbumArtCard, 46, 46)
+            updateMargins(binding.miniAlbumArtCard, startDp = 8)
+            updateSize(binding.miniAlbumArt, 36, 36)
+            updateMargins(binding.miniSongInfo, startDp = 8, endDp = 8)
+            updateSize(binding.miniPreviousButton, 34, 34, buttonScale)
+            updateSize(binding.miniPlayPauseButton, 40, 40, buttonScale)
+            updateSize(binding.miniNextButton, 34, 34, buttonScale)
+            updateSize(binding.miniFastForwardButton, 34, 34, buttonScale)
+            updateMargins(binding.miniPreviousButton, scale = buttonScale, topDp = 2, endDp = 0, bottomDp = 2, startDp = 2)
+            updateMargins(binding.miniPlayPauseButton, scale = buttonScale, topDp = 2, endDp = 0, bottomDp = 2, startDp = 2)
+            updateMargins(binding.miniNextButton, scale = buttonScale, topDp = 2, endDp = 0, bottomDp = 2, startDp = 2)
+            updateMargins(binding.miniFastForwardButton, scale = buttonScale, topDp = 2, endDp = 0, bottomDp = 2, startDp = 2)
 
             binding.miniAlbumArtCard.visibility = if (prefs.miniPlayerShowArt) VISIBLE else GONE
             
@@ -885,32 +898,42 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(context)
             
             // Apply compact mode
             if (prefs.miniPlayerCompactMode) {
-                val compactPadding = px(4, 1f)
+                val compactPadding = px(3, 1f)
                 setPadding(compactPadding, compactPadding, compactPadding, compactPadding)
                 binding.miniSongTitle.maxLines = 1
                 binding.miniArtistName.maxLines = 1
             } else {
-                val normalPadding = px(6, 1f)
+                val normalPadding = px(4, 1f)
                 setPadding(normalPadding, normalPadding, normalPadding, normalPadding)
-                binding.miniSongTitle.maxLines = 2
+                binding.miniSongTitle.maxLines = 1
                 binding.miniArtistName.maxLines = 1
             }
 
             binding.miniSongTitle.textSize = ThemeManager.scaleSp(
                 context,
-                if (prefs.miniPlayerCompactMode) 12f else 13f,
+                if (prefs.miniPlayerCompactMode) 11f else 12f,
                 prefs.fontScale
             )
             binding.miniArtistName.textSize = ThemeManager.scaleSp(
                 context,
-                if (prefs.miniPlayerCompactMode) 10f else 11f,
+                if (prefs.miniPlayerCompactMode) 9f else 10f,
                 prefs.fontScale
             )
             
             // Apply colors
-            setBackgroundColor(prefs.backgroundColor)
             binding.miniSongTitle.setTextColor(prefs.textPrimaryColor)
             binding.miniArtistName.setTextColor(prefs.textSecondaryColor)
+            val surface = ColorUtils.blendARGB(prefs.primaryColor, prefs.backgroundColor, 0.42f)
+            val accentSurface = ColorUtils.blendARGB(prefs.accentColor, prefs.primaryColor, 0.32f)
+            val subtleButton = ColorUtils.blendARGB(surface, prefs.backgroundColor, 0.2f)
+            binding.root.background?.mutate()?.setTint(surface)
+            binding.miniArtistName.background?.mutate()?.setTint(ColorUtils.blendARGB(accentSurface, prefs.backgroundColor, 0.45f))
+            listOf(binding.miniPreviousButton, binding.miniNextButton, binding.miniFastForwardButton).forEach { button ->
+                button.backgroundTintList = ColorStateList.valueOf(subtleButton)
+                button.imageTintList = ColorStateList.valueOf(prefs.textPrimaryColor)
+            }
+            binding.miniPlayPauseButton.backgroundTintList = ColorStateList.valueOf(accentSurface)
+            binding.miniPlayPauseButton.imageTintList = ColorStateList.valueOf(prefs.textPrimaryColor)
             
             // Update spinning animation based on preference
             updateSpinningAnimation(prefs.miniPlayerSpinningArt && mediaController?.isPlaying == true)

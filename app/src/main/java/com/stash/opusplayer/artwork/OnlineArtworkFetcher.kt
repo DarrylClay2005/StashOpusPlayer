@@ -51,6 +51,25 @@ class ArtworkCache(private val context: Context) {
 
     fun exists(song: Song): Boolean = fileFor(song).exists()
 
+    fun createLookupSong(
+        title: CharSequence?,
+        artist: CharSequence?,
+        album: CharSequence?
+    ): Song? {
+        val safeTitle = title?.toString()?.trim().orEmpty()
+        if (safeTitle.isBlank()) return null
+        val safeArtist = artist?.toString()?.trim().orEmpty()
+        val safeAlbum = album?.toString()?.trim().orEmpty()
+        return Song(
+            id = (safeTitle + "|" + safeArtist + "|" + safeAlbum).hashCode().toLong(),
+            title = safeTitle,
+            artist = safeArtist,
+            album = safeAlbum,
+            duration = 0L,
+            path = ""
+        )
+    }
+
     fun saveJpeg(bytes: ByteArray, file: File): Boolean {
         return try {
             FileOutputStream(file).use { it.write(bytes) }
@@ -65,6 +84,20 @@ class ArtworkCache(private val context: Context) {
         val f = fileFor(song)
         if (!f.exists()) return null
         return decodeDownsampled(f, maxDim)
+    }
+
+    fun loadBitmapForMetadata(
+        title: CharSequence?,
+        artist: CharSequence?,
+        album: CharSequence?,
+        maxDim: Int = 512
+    ): Bitmap? {
+        createLookupSong(title, artist, album)?.let { lookupSong ->
+            loadBitmapIfPresent(lookupSong, maxDim)?.let { return it }
+        }
+        val safeTitle = title?.toString()?.trim().orEmpty()
+        if (safeTitle.isBlank()) return null
+        return loadBitmapByTitleIfPresent(safeTitle, maxDim)
     }
 
     fun loadBitmapByTitleIfPresent(title: String, maxDim: Int = 512): Bitmap? {
@@ -135,6 +168,10 @@ class OnlineArtworkFetcher(context: Context) {
         try {
             val cached = cache.fileFor(song)
             if (cached.exists()) return@withContext cached
+            val titleOnlyCache = cache.fileForTitleOnly(song.displayName)
+            if (titleOnlyCache.exists()) {
+                return@withContext if (cache.saveJpeg(titleOnlyCache.readBytes(), cached)) cached else titleOnlyCache
+            }
 
             com.stash.opusplayer.utils.ImageDownloadTracker.begin()
             try {
@@ -142,13 +179,17 @@ class OnlineArtworkFetcher(context: Context) {
             val mbid = searchMusicBrainzRecording(song)
             if (mbid != null) {
                 downloadCoverArtArchive(mbid)?.let { bytes ->
-                    if (cache.saveJpeg(bytes, cached)) return@withContext cached
+                    val primarySaved = cache.saveJpeg(bytes, cached)
+                    cache.saveJpeg(bytes, titleOnlyCache)
+                    if (primarySaved) return@withContext cached
                 }
             }
 
             // Fallback: iTunes artwork
             fetchFromITunes(song)?.let { bytes ->
-                if (cache.saveJpeg(bytes, cached)) return@withContext cached
+                val primarySaved = cache.saveJpeg(bytes, cached)
+                cache.saveJpeg(bytes, titleOnlyCache)
+                if (primarySaved) return@withContext cached
             }
             } finally {
                 com.stash.opusplayer.utils.ImageDownloadTracker.end()
@@ -285,4 +326,3 @@ private fun buildUserAgent(): String = "StashAudio/${com.stash.opusplayer.BuildC
         return null
     }
 }
-

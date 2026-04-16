@@ -3,14 +3,17 @@ package com.stash.opusplayer.ui
 import android.content.ComponentName
 import android.content.Intent
 import android.animation.ObjectAnimator
+import android.content.res.ColorStateList
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.SeekBar
 import androidx.appcompat.app.AppCompatActivity
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.constraintlayout.widget.ConstraintSet
 import androidx.transition.AutoTransition
 import androidx.transition.TransitionManager
@@ -102,6 +105,7 @@ class NowPlayingActivity : AppCompatActivity() {
         }
         
         setupUI()
+        applyAdaptiveChrome()
         applyNowPlayingLayout(currentLayoutTheme, animate = false)
         connectToMediaController()
         setupPlayerManager()
@@ -152,23 +156,17 @@ class NowPlayingActivity : AppCompatActivity() {
         }
         
         // Scale in the album art
-        try {
-            binding.albumArtwork?.let { albumArt ->
-                albumArt.scaleX = 0.3f
-                albumArt.scaleY = 0.3f
-                albumArt.alpha = 0f
-                albumArt.animate()
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .alpha(1f)
-                    .setDuration(600)
-                    .setStartDelay(200)
-                    .setInterpolator(android.view.animation.OvershootInterpolator())
-                    .start()
-            }
-        } catch (e: Exception) {
-            // Handle case where albumArtwork view might not exist
-        }
+        binding.albumArtwork.scaleX = 0.3f
+        binding.albumArtwork.scaleY = 0.3f
+        binding.albumArtwork.alpha = 0f
+        binding.albumArtwork.animate()
+            .scaleX(1f)
+            .scaleY(1f)
+            .alpha(1f)
+            .setDuration(600)
+            .setStartDelay(200)
+            .setInterpolator(android.view.animation.OvershootInterpolator())
+            .start()
     }
     
     private fun setupUI() {
@@ -431,6 +429,86 @@ val repository = com.stash.opusplayer.data.MusicRepository(this@NowPlayingActivi
         binding.metadataBackButton.setOnClickListener { hideMetadataView() }
 
         // Audio controls have moved to Settings
+    }
+
+    private fun applyAdaptiveChrome() {
+        val prefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(this)
+        val outerPadding = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 18)
+        val smallButton = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 48)
+        val mediumButton = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 52)
+        val largeButton = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 58)
+        val primaryButton = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 72)
+
+        binding.topBar.setPadding(
+            outerPadding,
+            com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 16),
+            outerPadding,
+            com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 8)
+        )
+        binding.contentContainer.setPadding(
+            outerPadding,
+            com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 8),
+            outerPadding,
+            com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 28)
+        )
+
+        fun resize(view: View, width: Int, height: Int) {
+            view.layoutParams = view.layoutParams.apply {
+                this.width = width
+                this.height = height
+            }
+        }
+
+        fun updateMarginTop(view: View, dp: Int) {
+            val lp = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+            lp.topMargin = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, dp)
+            view.layoutParams = lp
+        }
+
+        listOf(binding.backButton, binding.menuButton).forEach { button ->
+            resize(button, smallButton, smallButton)
+        }
+        listOf(binding.shuffleButton, binding.repeatButton, binding.favoriteButton, binding.queueButton, binding.fastForwardButton, binding.metadataButton).forEach { button ->
+            resize(button, mediumButton, mediumButton)
+        }
+        listOf(binding.previousButton, binding.nextButton).forEach { button ->
+            resize(button, largeButton, largeButton)
+        }
+        resize(binding.playPauseButton, primaryButton, primaryButton)
+        resize(binding.metadataBackButton, com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 44), com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 44))
+
+        binding.albumArtCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 30).toFloat()
+        binding.songInfoCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 28).toFloat()
+        binding.progressCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 28).toFloat()
+        binding.controlsCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 30).toFloat()
+        binding.secondaryActionsCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 28).toFloat()
+        binding.metadataContainer.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 28).toFloat()
+
+        updateMarginTop(binding.songInfoCard, 16)
+        updateMarginTop(binding.progressCard, 16)
+        updateMarginTop(binding.controlsCard, 16)
+        updateMarginTop(binding.secondaryActionsCard, 16)
+        updateMarginTop(binding.metadataContainer, 16)
+
+        binding.songTitle.textSize = com.stash.opusplayer.ui.appearance.ThemeManager.scaleSp(this, 23f, prefs.fontScale)
+        binding.artistName.textSize = com.stash.opusplayer.ui.appearance.ThemeManager.scaleSp(this, 15f, prefs.fontScale)
+        binding.albumName.textSize = com.stash.opusplayer.ui.appearance.ThemeManager.scaleSp(this, 12f, prefs.fontScale)
+        binding.layoutThemeBadge.textSize = com.stash.opusplayer.ui.appearance.ThemeManager.scaleSp(this, 11f, prefs.fontScale)
+        binding.currentTime.textSize = com.stash.opusplayer.ui.appearance.ThemeManager.scaleSp(this, 11f, prefs.fontScale)
+        binding.totalTime.textSize = com.stash.opusplayer.ui.appearance.ThemeManager.scaleSp(this, 11f, prefs.fontScale)
+        binding.feedbackOverlay.textSize = com.stash.opusplayer.ui.appearance.ThemeManager.scaleSp(this, 13f, prefs.fontScale)
+        binding.replayGainLabel.textSize = com.stash.opusplayer.ui.appearance.ThemeManager.scaleSp(this, 12f, prefs.fontScale)
+        binding.artworkHintBadge.textSize = com.stash.opusplayer.ui.appearance.ThemeManager.scaleSp(this, 10f, prefs.fontScale)
+
+        resize(
+            binding.vinylSpindleView,
+            com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 22),
+            com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 22)
+        )
+
+        binding.enhancedSynthWaveView.layoutParams = binding.enhancedSynthWaveView.layoutParams.apply {
+            height = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this@NowPlayingActivity, 112)
+        }
     }
     
     private fun showReplayGainBadgeIfEnabled() {
@@ -965,16 +1043,8 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
             val title = controller.mediaMetadata.title?.toString() ?: return
             val artist = controller.mediaMetadata.artist?.toString() ?: ""
             val album = controller.mediaMetadata.albumTitle?.toString() ?: ""
-            val fakeSong = com.stash.opusplayer.data.Song(
-                id = 0L,
-                title = title,
-                artist = artist,
-                album = album,
-                duration = controller.duration.takeIf { it > 0 } ?: 0L,
-                path = ""
-            )
             val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
-            val bmp = cache.loadBitmapIfPresent(fakeSong, 512)
+            val bmp = cache.loadBitmapForMetadata(title, artist, album, 512)
             if (bmp != null) {
                 applyArtworkAwareStyling(bmp)
                 Glide.with(this)
@@ -1189,24 +1259,158 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
         set.connect(binding.metadataContainer.id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
         set.connect(binding.metadataContainer.id, ConstraintSet.BOTTOM, ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM)
         set.applyTo(container)
-
-        val centered = theme == com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.AURORA
-        val textGravity = if (centered) Gravity.CENTER else Gravity.START
-        binding.songInfoContainer.gravity = textGravity
-        binding.songTitle.gravity = textGravity
-        binding.artistName.gravity = textGravity
-        binding.albumName.gravity = textGravity
-        binding.layoutThemeBadge.text = theme.displayName
-        binding.progressCard.alpha = if (theme == com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.MINIMAL) 0.94f else 1f
+        applyNowPlayingThemeProfile(theme)
         updateArtworkSpinState()
+    }
+
+    private fun applyNowPlayingThemeProfile(theme: com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme) {
+        val compactPadding = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 16)
+        val comfortablePadding = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 20)
+        val mediumPadding = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 18)
+        val albumCardParams = binding.albumArtCard.layoutParams as? ConstraintLayout.LayoutParams ?: return
+        val containerWidth = resources.displayMetrics.widthPixels -
+            binding.contentContainer.paddingStart -
+            binding.contentContainer.paddingEnd
+
+        when (theme) {
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.AURORA -> {
+                albumCardParams.width = 0
+                albumCardParams.height = 0
+                albumCardParams.dimensionRatio = "1:1"
+                binding.songInfoContainer.gravity = Gravity.CENTER
+                binding.songTitle.gravity = Gravity.CENTER
+                binding.artistName.gravity = Gravity.CENTER
+                binding.albumName.gravity = Gravity.CENTER
+                binding.songInfoContainer.setPadding(comfortablePadding, comfortablePadding, comfortablePadding, comfortablePadding)
+                binding.albumArtCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 30).toFloat()
+                binding.songInfoCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 28).toFloat()
+                binding.progressCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 28).toFloat()
+                binding.controlsCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 30).toFloat()
+                binding.secondaryActionsCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 28).toFloat()
+                binding.artworkHintBadge.visibility = View.VISIBLE
+                binding.artworkHintBadge.text = "Tap edges to seek"
+                binding.albumArtwork.scaleX = 1f
+                binding.albumArtwork.scaleY = 1f
+                binding.vinylGrooveOverlay.visibility = View.GONE
+                binding.vinylSpindleView.visibility = View.GONE
+                setArtworkShape(com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 26).toFloat())
+                binding.progressCard.alpha = 1f
+            }
+
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.VINYL -> {
+                val albumSize = minOf(
+                    (containerWidth * 0.42f).toInt(),
+                    com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 220, allowGrowth = true)
+                )
+                albumCardParams.width = albumSize
+                albumCardParams.height = albumSize
+                albumCardParams.dimensionRatio = null
+                binding.songInfoContainer.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                binding.songTitle.gravity = Gravity.START
+                binding.artistName.gravity = Gravity.START
+                binding.albumName.gravity = Gravity.START
+                binding.songInfoContainer.setPadding(mediumPadding, comfortablePadding, mediumPadding, comfortablePadding)
+                binding.albumArtCard.radius = albumSize / 2f
+                binding.songInfoCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 24).toFloat()
+                binding.progressCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 24).toFloat()
+                binding.controlsCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 26).toFloat()
+                binding.secondaryActionsCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 24).toFloat()
+                binding.artworkHintBadge.visibility = View.VISIBLE
+                binding.artworkHintBadge.text = "Vinyl Deck"
+                binding.albumArtwork.scaleX = 0.9f
+                binding.albumArtwork.scaleY = 0.9f
+                binding.vinylGrooveOverlay.visibility = View.VISIBLE
+                binding.vinylSpindleView.visibility = View.VISIBLE
+                binding.vinylGrooveOverlay.alpha = 0.92f
+                setArtworkShape(albumSize / 2f)
+                binding.progressCard.alpha = 0.98f
+            }
+
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.MINIMAL -> {
+                val albumSize = minOf(
+                    (containerWidth * 0.34f).toInt(),
+                    com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 156, allowGrowth = true)
+                )
+                albumCardParams.width = albumSize
+                albumCardParams.height = albumSize
+                albumCardParams.dimensionRatio = null
+                binding.songInfoContainer.gravity = Gravity.START
+                binding.songTitle.gravity = Gravity.START
+                binding.artistName.gravity = Gravity.START
+                binding.albumName.gravity = Gravity.START
+                binding.songInfoContainer.setPadding(compactPadding, mediumPadding, compactPadding, mediumPadding)
+                binding.albumArtCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 24).toFloat()
+                binding.songInfoCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 24).toFloat()
+                binding.progressCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 22).toFloat()
+                binding.controlsCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 24).toFloat()
+                binding.secondaryActionsCard.radius = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 22).toFloat()
+                binding.artworkHintBadge.visibility = View.VISIBLE
+                binding.artworkHintBadge.text = "Quick seek"
+                binding.albumArtwork.scaleX = 1f
+                binding.albumArtwork.scaleY = 1f
+                binding.vinylGrooveOverlay.visibility = View.GONE
+                binding.vinylSpindleView.visibility = View.GONE
+                setArtworkShape(com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(this, 20).toFloat())
+                binding.progressCard.alpha = 1f
+            }
+        }
+
+        binding.albumArtCard.layoutParams = albumCardParams
+        binding.layoutThemeBadge.text = theme.displayName
+        binding.backdropImage.alpha = when (theme) {
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.MINIMAL -> 0.18f
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.VINYL -> 0.4f
+            else -> 0.32f
+        }
+        binding.backdropScrim.alpha = when (theme) {
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.MINIMAL -> 0.88f
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.VINYL -> 0.96f
+            else -> 1f
+        }
+        binding.albumArtCard.strokeWidth = com.stash.opusplayer.ui.appearance.ThemeManager.scaleDp(
+            this,
+            if (theme == com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.VINYL) 2 else 1
+        )
+    }
+
+    private fun setArtworkShape(cornerRadiusPx: Float) {
+        binding.albumArtwork.shapeAppearanceModel = binding.albumArtwork.shapeAppearanceModel
+            .toBuilder()
+            .setAllCornerSizes(cornerRadiusPx)
+            .build()
     }
 
     private fun applyArtworkAwareStyling(bitmap: android.graphics.Bitmap?) {
         val prefs = com.stash.opusplayer.ui.appearance.AppearancePreferences.fromPrefs(this)
-        val accent = bitmap?.let { extractArtworkAccent(it) } ?: prefs.accentColor
-        val surface = ColorUtils.blendARGB(prefs.primaryColor, accent, 0.26f)
-        val elevated = ColorUtils.blendARGB(prefs.backgroundColor, accent, 0.18f)
-        val cardSurface = ColorUtils.blendARGB(surface, prefs.backgroundColor, 0.35f)
+        val rawAccent = bitmap?.let { extractArtworkAccent(it) } ?: prefs.accentColor
+        val accent = when (currentLayoutTheme) {
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.VINYL ->
+                ColorUtils.blendARGB(rawAccent, 0xFFF59E0B.toInt(), 0.38f)
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.MINIMAL ->
+                ColorUtils.blendARGB(rawAccent, prefs.textPrimaryColor, 0.12f)
+            else -> rawAccent
+        }
+        val surface = when (currentLayoutTheme) {
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.VINYL ->
+                ColorUtils.blendARGB(prefs.backgroundColor, accent, 0.24f)
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.MINIMAL ->
+                ColorUtils.blendARGB(prefs.primaryColor, accent, 0.18f)
+            else -> ColorUtils.blendARGB(prefs.primaryColor, accent, 0.26f)
+        }
+        val elevated = when (currentLayoutTheme) {
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.VINYL ->
+                ColorUtils.blendARGB(prefs.backgroundColor, accent, 0.14f)
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.MINIMAL ->
+                ColorUtils.blendARGB(prefs.backgroundColor, accent, 0.1f)
+            else -> ColorUtils.blendARGB(prefs.backgroundColor, accent, 0.18f)
+        }
+        val cardSurface = when (currentLayoutTheme) {
+            com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.MINIMAL ->
+                ColorUtils.blendARGB(surface, prefs.backgroundColor, 0.22f)
+            else -> ColorUtils.blendARGB(surface, prefs.backgroundColor, 0.35f)
+        }
+        val chipTint = ColorUtils.blendARGB(accent, prefs.backgroundColor, if (currentLayoutTheme == com.stash.opusplayer.ui.appearance.NowPlayingLayoutTheme.MINIMAL) 0.42f else 0.55f)
+        val subtleButtonTint = ColorUtils.blendARGB(cardSurface, prefs.backgroundColor, 0.25f)
 
         binding.songInfoCard.setCardBackgroundColor(surface)
         binding.progressCard.setCardBackgroundColor(cardSurface)
@@ -1216,6 +1420,22 @@ val fetcher = com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@NowPlayingA
         binding.albumArtCard.setCardBackgroundColor(ColorUtils.blendARGB(accent, prefs.backgroundColor, 0.28f))
         binding.layoutThemeBadge.text = currentLayoutTheme.displayName
         binding.layoutThemeBadge.background.mutate().setTint(ColorUtils.blendARGB(accent, prefs.backgroundColor, 0.42f))
+        binding.currentTime.background.mutate().setTint(chipTint)
+        binding.totalTime.background.mutate().setTint(chipTint)
+        binding.albumName.background.mutate().setTint(chipTint)
+        binding.feedbackOverlay.background.mutate().setTint(chipTint)
+        binding.replayGainLabel.background.mutate().setTint(chipTint)
+        binding.artworkHintBadge.background.mutate().setTint(chipTint)
+        binding.vinylGrooveOverlay.background.mutate().setTint(ColorUtils.setAlphaComponent(accent, 170))
+        binding.vinylSpindleView.background.mutate().setTint(ColorUtils.blendARGB(accent, prefs.textPrimaryColor, 0.34f))
+
+        listOf(binding.backButton, binding.menuButton, binding.shuffleButton, binding.repeatButton, binding.previousButton, binding.nextButton, binding.favoriteButton, binding.queueButton, binding.fastForwardButton, binding.metadataButton, binding.metadataBackButton).forEach { button ->
+            button.backgroundTintList = ColorStateList.valueOf(subtleButtonTint)
+            button.imageTintList = ColorStateList.valueOf(prefs.textPrimaryColor)
+        }
+        binding.playPauseButton.backgroundTintList = ColorStateList.valueOf(accent)
+        binding.playPauseButton.imageTintList = ColorStateList.valueOf(prefs.textPrimaryColor)
+        applyNowPlayingThemeProfile(currentLayoutTheme)
     }
 
     private fun extractArtworkAccent(bitmap: android.graphics.Bitmap): Int {

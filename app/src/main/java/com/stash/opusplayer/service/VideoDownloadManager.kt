@@ -108,6 +108,7 @@ class VideoDownloadManager(private val context: Context) {
         val videoId = request.video.id
         val videoTitle = request.video.title
         val videoUrl = request.video.url
+        val outputDir = getOutputDirectory(request)
         
         Log.i(TAG, "🚀 Starting yt-dlp + FFmpeg download for: $videoTitle")
         
@@ -133,19 +134,6 @@ class VideoDownloadManager(private val context: Context) {
             val fileName = "$sanitizedTitle.$fileExtension"
             
             // Use user-selected download directory or fallback to Downloads folder
-            val outputDir = if (request.downloadPath.startsWith("content://")) {
-                // For SAF paths, download to internal first then copy
-                context.getExternalFilesDir("downloads")!!.absolutePath
-            } else {
-                // Direct file system path - create directory if needed
-                val dir = File(request.downloadPath)
-                if (!dir.exists()) {
-                    dir.mkdirs()
-                    Log.d(TAG, "Created download directory: ${dir.absolutePath}")
-                }
-                dir.absolutePath
-            }
-            
             Log.d(TAG, "Download directory: $outputDir")
             Log.d(TAG, "Download filename: $fileName")
             
@@ -247,16 +235,14 @@ class VideoDownloadManager(private val context: Context) {
                     // Retry download after update
                     val retryPath = ytDlpExtractor.downloadAudio(
                         videoUrl = request.video.url,
-                        outputDir = File(request.downloadPath).absolutePath,
+                        outputDir = outputDir,
                         fileName = "${sanitizeFileName(videoTitle)}.${request.selectedFormat.extension}",
                         format = request.selectedFormat.extension
                     )
                     
                     if (retryPath != null && File(retryPath).exists()) {
                         Log.i(TAG, "🎉 Retry successful after yt-dlp update!")
-                        _downloadProgress.emit(
-                            DownloadProgress(videoId, 100, DownloadStatus.COMPLETED, filePath = retryPath)
-                        )
+                        handleSuccessfulDownload(request, retryPath)
                         return
                     }
                 }
@@ -286,8 +272,12 @@ class VideoDownloadManager(private val context: Context) {
             )
             
             if (result.isSuccess) {
-                val downloadedPath = result.getOrNull()!!
-                handleSuccessfulDownload(request, downloadedPath)
+                val downloadedPath = result.getOrNull()
+                if (!downloadedPath.isNullOrBlank()) {
+                    handleSuccessfulDownload(request, downloadedPath)
+                    return
+                }
+                throw IllegalStateException("Auto-detection finished without a file path")
             } else {
                 throw Exception("Auto-detection download failed: ${result.exceptionOrNull()?.message}")
             }
@@ -522,7 +512,13 @@ class VideoDownloadManager(private val context: Context) {
      */
     private fun getOutputDirectory(request: DownloadRequest): String {
         return if (request.downloadPath.startsWith("content://")) {
-            context.getExternalFilesDir("downloads")!!.absolutePath
+            val externalDownloadsDir = context.getExternalFilesDir("downloads")
+            val fallbackDir = File(context.filesDir, "downloads")
+            val targetDir = externalDownloadsDir ?: fallbackDir
+            if (!targetDir.exists()) {
+                targetDir.mkdirs()
+            }
+            targetDir.absolutePath
         } else {
             val dir = File(request.downloadPath)
             if (!dir.exists()) {

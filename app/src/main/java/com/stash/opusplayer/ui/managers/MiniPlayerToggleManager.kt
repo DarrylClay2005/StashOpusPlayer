@@ -104,9 +104,9 @@ class MiniPlayerToggleManager(private val context: Context) {
      */
     fun getAvailableStyles(): List<Pair<String, String>> {
         return listOf(
-            STYLE_CLASSIC to "Classic Mini Player",
-            STYLE_REVAMPED to "Revamped Mini Player", 
-            STYLE_COMPACT to "Compact Mini Player"
+            STYLE_CLASSIC to "Streamlined",
+            STYLE_REVAMPED to "Deck",
+            STYLE_COMPACT to "Compact Strip"
         )
     }
     
@@ -116,26 +116,23 @@ class MiniPlayerToggleManager(private val context: Context) {
     fun getStyleFeatures(style: String): List<String> {
         return when (style) {
             STYLE_CLASSIC -> listOf(
-                "Basic controls",
-                "Album art display",
-                "Track information",
-                "Simple progress bar"
+                "Compact one-row layout",
+                "Quick transport buttons",
+                "Direct expand to now playing",
+                "Progress strip"
             )
             STYLE_REVAMPED -> listOf(
-                "Enhanced gesture controls",
-                "Advanced swipe gestures",
-                "Mini visualizer overlay",
-                "Smooth animations",
-                "Double-tap controls",
+                "Two-line deck layout",
+                "Scrubbable progress",
                 "Long-press options menu",
-                "Rotating album art",
-                "Pulse effects"
+                "Artwork-first presentation",
+                "Smoother state syncing"
             )
             STYLE_COMPACT -> listOf(
-                "Minimal footprint",
+                "Smallest footprint",
                 "Essential controls only",
-                "Gesture support",
-                "Quick access"
+                "Fast queue access",
+                "Tighter spacing"
             )
             else -> emptyList()
         }

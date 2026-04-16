@@ -3,97 +3,181 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="@color/background_color"
-    android:padding="12dp">
+    android:orientation="vertical"
+    android:padding="10dp">
 
-    <!-- Neomorphic Header Card -->
     <LinearLayout
         android:id="@+id/libraryHeader"
-        style="@style/NeomorphicCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginBottom="12dp">
+        android:layout_marginBottom="12dp"
+        android:background="@drawable/library_header_panel_background"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="14dp">
 
-        <ImageView
-            android:id="@+id/libraryHeaderIcon"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:src="@drawable/ic_library_music"
-            android:layout_marginEnd="10dp"
-            app:tint="@color/secondary_color" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/libraryHeaderIcon"
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:layout_marginEnd="10dp"
+                android:src="@drawable/ic_library_music"
+                app:tint="@color/text_primary" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/libraryHeaderTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Song Library"
+                    android:textColor="@color/text_primary"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/libraryHeaderSubtitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Recent tracks, deep cuts, and loose files in one place."
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/scanButton"
+                style="@style/Widget.MaterialComponents.Button"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="Rescan"
+                android:textAllCaps="false"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                app:backgroundTint="#1F0F172A"
+                app:cornerRadius="18dp"
+                app:icon="@drawable/ic_refresh"
+                app:iconGravity="textStart"
+                app:iconSize="14dp"
+                app:iconTint="@color/text_primary"
+                app:rippleColor="@color/text_secondary"
+                app:strokeColor="#3357C7B6"
+                app:strokeWidth="1dp" />
+
+        </LinearLayout>
 
         <TextView
-            android:id="@+id/libraryHeaderTitle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Music Library"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/likedButton"
-            style="@style/NeomorphicButton"
-            android:layout_width="44dp"
-            android:layout_height="36dp"
-            android:layout_marginEnd="6dp"
-            app:icon="@drawable/ic_favorite"
-            app:iconTint="@color/accent_color"
-            app:iconSize="18dp"
-            app:iconGravity="textStart"
-            app:iconPadding="0dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/searchButton"
-            style="@style/NeomorphicButton"
-            android:layout_width="44dp"
-            android:layout_height="36dp"
-            android:layout_marginEnd="6dp"
-            app:icon="@drawable/ic_search"
-            app:iconTint="@color/secondary_color"
-            app:iconSize="18dp"
-            app:iconGravity="textStart"
-            app:iconPadding="0dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/sortButton"
-            style="@style/NeomorphicButton"
-            android:layout_width="44dp"
-            android:layout_height="36dp"
-            android:layout_marginEnd="6dp"
-            app:icon="@drawable/ic_sort"
-            app:iconTint="@color/secondary_color"
-            app:iconSize="18dp"
-            app:iconGravity="textStart"
-            app:iconPadding="0dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/layoutButton"
-            style="@style/NeomorphicButton"
-            android:layout_width="44dp"
-            android:layout_height="36dp"
-            android:layout_marginEnd="6dp"
-            app:icon="@drawable/ic_view_list"
-            app:iconTint="@color/secondary_color"
-            app:iconSize="18dp"
-            app:iconGravity="textStart"
-            app:iconPadding="0dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/scanButton"
-            style="@style/NeomorphicAccentButton"
+            android:id="@+id/libraryStatsText"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="Scan"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/song_duration_chip_background"
+            android:paddingStart="12dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="6dp"
+            android:text="0 tracks ready"
+            android:textColor="@color/text_primary"
             android:textSize="11sp"
-            android:textColor="@color/white"
-            app:icon="@drawable/ic_refresh"
-            app:iconTint="@color/white"
-            app:iconSize="14dp" />
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/likedButton"
+                style="@style/Widget.MaterialComponents.Button"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:text=""
+                app:backgroundTint="#1F0F172A"
+                app:cornerRadius="20dp"
+                app:icon="@drawable/ic_favorite"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="18dp"
+                app:iconTint="@color/secondary_color"
+                app:rippleColor="@color/text_secondary"
+                app:strokeColor="#3357C7B6"
+                app:strokeWidth="1dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/searchButton"
+                style="@style/Widget.MaterialComponents.Button"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:text=""
+                app:backgroundTint="#1F0F172A"
+                app:cornerRadius="20dp"
+                app:icon="@drawable/ic_search"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="18dp"
+                app:iconTint="@color/text_primary"
+                app:rippleColor="@color/text_secondary"
+                app:strokeColor="#3357C7B6"
+                app:strokeWidth="1dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/sortButton"
+                style="@style/Widget.MaterialComponents.Button"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:text=""
+                app:backgroundTint="#1F0F172A"
+                app:cornerRadius="20dp"
+                app:icon="@drawable/ic_sort"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="18dp"
+                app:iconTint="@color/text_primary"
+                app:rippleColor="@color/text_secondary"
+                app:strokeColor="#3357C7B6"
+                app:strokeWidth="1dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/layoutButton"
+                style="@style/Widget.MaterialComponents.Button"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text=""
+                app:backgroundTint="#1F0F172A"
+                app:cornerRadius="20dp"
+                app:icon="@drawable/ic_view_list"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="18dp"
+                app:iconTint="@color/text_primary"
+                app:rippleColor="@color/text_secondary"
+                app:strokeColor="#3357C7B6"
+                app:strokeWidth="1dp" />
+
+        </LinearLayout>
 
     </LinearLayout>
 
@@ -106,44 +190,43 @@
         android:paddingTop="4dp"
         app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
 
-    <!-- Neomorphic Empty State -->
     <LinearLayout
         android:id="@+id/empty_state_container"
-        style="@style/NeomorphicCard"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:orientation="vertical"
+        android:background="@drawable/song_row_panel_background"
         android:gravity="center"
-        android:padding="20dp"
+        android:orientation="vertical"
+        android:padding="24dp"
         android:visibility="gone">
 
         <ImageView
-            android:layout_width="56dp"
-            android:layout_height="56dp"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_marginBottom="14dp"
+            android:alpha="0.8"
             android:src="@drawable/ic_library_music"
-            android:layout_marginBottom="12dp"
-            app:tint="@color/text_secondary"
-            android:alpha="0.6" />
+            app:tint="@color/text_secondary" />
 
         <TextView
             android:id="@+id/empty_state_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
             android:text="No music found"
-            android:textSize="16sp"
-            android:textStyle="bold"
             android:textColor="@color/text_primary"
-            android:layout_marginBottom="6dp" />
+            android:textSize="16sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/empty_state_subtitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Scan for music files or download from YouTube"
-            android:textSize="12sp"
+            android:gravity="center"
+            android:text="Scan your device or add folders to bring the library back to life."
             android:textColor="@color/text_secondary"
-            android:gravity="center" />
+            android:textSize="12sp" />
 
     </LinearLayout>
 

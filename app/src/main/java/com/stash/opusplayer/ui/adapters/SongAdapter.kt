@@ -100,7 +100,7 @@ class SongAdapter(
         fun bind(song: Song) {
             applyAdaptiveListSizing()
             binding.songTitle.text = song.displayName
-            binding.songArtist.text = "${song.artistName} • ${song.albumName}"
+            binding.songArtist.text = buildMetaLine(song, includeAlbum = true)
             binding.songDuration.text = song.durationText
 
             loadAlbumArt(binding, song)
@@ -244,7 +244,7 @@ class SongAdapter(
         fun bind(song: Song) {
             applyAdaptiveGridSizing()
             binding.songTitle.text = song.displayName
-            binding.songArtist.text = song.artistName
+            binding.songArtist.text = buildMetaLine(song, includeAlbum = false)
 
             loadAlbumArt(binding, song)
 
@@ -302,10 +302,6 @@ class SongAdapter(
         }
     }
 
-    private fun loadAlbumArt(bindingRoot: View, imageView: android.widget.ImageView, song: Song) {
-        // unused — helper placeholder if needed later
-    }
-
     private fun loadAlbumArt(binding: Any, song: Song) {
         val rootView: View
         val artworkView: android.widget.ImageView
@@ -337,6 +333,17 @@ class SongAdapter(
         }
         // Default artwork
         Glide.with(rootView.context).load(R.drawable.ic_music_note).into(artworkView)
+    }
+
+    private fun buildMetaLine(song: Song, includeAlbum: Boolean): String {
+        val parts = mutableListOf<String>()
+        parts += song.artistName
+        if (includeAlbum && song.albumName.isNotBlank() && !song.albumName.equals("Unknown Album", ignoreCase = true)) {
+            parts += song.albumName
+        } else if (!includeAlbum && song.genre.isNotBlank()) {
+            parts += song.genre
+        }
+        return parts.joinToString(" • ")
     }
 
     private fun showContextMenu(root: View, song: Song, anchor: View) {

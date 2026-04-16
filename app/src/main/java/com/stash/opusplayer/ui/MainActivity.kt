@@ -475,7 +475,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             .commit()
     }
     // No-op: legacy method retained for compatibility with older calls
-    private fun hideLoadingOverlay() { /* no overlay to hide */ }
+    private fun hideLoadingOverlay() = Unit
     
     private fun showAboutDialog() {
         AlertDialog.Builder(this)
@@ -646,11 +646,8 @@ Check for updates anytime from Settings.""")
     private fun applyVisualCustomization() {
         try {
             val background = visualCustomizationManager.getCurrentBackground()
-            // Apply background to main content area
             binding.mainContent.background = background
-            
-            // Also apply to drawer if needed
-            // binding.drawerLayout.background = background  // Skip drawer background for now
+            binding.drawerLayout.background = background
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Error applying visual customization", e)
         }

@@ -36,11 +36,7 @@ class YouTubePlaybackResolver(
             YouTubePlaybackBackend.YT_DLP -> resolveWithYtDlp(video)
             YouTubePlaybackBackend.LAVALINK -> resolveWithLavalink(video)
             YouTubePlaybackBackend.AUTO -> {
-                val lavalinkResult = if (YouTubePlaybackSettings.hasLavalinkConfig(context)) {
-                    resolveWithLavalink(video)
-                } else {
-                    Result.failure(IllegalStateException("No Lavalink server configured"))
-                }
+                val lavalinkResult = resolveWithLavalink(video)
                 if (lavalinkResult.isSuccess) {
                     lavalinkResult
                 } else {
@@ -60,49 +56,76 @@ class YouTubePlaybackResolver(
         }
     }
 
-    private fun resolveWithLavalink(video: YouTubeVideo): Result<ResolvedPlayback> {
+    private suspend fun resolveWithLavalink(video: YouTubeVideo): Result<ResolvedPlayback> {
         return try {
-            val baseUrl = YouTubePlaybackSettings.getLavalinkUrl(context)
-            if (baseUrl.isBlank()) {
-                return Result.failure(IllegalStateException("No Lavalink server URL configured"))
-            }
-
-            val password = YouTubePlaybackSettings.getLavalinkPassword(context)
-            val apiBase = if (baseUrl.endsWith("/v4")) baseUrl else "$baseUrl/v4"
-            val identifier = URLEncoder.encode(video.formattedUrl, StandardCharsets.UTF_8.name())
-            val request = Request.Builder()
-                .url("$apiBase/loadtracks?identifier=$identifier")
-                .apply {
-                    if (password.isNotBlank()) {
-                        header("Authorization", password)
-                    }
-                }
-                .get()
-                .build()
-
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return Result.failure(
-                    IllegalStateException("Lavalink request failed: ${response.code} ${response.message}")
+            val endpoint = YouTubePlaybackSettings.resolveEndpoint(context, client)
+                ?: return Result.failure(
+                    IllegalStateException(
+                        "No Lavalink node was configured or auto-detected. Add one in Streaming settings or keep playback on Auto."
+                    )
                 )
-            }
 
-            val body = response.body?.string().orEmpty()
+            val body = requestLoadTracks(endpoint, video.formattedUrl)
+                ?: return Result.failure(
+                    IllegalStateException(
+                        "A Lavalink node was found at ${endpoint.baseUrl}, but it did not return playable track data for this URL."
+                    )
+                )
+
             val json = JSONObject(body)
             val streamUrl = extractPlayableUrl(json)
             if (streamUrl.isNullOrBlank()) {
                 Result.failure(
                     IllegalStateException(
-                        "Lavalink did not return a device-playable stream URL. Use a Lavalink-compatible proxy node or switch YouTube playback to Auto."
+                        "Lavalink responded without a device-playable stream URL. Use a proxy-capable node or switch playback to Auto."
                     )
                 )
             } else {
-                Result.success(ResolvedPlayback(streamUrl, "Lavalink"))
+                Result.success(
+                    ResolvedPlayback(
+                        streamUrl = streamUrl,
+                        sourceLabel = if (endpoint.autoConfigured) "Lavalink auto" else "Lavalink"
+                    )
+                )
             }
         } catch (e: Exception) {
             Log.w(TAG, "Lavalink resolution failed", e)
             Result.failure(e)
         }
+    }
+
+    private fun requestLoadTracks(endpoint: LavalinkEndpoint, mediaUrl: String): String? {
+        val identifier = URLEncoder.encode(mediaUrl, StandardCharsets.UTF_8.name())
+        val candidates = listOf(
+            "${endpoint.baseUrl}/v4/loadtracks?identifier=$identifier",
+            "${endpoint.baseUrl}/loadtracks?identifier=$identifier"
+        )
+
+        for (candidate in candidates) {
+            val request = Request.Builder()
+                .url(candidate)
+                .apply {
+                    if (endpoint.password.isNotBlank()) {
+                        header("Authorization", endpoint.password)
+                    }
+                }
+                .get()
+                .build()
+
+            try {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.w(TAG, "Lavalink loadtracks failed for $candidate with ${response.code}")
+                        return@use
+                    }
+                    return response.body?.string().orEmpty()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error calling Lavalink candidate $candidate", e)
+            }
+        }
+
+        return null
     }
 
     private fun extractPlayableUrl(json: JSONObject): String? {

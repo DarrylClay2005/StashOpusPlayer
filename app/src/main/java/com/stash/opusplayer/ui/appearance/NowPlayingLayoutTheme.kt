@@ -2,7 +2,7 @@ package com.stash.opusplayer.ui.appearance
 
 enum class NowPlayingLayoutTheme(val storageValue: String, val displayName: String) {
     AURORA("aurora", "Aurora"),
-    VINYL("vinyl", "Vinyl Stack"),
+    VINYL("vinyl", "Vinyl Deck"),
     MINIMAL("minimal", "Minimal Deck");
 
     companion object {

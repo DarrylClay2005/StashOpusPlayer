@@ -1090,12 +1090,9 @@ val sessionId = activePlayer.audioSessionId
                                 activePlayer.mediaMetadata.releaseYear?.toInt()
                             } catch (_: Exception) { null }
                         )
-                        // Start audio analysis in background
+                        // Use metadata-driven analysis until we have a real PCM tap for this player stack.
                         serviceScope.launch(Dispatchers.IO) {
-                            // This would normally get actual audio samples from the player
-                            // For now we'll use a placeholder to enable the system
-                            val dummySamples = FloatArray(1024) { 0.0f }
-                            enhancedAudioManager.analyzeCurrentTrack(dummySamples, metadata)
+                            enhancedAudioManager.analyzeTrackMetadata(metadata)
                         }
                     } catch (_: Exception) {}
                 }
@@ -1411,23 +1408,13 @@ val sessionId = activePlayer.audioSessionId
     
     
     private fun getCurrentLargeIcon(): android.graphics.Bitmap? {
-        // Attempt to retrieve cached artwork for current media item using minimal overhead.
-        // We derive a pseudo Song-like structure from MediaMetadata for cache key stability.
-val title = activePlayer.mediaMetadata.title?.toString() ?: ""
+        val title = activePlayer.mediaMetadata.title?.toString() ?: ""
         val artist = activePlayer.mediaMetadata.artist?.toString() ?: ""
         val album = activePlayer.mediaMetadata.albumTitle?.toString() ?: ""
         if (title.isBlank() && artist.isBlank() && album.isBlank()) return null
         return try {
-            val fakeSong = com.stash.opusplayer.data.Song(
-                id = 0L,
-                title = title,
-                artist = artist,
-                album = album,
-                duration = 0L,
-                path = ""
-            )
             val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
-            cache.loadBitmapIfPresent(fakeSong)
+            cache.loadBitmapForMetadata(title, artist, album)
         } catch (_: Exception) {
             null
         }
@@ -1964,12 +1951,12 @@ try { activePlayer.pause() } catch (_: Exception) {}
                 val album = mi.mediaMetadata.albumTitle?.toString() ?: ""
                 if (title.isBlank() && artist.isBlank() && album.isBlank()) continue
                 try {
-                    val fakeSong = com.stash.opusplayer.data.Song(0L, title, artist, album, 0L, "")
                     val cache = com.stash.opusplayer.artwork.ArtworkCache(this)
-                    val bmp = cache.loadBitmapIfPresent(fakeSong, 256)
+                    val bmp = cache.loadBitmapForMetadata(title, artist, album, 256)
                     if (bmp == null) {
+                        val lookupSong = cache.createLookupSong(title, artist, album) ?: continue
                         serviceScope.launch(Dispatchers.IO) {
-                            try { com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@MusicService).getOrFetch(fakeSong) } catch (_: Exception) {}
+                            try { com.stash.opusplayer.artwork.OnlineArtworkFetcher(this@MusicService).getOrFetch(lookupSong) } catch (_: Exception) {}
                         }
                     }
                 } catch (_: Exception) {}

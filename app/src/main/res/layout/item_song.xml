@@ -4,78 +4,117 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginStart="4dp"
-    android:layout_marginEnd="4dp"
     android:layout_marginTop="4dp"
+    android:layout_marginEnd="4dp"
     android:layout_marginBottom="4dp"
-    app:cardUseCompatPadding="true"
-    app:cardCornerRadius="9dp"
-    app:cardElevation="2dp"
-    app:strokeColor="@color/border_gray"
-    app:strokeWidth="1dp">
+    android:foreground="?attr/selectableItemBackground"
+    app:cardBackgroundColor="@android:color/transparent"
+    app:cardElevation="0dp"
+    app:cardUseCompatPadding="false"
+    app:strokeWidth="0dp">
 
-    <LinearLayout
+    <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="10dp"
-        android:gravity="center_vertical">
+        android:background="@drawable/song_row_panel_background"
+        android:minHeight="72dp"
+        android:paddingStart="12dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="10dp">
 
-    <com.google.android.material.imageview.ShapeableImageView
-        android:id="@+id/song_artwork"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
-        android:scaleType="centerCrop"
-        app:shapeAppearanceOverlay="@style/CircularImageView"
-        android:src="@drawable/ic_music_note" />
+        <View
+            android:id="@+id/song_accent_bar"
+            android:layout_width="4dp"
+            android:layout_height="0dp"
+            android:background="@color/secondary_color"
+            android:alpha="0.75"
+            app:layout_constraintBottom_toBottomOf="@id/song_artwork"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="@id/song_artwork" />
 
-    <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:orientation="vertical"
-        android:layout_marginStart="10dp">
+        <com.google.android.material.imageview.ShapeableImageView
+            android:id="@+id/song_artwork"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="12dp"
+            android:contentDescription="@string/album_artwork"
+            android:scaleType="centerCrop"
+            android:src="@drawable/ic_music_note"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toEndOf="@id/song_accent_bar"
+            app:layout_constraintTop_toTopOf="parent"
+            app:shapeAppearanceOverlay="@style/RoundedImageView" />
+
+        <LinearLayout
+            android:id="@+id/song_info_stack"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="10dp"
+            android:orientation="vertical"
+            app:layout_constraintBottom_toBottomOf="@id/song_artwork"
+            app:layout_constraintEnd_toStartOf="@id/song_duration"
+            app:layout_constraintStart_toEndOf="@id/song_artwork"
+            app:layout_constraintTop_toTopOf="@id/song_artwork">
+
+            <TextView
+                android:id="@+id/song_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Song Title"
+                android:textAppearance="@style/TextAppearance.StashWave.Body"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/song_artist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:ellipsize="end"
+                android:maxLines="2"
+                android:text="Artist • Album"
+                android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+
+        </LinearLayout>
 
         <TextView
-            android:id="@+id/song_title"
-            android:layout_width="match_parent"
+            android:id="@+id/song_duration"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Song Title"
-android:textAppearance="@style/TextAppearance.StashWave.Body"
-            android:textSize="14sp"
-            android:maxLines="1"
-            android:ellipsize="end" />
+            android:layout_marginTop="2dp"
+            android:background="@drawable/song_duration_chip_background"
+            android:paddingStart="10dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="6dp"
+            android:text="3:45"
+            android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
+            android:textColor="@color/text_primary"
+            android:textSize="10sp"
+            app:layout_constraintEnd_toStartOf="@id/menu_button"
+            app:layout_constraintTop_toTopOf="@id/song_info_stack" />
 
-        <TextView
-            android:id="@+id/song_artist"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Artist Name"
-android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
-            android:textSize="11sp"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:layout_marginTop="2dp" />
+        <ImageButton
+            android:id="@+id/menu_button"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="More options"
+            android:padding="2dp"
+            android:src="@drawable/ic_more_vert"
+            android:tint="@color/text_secondary"
+            app:layout_constraintBottom_toBottomOf="@id/song_duration"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="@id/song_duration" />
 
-    </LinearLayout>
-
-    <TextView
-        android:id="@+id/song_duration"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="3:45"
-android:textAppearance="@style/TextAppearance.StashWave.Subtitle"
-        android:textSize="10sp"
-        android:layout_marginStart="4dp" />
-
-    <ImageView
-        android:id="@+id/menu_button"
-        android:layout_width="20dp"
-        android:layout_height="20dp"
-        android:src="@drawable/ic_more_vert"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:layout_marginStart="4dp"
-        android:contentDescription="More options" />
-
-    </LinearLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
 
 </com.google.android.material.card.MaterialCardView>

@@ -20,7 +20,7 @@ data class AppearancePreferences(
     val titleBold: Boolean = false,
     
     // UI Elements
-    val buttonSizeScale: Float = 1.0f,
+    val buttonSizeScale: Float = 0.92f,
     val cardCornerRadiusDp: Int = 20,
     val shadowsEnabled: Boolean = true,
     val shadowIntensity: Float = 1.0f,
@@ -36,7 +36,7 @@ data class AppearancePreferences(
     val animationSpeed: AnimationSpeed = AnimationSpeed.NORMAL,
     
     // Mini Player
-    val miniPlayerHeightDp: Int = 72,
+    val miniPlayerHeightDp: Int = 64,
     val miniPlayerShowArt: Boolean = true,
     val miniPlayerShowArtist: Boolean = true,
     val miniPlayerCompactMode: Boolean = false,
@@ -85,7 +85,7 @@ data class AppearancePreferences(
                 fontScale = prefs.getFloat(PrefsKeys.APPEARANCE_FONT_SCALE, 1.0f).coerceIn(0.85f, 1.3f),
                 titleBold = prefs.getBoolean(PrefsKeys.APPEARANCE_TITLE_BOLD, false),
                 
-                buttonSizeScale = prefs.getFloat(PrefsKeys.APPEARANCE_BUTTON_SIZE_SCALE, 1.0f).coerceIn(0.8f, 1.2f),
+                buttonSizeScale = prefs.getFloat(PrefsKeys.APPEARANCE_BUTTON_SIZE_SCALE, 0.92f).coerceIn(0.78f, 1.0f),
                 cardCornerRadiusDp = prefs.getInt(PrefsKeys.APPEARANCE_CARD_CORNER_RADIUS_DP, 20).coerceIn(8, 32),
                 shadowsEnabled = prefs.getBoolean(PrefsKeys.APPEARANCE_SHADOWS_ENABLED, true),
                 shadowIntensity = prefs.getFloat(PrefsKeys.APPEARANCE_SHADOW_INTENSITY, 1.0f).coerceIn(0f, 1f),
@@ -100,7 +100,7 @@ data class AppearancePreferences(
                     prefs.getString(PrefsKeys.APPEARANCE_ANIMATION_SPEED, AnimationSpeed.NORMAL.name) ?: AnimationSpeed.NORMAL.name
                 ),
                 
-                miniPlayerHeightDp = prefs.getInt(PrefsKeys.APPEARANCE_MINI_PLAYER_HEIGHT_DP, 72).coerceIn(56, 96),
+                miniPlayerHeightDp = prefs.getInt(PrefsKeys.APPEARANCE_MINI_PLAYER_HEIGHT_DP, 64).coerceIn(56, 72),
                 miniPlayerShowArt = prefs.getBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_SHOW_ART, true),
                 miniPlayerShowArtist = prefs.getBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_SHOW_ARTIST, true),
                 miniPlayerCompactMode = prefs.getBoolean(PrefsKeys.APPEARANCE_MINI_PLAYER_COMPACT_MODE, false),
@@ -141,7 +141,7 @@ data class AppearancePreferences(
                 fontScale = json.optDouble("fontScale", 1.0).toFloat().coerceIn(0.85f, 1.3f),
                 titleBold = json.optBoolean("titleBold", false),
                 
-                buttonSizeScale = json.optDouble("buttonSizeScale", 1.0).toFloat().coerceIn(0.8f, 1.2f),
+                buttonSizeScale = json.optDouble("buttonSizeScale", 0.92).toFloat().coerceIn(0.78f, 1.0f),
                 cardCornerRadiusDp = json.optInt("cardCornerRadiusDp", 20).coerceIn(8, 32),
                 shadowsEnabled = json.optBoolean("shadowsEnabled", true),
                 shadowIntensity = json.optDouble("shadowIntensity", 1.0).toFloat().coerceIn(0f, 1f),
@@ -158,7 +158,7 @@ data class AppearancePreferences(
                     AnimationSpeed.NORMAL
                 },
                 
-                miniPlayerHeightDp = json.optInt("miniPlayerHeightDp", 72).coerceIn(56, 96),
+                miniPlayerHeightDp = json.optInt("miniPlayerHeightDp", 64).coerceIn(56, 72),
                 miniPlayerShowArt = json.optBoolean("miniPlayerShowArt", true),
                 miniPlayerShowArtist = json.optBoolean("miniPlayerShowArtist", true),
                 miniPlayerCompactMode = json.optBoolean("miniPlayerCompactMode", false),

@@ -57,6 +57,7 @@ class SpectrumAnalyzer(private val context: Context) {
     private val smoothedSpectrum = FloatArray(FREQUENCY_BINS)
     private val peakSpectrum = FloatArray(FREQUENCY_BINS)
     private val octaveBands = FloatArray(OCTAVE_BANDS.size)
+    private var latestWaveformSamples = FloatArray(0)
     
     // Window function for FFT
     private val window = FloatArray(FFT_SIZE)
@@ -151,6 +152,13 @@ class SpectrumAnalyzer(private val context: Context) {
         if (!isEnabled || analysisJob?.isActive == true) return
         
         analysisJob = analysisScope.launch {
+            launch {
+                audioDataCapture.waveformData.collect { waveform ->
+                    if (waveform.isEmpty()) return@collect
+                    latestWaveformSamples = waveform.map { (it.toInt() - 128) / 128.0f }.toFloatArray()
+                }
+            }
+
             audioDataCapture.fftData.collect { fftData ->
                 if (isEnabled && fftData.isNotEmpty()) {
                     // Convert FFT bytes to magnitudes
@@ -201,9 +209,12 @@ class SpectrumAnalyzer(private val context: Context) {
             // Calculate frequency band levels
             calculateFrequencyBandLevels(SAMPLE_RATE)
             
-            // Calculate audio quality metrics (using dummy samples for now)
-            val dummySamples = FloatArray(FFT_SIZE) { (it * 0.001f).toFloat() }
-            calculateQualityMetrics(dummySamples)
+            val waveformSamples = latestWaveformSamples
+            if (waveformSamples.isNotEmpty()) {
+                calculateQualityMetrics(waveformSamples)
+            } else {
+                calculateSpectrumDrivenQualityMetrics()
+            }
             
             // Update state flows
             updateStateFlows()
@@ -518,6 +529,40 @@ class SpectrumAnalyzer(private val context: Context) {
         
         val snr = if (noiseEnergy > 0) 20 * log10(signalEnergy / noiseEnergy) else 60.0f
         _signalToNoiseRatio.value = snr.coerceIn(0.0f, 100.0f)
+    }
+
+    private fun calculateSpectrumDrivenQualityMetrics() {
+        val peakDb = spectrum.maxOrNull() ?: noiseFloor
+        val averageDb = spectrum.average().toFloat().coerceAtMost(peakDb)
+        _crestFactor.value = (peakDb - averageDb).coerceIn(0.0f, 24.0f)
+
+        val fundamentalBin = (_peakFrequency.value / (SAMPLE_RATE.toFloat() / FFT_SIZE)).toInt()
+        val fundamentalMagnitude = spectrum.getOrNull(fundamentalBin)
+            ?.let { 10.0.pow(it / 20.0).toFloat() }
+            ?: 0.0f
+
+        var harmonicEnergy = 0.0f
+        for (harmonic in 2..5) {
+            val harmonicBin = fundamentalBin * harmonic
+            if (harmonicBin < spectrum.size) {
+                harmonicEnergy += 10.0.pow(spectrum[harmonicBin] / 20.0).toFloat()
+            }
+        }
+        _totalHarmonicDistortion.value = if (fundamentalMagnitude > 0f) {
+            (sqrt(harmonicEnergy) / fundamentalMagnitude).coerceIn(0.0f, 1.0f)
+        } else {
+            0.0f
+        }
+
+        val signalRange = spectrum.take(100).ifEmpty { listOf(noiseFloor) }
+        val noiseRange = spectrum.takeLast(100).ifEmpty { listOf(noiseFloor) }
+        val signalEnergy = signalRange.map { 10.0.pow(it / 20.0).toFloat() }.average().toFloat()
+        val noiseEnergy = noiseRange.map { 10.0.pow(it / 20.0).toFloat() }.average().toFloat()
+        _signalToNoiseRatio.value = if (noiseEnergy > 0f) {
+            (20 * log10(signalEnergy / noiseEnergy)).coerceIn(0.0f, 100.0f)
+        } else {
+            60.0f
+        }
     }
     
     private fun updateStateFlows() {

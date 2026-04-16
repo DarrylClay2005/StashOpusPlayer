@@ -122,8 +122,9 @@ class UpdateChecker(private val context: Context) {
                 GitHubApiService.REPO_NAME
             )
             
-            if (response.isSuccessful && response.body() != null) {
-                response.body()!!.filter { !it.draft }
+            val releases = response.body()
+            if (response.isSuccessful && releases != null) {
+                releases.filter { !it.draft }
             } else {
                 emptyList()
             }

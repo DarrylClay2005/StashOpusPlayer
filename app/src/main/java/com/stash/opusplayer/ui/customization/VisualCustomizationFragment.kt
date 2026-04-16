@@ -1,71 +1,62 @@
 package com.stash.opusplayer.ui.customization
 
-import android.app.Activity
-import android.content.Intent
-import android.graphics.Color
-import android.net.Uri
 import android.os.Bundle
-import android.provider.MediaStore
 import android.view.LayoutInflater
-import android.view.Menu
-import android.view.MenuInflater
-import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
-import android.widget.*
+import android.widget.AdapterView
+import android.widget.LinearLayout
+import android.widget.Spinner
+import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
-import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
-import com.stash.opusplayer.R
+import com.stash.opusplayer.ui.appearance.AppearancePreferences
+import com.stash.opusplayer.ui.appearance.ThemeManager
 import com.stash.opusplayer.ui.appearance.VisualCustomizationManager
+import com.stash.opusplayer.ui.fragments.settings.NavigableSettingsFragment
+import com.stash.opusplayer.ui.fragments.settings.addActionButton
+import com.stash.opusplayer.ui.fragments.settings.addBodyText
+import com.stash.opusplayer.ui.fragments.settings.addChipButtonRow
+import com.stash.opusplayer.ui.fragments.settings.addSettingsSection
+import com.stash.opusplayer.ui.fragments.settings.addSliderControl
+import com.stash.opusplayer.ui.fragments.settings.addSpinnerControl
+import com.stash.opusplayer.ui.fragments.settings.addSwitchControl
+import com.stash.opusplayer.ui.fragments.settings.createSettingsPage
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
-/**
- * Fragment for visual customization settings including photo backgrounds
- */
-class VisualCustomizationFragment : Fragment() {
+class VisualCustomizationFragment : NavigableSettingsFragment() {
 
-    companion object {
-        private const val TAG = "VisualCustomizationFragment"
-        private const val REQUEST_IMAGE_PICK = 1001
-    }
+    override val screenTitle: String = "Animations & Background"
 
-    // UI Components
-    private lateinit var backgroundTypeSpinner: Spinner
-    private lateinit var photoBackgroundContainer: LinearLayout
-    private lateinit var photoPreview: ImageView
-    private lateinit var selectPhotoButton: Button
-    private lateinit var effectsContainer: LinearLayout
-    private lateinit var blurSeekBar: SeekBar
-    private lateinit var tintSeekBar: SeekBar
-    private lateinit var dimSeekBar: SeekBar
-    private lateinit var parallaxSwitch: Switch
-    private lateinit var breathingSwitch: Switch
-    private lateinit var colorShiftSwitch: Switch
-    private lateinit var applyButton: Button
-    private lateinit var resetButton: Button
-    private lateinit var previewBackground: View
-    
-    // Customization Manager
     private lateinit var customizationManager: VisualCustomizationManager
-    
-    // Image picker launcher
+    private lateinit var backgroundStatusView: TextView
+    private lateinit var motionStatusView: TextView
+    private lateinit var backgroundModeSpinner: Spinner
+    private lateinit var animationSpeedSpinner: Spinner
+
+    private var currentPrefs = AppearancePreferences()
+    private var hydratingBackgroundMode = false
+    private var hydratingAnimationSpeed = false
+
     private val imagePickerLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let { uri ->
-                lifecycleScope.launch {
-                    val success = customizationManager.setPhotoBackground(uri)
-                    if (success) {
-                        Toast.makeText(requireContext(), "Photo background set successfully", Toast.LENGTH_SHORT).show()
-                        updatePreview()
-                    } else {
-                        Toast.makeText(requireContext(), "Failed to load image", Toast.LENGTH_SHORT).show()
-                    }
-                }
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri == null) {
+            syncUiFromState()
+            return@registerForActivityResult
+        }
+
+        lifecycleScope.launch {
+            val success = customizationManager.setPhotoBackground(uri)
+            if (success) {
+                broadcastLiveUpdate()
+                Toast.makeText(requireContext(), "Background photo updated.", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(requireContext(), "Unable to load that image.", Toast.LENGTH_SHORT).show()
             }
+            syncUiFromState()
         }
     }
 
@@ -73,300 +64,341 @@ class VisualCustomizationFragment : Fragment() {
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View? {
-        return inflater.inflate(R.layout.fragment_visual_customization, container, false)
+    ): View {
+        customizationManager = VisualCustomizationManager(requireContext())
+        currentPrefs = AppearancePreferences.fromPrefs(requireContext())
+
+        val (scrollView, content) = createSettingsPage(
+            title = "Animations & Background",
+            subtitle = "This screen replaces the old animation tab with stable motion controls, dependable background presets, and smaller state surface area."
+        )
+
+        buildCurrentState(content)
+        buildAnimationSection(content)
+        buildBackgroundSection(content)
+        buildPhotoSection(content)
+        buildRecoverySection(content)
+        syncUiFromState()
+
+        return scrollView
     }
 
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-        
-        // Set up action bar with back button
-        val activity = requireActivity() as? AppCompatActivity
-        activity?.supportActionBar?.apply {
-            setDisplayHomeAsUpEnabled(true)
-            setDisplayShowHomeEnabled(true)
-            title = "Visual Customization"
+    private fun buildCurrentState(parent: LinearLayout) {
+        val section = addSettingsSection(
+            parent,
+            "Current State",
+            "You can verify what the app is actually using here before leaving the screen."
+        )
+
+        backgroundStatusView = addBodyText(section, "")
+        motionStatusView = addBodyText(section, "")
+    }
+
+    private fun buildAnimationSection(parent: LinearLayout) {
+        val section = addSettingsSection(
+            parent,
+            "App Motion",
+            "Only supported motion settings remain here now, which keeps animation changes from breaking the rest of the UI."
+        )
+
+        addSwitchControl(
+            section,
+            title = "Enable app animations",
+            summary = "Turns the app’s extra movement on or off without affecting playback itself.",
+            checked = currentPrefs.animationsEnabled
+        ) { enabled ->
+            persistAppearance(currentPrefs.copy(animationsEnabled = enabled))
         }
-        
-        // Enable options menu to handle back button
-        setHasOptionsMenu(true)
-        
-        try {
-            customizationManager = VisualCustomizationManager(requireContext())
-            initializeViews(view)
-            setupListeners()
-            loadCurrentSettings()
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Error initializing visual customization", e)
-            Toast.makeText(requireContext(), "Error loading visual settings", Toast.LENGTH_SHORT).show()
-        }
-    }
-    
-    private fun initializeViews(view: View) {
-        // Background type selection
-        backgroundTypeSpinner = view.findViewById(R.id.background_type_spinner)
-        setupBackgroundTypeSpinner()
-        
-        // Photo background components
-        photoBackgroundContainer = view.findViewById(R.id.photo_background_container)
-        photoPreview = view.findViewById(R.id.photo_preview)
-        selectPhotoButton = view.findViewById(R.id.select_photo_button)
-        
-        // Effect controls
-        effectsContainer = view.findViewById(R.id.effects_container)
-        blurSeekBar = view.findViewById(R.id.blur_seekbar)
-        tintSeekBar = view.findViewById(R.id.tint_seekbar)
-        dimSeekBar = view.findViewById(R.id.dim_seekbar)
-        
-        // Animation switches
-        parallaxSwitch = view.findViewById(R.id.parallax_switch)
-        breathingSwitch = view.findViewById(R.id.breathing_switch)
-        colorShiftSwitch = view.findViewById(R.id.color_shift_switch)
-        
-        // Action buttons
-        applyButton = view.findViewById(R.id.apply_button)
-        resetButton = view.findViewById(R.id.reset_button)
-        previewBackground = view.findViewById(R.id.preview_background)
-        
-        // Setup seekbar ranges
-        blurSeekBar.max = 100
-        tintSeekBar.max = 100
-        dimSeekBar.max = 100
-    }
-    
-    private fun setupBackgroundTypeSpinner() {
-        val backgroundTypes = arrayOf("Gradient", "Solid Color", "Photo Background")
-        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, backgroundTypes)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        backgroundTypeSpinner.adapter = adapter
-    }
-    
-    private fun setupListeners() {
-        // Background type selection
-        backgroundTypeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+
+        val speeds = AppearancePreferences.AnimationSpeed.entries
+        animationSpeedSpinner = addSpinnerControl(
+            section,
+            title = "Animation speed",
+            summary = "Controls how quickly rebuilt UI transitions and motion helpers should run.",
+            entries = listOf("Slow", "Normal", "Fast")
+        )
+        animationSpeedSpinner.setSelection(speeds.indexOf(currentPrefs.animationSpeed).coerceAtLeast(0))
+        animationSpeedSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!hydratingAnimationSpeed) {
+                    hydratingAnimationSpeed = true
+                    return
+                }
+                val selected = speeds[position]
+                if (selected != currentPrefs.animationSpeed) {
+                    persistAppearance(currentPrefs.copy(animationSpeed = selected))
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+
+        addSwitchControl(
+            section,
+            title = "Background parallax",
+            summary = "Lets the background drift slightly with motion instead of staying completely static.",
+            checked = customizationManager.isParallaxEnabled()
+        ) { enabled ->
+            customizationManager.setParallaxEnabled(enabled)
+            broadcastLiveUpdate()
+        }
+
+        addSwitchControl(
+            section,
+            title = "Breathing background",
+            summary = "Adds a slow ambient pulse to the background layer.",
+            checked = customizationManager.isBreathingEnabled()
+        ) { enabled ->
+            customizationManager.setBreathingEnabled(enabled)
+            broadcastLiveUpdate()
+        }
+
+        addSwitchControl(
+            section,
+            title = "Color shift",
+            summary = "Allows subtle palette drifting in supported background effects.",
+            checked = customizationManager.isColorShiftEnabled()
+        ) { enabled ->
+            customizationManager.setColorShiftEnabled(enabled)
+            broadcastLiveUpdate()
+        }
+    }
+
+    private fun buildBackgroundSection(parent: LinearLayout) {
+        val section = addSettingsSection(
+            parent,
+            "Background Mode",
+            "Switch backgrounds safely here without falling back into the old unstable customization flow."
+        )
+
+        backgroundModeSpinner = addSpinnerControl(
+            section,
+            title = "Active background mode",
+            summary = "Photo mode uses the selected image below. Gradient and solid color use the presets in this section.",
+            entries = listOf("Gradient", "Solid Color", "Photo Background")
+        )
+        backgroundModeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!hydratingBackgroundMode) {
+                    hydratingBackgroundMode = true
+                    return
+                }
+
                 when (position) {
-                    0 -> {
-                        customizationManager.setBackgroundType(VisualCustomizationManager.BACKGROUND_TYPE_GRADIENT)
-                        showPhotoControls(false)
-                    }
-                    1 -> {
-                        customizationManager.setBackgroundType(VisualCustomizationManager.BACKGROUND_TYPE_COLOR)
-                        showPhotoControls(false)
-                    }
-                    2 -> {
-                        customizationManager.setBackgroundType(VisualCustomizationManager.BACKGROUND_TYPE_PHOTO)
-                        showPhotoControls(true)
-                    }
-                }
-                updatePreview()
-            }
-            
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-        
-        // Photo selection
-        selectPhotoButton.setOnClickListener {
-            openImagePicker()
-        }
-        
-        // Effect controls
-        blurSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    customizationManager.updatePhotoSettings(
-                        blurRadius = progress,
-                        dimming = customizationManager.getPhotoDimming(),
-                        opacity = customizationManager.getPhotoOpacity()
-                    )
-                    updatePreview()
+                    1 -> setBackgroundMode(VisualCustomizationManager.BACKGROUND_TYPE_COLOR)
+                    2 -> setBackgroundMode(VisualCustomizationManager.BACKGROUND_TYPE_PHOTO, launchPickerIfMissing = true)
+                    else -> setBackgroundMode(VisualCustomizationManager.BACKGROUND_TYPE_GRADIENT)
                 }
             }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-        
-        tintSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    customizationManager.updatePhotoSettings(
-                        blurRadius = customizationManager.getPhotoBlurRadius(),
-                        tintIntensity = progress,
-                        tintColor = Color.parseColor("#6A1B9A")
-                    )
-                    updatePreview()
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+
+        addBodyText(section, "Gradient presets")
+        addChipButtonRow(
+            section,
+            listOf(
+                "Aurora" to {
+                    customizationManager.setGradientBackground(0xFF2E1065.toInt(), 0xFF0F0F23.toInt())
+                    syncUiFromState()
+                    broadcastLiveUpdate()
+                },
+                "Ocean" to {
+                    customizationManager.setGradientBackground(0xFF0B3C5D.toInt(), 0xFF081F2C.toInt())
+                    syncUiFromState()
+                    broadcastLiveUpdate()
+                },
+                "Ember" to {
+                    customizationManager.setGradientBackground(0xFF5A1F08.toInt(), 0xFF1F0D08.toInt())
+                    syncUiFromState()
+                    broadcastLiveUpdate()
                 }
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-        
-        dimSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    customizationManager.updatePhotoSettings(
-                        blurRadius = customizationManager.getPhotoBlurRadius(),
-                        dimming = progress,
-                        opacity = customizationManager.getPhotoOpacity()
-                    )
-                    updatePreview()
+            )
+        )
+
+        addBodyText(section, "Solid color presets")
+        addChipButtonRow(
+            section,
+            listOf(
+                "Charcoal" to {
+                    customizationManager.setColorBackground(0xFF111827.toInt())
+                    syncUiFromState()
+                    broadcastLiveUpdate()
+                },
+                "Forest" to {
+                    customizationManager.setColorBackground(0xFF10261B.toInt())
+                    syncUiFromState()
+                    broadcastLiveUpdate()
+                },
+                "Midnight" to {
+                    customizationManager.setColorBackground(0xFF0D1B2A.toInt())
+                    syncUiFromState()
+                    broadcastLiveUpdate()
                 }
+            )
+        )
+
+        addActionButton(section, "Choose background photo") {
+            imagePickerLauncher.launch("image/*")
+        }
+
+        addActionButton(section, "Clear background photo", outlined = true) {
+            customizationManager.clearPhotoBackground()
+            broadcastLiveUpdate()
+            syncUiFromState()
+            Toast.makeText(requireContext(), "Background photo cleared.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun buildPhotoSection(parent: LinearLayout) {
+        val section = addSettingsSection(
+            parent,
+            "Photo Tuning",
+            "These sliders affect photo backgrounds only, but they stay saved so the mode works correctly when you switch back."
+        )
+
+        addSliderControl(
+            section,
+            title = "Blur amount",
+            summary = "Softens busy photos so the app content stays readable.",
+            valueFrom = 0f,
+            valueTo = 25f,
+            stepSize = 1f,
+            initialValue = customizationManager.getPhotoBlurRadius().toFloat(),
+            formatter = { "${it.roundToInt()} px" }
+        ) { value, fromUser ->
+            if (fromUser) {
+                customizationManager.updatePhotoPresentation(blurRadius = value.roundToInt())
+                broadcastLiveUpdate()
             }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-        
-        // Animation switches with error handling
-        parallaxSwitch.setOnCheckedChangeListener { _, isChecked ->
-            try {
-                customizationManager.setParallaxEnabled(isChecked)
-                // Update preview and broadcast the change to update UI immediately
-                updatePreview()
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Error setting parallax", e)
+        }
+
+        addSliderControl(
+            section,
+            title = "Dim amount",
+            summary = "Darkens the selected photo so text and controls remain legible.",
+            valueFrom = 0f,
+            valueTo = 70f,
+            stepSize = 1f,
+            initialValue = customizationManager.getPhotoDimming().toFloat(),
+            formatter = { "${it.roundToInt()}%" }
+        ) { value, fromUser ->
+            if (fromUser) {
+                customizationManager.updatePhotoPresentation(dimming = value.roundToInt())
+                broadcastLiveUpdate()
             }
         }
-        
-        breathingSwitch.setOnCheckedChangeListener { _, isChecked ->
-            try {
-                customizationManager.setBreathingEnabled(isChecked)
-                // Update preview and broadcast the change to update UI immediately
-                updatePreview()
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Error setting breathing", e)
+
+        addSliderControl(
+            section,
+            title = "Photo opacity",
+            summary = "Controls how strongly the image shows through the app surface.",
+            valueFrom = 40f,
+            valueTo = 100f,
+            stepSize = 1f,
+            initialValue = customizationManager.getPhotoOpacity().toFloat(),
+            formatter = { "${it.roundToInt()}%" }
+        ) { value, fromUser ->
+            if (fromUser) {
+                customizationManager.updatePhotoPresentation(opacity = value.roundToInt())
+                broadcastLiveUpdate()
             }
         }
-        
-        colorShiftSwitch.setOnCheckedChangeListener { _, isChecked ->
-            try {
-                customizationManager.setColorShiftEnabled(isChecked)
-                // Update preview and broadcast the change to update UI immediately
-                updatePreview()
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Error setting color shift", e)
+    }
+
+    private fun buildRecoverySection(parent: LinearLayout) {
+        val section = addSettingsSection(
+            parent,
+            "Recovery",
+            "These buttons clear out shaky old state without forcing you to reinstall or wipe the whole app."
+        )
+
+        addActionButton(section, "Reset motion defaults") {
+            customizationManager.resetMotionDefaults()
+            persistAppearance(
+                currentPrefs.copy(
+                    animationsEnabled = true,
+                    animationSpeed = AppearancePreferences.AnimationSpeed.NORMAL
+                )
+            )
+            Toast.makeText(requireContext(), "Motion defaults restored.", Toast.LENGTH_SHORT).show()
+        }
+
+        addActionButton(section, "Reset background defaults", outlined = true) {
+            customizationManager.resetBackgroundDefaults(clearPhoto = false)
+            broadcastLiveUpdate()
+            syncUiFromState()
+            Toast.makeText(requireContext(), "Background defaults restored.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun persistAppearance(updatedPrefs: AppearancePreferences) {
+        currentPrefs = updatedPrefs
+        currentPrefs.saveToPrefs(requireContext())
+        broadcastLiveUpdate()
+    }
+
+    private fun setBackgroundMode(mode: String, launchPickerIfMissing: Boolean = false) {
+        if (mode == VisualCustomizationManager.BACKGROUND_TYPE_PHOTO && !customizationManager.hasPhotoBackground()) {
+            if (launchPickerIfMissing) {
+                imagePickerLauncher.launch("image/*")
+            } else {
+                Toast.makeText(requireContext(), "Choose a photo first.", Toast.LENGTH_SHORT).show()
             }
+            syncUiFromState()
+            return
         }
-        
-        // Action buttons
-        applyButton.setOnClickListener {
-            applyCustomization()
-        }
-        
-        resetButton.setOnClickListener {
-            resetToDefaults()
-        }
+
+        customizationManager.setBackgroundType(mode)
+        broadcastLiveUpdate()
+        syncUiFromState()
     }
-    
-    private fun loadCurrentSettings() {
-        // Load background type
-        val backgroundType = customizationManager.getBackgroundType()
-        backgroundTypeSpinner.setSelection(when (backgroundType) {
-            VisualCustomizationManager.BACKGROUND_TYPE_GRADIENT -> 0
-            VisualCustomizationManager.BACKGROUND_TYPE_COLOR -> 1
-            VisualCustomizationManager.BACKGROUND_TYPE_PHOTO -> 2
-            else -> 0
-        })
-        
-        // Show photo controls if photo background is selected
-        showPhotoControls(backgroundType == VisualCustomizationManager.BACKGROUND_TYPE_PHOTO)
-        
-        // Load effect settings
-        blurSeekBar.progress = customizationManager.getPhotoBlurRadius()
-        tintSeekBar.progress = customizationManager.getPhotoTintIntensity()
-        dimSeekBar.progress = customizationManager.getPhotoDimming()
-        
-        // Load animation settings
-        parallaxSwitch.isChecked = customizationManager.isParallaxEnabled()
-        breathingSwitch.isChecked = customizationManager.isBreathingEnabled()
-        colorShiftSwitch.isChecked = customizationManager.isColorShiftEnabled()
-        
-        // Update preview
-        updatePreview()
+
+    private fun broadcastLiveUpdate() {
+        ThemeManager.broadcastChange(requireContext(), false)
+        refreshStatus()
     }
-    
-    private fun showPhotoControls(show: Boolean) {
-        val visibility = if (show) View.VISIBLE else View.GONE
-        photoBackgroundContainer.visibility = visibility
-        effectsContainer.visibility = visibility
-    }
-    
-    private fun openImagePicker() {
-        val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
-            type = "image/*"
-        }
-        imagePickerLauncher.launch(intent)
-    }
-    
-    
-    private fun updatePreview() {
-        try {
-            // Update the preview with current background settings
-            val currentBackground = customizationManager.getCurrentBackground()
-            previewBackground.background = currentBackground
-            
-            // Also broadcast change to update main app background immediately
-            com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), false)
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Error updating preview", e)
-        }
-    }
-    
-    private fun applyCustomization() {
-        try {
-            // Broadcast settings change to apply immediately without recreation
-            com.stash.opusplayer.ui.appearance.ThemeManager.broadcastChange(requireContext(), true)
-            
-            Toast.makeText(requireContext(), "Visual customization applied", Toast.LENGTH_SHORT).show()
-            
-            // Optional: recreate activity for full effect (commented out to prevent disruption)
-            // requireActivity().recreate() 
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Error applying customization", e)
-            Toast.makeText(requireContext(), "Error applying changes", Toast.LENGTH_SHORT).show()
-        }
-    }
-    
-    private fun resetToDefaults() {
-        // Reset photo settings to defaults
-        customizationManager.updatePhotoSettings()
-        
-        // Clear any photo background
-        customizationManager.clearPhotoBackground()
-        
-        // Default to gradient
-        customizationManager.setBackgroundType(VisualCustomizationManager.BACKGROUND_TYPE_GRADIENT)
-        
-        loadCurrentSettings()
-        
-        // Update preview and broadcast the change
-        updatePreview()
-        
-        Toast.makeText(requireContext(), "Settings reset to defaults", Toast.LENGTH_SHORT).show()
-    }
-    
-    override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
-        super.onCreateOptionsMenu(menu, inflater)
-        // We don't need any menu items, just need to handle back button
-    }
-    
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return when (item.itemId) {
-            android.R.id.home -> {
-                // Handle back button press
-                parentFragmentManager.popBackStack()
-                true
+
+    private fun syncUiFromState() {
+        currentPrefs = AppearancePreferences.fromPrefs(requireContext())
+
+        hydratingBackgroundMode = false
+        backgroundModeSpinner.setSelection(
+            when (customizationManager.getBackgroundType()) {
+                VisualCustomizationManager.BACKGROUND_TYPE_COLOR -> 1
+                VisualCustomizationManager.BACKGROUND_TYPE_PHOTO -> 2
+                else -> 0
             }
-            else -> super.onOptionsItemSelected(item)
-        }
+        )
+
+        hydratingAnimationSpeed = false
+        animationSpeedSpinner.setSelection(
+            AppearancePreferences.AnimationSpeed.entries.indexOf(currentPrefs.animationSpeed).coerceAtLeast(0)
+        )
+
+        refreshStatus()
     }
-    
-    override fun onDestroyView() {
-        super.onDestroyView()
-        // Reset action bar title when leaving
-        val activity = requireActivity() as? AppCompatActivity
-        activity?.supportActionBar?.apply {
-            setDisplayHomeAsUpEnabled(true)
-            title = "Settings"
+
+    private fun refreshStatus() {
+        val backgroundMode = when (customizationManager.getBackgroundType()) {
+            VisualCustomizationManager.BACKGROUND_TYPE_COLOR -> "Solid color"
+            VisualCustomizationManager.BACKGROUND_TYPE_PHOTO -> if (customizationManager.hasPhotoBackground()) "Photo background loaded" else "Photo mode needs an image"
+            else -> "Gradient background"
+        }
+
+        backgroundStatusView.text = buildString {
+            append("$backgroundMode")
+            append(" • Blur ${customizationManager.getPhotoBlurRadius()}px")
+            append(" • Dim ${customizationManager.getPhotoDimming()}%")
+            append(" • Opacity ${customizationManager.getPhotoOpacity()}%")
+        }
+
+        motionStatusView.text = buildString {
+            append("Animations ${if (currentPrefs.animationsEnabled) "On" else "Off"}")
+            append(" • ${currentPrefs.animationSpeed.name.lowercase().replaceFirstChar { it.uppercase() }} speed")
+            append(" • Parallax ${if (customizationManager.isParallaxEnabled()) "On" else "Off"}")
+            append(" • Breathing ${if (customizationManager.isBreathingEnabled()) "On" else "Off"}")
+            append(" • Color Shift ${if (customizationManager.isColorShiftEnabled()) "On" else "Off"}")
         }
     }
 }

@@ -8,6 +8,7 @@
 
     <!-- Neomorphic Search Bar -->
     <LinearLayout
+        android:id="@+id/downloadInfoCard"
         style="@style/NeomorphicCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -179,6 +180,7 @@
             android:alpha="0.6" />
 
         <TextView
+            android:id="@+id/emptyStateTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Search YouTube videos"
@@ -187,6 +189,7 @@
             android:layout_marginBottom="8dp" />
 
         <TextView
+            android:id="@+id/emptyStateSubtitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Enter a search query to find videos to download"

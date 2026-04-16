@@ -33,7 +33,11 @@ object FfmpegEmbedder {
             val extension = filePath.substringAfterLast('.', "").lowercase()
             val inFile: File = if (isContent) {
                 val tmp = File.createTempFile("in_", ".$extension", context.cacheDir)
-                resolver!!.openInputStream(uri!!)!!.use { it.copyTo(tmp.outputStream()) }
+                val inputUri = uri ?: return false
+                val inputStream = resolver?.openInputStream(inputUri) ?: return false
+                inputStream.use { stream ->
+                    tmp.outputStream().use { output -> stream.copyTo(output) }
+                }
                 tmp
             } else {
                 File(filePath)
@@ -45,7 +49,9 @@ object FfmpegEmbedder {
             val success = executeFfmpeg(cmd)
             if (success) {
                 if (isContent) {
-                    resolver!!.openOutputStream(uri!!, "rwt")!!.use { os ->
+                    val outputUri = uri ?: return false
+                    val outputStream = resolver?.openOutputStream(outputUri, "rwt") ?: return false
+                    outputStream.use { os ->
                         outFile.inputStream().use { ins -> ins.copyTo(os) }
                     }
                 } else {

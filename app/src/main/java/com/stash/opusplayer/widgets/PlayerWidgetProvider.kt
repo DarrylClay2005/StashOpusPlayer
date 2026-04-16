@@ -52,7 +52,11 @@ class PlayerWidgetProvider : AppWidgetProvider() {
         val sessionToken = SessionToken(context, ComponentName(context, MusicService::class.java))
         val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture.addListener({
-            val controller = controllerFuture.get()
+            val controller = runCatching { controllerFuture.get() }.getOrNull()
+            if (controller == null) {
+                MediaController.releaseFuture(controllerFuture)
+                return@addListener
+            }
             val isPlaying = controller.isPlaying
             val title = controller.mediaMetadata.title ?: "Unknown Title"
             val artist = controller.mediaMetadata.artist ?: "Unknown Artist"
@@ -62,7 +66,6 @@ class PlayerWidgetProvider : AppWidgetProvider() {
             views.setTextViewText(R.id.widgetArtist, artist)
             views.setImageViewResource(R.id.widgetPlayPause, if (isPlaying) R.drawable.ic_pause_24 else R.drawable.ic_play_arrow_24)
 
-            // Try to fill artwork bitmap from cache using a fake Song key
             val bmp = loadArtworkBitmap(context, title.toString(), artist.toString(), controller.mediaMetadata.albumTitle?.toString() ?: "")
             if (bmp != null) {
                 views.setImageViewBitmap(R.id.widgetArtwork, bmp)
@@ -88,7 +91,11 @@ class PlayerWidgetProvider : AppWidgetProvider() {
         val sessionToken = SessionToken(context, ComponentName(context, MusicService::class.java))
         val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture.addListener({
-            val controller = controllerFuture.get()
+            val controller = runCatching { controllerFuture.get() }.getOrNull()
+            if (controller == null) {
+                MediaController.releaseFuture(controllerFuture)
+                return@addListener
+            }
             if (controller.isPlaying) controller.pause() else controller.play()
             MediaController.releaseFuture(controllerFuture)
             // Request widget UI refresh
@@ -100,7 +107,11 @@ class PlayerWidgetProvider : AppWidgetProvider() {
         val sessionToken = SessionToken(context, ComponentName(context, MusicService::class.java))
         val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture.addListener({
-            val controller = controllerFuture.get()
+            val controller = runCatching { controllerFuture.get() }.getOrNull()
+            if (controller == null) {
+                MediaController.releaseFuture(controllerFuture)
+                return@addListener
+            }
             controller.seekToNext()
             MediaController.releaseFuture(controllerFuture)
             // Request widget UI refresh
@@ -112,7 +123,11 @@ class PlayerWidgetProvider : AppWidgetProvider() {
         val sessionToken = SessionToken(context, ComponentName(context, MusicService::class.java))
         val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture.addListener({
-            val controller = controllerFuture.get()
+            val controller = runCatching { controllerFuture.get() }.getOrNull()
+            if (controller == null) {
+                MediaController.releaseFuture(controllerFuture)
+                return@addListener
+            }
             controller.seekToPrevious()
             MediaController.releaseFuture(controllerFuture)
             context.sendBroadcast(Intent(ACTION_UPDATE).setComponent(ComponentName(context, PlayerWidgetProvider::class.java)))
@@ -123,7 +138,11 @@ class PlayerWidgetProvider : AppWidgetProvider() {
         val sessionToken = SessionToken(context, ComponentName(context, MusicService::class.java))
         val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture.addListener({
-            val controller = controllerFuture.get()
+            val controller = runCatching { controllerFuture.get() }.getOrNull()
+            if (controller == null) {
+                MediaController.releaseFuture(controllerFuture)
+                return@addListener
+            }
             val pos = controller.currentPosition
             val dur = controller.duration
             val newPos = if (deltaMs >= 0) (pos + deltaMs).coerceAtMost(if (dur > 0) dur else Long.MAX_VALUE) else (pos + deltaMs).coerceAtLeast(0)
@@ -135,16 +154,8 @@ class PlayerWidgetProvider : AppWidgetProvider() {
 
     private fun loadArtworkBitmap(context: Context, title: String, artist: String, album: String): Bitmap? {
         return try {
-            val fake = com.stash.opusplayer.data.Song(
-                id = 0L,
-                title = title,
-                artist = artist,
-                album = album,
-                duration = 0L,
-                path = ""
-            )
             val cache = com.stash.opusplayer.artwork.ArtworkCache(context)
-            cache.loadBitmapIfPresent(fake, 256)
+            cache.loadBitmapForMetadata(title, artist, album, 256)
         } catch (_: Exception) {
             null
         }

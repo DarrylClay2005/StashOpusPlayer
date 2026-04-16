@@ -1,1109 +1,380 @@
 package com.stash.opusplayer.ui.appearance
 
-import android.app.Activity
-import android.content.Intent
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.LayoutInflater
-import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
-import android.widget.*
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import androidx.fragment.app.Fragment
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.card.MaterialCardView
-import com.google.android.material.chip.Chip
-import com.google.android.material.chip.ChipGroup
-import com.stash.opusplayer.R
-import com.stash.opusplayer.ui.MainActivity
+import android.widget.AdapterView
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
+import com.stash.opusplayer.ui.fragments.settings.NavigableSettingsFragment
+import com.stash.opusplayer.ui.fragments.settings.addActionButton
+import com.stash.opusplayer.ui.fragments.settings.addBodyText
+import com.stash.opusplayer.ui.fragments.settings.addChipButtonRow
+import com.stash.opusplayer.ui.fragments.settings.addSettingsSection
+import com.stash.opusplayer.ui.fragments.settings.addSliderControl
+import com.stash.opusplayer.ui.fragments.settings.addSpinnerControl
+import com.stash.opusplayer.ui.fragments.settings.addSwitchControl
+import com.stash.opusplayer.ui.fragments.settings.createSettingsPage
 import com.stash.opusplayer.ui.managers.MiniPlayerToggleManager
+import kotlin.math.roundToInt
 
-class AppearanceFragment : Fragment() {
-    
+class AppearanceFragment : NavigableSettingsFragment() {
+
+    override val screenTitle: String = "Appearance"
+
+    private data class AppearancePalette(
+        val label: String,
+        val primaryColor: Int,
+        val accentColor: Int,
+        val backgroundColor: Int,
+        val textPrimaryColor: Int,
+        val textSecondaryColor: Int
+    )
+
+    private val palettes = listOf(
+        AppearancePalette(
+            label = "Nightwave",
+            primaryColor = Color.parseColor("#1A2335"),
+            accentColor = Color.parseColor("#F97316"),
+            backgroundColor = Color.parseColor("#0A1220"),
+            textPrimaryColor = Color.parseColor("#F8FAFC"),
+            textSecondaryColor = Color.parseColor("#CBD5E1")
+        ),
+        AppearancePalette(
+            label = "Vinyl Ember",
+            primaryColor = Color.parseColor("#2B1D17"),
+            accentColor = Color.parseColor("#FB923C"),
+            backgroundColor = Color.parseColor("#120D0B"),
+            textPrimaryColor = Color.parseColor("#FFF7ED"),
+            textSecondaryColor = Color.parseColor("#E7C9B3")
+        ),
+        AppearancePalette(
+            label = "Glass Blue",
+            primaryColor = Color.parseColor("#18324E"),
+            accentColor = Color.parseColor("#38BDF8"),
+            backgroundColor = Color.parseColor("#0B1726"),
+            textPrimaryColor = Color.parseColor("#E0F2FE"),
+            textSecondaryColor = Color.parseColor("#BAE6FD")
+        ),
+        AppearancePalette(
+            label = "Forest Mix",
+            primaryColor = Color.parseColor("#173126"),
+            accentColor = Color.parseColor("#34D399"),
+            backgroundColor = Color.parseColor("#0A1712"),
+            textPrimaryColor = Color.parseColor("#ECFDF5"),
+            textSecondaryColor = Color.parseColor("#A7F3D0")
+        )
+    )
+
+    private lateinit var miniPlayerToggleManager: MiniPlayerToggleManager
+    private lateinit var setupSummaryView: TextView
+    private lateinit var densitySummaryView: TextView
+
     private var currentPrefs = AppearancePreferences()
-    private lateinit var previewCard: MaterialCardView
-    private lateinit var previewTitle: TextView
-    private lateinit var previewBody: TextView
-    private lateinit var previewButton: MaterialButton
-    
-    // Color tracking for preview updates
-    private var tempPrimaryColor: Int? = null
-    private var tempAccentColor: Int? = null
-    private var tempBackgroundColor: Int? = null
-    private var tempTextPrimaryColor: Int? = null
-    private var tempTextSecondaryColor: Int? = null
-    
-    // File picker launchers
-    private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        uri?.let { exportPresetToUri(it) }
-    }
-    
-    private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { importPresetFromUri(it) }
-    }
-    
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
-        currentPrefs = AppearancePreferences.fromPrefs(requireContext())
-        return createAppearanceView()
-    }
+    private var hydratingNowPlayingTheme = false
+    private var hydratingMiniPlayerStyle = false
 
-    @Suppress("DEPRECATION")
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-        val activity = requireActivity() as? AppCompatActivity
-        activity?.supportActionBar?.apply {
-            setDisplayHomeAsUpEnabled(true)
-            setDisplayShowHomeEnabled(true)
-            title = getString(R.string.settings_appearance_title)
-        }
-        setHasOptionsMenu(true)
-    }
-    
-    private fun createAppearanceView(): View {
-        val scrollView = ScrollView(requireContext())
-        val layout = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(32, 32, 32, 32)
-        }
-        
-        // Title
-        val title = TextView(requireContext()).apply {
-            text = getString(R.string.settings_appearance_title)
-            textSize = 24f
-            setPadding(0, 0, 0, 32)
-            setTextColor(ContextCompat.getColor(requireContext(), R.color.text_primary))
-        }
-        layout.addView(title)
-        
-        // Live Preview Card
-        layout.addView(buildLivePreviewCard())
-        
-        // Theme & Colors Section
-        addSectionHeader(layout, getString(R.string.settings_appearance_theme_colors))
-        layout.addView(buildThemeColorsSection())
-        
-        // Typography Section
-        addSectionHeader(layout, getString(R.string.settings_appearance_typography))
-        layout.addView(buildTypographySection())
-        
-        // UI Elements Section
-        addSectionHeader(layout, getString(R.string.settings_appearance_ui_elements))
-        layout.addView(buildUIElementsSection())
-        
-        // Background Section
-        addSectionHeader(layout, getString(R.string.settings_appearance_background))
-        layout.addView(buildBackgroundSection())
-        
-        // Animations Section
-        addSectionHeader(layout, getString(R.string.settings_appearance_animations))
-        layout.addView(buildAnimationsSection())
-        
-        // Mini Player Section
-        addSectionHeader(layout, getString(R.string.settings_appearance_mini_player))
-        layout.addView(buildMiniPlayerSection())
-        
-        // SynthWave Visualizer Section
-        addSectionHeader(layout, "SynthWave Visualizer")
-        layout.addView(buildSynthWaveSection())
-        
-        // Presets Section
-        addSectionHeader(layout, getString(R.string.settings_appearance_presets))
-        layout.addView(buildPresetsSection())
-        
-        // Global Reset Button
-        val resetAllButton = MaterialButton(requireContext()).apply {
-            text = getString(R.string.appearance_reset_defaults)
-            setTextColor(Color.WHITE)
-            backgroundTintList = android.content.res.ColorStateList.valueOf(ContextCompat.getColor(requireContext(), R.color.error_color))
-            setOnClickListener { showResetAllDialog() }
-        }
-        layout.addView(resetAllButton)
-        
-        scrollView.addView(layout)
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        currentPrefs = AppearancePreferences.fromPrefs(requireContext())
+        miniPlayerToggleManager = MiniPlayerToggleManager(requireContext())
+
+        val (scrollView, content) = createSettingsPage(
+            title = "Appearance",
+            subtitle = "This screen was rebuilt around stable controls only: tighter sizing, dependable player layouts, and curated palettes instead of the old crash-prone customization stack."
+        )
+
+        buildCurrentSetup(content)
+        buildPaletteSection(content)
+        buildPlayerLayoutSection(content)
+        buildSizingSection(content)
+        buildResetSection(content)
+        refreshSummary()
+
         return scrollView
     }
-    
-    private fun buildLivePreviewCard(): View {
-        val container = FrameLayout(requireContext()).apply {
-            setPadding(0, 0, 0, 24)
+
+    private fun buildCurrentSetup(parent: LinearLayout) {
+        val section = addSettingsSection(
+            parent,
+            "Current Setup",
+            "These values apply live across the library, mini player, and now playing screen."
+        )
+
+        setupSummaryView = addBodyText(section, "")
+        densitySummaryView = addBodyText(section, "")
+
+        addActionButton(section, "Refresh appearance now", outlined = true) {
+            currentPrefs = AppearancePreferences.fromPrefs(requireContext())
+            refreshSummary()
+            ThemeManager.broadcastChange(requireContext(), false)
         }
-        
-        previewCard = MaterialCardView(requireContext()).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
-            )
-            radius = currentPrefs.cardCornerRadiusDp * resources.displayMetrics.density
-            setCardBackgroundColor(currentPrefs.backgroundColor)
-            cardElevation = if (currentPrefs.shadowsEnabled) 8f * currentPrefs.shadowIntensity else 0f
-        }
-        
-        val innerLayout = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 24, 24, 24)
-        }
-        
-        previewTitle = TextView(requireContext()).apply {
-            text = getString(R.string.appearance_live_preview)
-            textSize = 18f * currentPrefs.fontScale
-            setTextColor(currentPrefs.textPrimaryColor)
-            typeface = if (currentPrefs.titleBold) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
-        }
-        innerLayout.addView(previewTitle)
-        
-        previewBody = TextView(requireContext()).apply {
-            text = "This preview updates in real-time as you adjust settings"
-            textSize = 14f * currentPrefs.fontScale
-            setTextColor(currentPrefs.textSecondaryColor)
-            setPadding(0, 8, 0, 16)
-        }
-        innerLayout.addView(previewBody)
-        
-        previewButton = MaterialButton(requireContext()).apply {
-            text = "Sample Button"
-            backgroundTintList = android.content.res.ColorStateList.valueOf(currentPrefs.accentColor)
-            setTextColor(Color.WHITE)
-            scaleX = currentPrefs.buttonSizeScale
-            scaleY = currentPrefs.buttonSizeScale
-        }
-        innerLayout.addView(previewButton)
-        
-        previewCard.addView(innerLayout)
-        container.addView(previewCard)
-        return container
     }
-    
-    private fun buildThemeColorsSection(): View {
-        val section = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        
-        // Quick presets chips
-        val presetsLabel = TextView(requireContext()).apply {
-            text = getString(R.string.appearance_presets_quick)
-            setTextColor(ContextCompat.getColor(requireContext(), R.color.text_secondary))
-            setPadding(0, 8, 0, 8)
-        }
-        section.addView(presetsLabel)
-        
-        val chipGroup = ChipGroup(requireContext()).apply {
-            isSingleSelection = false
-        }
-        
-        AppearancePresets.listPresets().forEach { preset ->
-            val chip = Chip(requireContext()).apply {
-                text = preset.name
-                isCheckable = true
-                setOnClickListener {
-                    applyPreset(preset)
-                    isChecked = false
+
+    private fun buildPaletteSection(parent: LinearLayout) {
+        val section = addSettingsSection(
+            parent,
+            "Color Direction",
+            "Only stable presets live here now. That keeps the appearance screen fast and avoids broken edge cases from the old custom picker flow."
+        )
+
+        addChipButtonRow(
+            section,
+            palettes.map { palette ->
+                palette.label to {
+                    persistAppearance(
+                        currentPrefs.copy(
+                            primaryColor = palette.primaryColor,
+                            accentColor = palette.accentColor,
+                            backgroundColor = palette.backgroundColor,
+                            textPrimaryColor = palette.textPrimaryColor,
+                            textSecondaryColor = palette.textSecondaryColor
+                        )
+                    )
+                    Toast.makeText(requireContext(), "${palette.label} applied.", Toast.LENGTH_SHORT).show()
                 }
             }
-            chipGroup.addView(chip)
-        }
-        section.addView(chipGroup)
-        
-        // Color pickers
-        section.addView(createColorPickerButton(getString(R.string.appearance_primary_color), currentPrefs.primaryColor) { color ->
-            tempPrimaryColor = color
-            updatePreview()
-        })
-        
-        section.addView(createColorPickerButton(getString(R.string.appearance_accent_color), currentPrefs.accentColor) { color ->
-            tempAccentColor = color
-            updatePreview()
-        })
-        
-        section.addView(createColorPickerButton(getString(R.string.appearance_background_color), currentPrefs.backgroundColor) { color ->
-            tempBackgroundColor = color
-            updatePreview()
-            checkContrast()
-        })
-        
-        section.addView(createColorPickerButton(getString(R.string.appearance_text_primary_color), currentPrefs.textPrimaryColor) { color ->
-            tempTextPrimaryColor = color
-            updatePreview()
-            checkContrast()
-        })
-        
-        section.addView(createColorPickerButton(getString(R.string.appearance_text_secondary_color), currentPrefs.textSecondaryColor) { color ->
-            tempTextSecondaryColor = color
-            updatePreview()
-            checkContrast()
-        })
-        
-        // Apply Colors Button
-        val applyButton = MaterialButton(requireContext()).apply {
-            text = getString(R.string.appearance_apply_colors)
-            setOnClickListener { applyColors() }
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(0, 16, 0, 0)
-            }
-        }
-        section.addView(applyButton)
-        
-        return section
-    }
-    
-    private fun buildTypographySection(): View {
-        val section = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        
-        // Font scale spinner
-        val fontScaleLabel = TextView(requireContext()).apply {
-            text = getString(R.string.appearance_font_scale)
-            setTextColor(ContextCompat.getColor(requireContext(), R.color.text_secondary))
-            setPadding(0, 8, 0, 8)
-        }
-        section.addView(fontScaleLabel)
-        
-        val fontScales = listOf(
-            getString(R.string.appearance_font_scale_small) to 0.85f,
-            getString(R.string.appearance_font_scale_medium) to 1.0f,
-            getString(R.string.appearance_font_scale_large) to 1.15f,
-            getString(R.string.appearance_font_scale_xlarge) to 1.3f
         )
-        
-        val fontScaleSpinner = Spinner(requireContext())
-        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, fontScales.map { it.first })
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        fontScaleSpinner.adapter = adapter
-        fontScaleSpinner.setSelection(fontScales.indexOfFirst { it.second == currentPrefs.fontScale }.coerceAtLeast(0))
-        fontScaleSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val newScale = fontScales[position].second
-                currentPrefs = currentPrefs.copy(fontScale = newScale)
-                currentPrefs.saveToPrefs(requireContext())
-                updatePreview()
-                ThemeManager.broadcastChange(requireContext(), true) // Requires recreate
-                Toast.makeText(requireContext(), "Font scale changed. App will restart.", Toast.LENGTH_SHORT).show()
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
+
+        addSwitchControl(
+            section,
+            title = "Bold headers",
+            summary = "Makes toolbar and section titles read a little stronger across the rebuilt layouts.",
+            checked = currentPrefs.titleBold
+        ) { enabled ->
+            persistAppearance(currentPrefs.copy(titleBold = enabled))
         }
-        section.addView(fontScaleSpinner)
-        
-        // Bold titles toggle
-        val boldToggle = CheckBox(requireContext()).apply {
-            text = getString(R.string.appearance_title_weight_bold)
-            isChecked = currentPrefs.titleBold
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(titleBold = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                updatePreview()
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
+
+        addSwitchControl(
+            section,
+            title = "Card shadows",
+            summary = "Keeps elevation cues on cards without bringing back the heavy old effects stack.",
+            checked = currentPrefs.shadowsEnabled
+        ) { enabled ->
+            persistAppearance(currentPrefs.copy(shadowsEnabled = enabled))
         }
-        section.addView(boldToggle)
-        
-        return section
     }
-    
-    private fun buildUIElementsSection(): View {
-        val section = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        
-        // Button size scale
-        section.addView(createSeekBarControl(
-            getString(R.string.appearance_button_size),
-            (currentPrefs.buttonSizeScale * 100).toInt(),
-            80, 120,
-            { progress ->
-                val scale = progress / 100f
-                previewButton.scaleX = scale
-                previewButton.scaleY = scale
-            },
-            { progress ->
-                val scale = progress / 100f
-                currentPrefs = currentPrefs.copy(buttonSizeScale = scale)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        ))
-        
-        // Corner radius
-        section.addView(createSeekBarControl(
-            getString(R.string.appearance_corner_radius),
-            currentPrefs.cardCornerRadiusDp,
-            8, 32,
-            { progress ->
-                previewCard.radius = progress * resources.displayMetrics.density
-            },
-            { progress ->
-                currentPrefs = currentPrefs.copy(cardCornerRadiusDp = progress)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        ))
-        
-        // Shadows enabled
-        val shadowsToggle = CheckBox(requireContext()).apply {
-            text = getString(R.string.appearance_shadows_enable)
-            isChecked = currentPrefs.shadowsEnabled
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(shadowsEnabled = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                updatePreview()
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        }
-        section.addView(shadowsToggle)
-        
-        // Shadow intensity
-        section.addView(createSeekBarControl(
-            getString(R.string.appearance_shadow_intensity),
-            (currentPrefs.shadowIntensity * 100).toInt(),
-            0, 100,
-            { progress ->
-                val intensity = progress / 100f
-                previewCard.cardElevation = if (currentPrefs.shadowsEnabled) 8f * intensity else 0f
-            },
-            { progress ->
-                val intensity = progress / 100f
-                currentPrefs = currentPrefs.copy(shadowIntensity = intensity)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        ))
-        
-        return section
-    }
-    
-    private fun buildBackgroundSection(): View {
-        val section = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        
-        // Background image button
-        val bgImageButton = MaterialButton(requireContext()).apply {
-            text = getString(R.string.appearance_background_image)
-            setOnClickListener {
-                (activity as? MainActivity)?.pickBackgroundImage()
-            }
-        }
-        section.addView(bgImageButton)
-        
-        // Use solid color toggle
-        val solidColorToggle = CheckBox(requireContext()).apply {
-            text = getString(R.string.appearance_use_solid_color)
-            isChecked = currentPrefs.useSolidBackgroundColor
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(useSolidBackgroundColor = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-                activity?.let { ThemeManager.applyBackgroundOverlay(it, currentPrefs) }
-            }
-        }
-        section.addView(solidColorToggle)
-        
-        // Background blur
-        section.addView(createSeekBarControl(
-            getString(R.string.appearance_background_blur) + " (Android 12+)",
-            currentPrefs.backgroundBlurRadius,
-            0, 25,
-            { },
-            { progress ->
-                currentPrefs = currentPrefs.copy(backgroundBlurRadius = progress)
-                currentPrefs.saveToPrefs(requireContext())
-                activity?.let { ThemeManager.applyBackgroundOverlay(it, currentPrefs) }
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        ))
-        
-        // Background dim
-        section.addView(createSeekBarControl(
-            getString(R.string.appearance_background_dim),
-            currentPrefs.backgroundDimPercent,
-            0, 100,
-            { },
-            { progress ->
-                currentPrefs = currentPrefs.copy(backgroundDimPercent = progress)
-                currentPrefs.saveToPrefs(requireContext())
-                activity?.let { ThemeManager.applyBackgroundOverlay(it, currentPrefs) }
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        ))
-        
-        return section
-    }
-    
-    private fun buildAnimationsSection(): View {
-        val section = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        
-        // Enable animations
-        val animToggle = CheckBox(requireContext()).apply {
-            text = getString(R.string.appearance_animations_enable)
-            isChecked = currentPrefs.animationsEnabled
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(animationsEnabled = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        }
-        section.addView(animToggle)
-        
-        // Animation speed
-        val speedLabel = TextView(requireContext()).apply {
-            text = getString(R.string.appearance_animation_speed)
-            setTextColor(ContextCompat.getColor(requireContext(), R.color.text_secondary))
-            setPadding(0, 16, 0, 8)
-        }
-        section.addView(speedLabel)
-        
-        val speeds = listOf(
-            getString(R.string.appearance_animation_speed_slow) to AppearancePreferences.AnimationSpeed.SLOW,
-            getString(R.string.appearance_animation_speed_normal) to AppearancePreferences.AnimationSpeed.NORMAL,
-            getString(R.string.appearance_animation_speed_fast) to AppearancePreferences.AnimationSpeed.FAST
+
+    private fun buildPlayerLayoutSection(parent: LinearLayout) {
+        val section = addSettingsSection(
+            parent,
+            "Player Layouts",
+            "These are the rebuilt controls that drive the now playing screen and the mini player without the old dead toggles."
         )
-        
-        val speedSpinner = Spinner(requireContext())
-        val speedAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, speeds.map { it.first })
-        speedAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        speedSpinner.adapter = speedAdapter
-        speedSpinner.setSelection(speeds.indexOfFirst { it.second == currentPrefs.animationSpeed }.coerceAtLeast(0))
-        speedSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val newSpeed = speeds[position].second
-                currentPrefs = currentPrefs.copy(animationSpeed = newSpeed)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-        section.addView(speedSpinner)
-        
-        return section
-    }
-    
-    private fun buildMiniPlayerSection(): View {
-        val section = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        val miniPlayerToggleManager = MiniPlayerToggleManager(requireContext())
-        
-        // Height
-        section.addView(createSeekBarControl(
-            getString(R.string.appearance_mini_player_height),
-            currentPrefs.miniPlayerHeightDp,
-            56, 96,
-            { },
-            { progress ->
-                currentPrefs = currentPrefs.copy(miniPlayerHeightDp = progress)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        ))
-        
-        // Show album art
-        val artToggle = CheckBox(requireContext()).apply {
-            text = getString(R.string.appearance_mini_player_show_art)
-            isChecked = currentPrefs.miniPlayerShowArt
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(miniPlayerShowArt = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        }
-        section.addView(artToggle)
-        
-        // Show artist name
-        val artistToggle = CheckBox(requireContext()).apply {
-            text = getString(R.string.appearance_mini_player_show_artist)
-            isChecked = currentPrefs.miniPlayerShowArtist
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(miniPlayerShowArtist = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        }
-        section.addView(artistToggle)
-        
-        // Compact mode
-        val compactToggle = CheckBox(requireContext()).apply {
-            text = getString(R.string.appearance_mini_player_compact_mode)
-            isChecked = currentPrefs.miniPlayerCompactMode
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(miniPlayerCompactMode = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        }
-        section.addView(compactToggle)
-
-        val miniPlayerStyleLabel = TextView(requireContext()).apply {
-            text = "Mini Player Style"
-            setTextColor(ContextCompat.getColor(requireContext(), R.color.text_secondary))
-            setPadding(0, 16, 0, 8)
-        }
-        section.addView(miniPlayerStyleLabel)
-
-        val styles = miniPlayerToggleManager.getAvailableStyles()
-        val styleSpinner = Spinner(requireContext())
-        val styleAdapter = ArrayAdapter(
-            requireContext(),
-            android.R.layout.simple_spinner_item,
-            styles.map { it.second }
-        )
-        styleAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        styleSpinner.adapter = styleAdapter
-        val currentStyle = miniPlayerToggleManager.getMiniPlayerStyle()
-        styleSpinner.setSelection(styles.indexOfFirst { it.first == currentStyle }.coerceAtLeast(0))
-        section.addView(styleSpinner)
-
-        val styleFeaturesLabel = TextView(requireContext()).apply {
-            textSize = 12f
-            setTextColor(ContextCompat.getColor(requireContext(), R.color.text_secondary))
-            setPadding(0, 8, 0, 0)
-        }
-        section.addView(styleFeaturesLabel)
-
-        fun updateStyleFeatures(style: String) {
-            styleFeaturesLabel.text = miniPlayerToggleManager.getStyleFeatures(style).joinToString(" • ")
-        }
-        updateStyleFeatures(currentStyle)
-
-        var styleHydrated = false
-        styleSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val selectedStyle = styles[position].first
-                updateStyleFeatures(selectedStyle)
-                if (!styleHydrated) {
-                    styleHydrated = true
-                    return
-                }
-                miniPlayerToggleManager.setMiniPlayerStyle(selectedStyle)
-                ThemeManager.broadcastChange(requireContext(), true)
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
-
-        val nowPlayingLabel = TextView(requireContext()).apply {
-            text = "Now Playing Layout"
-            setTextColor(ContextCompat.getColor(requireContext(), R.color.text_secondary))
-            setPadding(0, 16, 0, 8)
-        }
-        section.addView(nowPlayingLabel)
 
         val nowPlayingThemes = NowPlayingLayoutTheme.entries
-        val nowPlayingSpinner = Spinner(requireContext())
-        val nowPlayingAdapter = ArrayAdapter(
-            requireContext(),
-            android.R.layout.simple_spinner_item,
-            nowPlayingThemes.map { it.displayName }
+        val nowPlayingSpinner = addSpinnerControl(
+            section,
+            title = "Now playing layout",
+            summary = "Aurora stays balanced, Vinyl Deck leans into artwork, and Minimal Deck keeps playback tighter.",
+            entries = nowPlayingThemes.map { it.displayName }
         )
-        nowPlayingAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        nowPlayingSpinner.adapter = nowPlayingAdapter
-        nowPlayingSpinner.setSelection(
-            nowPlayingThemes.indexOf(currentPrefs.nowPlayingLayoutTheme).coerceAtLeast(0)
-        )
-        section.addView(nowPlayingSpinner)
-
-        var nowPlayingHydrated = false
+        nowPlayingSpinner.setSelection(nowPlayingThemes.indexOf(currentPrefs.nowPlayingLayoutTheme).coerceAtLeast(0))
         nowPlayingSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (!nowPlayingHydrated) {
-                    nowPlayingHydrated = true
+                if (!hydratingNowPlayingTheme) {
+                    hydratingNowPlayingTheme = true
                     return
                 }
-                currentPrefs = currentPrefs.copy(nowPlayingLayoutTheme = nowPlayingThemes[position])
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
+                val selected = nowPlayingThemes[position]
+                if (selected != currentPrefs.nowPlayingLayoutTheme) {
+                    persistAppearance(currentPrefs.copy(nowPlayingLayoutTheme = selected))
+                }
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
-        
-        // Spinning art animation
-        val spinningArtToggle = CheckBox(requireContext()).apply {
-            text = getString(R.string.appearance_mini_player_spinning_art)
-            isChecked = currentPrefs.miniPlayerSpinningArt
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(miniPlayerSpinningArt = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        }
-        section.addView(spinningArtToggle)
-        
-        return section
-    }
-    
-    private fun buildSynthWaveSection(): View {
-        val section = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        
-        // Enable SynthWave visualizer
-        val enableToggle = CheckBox(requireContext()).apply {
-            text = "Enable SynthWave Visualizer"
-            isChecked = currentPrefs.synthWaveEnabled
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(synthWaveEnabled = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-                Toast.makeText(requireContext(), "SynthWave visualizer toggled", Toast.LENGTH_SHORT).show()
-            }
-        }
-        section.addView(enableToggle)
-        
-        // Progress mode toggle
-        val progressModeToggle = CheckBox(requireContext()).apply {
-            text = "Progress Mode (Wave follows song progress)"
-            isChecked = currentPrefs.synthWaveProgressMode
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(synthWaveProgressMode = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-                Toast.makeText(requireContext(), "SynthWave mode updated", Toast.LENGTH_SHORT).show()
-            }
-        }
-        section.addView(progressModeToggle)
-        
-        // Animation intensity slider
-        section.addView(createSeekBarControl(
-            "Animation Intensity",
-            (currentPrefs.synthWaveAnimationIntensity * 100).toInt(),
-            10, 200,
-            { },
-            { progress ->
-                val intensity = progress / 100f
-                currentPrefs = currentPrefs.copy(synthWaveAnimationIntensity = intensity)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        ))
-        
-        // Particle count slider
-        section.addView(createSeekBarControl(
-            "Particle Count",
-            currentPrefs.synthWaveParticleCount,
-            50, 500,
-            { },
-            { progress ->
-                currentPrefs = currentPrefs.copy(synthWaveParticleCount = progress)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        ))
-        
-        // Wave frequency bands
-        section.addView(createSeekBarControl(
-            "Frequency Bands",
-            currentPrefs.synthWaveFrequencyBands,
-            16, 128,
-            { },
-            { progress ->
-                currentPrefs = currentPrefs.copy(synthWaveFrequencyBands = progress)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        ))
-        
-        // Enable lightning effects
-        val lightningToggle = CheckBox(requireContext()).apply {
-            text = "Lightning Effects on Bass Drop"
-            isChecked = currentPrefs.synthWaveLightningEnabled
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(synthWaveLightningEnabled = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        }
-        section.addView(lightningToggle)
-        
-        // Enable ripple effects
-        val rippleToggle = CheckBox(requireContext()).apply {
-            text = "Ripple Effects"
-            isChecked = currentPrefs.synthWaveRippleEnabled
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(synthWaveRippleEnabled = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        }
-        section.addView(rippleToggle)
-        
-        // Enable shake effects
-        val shakeToggle = CheckBox(requireContext()).apply {
-            text = "Shake Effects on Beat"
-            isChecked = currentPrefs.synthWaveShakeEnabled
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(synthWaveShakeEnabled = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-            }
-        }
-        section.addView(shakeToggle)
-        
-        // Performance mode toggle
-        val performanceToggle = CheckBox(requireContext()).apply {
-            text = "Performance Mode (Reduced Effects)"
-            isChecked = currentPrefs.synthWavePerformanceMode
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(synthWavePerformanceMode = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-                Toast.makeText(requireContext(), "Performance mode updated", Toast.LENGTH_SHORT).show()
-            }
-        }
-        section.addView(performanceToggle)
-        
-        // Custom colors toggle
-        val customColorsToggle = CheckBox(requireContext()).apply {
-            text = "Use Custom Colors"
-            isChecked = currentPrefs.synthWaveUseCustomColors
-            setOnCheckedChangeListener { _, isChecked ->
-                currentPrefs = currentPrefs.copy(synthWaveUseCustomColors = isChecked)
-                currentPrefs.saveToPrefs(requireContext())
-                ThemeManager.broadcastChange(requireContext(), false)
-                Toast.makeText(requireContext(), "SynthWave colors updated", Toast.LENGTH_SHORT).show()
-            }
-        }
-        section.addView(customColorsToggle)
-        
-        // Custom color pickers (only show when custom colors is enabled)
-        val colorSection = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = if (currentPrefs.synthWaveUseCustomColors) View.VISIBLE else View.GONE
-        }
-        
-        colorSection.addView(createColorPickerButton("Primary Wave Color", currentPrefs.synthWavePrimaryColor) { color ->
-            currentPrefs = currentPrefs.copy(synthWavePrimaryColor = color)
-            currentPrefs.saveToPrefs(requireContext())
-            ThemeManager.broadcastChange(requireContext(), false)
-        })
-        
-        colorSection.addView(createColorPickerButton("Secondary Wave Color", currentPrefs.synthWaveSecondaryColor) { color ->
-            currentPrefs = currentPrefs.copy(synthWaveSecondaryColor = color)
-            currentPrefs.saveToPrefs(requireContext())
-            ThemeManager.broadcastChange(requireContext(), false)
-        })
-        
-        colorSection.addView(createColorPickerButton("Glow Color", currentPrefs.synthWaveGlowColor) { color ->
-            currentPrefs = currentPrefs.copy(synthWaveGlowColor = color)
-            currentPrefs.saveToPrefs(requireContext())
-            ThemeManager.broadcastChange(requireContext(), false)
-        })
-        
-        section.addView(colorSection)
-        
-        // Update color section visibility when custom colors toggle changes
-        customColorsToggle.setOnCheckedChangeListener { _, isChecked ->
-            currentPrefs = currentPrefs.copy(synthWaveUseCustomColors = isChecked)
-            currentPrefs.saveToPrefs(requireContext())
-            colorSection.visibility = if (isChecked) View.VISIBLE else View.GONE
-            ThemeManager.broadcastChange(requireContext(), false)
-            Toast.makeText(requireContext(), "SynthWave colors updated", Toast.LENGTH_SHORT).show()
-        }
-        
-        return section
-    }
-    
-    private fun buildPresetsSection(): View {
-        val section = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        
-        // Save preset button
-        val saveButton = MaterialButton(requireContext()).apply {
-            text = getString(R.string.appearance_save_preset)
-            setOnClickListener { showSavePresetDialog() }
-        }
-        section.addView(saveButton)
-        
-        // Load preset button
-        val loadButton = MaterialButton(requireContext()).apply {
-            text = getString(R.string.appearance_load_preset)
-            setOnClickListener { showLoadPresetDialog() }
-        }
-        section.addView(loadButton)
-        
-        // Export preset button
-        val exportButton = MaterialButton(requireContext()).apply {
-            text = getString(R.string.appearance_export_preset)
-            setOnClickListener { exportPreset() }
-        }
-        section.addView(exportButton)
-        
-        // Import preset button
-        val importButton = MaterialButton(requireContext()).apply {
-            text = getString(R.string.appearance_import_preset)
-            setOnClickListener { importPreset() }
-        }
-        section.addView(importButton)
-        
-        return section
-    }
-    
-    // Helper methods continued in next part...
-    private fun addSectionHeader(parent: LinearLayout, title: String) {
-        val header = TextView(requireContext()).apply {
-            text = title
-            textSize = 18f
-            setPadding(0, 24, 0, 12)
-            setTextColor(ContextCompat.getColor(requireContext(), android.R.color.holo_blue_bright))
-        }
-        parent.addView(header)
-    }
-    
-    private fun createColorPickerButton(label: String, initialColor: Int, onColorSelected: (Int) -> Unit): View {
-        val row = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 8, 0, 8)
-        }
-        
-        val labelView = TextView(requireContext()).apply {
-            text = label
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            setTextColor(ContextCompat.getColor(requireContext(), R.color.text_primary))
-        }
-        row.addView(labelView)
-        
-        val colorSwatch = View(requireContext()).apply {
-            val size = (48 * resources.displayMetrics.density).toInt()
-            layoutParams = LinearLayout.LayoutParams(size, size)
-            background = GradientDrawable().apply {
-                setColor(initialColor)
-                cornerRadius = 8 * resources.displayMetrics.density
-                setStroke(2, ContextCompat.getColor(requireContext(), R.color.text_secondary))
-            }
-            setOnClickListener {
-                val dialog = ColorPickerDialog.newInstance(initialColor) { color ->
-                    (background as GradientDrawable).setColor(color)
-                    onColorSelected(color)
-                }
-                dialog.show(parentFragmentManager, "color_picker")
-            }
-        }
-        row.addView(colorSwatch)
-        
-        return row
-    }
-    
-    private fun createSeekBarControl(
-        label: String,
-        initialValue: Int,
-        min: Int,
-        max: Int,
-        onProgressChange: (Int) -> Unit,
-        onProgressStop: (Int) -> Unit
-    ): View {
-        val container = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 8, 0, 8)
-        }
-        
-        val labelView = TextView(requireContext()).apply {
-            text = "$label: $initialValue"
-            setTextColor(ContextCompat.getColor(requireContext(), R.color.text_secondary))
-        }
-        container.addView(labelView)
-        
-        val seekBar = SeekBar(requireContext()).apply {
-            this.max = max - min
-            progress = initialValue - min
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                    val value = progress + min
-                    labelView.text = "$label: $value"
-                    if (fromUser) {
-                        onProgressChange(value)
-                    }
-                }
-                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-                override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                    val value = (seekBar?.progress ?: 0) + min
-                    onProgressStop(value)
-                }
-            })
-        }
-        container.addView(seekBar)
-        
-        return container
-    }
-    
-    private fun updatePreview() {
-        val accentColor = tempAccentColor ?: currentPrefs.accentColor
-        val backgroundColor = tempBackgroundColor ?: currentPrefs.backgroundColor
-        val textPrimary = tempTextPrimaryColor ?: currentPrefs.textPrimaryColor
-        val textSecondary = tempTextSecondaryColor ?: currentPrefs.textSecondaryColor
-        
-        previewCard.setCardBackgroundColor(backgroundColor)
-        previewTitle.setTextColor(textPrimary)
-        previewTitle.textSize = 18f * currentPrefs.fontScale
-        previewTitle.typeface = if (currentPrefs.titleBold) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
-        previewBody.setTextColor(textSecondary)
-        previewBody.textSize = 14f * currentPrefs.fontScale
-        previewButton.backgroundTintList = android.content.res.ColorStateList.valueOf(accentColor)
-    }
-    
-    private fun applyColors() {
-        currentPrefs = currentPrefs.copy(
-            primaryColor = tempPrimaryColor ?: currentPrefs.primaryColor,
-            accentColor = tempAccentColor ?: currentPrefs.accentColor,
-            backgroundColor = tempBackgroundColor ?: currentPrefs.backgroundColor,
-            textPrimaryColor = tempTextPrimaryColor ?: currentPrefs.textPrimaryColor,
-            textSecondaryColor = tempTextSecondaryColor ?: currentPrefs.textSecondaryColor
+
+        val miniPlayerStyles = miniPlayerToggleManager.getAvailableStyles()
+        val miniPlayerSpinner = addSpinnerControl(
+            section,
+            title = "Mini player style",
+            summary = "Each option now routes to a maintained mini player surface instead of the old experimental toggle mess.",
+            entries = miniPlayerStyles.map { it.second }
         )
+        miniPlayerSpinner.setSelection(
+            miniPlayerStyles.indexOfFirst { it.first == miniPlayerToggleManager.getMiniPlayerStyle() }.coerceAtLeast(0)
+        )
+        miniPlayerSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!hydratingMiniPlayerStyle) {
+                    hydratingMiniPlayerStyle = true
+                    return
+                }
+                val selectedStyle = miniPlayerStyles[position].first
+                if (selectedStyle != miniPlayerToggleManager.getMiniPlayerStyle()) {
+                    miniPlayerToggleManager.setMiniPlayerStyle(selectedStyle)
+                    ThemeManager.broadcastChange(requireContext(), false)
+                    refreshSummary()
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+
+        addSwitchControl(
+            section,
+            title = "Show album art in mini player",
+            summary = "Keeps the artwork tile visible inside the mini player.",
+            checked = currentPrefs.miniPlayerShowArt
+        ) { enabled ->
+            persistAppearance(currentPrefs.copy(miniPlayerShowArt = enabled))
+        }
+
+        addSwitchControl(
+            section,
+            title = "Show artist in mini player",
+            summary = "Keeps the second text line visible when you want more context in the collapsed player.",
+            checked = currentPrefs.miniPlayerShowArtist
+        ) { enabled ->
+            persistAppearance(currentPrefs.copy(miniPlayerShowArtist = enabled))
+        }
+
+        addSwitchControl(
+            section,
+            title = "Compact mini player spacing",
+            summary = "Shrinks padding and line count so the mini player sits tighter against the rest of the app.",
+            checked = currentPrefs.miniPlayerCompactMode
+        ) { enabled ->
+            persistAppearance(currentPrefs.copy(miniPlayerCompactMode = enabled))
+        }
+
+        addSwitchControl(
+            section,
+            title = "Spin mini player artwork",
+            summary = "Only affects the rotating artwork effect when music is actually playing.",
+            checked = currentPrefs.miniPlayerSpinningArt
+        ) { enabled ->
+            persistAppearance(currentPrefs.copy(miniPlayerSpinningArt = enabled))
+        }
+    }
+
+    private fun buildSizingSection(parent: LinearLayout) {
+        val section = addSettingsSection(
+            parent,
+            "Sizing & Density",
+            "These controls replace the old broken element sizing code with a smaller, safer range."
+        )
+
+        addSliderControl(
+            section,
+            title = "Control size",
+            summary = "Scales icon buttons and action buttons across the app.",
+            valueFrom = 0.78f,
+            valueTo = 1.0f,
+            stepSize = 0.02f,
+            initialValue = currentPrefs.buttonSizeScale,
+            formatter = { "${(it * 100).roundToInt()}%" }
+        ) { value, fromUser ->
+            if (fromUser) {
+                persistAppearance(currentPrefs.copy(buttonSizeScale = value))
+            }
+        }
+
+        addSliderControl(
+            section,
+            title = "Text scale",
+            summary = "Adjusts the text sizing used by rebuilt screens without stepping outside a sane range.",
+            valueFrom = 0.9f,
+            valueTo = 1.15f,
+            stepSize = 0.05f,
+            initialValue = currentPrefs.fontScale,
+            formatter = { "${(it * 100).roundToInt()}%" }
+        ) { value, fromUser ->
+            if (fromUser) {
+                persistAppearance(currentPrefs.copy(fontScale = value))
+            }
+        }
+
+        addSliderControl(
+            section,
+            title = "Mini player height",
+            summary = "Caps the collapsed player to a tighter range so it no longer feels oversized.",
+            valueFrom = 56f,
+            valueTo = 72f,
+            stepSize = 2f,
+            initialValue = currentPrefs.miniPlayerHeightDp.toFloat(),
+            formatter = { "${it.roundToInt()} dp" }
+        ) { value, fromUser ->
+            if (fromUser) {
+                persistAppearance(currentPrefs.copy(miniPlayerHeightDp = value.roundToInt()))
+            }
+        }
+
+        addSliderControl(
+            section,
+            title = "Card corner radius",
+            summary = "Changes the roundness of the rebuilt cards without touching the underlying layout logic.",
+            valueFrom = 12f,
+            valueTo = 28f,
+            stepSize = 2f,
+            initialValue = currentPrefs.cardCornerRadiusDp.toFloat(),
+            formatter = { "${it.roundToInt()} dp" }
+        ) { value, fromUser ->
+            if (fromUser) {
+                persistAppearance(currentPrefs.copy(cardCornerRadiusDp = value.roundToInt()))
+            }
+        }
+    }
+
+    private fun buildResetSection(parent: LinearLayout) {
+        val section = addSettingsSection(
+            parent,
+            "Recovery",
+            "Use these when old appearance values left the app feeling oversized or visually inconsistent."
+        )
+
+        addActionButton(section, "Apply tighter defaults") {
+            miniPlayerToggleManager.setMiniPlayerStyle(MiniPlayerToggleManager.STYLE_COMPACT)
+            persistAppearance(
+                AppearancePreferences().copy(
+                    buttonSizeScale = 0.88f,
+                    miniPlayerHeightDp = 60,
+                    miniPlayerCompactMode = true,
+                    cardCornerRadiusDp = 18
+                )
+            )
+            Toast.makeText(requireContext(), "Compact defaults applied.", Toast.LENGTH_SHORT).show()
+        }
+
+        addActionButton(section, "Reset appearance", outlined = true) {
+            miniPlayerToggleManager.setMiniPlayerStyle(MiniPlayerToggleManager.STYLE_REVAMPED)
+            persistAppearance(AppearancePreferences())
+            Toast.makeText(requireContext(), "Appearance reset to a stable default.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun persistAppearance(updatedPrefs: AppearancePreferences) {
+        currentPrefs = updatedPrefs
         currentPrefs.saveToPrefs(requireContext())
         ThemeManager.broadcastChange(requireContext(), false)
-        Toast.makeText(requireContext(), R.string.toast_applied, Toast.LENGTH_SHORT).show()
-    }
-    
-    private fun applyPreset(preset: AppearancePresets.PresetInfo) {
-        tempPrimaryColor = preset.primaryColor
-        tempAccentColor = preset.accentColor
-        tempBackgroundColor = preset.backgroundColor
-        tempTextPrimaryColor = preset.textPrimaryColor
-        tempTextSecondaryColor = preset.textSecondaryColor
-        updatePreview()
-        Toast.makeText(requireContext(), "Preset applied. Click 'Apply Colors' to save.", Toast.LENGTH_SHORT).show()
-    }
-    
-    private fun checkContrast() {
-        val bg = tempBackgroundColor ?: currentPrefs.backgroundColor
-        val textPrimary = tempTextPrimaryColor ?: currentPrefs.textPrimaryColor
-        
-        val ratio = currentPrefs.calculateContrastRatio(textPrimary, bg)
-        if (ratio < 4.5) {
-            Toast.makeText(requireContext(), R.string.tooltip_contrast_warning, Toast.LENGTH_LONG).show()
-        }
-    }
-    
-    private fun showSavePresetDialog() {
-        val input = EditText(requireContext()).apply {
-            hint = getString(R.string.appearance_preset_name_hint)
-        }
-        androidx.appcompat.app.AlertDialog.Builder(requireContext())
-            .setTitle(getString(R.string.appearance_save_preset))
-            .setView(input)
-            .setPositiveButton("Save") { _, _ ->
-                val name = input.text.toString().trim()
-                if (name.isNotEmpty()) {
-                    if (AppearancePresets.customPresetExists(requireContext(), name)) {
-                        confirmOverwritePreset(name)
-                    } else {
-                        AppearancePresets.saveCustomPreset(requireContext(), name, currentPrefs)
-                        Toast.makeText(requireContext(), R.string.toast_saved, Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-    
-    private fun confirmOverwritePreset(name: String) {
-        androidx.appcompat.app.AlertDialog.Builder(requireContext())
-            .setTitle("Overwrite Preset?")
-            .setMessage("A preset with this name already exists. Overwrite it?")
-            .setPositiveButton("Overwrite") { _, _ ->
-                AppearancePresets.saveCustomPreset(requireContext(), name, currentPrefs)
-                Toast.makeText(requireContext(), R.string.toast_saved, Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-    
-    private fun showLoadPresetDialog() {
-        val presets = AppearancePresets.getCustomPresetNames(requireContext())
-        if (presets.isEmpty()) {
-            Toast.makeText(requireContext(), "No saved presets", Toast.LENGTH_SHORT).show()
-            return
-        }
-        
-        androidx.appcompat.app.AlertDialog.Builder(requireContext())
-            .setTitle(getString(R.string.appearance_load_preset))
-            .setItems(presets.toTypedArray()) { _, which ->
-                val name = presets[which]
-                AppearancePresets.loadCustomPreset(requireContext(), name)?.let { prefs ->
-                    currentPrefs = prefs
-                    currentPrefs.saveToPrefs(requireContext())
-                    updatePreview()
-                    ThemeManager.broadcastChange(requireContext(), true)
-                    Toast.makeText(requireContext(), R.string.toast_applied, Toast.LENGTH_SHORT).show()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-    
-    private fun exportPreset() {
-        exportLauncher.launch("appearance_preset.json")
-    }
-    
-    private fun exportPresetToUri(uri: android.net.Uri) {
-        try {
-            requireContext().contentResolver.openOutputStream(uri)?.use { output ->
-                output.write(currentPrefs.toJson().toByteArray())
-            }
-            Toast.makeText(requireContext(), R.string.toast_export_success, Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(requireContext(), R.string.toast_error, Toast.LENGTH_SHORT).show()
-        }
-    }
-    
-    private fun importPreset() {
-        importLauncher.launch(arrayOf("application/json"))
-    }
-    
-    private fun importPresetFromUri(uri: android.net.Uri) {
-        try {
-            val json = requireContext().contentResolver.openInputStream(uri)?.use { input ->
-                input.bufferedReader().readText()
-            } ?: return
-            
-            val prefs = AppearancePreferences.fromJson(json)
-            currentPrefs = prefs
-            currentPrefs.saveToPrefs(requireContext())
-            updatePreview()
-            ThemeManager.broadcastChange(requireContext(), true)
-            Toast.makeText(requireContext(), R.string.toast_import_success, Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(requireContext(), "${getString(R.string.toast_error)}: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-    
-    private fun showResetAllDialog() {
-        androidx.appcompat.app.AlertDialog.Builder(requireContext())
-            .setTitle(getString(R.string.appearance_reset_defaults))
-            .setMessage(getString(R.string.appearance_confirm_reset_all))
-            .setPositiveButton("Reset") { _, _ ->
-                AppearancePreferences.resetToDefaults(requireContext())
-                currentPrefs = AppearancePreferences.fromPrefs(requireContext())
-                updatePreview()
-                ThemeManager.broadcastChange(requireContext(), true)
-                activity?.recreate()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        refreshSummary()
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return if (item.itemId == android.R.id.home) {
-            parentFragmentManager.popBackStack()
-            true
-        } else {
-            super.onOptionsItemSelected(item)
-        }
-    }
+    private fun refreshSummary() {
+        val miniPlayerStyle = miniPlayerToggleManager.getAvailableStyles()
+            .firstOrNull { it.first == miniPlayerToggleManager.getMiniPlayerStyle() }
+            ?.second
+            ?: "Deck"
 
-    override fun onDestroyView() {
-        super.onDestroyView()
-        val activity = requireActivity() as? AppCompatActivity
-        activity?.supportActionBar?.apply {
-            setDisplayHomeAsUpEnabled(true)
-            title = getString(R.string.menu_settings)
+        setupSummaryView.text = buildString {
+            append("Now Playing: ${currentPrefs.nowPlayingLayoutTheme.displayName}")
+            append(" • Mini Player: $miniPlayerStyle")
+            append(" • Art ${if (currentPrefs.miniPlayerShowArt) "On" else "Off"}")
+            append(" • Artist ${if (currentPrefs.miniPlayerShowArtist) "On" else "Off"}")
+        }
+
+        densitySummaryView.text = buildString {
+            append("Controls ${(currentPrefs.buttonSizeScale * 100).roundToInt()}%")
+            append(" • Text ${(currentPrefs.fontScale * 100).roundToInt()}%")
+            append(" • Mini Player ${currentPrefs.miniPlayerHeightDp}dp")
+            append(" • Corners ${currentPrefs.cardCornerRadiusDp}dp")
         }
     }
 }
