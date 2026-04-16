@@ -425,7 +425,12 @@ class CustomYouTubeExtractionService(private val context: Context) {
             Log.i(TAG, "🔗 Using service: $serviceUrl")
             
             // Build the request URL
-            val requestUrl = "$serviceUrl/$videoUrl?format=$format&quality=$quality"
+            val requestUrl = ExtractionServiceConfig.buildQuickDownloadUrl(
+                serviceUrl = serviceUrl,
+                mediaUrl = videoUrl,
+                format = format,
+                quality = quality
+            )
             
             val request = Request.Builder()
                 .url(requestUrl)
@@ -469,7 +474,7 @@ class CustomYouTubeExtractionService(private val context: Context) {
     suspend fun getSupportedPlatforms(): Result<JSONObject> = withContext(Dispatchers.IO) {
         return@withContext try {
             val serviceUrl = ExtractionServiceConfig.getServiceUrl(context)
-            val platformsUrl = serviceUrl.replace("/quick", "/platforms")
+            val platformsUrl = ExtractionServiceConfig.buildPlatformsUrl(serviceUrl)
             
             val request = Request.Builder()
                 .url(platformsUrl)

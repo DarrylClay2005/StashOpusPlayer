@@ -148,7 +148,11 @@ class YouTubeApiService(private val context: android.content.Context) {
         try {
             val key = apiKey
             if (key.isBlank()) {
-                return@withContext Result.failure(IOException("YouTube API key not configured. To enable video details:\n\n1. Get your own free API key: See YOUTUBE_API_SETUP.md\n2. Set it in Settings > YouTube API Key\n\nFor downloads only, use Seal integration instead"))
+                return@withContext Result.failure(
+                    IOException(
+                        "YouTube API key not configured. Add one in Settings > YouTube to enable richer search metadata and comments."
+                    )
+                )
             }
             val url = "$BASE_URL/videos?part=snippet,contentDetails,statistics&id=$videoId&key=$key"
             

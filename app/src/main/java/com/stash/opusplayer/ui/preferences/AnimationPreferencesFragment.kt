@@ -69,7 +69,7 @@ class AnimationPreferencesFragment : Fragment() {
             text = "Animation & Visual Effects"
             textSize = 24f
             setPadding(0, 0, 0, 32)
-            setTextColor(resources.getColor(android.R.color.white, null))
+            setTextColor(androidx.core.content.ContextCompat.getColor(requireContext(), android.R.color.white))
         }
         layout.addView(title)
         
@@ -345,7 +345,7 @@ class AnimationPreferencesFragment : Fragment() {
             text = title
             textSize = 18f
             setPadding(0, 24, 0, 12)
-            setTextColor(resources.getColor(android.R.color.holo_blue_bright, null))
+            setTextColor(androidx.core.content.ContextCompat.getColor(requireContext(), android.R.color.holo_blue_bright))
         }
         parent.addView(header)
     }

@@ -538,16 +538,116 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
                 val key = apiKeyInput.text?.toString()?.trim() ?: ""
                 val saveKeyPrefs = requireContext().getSharedPreferences("settings", 0)
                 saveKeyPrefs.edit().putString("user_youtube_api_key", key).apply()
-                // Prompt to reload app so the key takes effect everywhere
-                androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                    .setTitle("Reload required")
-                    .setMessage("The app will reload to apply your YouTube API key. Continue?")
-                    .setPositiveButton("Reload") { _, _ -> restartApp() }
-                    .setNegativeButton("Later", null)
-                    .show()
+                Toast.makeText(requireContext(), "YouTube API key saved", Toast.LENGTH_SHORT).show()
             }
         }
         layout.addView(saveApiKeyButton)
+
+        val backendInfo = TextView(requireContext()).apply {
+            text = "Playback backend: Auto tries a Lavalink-compatible server first, then falls back to local yt-dlp. Wavelink is Python-only, so Android talks to the Lavalink node directly."
+            textSize = 12f
+            setPadding(0, 16, 0, 8)
+        }
+        layout.addView(backendInfo)
+
+        val backendSpinner = Spinner(requireContext())
+        val backendEntries = listOf(
+            "Auto (Lavalink -> yt-dlp)",
+            "yt-dlp only",
+            "Lavalink compatible"
+        )
+        val backendValues = listOf(
+            com.stash.opusplayer.youtube.YouTubePlaybackBackend.AUTO,
+            com.stash.opusplayer.youtube.YouTubePlaybackBackend.YT_DLP,
+            com.stash.opusplayer.youtube.YouTubePlaybackBackend.LAVALINK
+        )
+        backendSpinner.adapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_item,
+            backendEntries
+        ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        val currentBackend = com.stash.opusplayer.youtube.YouTubePlaybackSettings.getBackend(requireContext())
+        backendSpinner.setSelection(backendValues.indexOf(currentBackend).coerceAtLeast(0))
+        layout.addView(backendSpinner)
+
+        val lavalinkUrlInput = EditText(requireContext()).apply {
+            hint = "Lavalink URL, e.g. https://node.example.com"
+            setText(com.stash.opusplayer.youtube.YouTubePlaybackSettings.getLavalinkUrl(requireContext()))
+        }
+        layout.addView(lavalinkUrlInput)
+
+        val lavalinkPasswordInput = EditText(requireContext()).apply {
+            hint = "Lavalink password"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(com.stash.opusplayer.youtube.YouTubePlaybackSettings.getLavalinkPassword(requireContext()))
+        }
+        layout.addView(lavalinkPasswordInput)
+
+        val updateLavalinkInputsVisibility = {
+            val selectedBackend = backendValues[backendSpinner.selectedItemPosition]
+            val showServerInputs = selectedBackend != com.stash.opusplayer.youtube.YouTubePlaybackBackend.YT_DLP
+            lavalinkUrlInput.visibility = if (showServerInputs) View.VISIBLE else View.GONE
+            lavalinkPasswordInput.visibility = if (showServerInputs) View.VISIBLE else View.GONE
+        }
+        backendSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateLavalinkInputsVisibility()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        updateLavalinkInputsVisibility()
+
+        val savePlaybackBackendButton = Button(requireContext()).apply {
+            text = "Save YouTube Playback Backend"
+            setOnClickListener {
+                val selectedBackend = backendValues[backendSpinner.selectedItemPosition]
+                com.stash.opusplayer.youtube.YouTubePlaybackSettings.setBackend(requireContext(), selectedBackend)
+                com.stash.opusplayer.youtube.YouTubePlaybackSettings.setLavalinkUrl(
+                    requireContext(),
+                    lavalinkUrlInput.text?.toString().orEmpty()
+                )
+                com.stash.opusplayer.youtube.YouTubePlaybackSettings.setLavalinkPassword(
+                    requireContext(),
+                    lavalinkPasswordInput.text?.toString().orEmpty()
+                )
+                Toast.makeText(requireContext(), "YouTube playback backend saved", Toast.LENGTH_SHORT).show()
+            }
+        }
+        layout.addView(savePlaybackBackendButton)
+
+        val extractionInfo = TextView(requireContext()).apply {
+            text = "Download service: leave auto-detect on for local services, or set a manual /quick endpoint if you host your own extractor."
+            textSize = 12f
+            setPadding(0, 16, 0, 8)
+        }
+        layout.addView(extractionInfo)
+
+        val autoDetectExtractorToggle = CheckBox(requireContext()).apply {
+            text = "Auto-detect local download service"
+            isChecked = com.stash.opusplayer.service.ExtractionServiceConfig.isAutoDetectEnabled(requireContext())
+            setOnCheckedChangeListener { _, isChecked ->
+                com.stash.opusplayer.service.ExtractionServiceConfig.setAutoDetectEnabled(requireContext(), isChecked)
+            }
+        }
+        layout.addView(autoDetectExtractorToggle)
+
+        val manualServiceInput = EditText(requireContext()).apply {
+            hint = "Manual extractor URL, e.g. http://192.168.1.10:8083/quick"
+            setText(com.stash.opusplayer.service.ExtractionServiceConfig.getManualServiceUrl(requireContext()))
+        }
+        layout.addView(manualServiceInput)
+
+        val saveExtractorButton = Button(requireContext()).apply {
+            text = "Save Download Service"
+            setOnClickListener {
+                com.stash.opusplayer.service.ExtractionServiceConfig.setManualServiceUrl(
+                    requireContext(),
+                    manualServiceInput.text?.toString().orEmpty()
+                )
+                Toast.makeText(requireContext(), "Download service settings saved", Toast.LENGTH_SHORT).show()
+            }
+        }
+        layout.addView(saveExtractorButton)
 
         // Library Rescan
         val rescanBtn = Button(requireContext()).apply {
@@ -597,7 +697,10 @@ val token = androidx.media3.session.SessionToken(requireContext(), android.conte
                 val wm = androidx.work.WorkManager.getInstance(requireContext())
                 val tag = "library_rescan_periodic"
                 if (isChecked) {
-                    val req = androidx.work.PeriodicWorkRequestBuilder<com.stash.opusplayer.work.LibraryRescanWorker>(java.time.Duration.ofHours(24)).addTag(tag).build()
+                    val req = androidx.work.PeriodicWorkRequestBuilder<com.stash.opusplayer.work.LibraryRescanWorker>(
+                        24,
+                        java.util.concurrent.TimeUnit.HOURS
+                    ).addTag(tag).build()
                     wm.enqueueUniquePeriodicWork(tag, androidx.work.ExistingPeriodicWorkPolicy.UPDATE, req)
                     Toast.makeText(requireContext(), "Periodic rescan scheduled", Toast.LENGTH_SHORT).show()
                 } else {

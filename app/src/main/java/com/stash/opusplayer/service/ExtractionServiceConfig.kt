@@ -1,147 +1,194 @@
 package com.stash.opusplayer.service
 
 import android.content.Context
+import android.util.Log
 import com.stash.opusplayer.utils.NetworkUtils
+import java.net.URL
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 /**
- * Configuration for external video/audio extraction services.
- * Users can modify these URLs to use their own hosted services or alternative APIs.
- * Now supports multiple platforms: Vimeo, Bandcamp, Internet Archive, and more!
- * Features auto-detection of local download services.
+ * Preference-backed configuration for optional external extraction services.
+ *
+ * The original implementation was hard-wired to one local network IP and treated
+ * settings as compile-time constants. This version keeps the same discovery
+ * behavior, but lets the running app persist real user choices.
  */
 object ExtractionServiceConfig {
-    
-    // Auto-detect configuration
-    const val AUTO_DETECT_ENABLED = true  // Enable automatic service discovery
-    const val PREFERRED_SERVICE_PORT = 8083  // Preferred port for multi-platform service
-    const val FALLBACK_SERVICE_PORT = 8082  // Fallback port for YouTube downloader
-    
-    // Static fallback configuration (used when auto-detect fails)
-    private const val FALLBACK_IP = "192.168.12.188"
-    const val STATIC_SERVICE_URL = "http://$FALLBACK_IP:$PREFERRED_SERVICE_PORT/quick"
-    const val LOCAL_SERVICE_ENABLED = true  // Multi-platform support enabled
-    
-    // Backup services
-    
+
+    private const val TAG = "ExtractionService"
+    private const val PREFS_NAME = "settings"
+    private const val PREF_AUTO_DETECT_ENABLED = "download_service_auto_detect"
+    private const val PREF_MANUAL_SERVICE_URL = "manual_extraction_service_url"
+    private const val PREF_SELECTED_SERVICE_URL = "selected_extraction_service_url"
+
+    // Defaults used when the user has not configured anything yet.
+    const val AUTO_DETECT_ENABLED = true
+    const val PREFERRED_SERVICE_PORT = 8083
+    const val FALLBACK_SERVICE_PORT = 8082
+    const val LOCAL_SERVICE_ENABLED = true
+
     // Direct YouTube extraction (fallback)
     const val DIRECT_EXTRACTION_ENABLED = true
-    
+
     // Cobra API configuration - Open source YouTube downloader
     const val COBRA_API_URL = "https://co.wuk.sh/api/json"
-    const val COBRA_ENABLED = false  // Disabled - service returning 404
-    
+    const val COBRA_ENABLED = false
+
     // yt-dlp API service configuration
     const val YOUTUBE_DL_API_URL = "https://ytdl-api.onrender.com/api/yt-dlp"
-    const val YOUTUBE_DL_ENABLED = false  // Disabled - service returning 404
-    
+    const val YOUTUBE_DL_ENABLED = false
+
     // Invidious instance configuration - Privacy-focused YouTube frontend
     const val INVIDIOUS_INSTANCE_URL = "https://invidious.io/api/v1/videos"
-    const val INVIDIOUS_ENABLED = false  // Disabled - service returning 404
-    
+    const val INVIDIOUS_ENABLED = false
+
     // Alternative services (disabled by default - enable if you have access)
     const val ALTERNATIVE_SERVICE_1_URL = "https://your-custom-service.com/extract"
     const val ALTERNATIVE_SERVICE_1_ENABLED = false
-    
+
     const val ALTERNATIVE_SERVICE_2_URL = "https://another-service.com/api/youtube"
     const val ALTERNATIVE_SERVICE_2_ENABLED = false
-    
-    /**
-     * Instructions for users who want to set up their own extraction service:
-     * 
-     * MULTI-PLATFORM SUPPORT:
-     * The current service supports multiple platforms:
-     * - Vimeo (active)
-     * - Bandcamp (active)
-     * - Internet Archive (active)
-     * - SoundCloud (limited)
-     * - Dailymotion (limited)
-     * - YouTube (blocked due to anti-bot measures)
-     * 
-     * Setup steps:
-     * 1. Run the multi_platform_downloader.py script on your server
-     * 2. Update LOCAL_SERVICE_URL to point to your service
-     * 3. Set LOCAL_SERVICE_ENABLED to true
-     * 4. Recompile the app
-     * 
-     * Service endpoints:
-     * - /health - Service health check
-     * - /platforms - List supported platforms
-     * - /quick/<url> - Quick download endpoint
-     * - /info/<url> - Get video/audio info
-     */
-    
-    // Timeout settings
+
     const val REQUEST_TIMEOUT_MS = 30000L
     const val CONNECT_TIMEOUT_MS = 10000L
-    
-    /**
-     * Get the best available download service URL
-     * Uses auto-detection if enabled, falls back to static configuration
-     */
-    fun getServiceUrl(context: Context? = null): String {
-        if (!AUTO_DETECT_ENABLED || !LOCAL_SERVICE_ENABLED) {
-            return STATIC_SERVICE_URL
+
+    const val STATIC_SERVICE_URL = "http://127.0.0.1:$PREFERRED_SERVICE_PORT/quick"
+
+    private fun prefs(context: Context) =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    fun isAutoDetectEnabled(context: Context? = null): Boolean {
+        return context?.let { prefs(it).getBoolean(PREF_AUTO_DETECT_ENABLED, AUTO_DETECT_ENABLED) }
+            ?: AUTO_DETECT_ENABLED
+    }
+
+    fun setAutoDetectEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(PREF_AUTO_DETECT_ENABLED, enabled).apply()
+    }
+
+    fun getManualServiceUrl(context: Context? = null): String {
+        val raw = context?.let { prefs(it).getString(PREF_MANUAL_SERVICE_URL, "") }.orEmpty()
+        return normalizeServiceUrl(raw)
+    }
+
+    fun setManualServiceUrl(context: Context, serviceUrl: String) {
+        val normalized = normalizeServiceUrl(serviceUrl)
+        prefs(context).edit().putString(PREF_MANUAL_SERVICE_URL, normalized).apply()
+    }
+
+    fun getSelectedServiceUrl(context: Context? = null): String {
+        val raw = context?.let { prefs(it).getString(PREF_SELECTED_SERVICE_URL, "") }.orEmpty()
+        return normalizeServiceUrl(raw)
+    }
+
+    fun setSelectedServiceUrl(context: Context, serviceUrl: String) {
+        val normalized = normalizeServiceUrl(serviceUrl)
+        prefs(context).edit().putString(PREF_SELECTED_SERVICE_URL, normalized).apply()
+    }
+
+    fun normalizeServiceUrl(raw: String): String {
+        var url = raw.trim()
+        if (url.isBlank()) {
+            return ""
         }
-        
-        return try {
-            // Auto-detect local IP
-            val localIp = NetworkUtils.getLocalIpAddress(context)
-            
-            // Check preferred port first (multi-platform service)
-            if (NetworkUtils.isServiceReachable(localIp, PREFERRED_SERVICE_PORT, 3000)) {
-                val url = "http://$localIp:$PREFERRED_SERVICE_PORT/quick"
-                android.util.Log.i("ExtractionService", "Using auto-detected service: $url")
-                return url
-            }
-            
-            // Check fallback port (YouTube downloader)
-            if (NetworkUtils.isServiceReachable(localIp, FALLBACK_SERVICE_PORT, 3000)) {
-                val url = "http://$localIp:$FALLBACK_SERVICE_PORT/quick"
-                android.util.Log.i("ExtractionService", "Using fallback service: $url")
-                return url
-            }
-            
-            android.util.Log.w("ExtractionService", "Auto-detect failed, using static URL: $STATIC_SERVICE_URL")
-            STATIC_SERVICE_URL
-        } catch (e: Exception) {
-            android.util.Log.e("ExtractionService", "Error in auto-detection: ${e.message}")
-            STATIC_SERVICE_URL
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            url = "http://$url"
+        }
+        url = url.removeSuffix("/")
+        return when {
+            url.endsWith("/quick") -> url
+            url.endsWith("/health") -> "${url.removeSuffix("/health")}/quick"
+            url.endsWith("/platforms") -> "${url.removeSuffix("/platforms")}/quick"
+            else -> "$url/quick"
         }
     }
-    
+
+    fun buildPlatformsUrl(serviceUrl: String): String =
+        normalizeServiceUrl(serviceUrl).replace("/quick", "/platforms")
+
+    fun buildHealthUrl(serviceUrl: String): String =
+        normalizeServiceUrl(serviceUrl).replace("/quick", "/health")
+
+    fun buildQuickDownloadUrl(serviceUrl: String, mediaUrl: String, format: String, quality: String): String {
+        val normalizedServiceUrl = normalizeServiceUrl(serviceUrl)
+        val encodedMediaUrl = URLEncoder.encode(mediaUrl, StandardCharsets.UTF_8.name())
+        val encodedFormat = URLEncoder.encode(format, StandardCharsets.UTF_8.name())
+        val encodedQuality = URLEncoder.encode(quality, StandardCharsets.UTF_8.name())
+        return "$normalizedServiceUrl/$encodedMediaUrl?format=$encodedFormat&quality=$encodedQuality"
+    }
+
     /**
-     * Get the current service URL (for backward compatibility)
+     * Returns the best currently configured endpoint.
+     *
+     * Priority:
+     * 1. User-selected service from discovery
+     * 2. Manual service URL from settings
+     * 3. Auto-detected local services
+     * 4. Loopback fallback
      */
+    fun getServiceUrl(context: Context? = null): String {
+        val selectedUrl = getSelectedServiceUrl(context)
+        val manualUrl = getManualServiceUrl(context)
+
+        val preferredConfiguredUrl = listOf(selectedUrl, manualUrl)
+            .firstOrNull { it.isNotBlank() && isServiceEndpointHealthy(it) }
+        if (!preferredConfiguredUrl.isNullOrBlank()) {
+            return preferredConfiguredUrl
+        }
+
+        if (isAutoDetectEnabled(context) && LOCAL_SERVICE_ENABLED) {
+            try {
+                val localIp = NetworkUtils.getLocalIpAddress(context)
+                val detectedUrls = listOf(
+                    "http://$localIp:$PREFERRED_SERVICE_PORT/quick",
+                    "http://$localIp:$FALLBACK_SERVICE_PORT/quick"
+                )
+                detectedUrls.firstOrNull { isServiceEndpointHealthy(it) }?.let { detectedUrl ->
+                    Log.i(TAG, "Using auto-detected service: $detectedUrl")
+                    return detectedUrl
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Service auto-detection failed", e)
+            }
+        }
+
+        if (manualUrl.isNotBlank()) {
+            return manualUrl
+        }
+        return STATIC_SERVICE_URL
+    }
+
     val LOCAL_SERVICE_URL: String
         get() = getServiceUrl()
-    
-    /**
-     * Discover all available download services on the local network
-     */
+
     fun discoverServices(context: Context? = null): List<NetworkUtils.ServiceInfo> {
         return try {
             val localIp = NetworkUtils.getLocalIpAddress(context)
             NetworkUtils.findAvailableDownloadServices(localIp)
         } catch (e: Exception) {
-            android.util.Log.e("ExtractionService", "Service discovery failed: ${e.message}")
+            Log.e(TAG, "Service discovery failed: ${e.message}")
             emptyList()
         }
     }
-    
-    /**
-     * Test connectivity to the current service
-     */
+
     fun testServiceConnectivity(context: Context? = null): Boolean {
-        val serviceUrl = getServiceUrl(context)
+        return isServiceEndpointHealthy(getServiceUrl(context))
+    }
+
+    private fun isServiceEndpointHealthy(serviceUrl: String): Boolean {
+        val normalized = normalizeServiceUrl(serviceUrl)
+        if (normalized.isBlank()) {
+            return false
+        }
         return try {
-            val url = java.net.URL(serviceUrl.replace("/quick", "/health"))
-            val connection = url.openConnection()
+            val connection = URL(buildHealthUrl(normalized)).openConnection()
             connection.connectTimeout = CONNECT_TIMEOUT_MS.toInt()
             connection.readTimeout = 5000
             connection.connect()
             true
         } catch (e: Exception) {
-            android.util.Log.w("ExtractionService", "Service connectivity test failed: ${e.message}")
+            Log.d(TAG, "Service connectivity test failed for $normalized: ${e.message}")
             false
         }
     }

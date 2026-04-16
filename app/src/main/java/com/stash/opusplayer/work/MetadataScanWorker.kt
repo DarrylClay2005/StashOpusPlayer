@@ -48,11 +48,13 @@ class MetadataScanWorker(
         }
         
         fun schedulePeriodicMetadataScan(context: Context) {
-            val constraints = Constraints.Builder()
+            val constraintsBuilder = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
                 .setRequiresBatteryNotLow(true)
-                .setRequiresDeviceIdle(true)
-                .build()
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                constraintsBuilder.setRequiresDeviceIdle(true)
+            }
+            val constraints = constraintsBuilder.build()
 
             val request = PeriodicWorkRequestBuilder<MetadataScanWorker>(6, TimeUnit.HOURS)
                 .setConstraints(constraints)

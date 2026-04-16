@@ -104,7 +104,8 @@ class AudioFormatAdapter(
                 
                 // Update card appearance based on selection
                 root.strokeWidth = if (isSelected) 2 else 1
-                root.strokeColor = root.context.getColor(
+                root.strokeColor = androidx.core.content.ContextCompat.getColor(
+                    root.context,
                     if (isSelected) android.R.color.holo_blue_bright 
                     else android.R.color.darker_gray
                 )

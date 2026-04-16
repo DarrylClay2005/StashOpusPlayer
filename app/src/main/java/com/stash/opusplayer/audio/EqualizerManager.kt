@@ -172,47 +172,12 @@ class EqualizerManager(private val context: Context) {
         val totalEffects = 6
         
         // Enable/disable each effect independently with isolated error handling
-        try {
-            equalizer?.enabled = enabled
-            successfulEffects++
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to set equalizer enabled state", e)
-        }
-        
-        try {
-            bassBoost?.enabled = enabled
-            successfulEffects++
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to set bassBoost enabled state", e)
-        }
-        
-        try {
-            virtualizer?.enabled = enabled
-            successfulEffects++
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to set virtualizer enabled state", e)
-        }
-        
-        try {
-            presetReverb?.enabled = enabled
-            successfulEffects++
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to set presetReverb enabled state", e)
-        }
-        
-        try {
-            loudnessEnhancer?.enabled = enabled
-            successfulEffects++
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to set loudnessEnhancer enabled state", e)
-        }
-        
-        try {
-            environmentalReverb?.enabled = enabled
-            successfulEffects++
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to set environmentalReverb enabled state", e)
-        }
+        if (setEnabledIfPresent("equalizer", enabled, equalizer?.let { { it.enabled = enabled } })) successfulEffects++
+        if (setEnabledIfPresent("bassBoost", enabled, bassBoost?.let { { it.enabled = enabled } })) successfulEffects++
+        if (setEnabledIfPresent("virtualizer", enabled, virtualizer?.let { { it.enabled = enabled } })) successfulEffects++
+        if (setEnabledIfPresent("presetReverb", enabled, presetReverb?.let { { it.enabled = enabled } })) successfulEffects++
+        if (setEnabledIfPresent("loudnessEnhancer", enabled, loudnessEnhancer?.let { { it.enabled = enabled } })) successfulEffects++
+        if (setEnabledIfPresent("environmentalReverb", enabled, environmentalReverb?.let { { it.enabled = enabled } })) successfulEffects++
         
         // Update state if at least some effects were successful
         val effectivelyEnabled = enabled && (successfulEffects > 0)
@@ -274,7 +239,11 @@ class EqualizerManager(private val context: Context) {
     fun setBandLevel(band: Int, level: Float) {
         try {
             equalizer?.let { eq ->
-                val millibels = (level * 1000).toInt().toShort()
+                if (band !in 0 until eq.numberOfBands.toInt()) {
+                    Log.w(TAG, "Ignoring out-of-range band index: $band")
+                    return
+                }
+                val millibels = clampBandLevel(eq, (level * 1000f).toInt())
                 eq.setBandLevel(band.toShort(), millibels)
                 
                 // If we're in custom mode, save the custom settings
@@ -291,9 +260,10 @@ class EqualizerManager(private val context: Context) {
     
     fun setBassBoost(strength: Int) {
         try {
-            bassBoost?.setStrength(strength.toShort())
-            _bassBoostLevel.value = strength
-            prefs.edit().putInt(PREF_BASS_BOOST, strength).apply()
+            val safeStrength = strength.coerceIn(0, 1000)
+            bassBoost?.setStrength(safeStrength.toShort())
+            _bassBoostLevel.value = safeStrength
+            prefs.edit().putInt(PREF_BASS_BOOST, safeStrength).apply()
         } catch (e: Exception) {
             Log.e(TAG, "Error setting bass boost", e)
         }
@@ -301,9 +271,10 @@ class EqualizerManager(private val context: Context) {
     
     fun setVirtualizer(strength: Int) {
         try {
-            virtualizer?.setStrength(strength.toShort())
-            _virtualizerLevel.value = strength
-            prefs.edit().putInt(PREF_VIRTUALIZER, strength).apply()
+            val safeStrength = strength.coerceIn(0, 1000)
+            virtualizer?.setStrength(safeStrength.toShort())
+            _virtualizerLevel.value = safeStrength
+            prefs.edit().putInt(PREF_VIRTUALIZER, safeStrength).apply()
         } catch (e: Exception) {
             Log.e(TAG, "Error setting virtualizer", e)
         }
@@ -350,9 +321,9 @@ class EqualizerManager(private val context: Context) {
     
     fun getBandFrequency(band: Int): Int {
         return try {
-            equalizer?.getCenterFreq(band.toShort())?.div(1000) ?: 0
+            equalizer?.getCenterFreq(band.toShort())?.div(1000) ?: defaultBandFrequency(band)
         } catch (e: Exception) {
-            0
+            defaultBandFrequency(band)
         }
     }
     
@@ -607,7 +578,7 @@ class EqualizerManager(private val context: Context) {
     private fun applyLevels(eq: Equalizer, levels: IntArray) {
         val numBands = minOf(eq.numberOfBands.toInt(), levels.size)
         for (i in 0 until numBands) {
-            eq.setBandLevel(i.toShort(), levels[i].toShort())
+            eq.setBandLevel(i.toShort(), clampBandLevel(eq, levels[i]))
         }
     }
     
@@ -635,6 +606,29 @@ class EqualizerManager(private val context: Context) {
     
     fun isInitialized(): Boolean {
         return equalizer != null
+    }
+
+    private fun setEnabledIfPresent(effectName: String, enabled: Boolean, setter: (() -> Unit)?): Boolean {
+        if (setter == null) {
+            return false
+        }
+        return try {
+            setter()
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to set $effectName enabled=$enabled", e)
+            false
+        }
+    }
+
+    private fun clampBandLevel(eq: Equalizer, millibels: Int): Short {
+        val range = eq.bandLevelRange
+        return millibels.coerceIn(range[0].toInt(), range[1].toInt()).toShort()
+    }
+
+    private fun defaultBandFrequency(band: Int): Int {
+        val fallbackBands = intArrayOf(60, 230, 910, 3600, 14000)
+        return fallbackBands.getOrElse(band) { fallbackBands.last() }
     }
 }
 

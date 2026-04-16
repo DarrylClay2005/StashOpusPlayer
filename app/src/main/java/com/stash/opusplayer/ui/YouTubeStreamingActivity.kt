@@ -542,83 +542,123 @@ com.stash.opusplayer.utils.YouTubeCommentsCache.get(videoId, commentsOrder)?.let
 
     private fun startBackgroundAudio() {
         val video = currentVideo ?: return
-        // Resolve stream URL with yt-dlp and hand off to our Media3 MusicService for background playback
         lifecycleScope.launch {
             try {
                 binding.playPauseButton.isEnabled = false
                 Toast.makeText(this@YouTubeStreamingActivity, "Preparing background audio…", Toast.LENGTH_SHORT).show()
-val extractor = com.stash.opusplayer.utils.YtDlpExtractor(this@YouTubeStreamingActivity)
-                val url = extractor.getBestAudioStreamUrl(video.formattedUrl)
-                if (url.isNullOrBlank()) {
-                    // Prefetch thumbnail into cache before delegating to Seal
-                    try {
-                        val meta = com.stash.opusplayer.utils.MetadataExtractor(this@YouTubeStreamingActivity)
-                        val b64 = meta.downloadYouTubeThumbnail(video.id)
-                        if (b64 != null) {
-                            val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                            val cache = com.stash.opusplayer.artwork.ArtworkCache(this@YouTubeStreamingActivity)
-                            val variants = listOf(
-                                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "YouTube", 0L, ""),
-                                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "Unknown Album", 0L, ""),
-                                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "", 0L, ""),
-                                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "YouTube", 0L, ""),
-                                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "Unknown Album", 0L, ""),
-                                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "", 0L, "")
-                            )
-                            variants.forEach { s ->
-                                val f = cache.fileFor(s)
-                                if (!f.exists()) cache.saveJpeg(bytes, f)
-                            }
-                            // Also save by title-only key
-                            val tf = cache.fileForTitleOnly(video.title)
-                            if (!tf.exists()) cache.saveJpeg(bytes, tf)
-                        }
-                    } catch (_: Exception) {}
+                cacheThumbnailForBackgroundPlayback(video)
 
-// Fallback: if Seal is installed, open there so user can use background playback
-val opened = com.stash.opusplayer.integration.SealIntegration.openInSeal(this@YouTubeStreamingActivity, video.formattedUrl)
+                val resolver = com.stash.opusplayer.youtube.YouTubePlaybackResolver(this@YouTubeStreamingActivity)
+                val result = resolver.resolve(video)
+                val playback = result.getOrNull()
+
+                if (playback == null) {
+                    val opened = com.stash.opusplayer.integration.SealIntegration.openInSeal(
+                        this@YouTubeStreamingActivity,
+                        video.formattedUrl
+                    )
                     if (!opened) {
-                        Toast.makeText(this@YouTubeStreamingActivity, "Unable to resolve audio stream", Toast.LENGTH_LONG).show()
+                        Toast.makeText(
+                            this@YouTubeStreamingActivity,
+                            result.exceptionOrNull()?.message ?: "Unable to resolve audio stream",
+                            Toast.LENGTH_LONG
+                        ).show()
                     } else {
-                        Toast.makeText(this@YouTubeStreamingActivity, "Open in Seal for background playback", Toast.LENGTH_LONG).show()
+                        Toast.makeText(
+                            this@YouTubeStreamingActivity,
+                            "Opened in Seal because the current backend could not provide direct playback.",
+                            Toast.LENGTH_LONG
+                        ).show()
                     }
-                    binding.playPauseButton.isEnabled = true
                     return@launch
                 }
-                // Build media metadata
-                val meta = androidx.media3.common.MediaMetadata.Builder()
-                    .setTitle(video.title)
-                    .setArtist(video.channelTitle)
-                    .build()
-                val item = androidx.media3.common.MediaItem.Builder()
-                    .setUri(android.net.Uri.parse(url))
-                    .setMediaMetadata(meta)
-                    .build()
 
-                val token = androidx.media3.session.SessionToken(this@YouTubeStreamingActivity, android.content.ComponentName(this@YouTubeStreamingActivity, com.stash.opusplayer.service.MusicService::class.java))
-                val future = androidx.media3.session.MediaController.Builder(this@YouTubeStreamingActivity, token).buildAsync()
-                future.addListener({
-                    try {
-                        val controller = future.get()
-                        controller.setMediaItem(item)
-                        controller.prepare()
-                        controller.play()
-                        // Pause the embedded YouTube player and inform user
-                        youTubePlayer?.pause()
-                        Toast.makeText(this@YouTubeStreamingActivity, "Playing in background", Toast.LENGTH_SHORT).show()
-                        // Optionally finish activity to get out of the way
-                        // finish()
-                    } catch (e: Exception) {
-                        Toast.makeText(this@YouTubeStreamingActivity, "Failed to start background playback: ${e.message}", Toast.LENGTH_LONG).show()
-                    } finally {
-                        binding.playPauseButton.isEnabled = true
-                    }
-                }, com.google.common.util.concurrent.MoreExecutors.directExecutor())
+                playResolvedAudio(video, playback)
             } catch (e: Exception) {
                 Toast.makeText(this@YouTubeStreamingActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
                 binding.playPauseButton.isEnabled = true
             }
         }
+    }
+
+    private suspend fun cacheThumbnailForBackgroundPlayback(video: YouTubeVideo) {
+        try {
+            val meta = com.stash.opusplayer.utils.MetadataExtractor(this@YouTubeStreamingActivity)
+            val b64 = meta.downloadYouTubeThumbnail(video.id)
+            if (b64.isNullOrBlank()) {
+                return
+            }
+
+            val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+            val cache = com.stash.opusplayer.artwork.ArtworkCache(this@YouTubeStreamingActivity)
+            val variants = listOf(
+                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "YouTube", 0L, ""),
+                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "Unknown Album", 0L, ""),
+                com.stash.opusplayer.data.Song(0L, video.title, video.channelTitle, "", 0L, ""),
+                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "YouTube", 0L, ""),
+                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "Unknown Album", 0L, ""),
+                com.stash.opusplayer.data.Song(0L, video.title, "Unknown Artist", "", 0L, "")
+            )
+            variants.forEach { song ->
+                val file = cache.fileFor(song)
+                if (!file.exists()) {
+                    cache.saveJpeg(bytes, file)
+                }
+            }
+            val titleOnlyFile = cache.fileForTitleOnly(video.title)
+            if (!titleOnlyFile.exists()) {
+                cache.saveJpeg(bytes, titleOnlyFile)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to cache thumbnail for background playback", e)
+        }
+    }
+
+    private fun playResolvedAudio(
+        video: YouTubeVideo,
+        playback: com.stash.opusplayer.youtube.ResolvedPlayback
+    ) {
+        val artworkUrl = video.highResThumbnailUrl ?: video.thumbnailUrl
+        val metadata = androidx.media3.common.MediaMetadata.Builder()
+            .setTitle(video.title)
+            .setArtist(video.channelTitle)
+            .setAlbumTitle("YouTube")
+            .setArtworkUri(artworkUrl.takeIf { !it.isNullOrBlank() }?.let(android.net.Uri::parse))
+            .build()
+        val item = androidx.media3.common.MediaItem.Builder()
+            .setUri(android.net.Uri.parse(playback.streamUrl))
+            .setMediaMetadata(metadata)
+            .build()
+
+        val token = androidx.media3.session.SessionToken(
+            this@YouTubeStreamingActivity,
+            android.content.ComponentName(
+                this@YouTubeStreamingActivity,
+                com.stash.opusplayer.service.MusicService::class.java
+            )
+        )
+        val future = androidx.media3.session.MediaController.Builder(this@YouTubeStreamingActivity, token).buildAsync()
+        future.addListener({
+            try {
+                val controller = future.get()
+                controller.setMediaItem(item)
+                controller.prepare()
+                controller.play()
+                youTubePlayer?.pause()
+                Toast.makeText(
+                    this@YouTubeStreamingActivity,
+                    "Playing in background via ${playback.sourceLabel}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } catch (e: Exception) {
+                Toast.makeText(
+                    this@YouTubeStreamingActivity,
+                    "Failed to start background playback: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }, com.google.common.util.concurrent.MoreExecutors.directExecutor())
     }
 
     private fun formatTime(seconds: Float): String {

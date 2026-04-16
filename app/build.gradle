@@ -109,7 +109,7 @@ android {
         jvmTarget = '1.8'
         freeCompilerArgs += [
             '-Xjsr305=strict',
-            '-Xopt-in=kotlin.RequiresOptIn'
+            '-opt-in=kotlin.RequiresOptIn'
         ]
     }
     
@@ -125,13 +125,6 @@ android {
         // Disable lint checks that are not critical for performance
         disable 'UnusedResources', 'IconMissingDensityFolder'
     }
-    
-    // Performance optimizations for build
-    dexOptions {
-        javaMaxHeapSize "4g"
-        preDexLibraries = true
-    }
-    
     
     packagingOptions {
         exclude 'META-INF/DEPENDENCIES'
@@ -203,7 +196,7 @@ dependencies {
     implementation 'com.google.http-client:google-http-client-gson:1.42.3'
     
     // Video downloading (yt-dlp alternative for Android)
-    implementation 'com.github.yausername:youtubedl-android:0.13.0'
+    implementation 'com.github.yausername:youtubedl-android:0.14.0'
     
     // YouTube Player for direct streaming
     implementation 'com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0'

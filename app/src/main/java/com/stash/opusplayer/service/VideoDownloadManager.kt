@@ -319,7 +319,12 @@ class VideoDownloadManager(private val context: Context) {
             Log.i(TAG, "🔗 Using service: $serviceUrl")
             
             // Build request URL
-            val requestUrl = "$serviceUrl/$videoUrl?format=${request.selectedFormat.extension}&quality=${request.selectedFormat.quality ?: "good"}"
+            val requestUrl = ExtractionServiceConfig.buildQuickDownloadUrl(
+                serviceUrl = serviceUrl,
+                mediaUrl = videoUrl,
+                format = request.selectedFormat.extension,
+                quality = request.selectedFormat.quality ?: "good"
+            )
             
             _downloadProgress.emit(
                 DownloadProgress(videoId, 20, DownloadStatus.DOWNLOADING)
@@ -596,7 +601,18 @@ class VideoDownloadManager(private val context: Context) {
      * Get available audio formats (simplified)
      */
     suspend fun getAvailableFormats(videoUrl: String): Result<List<com.stash.opusplayer.data.AudioFormat>> {
-        return Result.success(getDefaultFormats())
+        return try {
+            val result = customYouTubeService.getAvailableFormats(videoUrl)
+            val formats = result.getOrNull().orEmpty()
+            if (result.isSuccess && formats.isNotEmpty()) {
+                Result.success(formats)
+            } else {
+                Result.success(getDefaultFormats())
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Falling back to default audio formats", e)
+            Result.success(getDefaultFormats())
+        }
     }
 
     private fun getDefaultFormats(): List<com.stash.opusplayer.data.AudioFormat> {

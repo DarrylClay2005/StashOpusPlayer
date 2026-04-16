@@ -71,8 +71,7 @@ class DownloadServiceSettingsActivity : AppCompatActivity() {
         platformsRecyclerView.layoutManager = LinearLayoutManager(this)
         platformsRecyclerView.adapter = platformsAdapter
         
-        // Set initial state
-        autoDetectSwitch.isChecked = ExtractionServiceConfig.AUTO_DETECT_ENABLED
+        autoDetectSwitch.isChecked = ExtractionServiceConfig.isAutoDetectEnabled(this)
     }
 
     private fun initServices() {
@@ -81,13 +80,13 @@ class DownloadServiceSettingsActivity : AppCompatActivity() {
 
     private fun setupListeners() {
         autoDetectSwitch.setOnCheckedChangeListener { _, isChecked ->
-            // Note: This would require modifying ExtractionServiceConfig to be mutable
-            // For now, just show the current setting
-            if (isChecked != ExtractionServiceConfig.AUTO_DETECT_ENABLED) {
-                Toast.makeText(this, 
-                    "Auto-detect setting requires app rebuild to take effect", 
-                    Toast.LENGTH_LONG).show()
-            }
+            ExtractionServiceConfig.setAutoDetectEnabled(this, isChecked)
+            Toast.makeText(
+                this,
+                if (isChecked) "Auto-detect enabled" else "Auto-detect disabled",
+                Toast.LENGTH_SHORT
+            ).show()
+            updateDisplayedInfo()
         }
 
         scanServicesButton.setOnClickListener {
@@ -120,7 +119,12 @@ class DownloadServiceSettingsActivity : AppCompatActivity() {
                     
                     // Update status
                     serviceStatusText.text = "Status: Checking..."
-                    serviceStatusText.setTextColor(getColor(android.R.color.holo_orange_dark))
+                    serviceStatusText.setTextColor(
+                        androidx.core.content.ContextCompat.getColor(
+                            this@DownloadServiceSettingsActivity,
+                            android.R.color.holo_orange_dark
+                        )
+                    )
                 }
             }
             
@@ -167,16 +171,31 @@ class DownloadServiceSettingsActivity : AppCompatActivity() {
                 
                 if (isHealthy) {
                     serviceStatusText.text = "Status: ✅ Healthy"
-                    serviceStatusText.setTextColor(getColor(android.R.color.holo_green_dark))
+                    serviceStatusText.setTextColor(
+                        androidx.core.content.ContextCompat.getColor(
+                            this@DownloadServiceSettingsActivity,
+                            android.R.color.holo_green_dark
+                        )
+                    )
                 } else {
                     serviceStatusText.text = "Status: ❌ Unreachable"
-                    serviceStatusText.setTextColor(getColor(android.R.color.holo_red_dark))
+                    serviceStatusText.setTextColor(
+                        androidx.core.content.ContextCompat.getColor(
+                            this@DownloadServiceSettingsActivity,
+                            android.R.color.holo_red_dark
+                        )
+                    )
                 }
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Connectivity test failed", e)
                 serviceStatusText.text = "Status: ❌ Error"
-                serviceStatusText.setTextColor(getColor(android.R.color.holo_red_dark))
+                serviceStatusText.setTextColor(
+                    androidx.core.content.ContextCompat.getColor(
+                        this@DownloadServiceSettingsActivity,
+                        android.R.color.holo_red_dark
+                    )
+                )
             }
             
             testConnectivityButton.isEnabled = true
@@ -221,10 +240,9 @@ class DownloadServiceSettingsActivity : AppCompatActivity() {
             .setTitle("Switch Service")
             .setMessage("Switch to service at ${serviceInfo.baseUrl}?\n\nType: ${serviceInfo.type}")
             .setPositiveButton("Switch") { _, _ ->
-                Toast.makeText(this, 
-                    "Service switching requires app restart and rebuild", 
-                    Toast.LENGTH_LONG).show()
-                // In a real implementation, this would update the configuration
+                ExtractionServiceConfig.setSelectedServiceUrl(this, serviceInfo.quickUrl)
+                Toast.makeText(this, "Switched to ${serviceInfo.quickUrl}", Toast.LENGTH_LONG).show()
+                updateDisplayedInfo()
             }
             .setNegativeButton("Cancel", null)
             .show()
