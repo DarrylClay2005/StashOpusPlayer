@@ -35,6 +35,12 @@ gradle/wrapper/gradle-wrapper.jar
 # Other
 tmp/
 
+# iOS build outputs
+ios/build/
+ios/DerivedData/
+ios/ExportOptions.plist
+ios/*.xcresult
+
 # Keystore files (security sensitive)
 *.keystore
 *.jks
