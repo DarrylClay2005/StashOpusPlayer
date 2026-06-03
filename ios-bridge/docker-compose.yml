@@ -1,0 +1,16 @@
+services:
+  ios-bridge:
+    build: .
+    container_name: ios_bridge
+    restart: always
+    network_mode: "host"
+    environment:
+      - YTDLP_CACHE_DIR=/app/.cache/yt-dlp
+      - IOS_BRIDGE_API_KEY=${IOS_BRIDGE_API_KEY:-}
+    volumes:
+      - ./cache/yt-dlp:/app/.cache/yt-dlp
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7333/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

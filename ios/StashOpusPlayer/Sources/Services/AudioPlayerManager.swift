@@ -308,6 +308,14 @@ final class AudioPlayerManager: ObservableObject {
         abRepeatEnd = nil
     }
 
+    // MARK: - Audio Effects
+
+    func applyEffect(_ effect: AudioEffect) {
+        var s = AudioEffectsService.apply(effect: effect, to: audioSettings)
+        s.activeEffectID = effect.id
+        audioSettings = s   // triggers didSet → applyAudioSettings()
+    }
+
     // MARK: - EQ Presets
 
     func applyEQPreset(_ preset: EQPreset) {

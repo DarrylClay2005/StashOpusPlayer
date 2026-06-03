@@ -1,0 +1,74 @@
+import SwiftUI
+
+// MARK: - EffectsView
+
+struct EffectsView: View {
+    @EnvironmentObject private var player: AudioPlayerManager
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 5)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Active indicator row
+            HStack(spacing: 6) {
+                Text("Active:")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                let activeName = AudioEffectsService.effect(id: player.audioSettings.activeEffectID)?.name ?? "None"
+                Text(activeName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Effect grid
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(AudioEffectsService.allEffects) { effect in
+                    EffectCell(
+                        effect: effect,
+                        isActive: player.audioSettings.activeEffectID == effect.id
+                    ) {
+                        player.applyEffect(effect)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - EffectCell
+
+private struct EffectCell: View {
+    let effect: AudioEffect
+    let isActive: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: effect.icon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(isActive ? .white : AppTheme.textSecondary)
+                    .frame(height: 22)
+
+                Text(effect.name)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(isActive ? .white : AppTheme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity)
+            .background(
+                isActive
+                    ? AnyShapeStyle(AppTheme.accent)
+                    : AnyShapeStyle(AppTheme.elevatedSurface),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.18), value: isActive)
+    }
+}

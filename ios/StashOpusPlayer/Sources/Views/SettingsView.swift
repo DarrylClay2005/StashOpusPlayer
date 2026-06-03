@@ -11,6 +11,7 @@ struct SettingsView: View {
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var sleepTimer: SleepTimerService
     @EnvironmentObject private var updater: UpdateService
+    @EnvironmentObject private var streaming: StreamingService
 
     // MARK: Body
 
@@ -29,6 +30,7 @@ struct SettingsView: View {
 
                 librarySection
                 playbackSection
+                streamingSection
                 sleepTimerSection
                 audioSection
                 appearanceSection
@@ -212,6 +214,81 @@ struct SettingsView: View {
 
         } header: {
             sectionHeader("Playback")
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
+    // MARK: — Streaming Section
+
+    @State private var showHealthResult = false
+    @State private var healthOK = false
+
+    private var streamingSection: some View {
+        Section {
+            // Status row
+            HStack {
+                Label("Bridge Server", systemImage: "server.rack")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                Text(streaming.isConfigured ? "Configured" : "Not configured")
+                    .font(AppTheme.bodyFont(size: 13))
+                    .foregroundStyle(streaming.isConfigured ? AppTheme.success : AppTheme.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        (streaming.isConfigured ? AppTheme.success : AppTheme.textSecondary).opacity(0.15),
+                        in: Capsule()
+                    )
+            }
+
+            // Server URL field
+            HStack {
+                Label("Server URL", systemImage: "link")
+                    .foregroundStyle(AppTheme.textPrimary)
+                TextField("http://192.168.1.x:7333", text: Binding(
+                    get: { streaming.bridgeURL },
+                    set: { streaming.bridgeURL = $0 }
+                ))
+                .keyboardType(.URL)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            // API Key (optional)
+            HStack {
+                Label("API Key (optional)", systemImage: "key")
+                    .foregroundStyle(AppTheme.textPrimary)
+                SecureField("Leave blank if not set", text: Binding(
+                    get: { streaming.apiKey },
+                    set: { streaming.apiKey = $0 }
+                ))
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            // Test connection
+            Button {
+                Task {
+                    let ok = await streaming.checkHealth()
+                    healthOK = ok
+                    showHealthResult = true
+                }
+            } label: {
+                HStack {
+                    Label("Test Connection", systemImage: "antenna.radiowaves.left.and.right")
+                        .foregroundStyle(AppTheme.accent)
+                    Spacer()
+                    if showHealthResult {
+                        Image(systemName: healthOK ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundStyle(healthOK ? AppTheme.success : AppTheme.error)
+                    }
+                }
+            }
+
+        } header: {
+            sectionHeader("Streaming")
         }
         .listRowBackground(AppTheme.surface)
     }

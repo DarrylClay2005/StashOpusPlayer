@@ -48,6 +48,7 @@ struct NowPlayingView: View {
     // Collapsible panels
     @State private var showPlaybackControls = true
     @State private var showABRepeat = false
+    @State private var showEffects = false
     @State private var showEQ = true
     @State private var showLyrics = false
 
@@ -72,6 +73,7 @@ struct NowPlayingView: View {
                     volumeSection
                     playbackControlsSection
                     abRepeatSection
+                    effectsSection
                     equalizerSection
                     lyricsSection
                 }
@@ -501,6 +503,35 @@ struct NowPlayingView: View {
         }
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.2), value: isSet)
+    }
+
+    // MARK: - Audio Effects
+
+    private var effectsSection: some View {
+        DisclosureGroup(
+            isExpanded: $showEffects,
+            content: {
+                EffectsView()
+                    .padding(.top, 8)
+            },
+            label: {
+                HStack {
+                    Text("Audio Effects")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    if player.audioSettings.activeEffectID != "none" {
+                        Text(AudioEffectsService.effect(id: player.audioSettings.activeEffectID)?.name ?? "")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(AppTheme.accent, in: Capsule())
+                    }
+                }
+            }
+        )
+        .tint(AppTheme.accent)
+        .panelStyle()
     }
 
     // MARK: - Equalizer

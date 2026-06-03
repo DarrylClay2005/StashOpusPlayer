@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
 
     @EnvironmentObject private var player: AudioPlayerManager
+    @EnvironmentObject private var streaming: StreamingService
 
     /// Persists the last-selected tab across launches.
     @AppStorage("selected_tab") private var selectedTab = 0
@@ -37,12 +38,19 @@ struct ContentView: View {
                 }
                 .tag(2)
 
-            // MARK: Tab 4 — Settings
+            // MARK: Tab 4 — Search Streaming
+            StreamSearchView()
+                .tabItem {
+                    Label("Search", systemImage: "magnifyingglass")
+                }
+                .tag(3)
+
+            // MARK: Tab 5 — Settings
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
-                .tag(3)
+                .tag(4)
         }
         .tint(AppTheme.dynamicAccent)
     }

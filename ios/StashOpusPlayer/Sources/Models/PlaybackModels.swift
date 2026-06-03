@@ -38,4 +38,5 @@ struct AudioSettings: Codable, Equatable {
     var replayGainEnabled: Bool = false
     var bassBoostEnabled: Bool = false
     var bassBoostGain: Float = 0.0  // 0–15 dB extra on 32 Hz and 64 Hz bands
+    var activeEffectID: String = "none"
 }

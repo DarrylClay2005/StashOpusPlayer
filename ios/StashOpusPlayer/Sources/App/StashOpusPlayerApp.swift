@@ -7,6 +7,7 @@ struct StashOpusPlayerApp: App {
     @StateObject private var player = AudioPlayerManager()
     @StateObject private var sleepTimer = SleepTimerService()
     @StateObject private var updater = UpdateService.shared
+    @StateObject private var streaming = StreamingService()
 
     var body: some Scene {
         WindowGroup {
@@ -15,6 +16,7 @@ struct StashOpusPlayerApp: App {
                 .environmentObject(player)
                 .environmentObject(sleepTimer)
                 .environmentObject(updater)
+                .environmentObject(streaming)
                 .preferredColorScheme(.dark)
                 .task {
                     // Restore audio settings first so the player is configured before any resume.

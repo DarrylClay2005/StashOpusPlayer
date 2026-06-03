@@ -57,4 +57,17 @@ targets:
         config: Release
       analyzeAction:
         config: Debug
-      testTargets: []
+      testTargets:
+        - StashOpusPlayerTests
+
+  StashOpusPlayerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: StashOpusPlayer/Tests
+    dependencies:
+      - target: StashOpusPlayer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stash.opusplayer.ios.tests
+        INFOPLIST_FILE: ""
