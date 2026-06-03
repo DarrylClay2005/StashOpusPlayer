@@ -54,6 +54,10 @@ final class StreamingService: ObservableObject {
     static let bridgeURLKey = "ios_bridge_url"
     static let apiKeyKey    = "ios_bridge_api_key"
 
+    /// Public URL baked into the app — routed via SwarmPanel ngrok proxy so
+    /// it works anywhere without home WiFi. Users can override in Settings.
+    static let defaultBridgeURL = "https://germinate-props-motive.ngrok-free.dev/ios-bridge"
+
     // MARK: Published state
 
     @Published var searchResults: [StreamTrack] = []
@@ -64,7 +68,7 @@ final class StreamingService: ObservableObject {
     // MARK: Persisted settings
 
     var bridgeURL: String {
-        get { UserDefaults.standard.string(forKey: Self.bridgeURLKey) ?? "" }
+        get { UserDefaults.standard.string(forKey: Self.bridgeURLKey) ?? Self.defaultBridgeURL }
         set { UserDefaults.standard.set(newValue, forKey: Self.bridgeURLKey) }
     }
 
@@ -73,7 +77,7 @@ final class StreamingService: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: Self.apiKeyKey) }
     }
 
-    var isConfigured: Bool { !bridgeURL.isEmpty }
+    var isConfigured: Bool { true } // always configured via default URL
 
     // MARK: - Search
 

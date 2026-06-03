@@ -97,10 +97,11 @@ final class AccountService: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: Self.tokenKey) }
     }
 
-    // MARK: Bridge URL (shared with StreamingService)
+    // MARK: Bridge URL — defaults to public baked-in URL, overridable in Settings
 
     var bridgeURL: String {
-        UserDefaults.standard.string(forKey: StreamingService.bridgeURLKey) ?? ""
+        UserDefaults.standard.string(forKey: StreamingService.bridgeURLKey)
+            ?? StreamingService.defaultBridgeURL
     }
 
     // MARK: Init — restore session

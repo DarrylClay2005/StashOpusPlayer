@@ -7,6 +7,14 @@ services:
     environment:
       - YTDLP_CACHE_DIR=/app/.cache/yt-dlp
       - IOS_BRIDGE_API_KEY=${IOS_BRIDGE_API_KEY:-}
+      # Dedicated MariaDB credentials for the StashOpusPlayer iOS app
+      - DB_HOST=127.0.0.1
+      - DB_PORT=3306
+      - DB_USER=stash
+      - DB_PASSWORD=player
+      - DB_NAME=discord_music_gws
+      # JWT secret for account tokens
+      - IOS_JWT_SECRET=${IOS_JWT_SECRET:-stash-opus-player-jwt-secret-2026}
     volumes:
       - ./cache/yt-dlp:/app/.cache/yt-dlp
     healthcheck:
