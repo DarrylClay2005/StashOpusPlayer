@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 @MainActor
 final class UpdateService: ObservableObject {
@@ -14,6 +15,10 @@ final class UpdateService: ObservableObject {
     }
 
     private init() {}
+
+    func openReleasePage() {
+        UIApplication.shared.open(releasePageURL)
+    }
 
     func checkForUpdates() async {
         guard !isChecking else { return }
