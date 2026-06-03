@@ -6,7 +6,7 @@
     <key>CFBundleName</key>
     <string>$(PRODUCT_NAME)</string>
     <key>CFBundleDisplayName</key>
-    <string>Stash Opus Player</string>
+    <string>StashOpusPlayer</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleExecutable</key>
@@ -26,11 +26,38 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
 
-    <!-- Document handling -->
+    <!-- Document handling — UIFileSharingEnabled makes the app's Documents
+         folder visible in Finder/Files so users can drop audio files there.
+         LSSupportsOpeningDocumentsInPlace allows opening files directly. -->
+    <key>UIFileSharingEnabled</key>
+    <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>
     <true/>
     <key>UISupportsDocumentBrowser</key>
     <false/>
+
+    <!-- Supported audio file types for Open-in / Share-sheet import -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Audio File</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.audio</string>
+                <string>public.mp3</string>
+                <string>public.mpeg-4-audio</string>
+                <string>com.apple.m4a-audio</string>
+                <string>public.aiff-audio</string>
+                <string>com.microsoft.waveform-audio</string>
+                <string>public.flac-audio</string>
+            </array>
+        </dict>
+    </array>
 
     <!-- Supported orientations (iPhone) -->
     <key>UISupportedInterfaceOrientations</key>

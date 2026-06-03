@@ -79,6 +79,9 @@ struct LibraryView: View {
                 }
             }
             .onAppear {
+                // Always rescan the local Documents folder (picks up files added via Files app/Finder)
+                library.scanLocalDocuments()
+                // Request Apple Music library access if we have no songs yet
                 if library.allSongs.isEmpty && !library.isScanning {
                     library.requestAccessAndScan()
                 }
@@ -125,6 +128,8 @@ struct LibraryView: View {
                     .tint(AppTheme.accent)
             } else {
                 Button {
+                    // Rescan both local Documents folder and Apple Music library
+                    library.scanLocalDocuments()
                     library.requestAccessAndScan()
                 } label: {
                     Image(systemName: "arrow.clockwise")

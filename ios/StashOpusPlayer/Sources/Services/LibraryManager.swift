@@ -32,6 +32,65 @@ final class LibraryManager: ObservableObject {
         self.artwork = artwork
         favoriteSongIDs = persistence.loadFavorites()
         playlists = persistence.loadPlaylists()
+        // Immediately scan files already sitting in the app's Documents folder
+        // (placed there via Finder/Files app or a previous import session).
+        scanLocalDocuments()
+    }
+
+    /// Scans the app's Documents directory (root + Imported Music subfolder) for audio
+    /// files and adds any that aren't already tracked. Called automatically on init and
+    /// can be triggered manually after the user drops files via the Files app.
+    func scanLocalDocuments() {
+        Task {
+            let fm = FileManager.default
+            guard let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+            let importedDir = docsDir.appendingPathComponent("Imported Music")
+
+            var candidates: [URL] = []
+
+            // Root Documents folder — files dragged in via Finder/Files
+            if let contents = try? fm.contentsOfDirectory(
+                at: docsDir,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                candidates += contents.filter {
+                    DocumentImportService.supportedExtensions.contains($0.pathExtension.lowercased())
+                }
+            }
+
+            // Imported Music subfolder — files copied by DocumentImportService
+            if let contents = try? fm.contentsOfDirectory(
+                at: importedDir,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                candidates += contents.filter {
+                    DocumentImportService.supportedExtensions.contains($0.pathExtension.lowercased())
+                }
+            }
+
+            guard !candidates.isEmpty else { return }
+
+            // Build Song objects for any files not already in importedSongs
+            let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
+            let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
+            guard !newURLs.isEmpty else { return }
+
+            let service = DocumentImportService()
+            let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
+                var result: [Song] = []
+                for url in newURLs {
+                    let song = await service.makeSong(for: url)
+                    result.append(song)
+                }
+                return result
+            }.value
+
+            importedSongs.append(contentsOf: newSongs)
+            importedSongs = Array(Dictionary(grouping: importedSongs, by: \.id).compactMap { $0.value.first })
+            rebuildAllSongs()
+        }
     }
 
     func requestAccessAndScan() {

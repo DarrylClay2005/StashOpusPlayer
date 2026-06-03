@@ -16,9 +16,10 @@ enum DocumentImportError: LocalizedError {
 }
 
 struct DocumentImportService {
-    private let supportedExtensions: Set<String> = [
-        "mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "mp4"
+    static let supportedExtensions: Set<String> = [
+        "mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "mp4", "opus"
     ]
+    private var supportedExtensions: Set<String> { Self.supportedExtensions }
 
     func importFiles(from urls: [URL]) async throws -> [Song] {
         var songs: [Song] = []
@@ -76,7 +77,8 @@ struct DocumentImportService {
         return libraryDir.appendingPathComponent("\(safeName).\(ext)")
     }
 
-    private func makeSong(for url: URL) async -> Song {
+    /// Exposed so LibraryManager can build Song objects when scanning the Documents folder directly.
+    func makeSong(for url: URL) async -> Song {
         let asset = AVURLAsset(url: url)
         let loadedDuration = (try? await asset.load(.duration)).map(CMTimeGetSeconds) ?? 0
         let commonMetadata = (try? await asset.load(.commonMetadata)) ?? []
