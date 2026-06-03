@@ -9,27 +9,27 @@ final class MusicFolderService: ObservableObject {
 
     struct WatchedFolder: Identifiable, Codable {
         let id: UUID
-        var displayName: String   // last path component
-        var bookmarkData: Data    // security-scoped bookmark
+        var displayName: String
+        var bookmarkData: Data
         var lastScannedAt: Date
         var trackCount: Int
     }
 
-    init() {
-        loadBookmarks()
-    }
+    init() { loadBookmarks() }
 
     // MARK: - Public API
 
-    /// Add a folder from a security-scoped URL (from UIDocumentPickerViewController / .fileImporter).
+    /// Add a folder from a URL obtained via .fileImporter / UIDocumentPickerViewController.
     func addFolder(url: URL) throws {
-        // Start accessing so we can create the bookmark.
+        // On iOS, startAccessingSecurityScopedResource() must be called before
+        // creating a bookmark so the sandbox grants access.
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
+        // .minimalBookmark is the correct option on iOS (withSecurityScope is macOS-only).
         let bookmarkData = try url.bookmarkData(
-            options: .withSecurityScope,
-            includingResourceValuesForKeys: nil,
+            options: .minimalBookmark,
+            includingResourceValuesForKeys: [.isDirectoryKey],
             relativeTo: nil
         )
 
@@ -41,22 +41,19 @@ final class MusicFolderService: ObservableObject {
             trackCount: 0
         )
 
-        // Avoid duplicates by display name + bookmark data comparison.
-        guard !watchedFolders.contains(where: { $0.displayName == folder.displayName && $0.bookmarkData == folder.bookmarkData }) else {
-            return
-        }
+        guard !watchedFolders.contains(where: {
+            $0.displayName == folder.displayName && $0.bookmarkData == folder.bookmarkData
+        }) else { return }
 
         watchedFolders.append(folder)
         saveBookmarks()
     }
 
-    /// Remove a watched folder by ID.
     func removeFolder(id: UUID) {
         watchedFolders.removeAll { $0.id == id }
         saveBookmarks()
     }
 
-    /// Update the track count for a folder after a scan.
     func updateTrackCount(_ count: Int, for id: UUID) {
         guard let index = watchedFolders.firstIndex(where: { $0.id == id }) else { return }
         watchedFolders[index].trackCount = count
@@ -64,17 +61,19 @@ final class MusicFolderService: ObservableObject {
         saveBookmarks()
     }
 
-    /// Resolve all bookmarks and return valid (already-accessed) URLs.
-    /// Callers must call `stopAccessingSecurityScopedResource()` on each URL when done.
+    /// Resolve all persisted bookmarks and return valid accessible URLs.
+    /// Each returned URL has `startAccessingSecurityScopedResource()` already called;
+    /// callers must call `stopAccessingSecurityScopedResource()` when done.
     func resolveAll() -> [URL] {
         var valid: [URL] = []
         var staleIDs: [UUID] = []
 
         for folder in watchedFolders {
             var isStale = false
-            guard let resolvedURL = try? URL(
+            // iOS: use no bookmark-resolution options (withSecurityScope is macOS-only)
+            guard let resolved = try? URL(
                 resolvingBookmarkData: folder.bookmarkData,
-                options: .withSecurityScope,
+                options: [],
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             ) else {
@@ -83,15 +82,17 @@ final class MusicFolderService: ObservableObject {
             }
 
             if isStale {
-                // Attempt to refresh the bookmark.
-                let accessing = resolvedURL.startAccessingSecurityScopedResource()
-                defer { if accessing { resolvedURL.stopAccessingSecurityScopedResource() } }
-                if let fresh = try? resolvedURL.bookmarkData(
-                    options: .withSecurityScope,
+                // Try to refresh the bookmark while we still have access.
+                let didAccess = resolved.startAccessingSecurityScopedResource()
+                let fresh = try? resolved.bookmarkData(
+                    options: .minimalBookmark,
                     includingResourceValuesForKeys: nil,
                     relativeTo: nil
-                ), let index = watchedFolders.firstIndex(where: { $0.id == folder.id }) {
-                    watchedFolders[index].bookmarkData = fresh
+                )
+                if didAccess { resolved.stopAccessingSecurityScopedResource() }
+
+                if let fresh, let idx = watchedFolders.firstIndex(where: { $0.id == folder.id }) {
+                    watchedFolders[idx].bookmarkData = fresh
                     saveBookmarks()
                 } else {
                     staleIDs.append(folder.id)
@@ -99,19 +100,21 @@ final class MusicFolderService: ObservableObject {
                 }
             }
 
-            if resolvedURL.startAccessingSecurityScopedResource() {
-                valid.append(resolvedURL)
-            } else {
-                staleIDs.append(folder.id)
+            // The resolved URL is a security-scoped resource; start access for the caller.
+            if resolved.startAccessingSecurityScopedResource() {
+                valid.append(resolved)
+            }
+            // If startAccessing returns false the URL is still valid but may not need
+            // explicit access (e.g. it's within our sandbox already).
+            else {
+                valid.append(resolved)
             }
         }
 
-        // Remove permanently stale entries.
         if !staleIDs.isEmpty {
             watchedFolders.removeAll { staleIDs.contains($0.id) }
             saveBookmarks()
         }
-
         return valid
     }
 
@@ -125,9 +128,8 @@ final class MusicFolderService: ObservableObject {
 
     private func loadBookmarks() {
         guard let data = UserDefaults.standard.data(forKey: Self.bookmarksKey),
-              let decoded = try? JSONDecoder().decode([WatchedFolder].self, from: data) else {
-            return
-        }
+              let decoded = try? JSONDecoder().decode([WatchedFolder].self, from: data)
+        else { return }
         watchedFolders = decoded
     }
 }
