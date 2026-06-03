@@ -1,0 +1,34 @@
+{
+  "name": "Stash Opus Player",
+  "identifier": "com.stash.opusplayer.altstore-source",
+  "sourceURL": "https://raw.githubusercontent.com/HeavenlyXenusVR/StashOpusPlayer/main/ios/altstore-source.json",
+  "apps": [
+    {
+      "name": "Stash Opus Player",
+      "bundleIdentifier": "com.stash.opusplayer.ios",
+      "developerName": "HeavenlyXenusVR",
+      "subtitle": "Music player with EQ, crossfade, and more",
+      "localizedDescription": "Stash Opus Player is a full-featured iOS music player with 10-band EQ, crossfade, gapless playback, AB repeat, sleep timer, lyrics support, and library management.",
+      "iconURL": "https://raw.githubusercontent.com/HeavenlyXenusVR/StashOpusPlayer/main/app/src/main/ic_launcher.png",
+      "tintColor": "EC4079",
+      "screenshotURLs": [],
+      "versions": [
+        {
+          "version": "1.0.0",
+          "date": "2026-06-03T00:00:00Z",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.0.0/StashOpusPlayer-1.0.0-unsigned.ipa",
+          "localizedDescription": "Initial iOS release",
+          "size": 370000,
+          "minOSVersion": "16.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSAppleMusicUsageDescription": "Stash Opus Player reads your music library to display and play your songs."
+        }
+      }
+    }
+  ],
+  "news": []
+}

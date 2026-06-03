@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import MediaPlayer
 import UIKit
@@ -10,7 +10,13 @@ final class AudioPlayerManager: ObservableObject {
 
     // MARK: Published State
 
-    @Published private(set) var currentSong: Song?
+    @Published private(set) var currentSong: Song? {
+        didSet {
+            if currentSong?.id != oldValue?.id {
+                Task { await updateNowPlayingArtwork(for: currentSong) }
+            }
+        }
+    }
     @Published private(set) var queue: [Song] = []
     @Published private(set) var currentIndex = 0
     @Published private(set) var isPlaying = false
@@ -66,6 +72,9 @@ final class AudioPlayerManager: ObservableObject {
 
     // Gapless: the next file pre-loaded and scheduled on the active node.
     private var gaplessScheduled = false
+
+    // Audio interruption / route change
+    private var wasInterrupted = false
 
     // MARK: Init / Deinit
 
@@ -262,6 +271,11 @@ final class AudioPlayerManager: ObservableObject {
         } else {
             queue.insert(song, at: insertionIndex)
         }
+    }
+
+    /// Append a song to the end of the queue without affecting current playback.
+    func appendToQueue(song: Song) {
+        queue.append(song)
     }
 
     // MARK: - AB Repeat
@@ -536,6 +550,57 @@ final class AudioPlayerManager: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in self?.handleAudioInterruption(notification) }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in self?.handleRouteChange(notification) }
+        }
+    }
+
+    private func handleAudioInterruption(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue)
+        else { return }
+
+        switch type {
+        case .began:
+            if isPlaying {
+                pause()
+                wasInterrupted = true
+            }
+        case .ended:
+            wasInterrupted = false
+            guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+            if options.contains(.shouldResume) {
+                resume()
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleRouteChange(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
+        else { return }
+
+        if reason == .oldDeviceUnavailable {
+            pause()
+        }
     }
 
     private func configureEngine() {
@@ -616,14 +681,14 @@ final class AudioPlayerManager: ObservableObject {
             }
         }
 
-        updateNowPlaying()
+        // Do NOT call updateNowPlaying() here — this runs on every EQ slider drag.
     }
 
     // MARK: - Position Tracking
 
     private func startTimer() {
         stopTimer()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.timerTick()
             }
@@ -637,7 +702,6 @@ final class AudioPlayerManager: ObservableObject {
 
     private func timerTick() {
         updatePositionFromPlayer()
-        updateNowPlaying()
 
         // AB Repeat enforcement
         if abRepeatEnabled,
@@ -679,6 +743,22 @@ final class AudioPlayerManager: ObservableObject {
             MPNowPlayingInfoPropertyDefaultPlaybackRate: Double(audioSettings.speed)
         ]
 
+        // Preserve existing artwork if already set (avoid flickering during position updates).
+        if let existing = MPNowPlayingInfoCenter.default().nowPlayingInfo,
+           let existingArtwork = existing[MPMediaItemPropertyArtwork] {
+            info[MPMediaItemPropertyArtwork] = existingArtwork
+        }
+
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    /// Fetches artwork asynchronously and injects it into the Now Playing info center.
+    private func updateNowPlayingArtwork(for song: Song?) async {
+        guard let song else { return }
+        guard let image = await ArtworkService.shared.loadArtwork(for: song) else { return }
+        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        info[MPMediaItemPropertyArtwork] = artwork
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 

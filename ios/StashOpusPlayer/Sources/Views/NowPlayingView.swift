@@ -30,6 +30,9 @@ private struct VerticalSlider: View {
 struct NowPlayingView: View {
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var library: LibraryManager
+    @EnvironmentObject private var sleepTimer: SleepTimerService
+
+    @Environment(\.dismiss) private var dismiss
 
     // Seeking
     @State private var isSeeking = false
@@ -48,8 +51,14 @@ struct NowPlayingView: View {
     @State private var showEQ = true
     @State private var showLyrics = false
 
+    // Sleep Timer sheet
+    @State private var showSleepTimerSheet = false
+
     // Lyrics
     @State private var lyricsLines: [LrcLine] = []
+
+    // Haptic generator for seek start
+    private let seekHaptic = UIImpactFeedbackGenerator(style: .light)
 
     var body: some View {
         NavigationStack {
@@ -59,6 +68,7 @@ struct NowPlayingView: View {
                     trackInfoSection
                     timelineSection
                     transportSection
+                    sleepTimerPill
                     volumeSection
                     playbackControlsSection
                     abRepeatSection
@@ -69,9 +79,34 @@ struct NowPlayingView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 32)
             }
+            // Swipe down to dismiss when presented as a sheet
+            .gesture(
+                DragGesture()
+                    .onEnded { value in
+                        if value.translation.height > 60 {
+                            dismiss()
+                        }
+                    }
+            )
             .navigationTitle("Now Playing")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
             .appScreenBackground()
+        }
+        .sheet(isPresented: $showSleepTimerSheet) {
+            SleepTimerSheet()
+                .environmentObject(sleepTimer)
         }
         .onChange(of: player.currentSong?.id) { newID in
             guard newID != nil else { return }
@@ -79,6 +114,7 @@ struct NowPlayingView: View {
             loadLyrics()
         }
         .onAppear {
+            seekHaptic.prepare()
             loadLyrics()
         }
     }
@@ -163,7 +199,9 @@ struct NowPlayingView: View {
                 in: 0...max(player.duration, 1),
                 onEditingChanged: { editing in
                     isSeeking = editing
-                    if !editing {
+                    if editing {
+                        seekHaptic.impactOccurred()
+                    } else {
                         player.seek(to: draftPosition)
                     }
                 }
@@ -208,7 +246,7 @@ struct NowPlayingView: View {
 
             Spacer()
 
-            // Play / Pause
+            // Play / Pause — centered, always 68pt circle
             Button {
                 player.togglePlayPause()
             } label: {
@@ -273,6 +311,41 @@ struct NowPlayingView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - Sleep Timer Pill
+
+    @ViewBuilder
+    private var sleepTimerPill: some View {
+        if sleepTimer.isActive {
+            Button {
+                showSleepTimerSheet = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text("💤")
+                        .font(.caption)
+                    Text(sleepTimer.formattedRemaining)
+                        .font(.system(.caption, design: .monospaced).weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .contentTransition(.numericText())
+                        .animation(.linear(duration: 0.5), value: sleepTimer.remainingSeconds)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(
+                    AppTheme.surface,
+                    in: Capsule()
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(AppTheme.accent.opacity(0.4), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .transition(.scale.combined(with: .opacity))
+            .animation(.spring(response: 0.35, dampingFraction: 0.75), value: sleepTimer.isActive)
+        }
+    }
+
     // MARK: - Volume
 
     private var volumeSection: some View {
@@ -312,9 +385,20 @@ struct NowPlayingView: View {
                 .padding(.top, 10)
             },
             label: {
-                Text("Playback Controls")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.textPrimary)
+                // When collapsed, show current speed value if not 1.0 for quick reference
+                HStack(spacing: 6) {
+                    Text("Playback Controls")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    if !showPlaybackControls && player.audioSettings.speed != 1.0 {
+                        Text(String(format: "%.2f×", player.audioSettings.speed))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(AppTheme.elevatedSurface, in: Capsule())
+                    }
+                }
             }
         )
         .tint(AppTheme.accent)
@@ -477,6 +561,18 @@ struct NowPlayingView: View {
                         }
                         .frame(height: 160)
                         .padding(.top, 4)
+                    } else {
+                        // Placeholder when EQ is disabled
+                        HStack(spacing: 10) {
+                            Image(systemName: "slider.vertical.3")
+                                .font(.system(size: 20))
+                                .foregroundStyle(AppTheme.textSecondary.opacity(0.6))
+                            Text("Enable to customize EQ bands")
+                                .font(.subheadline)
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 20)
                     }
                 }
                 .padding(.top, 10)

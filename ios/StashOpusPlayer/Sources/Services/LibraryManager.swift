@@ -20,6 +20,9 @@ final class LibraryManager: ObservableObject {
     private var mediaSongs: [Song] = []
     private var importedSongs: [Song] = []
 
+    /// Pending debounced rebuild task. Cancelled and replaced on each rapid mutation.
+    private var pendingRebuildTask: Task<Void, Never>?
+
     var favoriteSongs: [Song] {
         allSongs.filter { favoriteSongIDs.contains($0.id) }
     }
@@ -51,16 +54,15 @@ final class LibraryManager: ObservableObject {
         isScanning = true
         errorMessage = nil
 
-        Task.detached(priority: .userInitiated) {
-            let query = MPMediaQuery.songs()
-            let items = query.items ?? []
-            let scanned = items.compactMap(Song.init(mediaItem:))
-
-            await MainActor.run {
-                self.mediaSongs = scanned
-                self.rebuildAllSongs()
-                self.isScanning = false
-            }
+        Task {
+            let scanned: [Song] = await Task.detached(priority: .userInitiated) {
+                let query = MPMediaQuery.songs()
+                return (query.items ?? []).compactMap(Song.init(mediaItem:))
+            }.value
+            // Back on MainActor — Task inherits actor context from scanMediaLibrary().
+            self.mediaSongs = scanned
+            self.rebuildAllSongs()
+            self.isScanning = false
         }
     }
 
@@ -154,13 +156,20 @@ final class LibraryManager: ObservableObject {
         artwork.artwork(for: song)
     }
 
+    /// Debounced rebuild — cancels any pending task and schedules a new one after 0.1 s.
+    /// This prevents runaway work when rapid successive mutations occur (e.g. bulk imports).
     private func rebuildAllSongs() {
-        let combined = (mediaSongs + importedSongs).sorted {
-            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        pendingRebuildTask?.cancel()
+        pendingRebuildTask = Task {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 s
+            guard !Task.isCancelled else { return }
+            let combined = (self.mediaSongs + self.importedSongs).sorted {
+                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
+            self.allSongs = combined
+            self.artists = Array(Set(combined.map(\.artistName))).sorted()
+            self.albums  = Array(Set(combined.map(\.albumName))).sorted()
+            self.genres  = Array(Set(combined.compactMap { $0.genre.isEmpty ? nil : $0.genre })).sorted()
         }
-        allSongs = combined
-        artists = Array(Set(combined.map(\.artistName))).sorted()
-        albums = Array(Set(combined.map(\.albumName))).sorted()
-        genres = Array(Set(combined.compactMap { $0.genre.isEmpty ? nil : $0.genre })).sorted()
     }
 }

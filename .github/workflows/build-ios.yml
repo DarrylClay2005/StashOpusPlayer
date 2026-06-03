@@ -15,6 +15,9 @@ on:
         type: choice
         options: [ Release, Debug ]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     name: Build & export IPA
@@ -29,7 +32,9 @@ jobs:
           # Use the latest available stable Xcode
           XCODE=$(ls /Applications | grep '^Xcode' | sort -rV | head -1)
           sudo xcode-select -s "/Applications/$XCODE/Contents/Developer"
-          xcodebuild -version
+
+      - name: Print Xcode version
+        run: xcodebuild -version
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -57,7 +62,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            | xcpretty || true
+            2>&1 | tail -30 || { echo "xcodebuild failed"; exit 1; }
           # Verify the .app was produced
           APP=$(find build/StashOpusPlayer.xcarchive -name "*.app" | head -1)
           if [ -z "$APP" ]; then
@@ -69,18 +74,21 @@ jobs:
       - name: Package IPA (unsigned)
         working-directory: ios
         run: |
+          MARKETING_VERSION=$(grep 'MARKETING_VERSION' project.yml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          IPA_NAME="StashOpusPlayer-v${MARKETING_VERSION}-unsigned.ipa"
           PAYLOAD_DIR="build/Payload/Payload"
           mkdir -p "$PAYLOAD_DIR"
           cp -R "$APP_PATH" "$PAYLOAD_DIR/"
           cd build/Payload
-          zip -r ../StashOpusPlayer-unsigned.ipa Payload/ -x "*.DS_Store"
-          echo "IPA created: $(du -sh ../StashOpusPlayer-unsigned.ipa)"
+          zip -r "../$IPA_NAME" Payload/ -x "*.DS_Store"
+          echo "IPA created: $(du -sh ../$IPA_NAME)"
+          echo "IPA_NAME=$IPA_NAME" >> "$GITHUB_ENV"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: StashOpusPlayer-unsigned-ipa
-          path: ios/build/StashOpusPlayer-unsigned.ipa
+          path: ios/build/${{ env.IPA_NAME }}
           retention-days: 14
 
       - name: Upload archive (for re-signing)

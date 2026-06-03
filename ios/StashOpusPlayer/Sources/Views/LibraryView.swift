@@ -9,6 +9,7 @@ private enum LibraryTab: String, CaseIterable {
     case albums    = "Albums"
     case genres    = "Genres"
     case playlists = "Playlists"
+    case favorites = "Favorites"
 }
 
 // MARK: - LibraryView
@@ -19,12 +20,13 @@ struct LibraryView: View {
 
     @State private var selectedTab: LibraryTab = .songs
     @State private var searchText: String = ""
+    @State private var debouncedSearch: String = ""
     @State private var isImporterPresented = false
 
-    // MARK: Filtered songs for Songs tab
+    // MARK: Filtered songs for Songs tab (uses debounced search)
 
     private var filteredSongs: [Song] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = debouncedSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return library.allSongs }
         return library.allSongs.filter { song in
             song.displayName.localizedCaseInsensitiveContains(query)
@@ -81,6 +83,15 @@ struct LibraryView: View {
                     library.requestAccessAndScan()
                 }
             }
+            // Debounce search: wait 0.3 s after the user stops typing
+            .onChange(of: searchText) { newValue in
+                Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    if searchText == newValue {
+                        debouncedSearch = newValue
+                    }
+                }
+            }
         }
     }
 
@@ -99,6 +110,8 @@ struct LibraryView: View {
             GenresTab()
         case .playlists:
             PlaylistsView()
+        case .favorites:
+            FavoritesView()
         }
     }
 

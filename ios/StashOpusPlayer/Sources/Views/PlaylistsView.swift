@@ -6,6 +6,11 @@ struct PlaylistsView: View {
     @State private var showingCreateSheet = false
     @State private var newPlaylistName = ""
 
+    // Rename alert state
+    @State private var renameTarget: Playlist? = nil
+    @State private var renameText: String = ""
+    @State private var showingRenameAlert = false
+
     var body: some View {
         List {
             if library.playlists.isEmpty {
@@ -23,6 +28,23 @@ struct PlaylistsView: View {
                         PlaylistRow(playlist: playlist)
                     }
                     .listRowBackground(AppTheme.surface.opacity(0.5))
+                    .contextMenu {
+                        // Rename
+                        Button {
+                            renameTarget = playlist
+                            renameText = playlist.name
+                            showingRenameAlert = true
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+
+                        // Delete (destructive)
+                        Button(role: .destructive) {
+                            library.deletePlaylist(playlist)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                 }
                 .onDelete { indexSet in
                     for index in indexSet {
@@ -57,6 +79,20 @@ struct PlaylistsView: View {
                 }
             )
         }
+        // Rename alert
+        .alert("Rename Playlist", isPresented: $showingRenameAlert, presenting: renameTarget) { playlist in
+            TextField("Playlist name", text: $renameText)
+                .autocorrectionDisabled()
+            Button("Rename") {
+                let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    library.renamePlaylist(playlist, to: trimmed)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { playlist in
+            Text("Enter a new name for \"\(playlist.name)\".")
+        }
     }
 }
 
@@ -64,6 +100,31 @@ struct PlaylistsView: View {
 
 private struct PlaylistRow: View {
     let playlist: Playlist
+    @EnvironmentObject private var library: LibraryManager
+
+    // Total duration of all songs in the playlist
+    private var totalDuration: TimeInterval {
+        library.songs(for: playlist).reduce(0) { $0 + $1.duration }
+    }
+
+    /// Formats seconds as "Xh Ym" or "Xm" etc.
+    private var durationText: String {
+        let total = Int(totalDuration.rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(minutes)m"
+        }
+    }
+
+    private var subtitle: String {
+        let count = playlist.songCount
+        let countText = "\(count) \(count == 1 ? "song" : "songs")"
+        guard playlist.songCount > 0 else { return countText }
+        return "\(countText) · \(durationText)"
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -80,7 +141,7 @@ private struct PlaylistRow: View {
                 Text(playlist.name)
                     .foregroundStyle(AppTheme.textPrimary)
                     .lineLimit(1)
-                Text("\(playlist.songCount) \(playlist.songCount == 1 ? "song" : "songs")")
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
             }

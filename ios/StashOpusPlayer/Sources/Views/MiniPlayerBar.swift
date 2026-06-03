@@ -4,6 +4,7 @@ import UIKit
 struct MiniPlayerBar: View {
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var library: LibraryManager
+    @EnvironmentObject private var sleepTimer: SleepTimerService
     @State private var showingNowPlaying = false
 
     var body: some View {
@@ -13,6 +14,7 @@ struct MiniPlayerBar: View {
                     NowPlayingView()
                         .environmentObject(player)
                         .environmentObject(library)
+                        .environmentObject(sleepTimer)
                 }
         }
     }
@@ -82,6 +84,19 @@ struct MiniPlayerBar: View {
 
     private var controls: some View {
         HStack(spacing: 16) {
+            // Heart / Favorite button
+            if let song = player.currentSong {
+                Button {
+                    library.toggleFavorite(songID: song.id)
+                } label: {
+                    Image(systemName: library.isFavorite(songID: song.id) ? "heart.fill" : "heart")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(library.isFavorite(songID: song.id) ? AppTheme.accent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .animation(.spring(response: 0.3), value: library.isFavorite(songID: song.id))
+            }
+
             // Play / Pause
             Button {
                 player.togglePlayPause()

@@ -9,16 +9,30 @@ struct SettingsView: View {
 
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
+    @EnvironmentObject private var sleepTimer: SleepTimerService
+    @EnvironmentObject private var updater: UpdateService
 
     // MARK: Body
 
     var body: some View {
         NavigationStack {
             List {
+                // Update banner — only visible when an update is available
+                if updater.updateAvailable {
+                    Section {
+                        UpdateBannerView()
+                            .environmentObject(updater)
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
+
                 librarySection
                 playbackSection
+                sleepTimerSection
                 audioSection
                 appearanceSection
+                updatesSection
                 aboutSection
             }
             .scrollContentBackground(.hidden)
@@ -202,6 +216,44 @@ struct SettingsView: View {
         .listRowBackground(AppTheme.surface)
     }
 
+    // MARK: — Sleep Timer Section
+
+    private var sleepTimerSection: some View {
+        Section {
+            if sleepTimer.isActive {
+                HStack {
+                    Label("Active — \(sleepTimer.formattedRemaining)", systemImage: "moon.zzz")
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .font(.system(.subheadline).monospacedDigit())
+                    Spacer()
+                    Button("Cancel") {
+                        sleepTimer.cancel()
+                    }
+                    .foregroundStyle(AppTheme.warning)
+                }
+            } else {
+                Picker("Duration", selection: $sleepTimer.selectedDuration) {
+                    ForEach(SleepTimerService.presets, id: \.seconds) { preset in
+                        Text(preset.label).tag(preset.seconds)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(AppTheme.accent)
+                .foregroundStyle(AppTheme.textPrimary)
+
+                Button {
+                    sleepTimer.start()
+                } label: {
+                    Label("Start Sleep Timer", systemImage: "moon.zzz")
+                        .foregroundStyle(AppTheme.accent)
+                }
+            }
+        } header: {
+            sectionHeader("Sleep Timer")
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
     // MARK: — Audio Section
 
     private var audioSection: some View {
@@ -295,6 +347,59 @@ struct SettingsView: View {
             }
         } header: {
             sectionHeader("Appearance")
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
+    // MARK: — App Updates Section
+
+    private var updatesSection: some View {
+        Section {
+            // Version info row
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Current Version")
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text(updater.currentVersion)
+                        .font(AppTheme.monoFont(size: 13))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                Spacer()
+                if updater.updateAvailable, let latest = updater.latestVersion {
+                    Text("→ \(latest)")
+                        .font(AppTheme.monoFont(size: 13))
+                        .foregroundStyle(AppTheme.success)
+                }
+            }
+
+            // Download update button — only when available
+            if updater.updateAvailable {
+                Button {
+                    updater.openReleasePage()
+                } label: {
+                    Label("Download Update", systemImage: "arrow.down.circle")
+                        .foregroundStyle(AppTheme.accent)
+                }
+            }
+
+            // Check for updates button
+            Button {
+                Task { await updater.checkForUpdates() }
+            } label: {
+                HStack {
+                    Label("Check for Updates", systemImage: "arrow.clockwise")
+                        .foregroundStyle(AppTheme.accent)
+                    Spacer()
+                    if updater.isChecking {
+                        ProgressView()
+                            .tint(AppTheme.accent)
+                    }
+                }
+            }
+            .disabled(updater.isChecking)
+
+        } header: {
+            sectionHeader("App Updates")
         }
         .listRowBackground(AppTheme.surface)
     }

@@ -7,6 +7,7 @@ struct SongRow: View {
     var subtitle: String? = nil
 
     @EnvironmentObject private var library: LibraryManager
+    @EnvironmentObject private var player: AudioPlayerManager
 
     private var resolvedSubtitle: String {
         subtitle ?? "\(song.artistName) · \(song.albumName)"
@@ -47,6 +48,11 @@ struct SongRow: View {
         }
         .contentShape(Rectangle())
         .padding(.vertical, 4)
+        .contextMenu {
+            SongContextMenuContent(song: song)
+                .environmentObject(library)
+                .environmentObject(player)
+        }
     }
 }
 
