@@ -15,9 +15,9 @@
       "versions": [
         {
           "version": "1.0.0",
-          "date": "2026-06-03T00:00:00Z",
+          "date": "2026-06-03T18:26:49Z",
           "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.0.0/StashOpusPlayer-1.0.0-unsigned.ipa",
-          "localizedDescription": "Initial iOS release",
+          "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
         }
