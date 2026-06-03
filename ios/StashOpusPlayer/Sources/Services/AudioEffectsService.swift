@@ -1,5 +1,67 @@
 import Foundation
 
+// MARK: - AudioEffectSpecialMode
+
+/// Describes the DSP oscillator or spatial mode that goes beyond static EQ / speed / pitch.
+enum AudioEffectSpecialMode: Codable, Equatable {
+    case none
+    case rotation(hz: Double)               // 8D — rotate listener orientation
+    case tremolo(freq: Double, depth: Float) // volume LFO
+    case vibrato(freq: Double, depth: Double) // pitch LFO (semitones)
+    case karaoke(level: Float)              // center-channel cancellation
+
+    // ── Codable ──────────────────────────────────────────────────────────────
+
+    private enum CodingKeys: String, CodingKey {
+        case type, hz, freq, depth, level
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try c.decode(String.self, forKey: .type)
+        switch type {
+        case "rotation":
+            let hz = try c.decode(Double.self, forKey: .hz)
+            self = .rotation(hz: hz)
+        case "tremolo":
+            let freq  = try c.decode(Double.self, forKey: .freq)
+            let depth = try c.decode(Float.self,  forKey: .depth)
+            self = .tremolo(freq: freq, depth: depth)
+        case "vibrato":
+            let freq  = try c.decode(Double.self, forKey: .freq)
+            let depth = try c.decode(Double.self, forKey: .depth)
+            self = .vibrato(freq: freq, depth: depth)
+        case "karaoke":
+            let level = try c.decode(Float.self, forKey: .level)
+            self = .karaoke(level: level)
+        default:
+            self = .none
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .none:
+            try c.encode("none", forKey: .type)
+        case .rotation(let hz):
+            try c.encode("rotation", forKey: .type)
+            try c.encode(hz, forKey: .hz)
+        case .tremolo(let freq, let depth):
+            try c.encode("tremolo", forKey: .type)
+            try c.encode(freq,  forKey: .freq)
+            try c.encode(depth, forKey: .depth)
+        case .vibrato(let freq, let depth):
+            try c.encode("vibrato", forKey: .type)
+            try c.encode(freq,  forKey: .freq)
+            try c.encode(depth, forKey: .depth)
+        case .karaoke(let level):
+            try c.encode("karaoke", forKey: .type)
+            try c.encode(level, forKey: .level)
+        }
+    }
+}
+
 // MARK: - AudioEffect
 
 struct AudioEffect: Identifiable, Equatable, Codable {
@@ -10,6 +72,7 @@ struct AudioEffect: Identifiable, Equatable, Codable {
     var eqEnabled: Bool        // whether EQ should be active
     var speed: Float           // 1.0 = normal playback speed
     var pitchSemitones: Float  // 0.0 = no pitch shift
+    var specialMode: AudioEffectSpecialMode = .none
 }
 
 // MARK: - AudioEffectsService
@@ -18,8 +81,7 @@ enum AudioEffectsService {
 
     // MARK: All Presets
 
-    /// All 19 implementable effects (8d / karaoke / tremolo / vibrato / earrape skipped
-    /// because they require DSP primitives outside AVAudioUnitEQ / AVAudioUnitTimePitch).
+    /// All 23 effects — the original 19 plus 8D, tremolo, vibrato, and karaoke.
     static let allEffects: [AudioEffect] = [
         none,
         bassboost,
@@ -41,6 +103,10 @@ enum AudioEffectsService {
         slowmo,
         pitchUp,
         pitchDown,
+        eightD,
+        tremolo,
+        vibrato,
+        karaoke,
     ]
 
     // MARK: Preset Definitions
@@ -289,6 +355,54 @@ enum AudioEffectsService {
         eqEnabled: false,
         speed: 1.0,
         pitchSemitones: -6.1
+    )
+
+    /// 8D Audio — rotates the listener's spatial orientation at 0.18 Hz using AVAudioEnvironmentNode.
+    static let eightD = AudioEffect(
+        id: "8d",
+        name: "8D Audio",
+        icon: "rotate.3d",
+        eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        eqEnabled: false,
+        speed: 1.0,
+        pitchSemitones: 0.0,
+        specialMode: .rotation(hz: 0.18)
+    )
+
+    /// Tremolo — modulates volume with a 4 Hz sine LFO at 45 % depth.
+    static let tremolo = AudioEffect(
+        id: "tremolo",
+        name: "Tremolo",
+        icon: "waveform.path",
+        eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        eqEnabled: false,
+        speed: 1.0,
+        pitchSemitones: 0.0,
+        specialMode: .tremolo(freq: 4.0, depth: 0.45)
+    )
+
+    /// Vibrato — modulates pitch with a 4.5 Hz sine LFO at ±0.35 semitones.
+    static let vibrato = AudioEffect(
+        id: "vibrato",
+        name: "Vibrato",
+        icon: "waveform",
+        eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        eqEnabled: false,
+        speed: 1.0,
+        pitchSemitones: 0.0,
+        specialMode: .vibrato(freq: 4.5, depth: 0.35)
+    )
+
+    /// Karaoke — center-channel cancellation to reduce lead vocals.
+    static let karaoke = AudioEffect(
+        id: "karaoke",
+        name: "Karaoke",
+        icon: "mic.slash.fill",
+        eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        eqEnabled: false,
+        speed: 1.0,
+        pitchSemitones: 0.0,
+        specialMode: .karaoke(level: 1.0)
     )
 
     // MARK: Lookup

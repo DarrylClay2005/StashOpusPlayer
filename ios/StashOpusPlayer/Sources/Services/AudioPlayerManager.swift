@@ -46,6 +46,34 @@ final class AudioPlayerManager: ObservableObject {
     private let timePitch = AVAudioUnitTimePitch()
     private let equalizer = AVAudioUnitEQ(numberOfBands: 10)
 
+    // MARK: Private — Spatial / Special-Effect Nodes
+
+    // 8D: environment + a spatial source mixer
+    private let environmentNode = AVAudioEnvironmentNode()
+    private let spatialSourceMixer = AVAudioMixerNode()
+    private var rotationAngle: Double = 0
+    private var rotationHz: Double = 0.18
+    private var rotationLink: CADisplayLink?
+    private var is8DActive = false
+
+    // Tremolo
+    private var tremoloLink: CADisplayLink?
+    private var tremoloPhase: Double = 0
+    private var tremoloFrequency: Double = 4.0
+    private var tremoloDepth: Float = 0.45
+    private var isTremoloActive = false
+
+    // Vibrato
+    private var vibratoLink: CADisplayLink?
+    private var vibratoPhase: Double = 0
+    private var vibratoFrequency: Double = 4.5
+    private var vibratoDepth: Double = 0.35  // semitones
+    private var isVibratoActive = false
+    private var vibratoBasePitch: Float = 0  // captures audioSettings.pitchSemitones at start
+
+    // Karaoke
+    private var isKaraokeActive = false
+
     // Tracks which player node currently owns the active song.
     // Flips after each crossfade so the two nodes alternate roles.
     private var usingPrimaryNode = true
@@ -97,6 +125,9 @@ final class AudioPlayerManager: ObservableObject {
     deinit {
         timer?.invalidate()
         crossfadeTimer?.invalidate()
+        rotationLink?.invalidate()
+        tremoloLink?.invalidate()
+        vibratoLink?.invalidate()
         let center = MPRemoteCommandCenter.shared()
         center.playCommand.removeTarget(nil)
         center.pauseCommand.removeTarget(nil)
@@ -166,6 +197,11 @@ final class AudioPlayerManager: ObservableObject {
         position = 0
         isPlaying = false
         stopTimer()
+        // Stop any active special effects so their CADisplayLinks don't keep firing.
+        stop8DRotation()
+        stopTremolo()
+        stopVibrato()
+        disableKaraoke()
         updateNowPlaying()
     }
 
@@ -311,9 +347,30 @@ final class AudioPlayerManager: ObservableObject {
     // MARK: - Audio Effects
 
     func applyEffect(_ effect: AudioEffect) {
+        // Stop all running special effects before switching to a new one.
+        stop8DRotation()
+        stopTremolo()
+        stopVibrato()
+        disableKaraoke()
+
+        // Apply static EQ / speed / pitch settings.
         var s = AudioEffectsService.apply(effect: effect, to: audioSettings)
         s.activeEffectID = effect.id
         audioSettings = s   // triggers didSet → applyAudioSettings()
+
+        // Start the special mode for this effect.
+        switch effect.specialMode {
+        case .rotation(let hz):
+            start8DRotation(hz: hz)
+        case .tremolo(let freq, let depth):
+            startTremolo(frequency: freq, depth: depth)
+        case .vibrato(let freq, let depth):
+            startVibrato(frequency: freq, depth: depth)
+        case .karaoke(let level):
+            enableKaraoke(level: level)
+        case .none:
+            break
+        }
     }
 
     // MARK: - EQ Presets
@@ -586,13 +643,15 @@ final class AudioPlayerManager: ObservableObject {
     // MARK: - Audio Engine Configuration
 
     private func configureAudioSession() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [.allowAirPlay, .allowBluetoothA2DP])
-            try session.setActive(true)
-        } catch {
-            errorMessage = error.localizedDescription
+        let session = AVAudioSession.sharedInstance()
+        // Try with full options first; fall back gracefully if Bluetooth A2DP
+        // is unavailable (causes -20 error on some devices/simulators).
+        let fullOptions: AVAudioSession.CategoryOptions = [.allowAirPlay, .allowBluetoothA2DP]
+        let fallbackOptions: AVAudioSession.CategoryOptions = [.allowAirPlay]
+        if (try? session.setCategory(.playback, mode: .default, options: fullOptions)) == nil {
+            try? session.setCategory(.playback, mode: .default, options: fallbackOptions)
         }
+        try? session.setActive(true)
 
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
@@ -657,14 +716,43 @@ final class AudioPlayerManager: ObservableObject {
         engine.attach(timePitch)
         engine.attach(equalizer)
 
+        // Spatial chain: spatialSourceMixer feeds into environmentNode which
+        // enables HRTF-based 3D spatialisation for the 8D-rotation effect.
+        engine.attach(spatialSourceMixer)
+        engine.attach(environmentNode)
+
         // Both player nodes connect to separate mixer inputs so their volumes
         // can be ramped independently during a crossfade.
         engine.connect(primaryNode,   to: crossfadeMixer, fromBus: 0, toBus: 0, format: nil)
         engine.connect(secondaryNode, to: crossfadeMixer, fromBus: 0, toBus: 1, format: nil)
         engine.connect(crossfadeMixer, to: timePitch, format: nil)
         engine.connect(timePitch, to: equalizer, format: nil)
-        engine.connect(equalizer, to: engine.mainMixerNode, format: nil)
+
+        // equalizer → spatialSourceMixer → environmentNode → mainMixerNode
+        // The environmentNode is always in the chain; when 8D is inactive the
+        // listener orientation is neutral, so it acts as a transparent passthrough.
+        engine.connect(equalizer, to: spatialSourceMixer, format: nil)
+        engine.connect(spatialSourceMixer, to: environmentNode, format: nil)
+        engine.connect(environmentNode, to: engine.mainMixerNode, format: nil)
+
+        configureEnvironmentNode()
         isEngineConfigured = true
+    }
+
+    private func configureEnvironmentNode() {
+        // Place the listener at the origin looking forward along -Z.
+        environmentNode.listenerPosition = AVAudio3DPoint(x: 0, y: 0, z: 0)
+        environmentNode.listenerVectorOrientation = AVAudio3DVectorOrientation(
+            forward: AVAudio3DVector(x: 0, y: 0, z: -1),
+            up: AVAudio3DVector(x: 0, y: 1, z: 0)
+        )
+        // Use the platform's best HRTF algorithm.
+        environmentNode.renderingAlgorithm = .auto
+
+        // Park the spatial source at a fixed position to the right of the listener (radius 2 m).
+        // The 8D effect rotates the listener's yaw so this fixed source appears to orbit.
+        // When 8D is off the orientation is reset to neutral (yaw=0) so no coloration occurs.
+        spatialSourceMixer.position = AVAudio3DPoint(x: 2, y: 0, z: 0)
     }
 
     private func configureEqualizer() {
@@ -708,6 +796,163 @@ final class AudioPlayerManager: ObservableObject {
             } catch {
                 errorMessage = error.localizedDescription
             }
+        }
+    }
+
+    // MARK: - 8D Rotation
+
+    func start8DRotation(hz: Double = 0.18) {
+        stop8DRotation()
+        rotationHz = hz
+        rotationAngle = 0
+        is8DActive = true
+        // Enable spatialisation on the audio session.
+        try? AVAudioSession.sharedInstance().setCategory(
+            .playback,
+            mode: .default,
+            options: [.allowAirPlay, .allowBluetoothA2DP]
+        )
+        let link = CADisplayLink(target: self, selector: #selector(update8DRotation))
+        link.add(to: .main, forMode: .common)
+        rotationLink = link
+    }
+
+    func stop8DRotation() {
+        rotationLink?.invalidate()
+        rotationLink = nil
+        is8DActive = false
+        // Reset listener to neutral orientation so no spatial coloration remains.
+        environmentNode.listenerAngularOrientation = AVAudio3DAngularOrientation(
+            yaw: 0, pitch: 0, roll: 0
+        )
+    }
+
+    @objc private func update8DRotation() {
+        guard is8DActive else { return }
+        // Advance angle by one display-link frame (assume 60 fps; CADisplayLink duration
+        // could be used for accuracy but 60 fps is the common case on iOS devices).
+        rotationAngle += 2 * .pi * rotationHz / 60.0
+        // Wrap to keep angle in [0, 2π) to avoid floating-point drift.
+        if rotationAngle >= 2 * .pi { rotationAngle -= 2 * .pi }
+        // Rotate the listener's yaw. The spatial source is fixed to the right (x=2),
+        // so rotating the listener's facing direction makes the source appear to orbit.
+        let yawDegrees = Float(rotationAngle * 180.0 / .pi)
+        environmentNode.listenerAngularOrientation = AVAudio3DAngularOrientation(
+            yaw: yawDegrees, pitch: 0, roll: 0
+        )
+    }
+
+    // MARK: - Tremolo
+
+    func startTremolo(frequency: Double = 4.0, depth: Float = 0.45) {
+        stopTremolo()
+        tremoloFrequency = frequency
+        tremoloDepth = depth
+        tremoloPhase = 0
+        isTremoloActive = true
+        let link = CADisplayLink(target: self, selector: #selector(updateTremolo))
+        link.add(to: .main, forMode: .common)
+        tremoloLink = link
+    }
+
+    func stopTremolo() {
+        tremoloLink?.invalidate()
+        tremoloLink = nil
+        isTremoloActive = false
+        // Restore both nodes to their normal volume.
+        primaryNode.volume = audioSettings.volume
+        secondaryNode.volume = audioSettings.volume
+    }
+
+    @objc private func updateTremolo() {
+        guard isTremoloActive, isPlaying else { return }
+        tremoloPhase += 2 * .pi * tremoloFrequency / 60.0
+        // LFO: volume = baseVolume × (1 − depth/2 + depth/2 × sin(phase))
+        // Centres around baseVolume with ±depth/2 swing, never exceeds baseVolume.
+        let baseVol = Double(audioSettings.volume)
+        let lfo = 1.0 - Double(tremoloDepth) / 2.0 + Double(tremoloDepth) / 2.0 * sin(tremoloPhase)
+        let vol = Float(max(0, min(baseVol, baseVol * lfo)))
+        if isCrossfading {
+            // During crossfade both nodes are audible — apply to the active one only.
+            activeNode.volume = vol
+        } else {
+            primaryNode.volume  = usingPrimaryNode ? vol : audioSettings.volume
+            secondaryNode.volume = usingPrimaryNode ? audioSettings.volume : vol
+        }
+    }
+
+    // MARK: - Vibrato
+
+    func startVibrato(frequency: Double = 4.5, depth: Double = 0.35) {
+        stopVibrato()
+        vibratoFrequency = frequency
+        vibratoDepth = depth
+        vibratoPhase = 0
+        vibratoBasePitch = audioSettings.pitchSemitones
+        isVibratoActive = true
+        let link = CADisplayLink(target: self, selector: #selector(updateVibrato))
+        link.add(to: .main, forMode: .common)
+        vibratoLink = link
+    }
+
+    func stopVibrato() {
+        vibratoLink?.invalidate()
+        vibratoLink = nil
+        isVibratoActive = false
+        // Restore pitch to the value captured when vibrato started (or current setting).
+        timePitch.pitch = vibratoBasePitch * 100
+    }
+
+    @objc private func updateVibrato() {
+        guard isVibratoActive else { return }
+        vibratoPhase += 2 * .pi * vibratoFrequency / 60.0
+        let deviation = vibratoDepth * sin(vibratoPhase)
+        let totalSemitones = Double(vibratoBasePitch) + deviation
+        timePitch.pitch = Float(totalSemitones * 100)  // AVAudioUnitTimePitch.pitch is in cents
+    }
+
+    // MARK: - Karaoke (center-channel cancellation)
+
+    func enableKaraoke(level: Float = 1.0) {
+        guard !isKaraokeActive else { return }
+        isKaraokeActive = true
+        installKaraokeTap(level: level)
+    }
+
+    func disableKaraoke() {
+        guard isKaraokeActive else { return }
+        isKaraokeActive = false
+        removeKaraokeTap()
+    }
+
+    /// Installs a tap on the engine's output node that rewrites the stereo PCM frames
+    /// in-place with L-R center-cancellation, avoiding any graph topology changes at runtime.
+    private func installKaraokeTap(level: Float) {
+        let outputNode = engine.outputNode
+        outputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
+            guard let self, self.isKaraokeActive else { return }
+            self.applyCenterCancellation(to: buffer, level: level)
+        }
+    }
+
+    private func removeKaraokeTap() {
+        engine.outputNode.removeTap(onBus: 0)
+    }
+
+    /// Applies stereo center-channel cancellation in-place to a PCM buffer.
+    /// For each stereo pair: out_L = (L − R) × 0.5 × level; out_R = (R − L) × 0.5 × level.
+    private func applyCenterCancellation(to buffer: AVAudioPCMBuffer, level: Float) {
+        guard buffer.format.channelCount == 2,
+              let data = buffer.floatChannelData else { return }
+        let frameCount = Int(buffer.frameLength)
+        let left  = data[0]
+        let right = data[1]
+        let scale = 0.5 * level
+        for i in 0 ..< frameCount {
+            let l = left[i]
+            let r = right[i]
+            left[i]  = (l - r) * scale
+            right[i] = (r - l) * scale
         }
     }
 

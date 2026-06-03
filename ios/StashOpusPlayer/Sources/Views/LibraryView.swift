@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 // MARK: - Tab enum
 
@@ -17,11 +16,12 @@ private enum LibraryTab: String, CaseIterable {
 struct LibraryView: View {
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
+    @EnvironmentObject private var folderService: MusicFolderService
 
     @State private var selectedTab: LibraryTab = .songs
     @State private var searchText: String = ""
     @State private var debouncedSearch: String = ""
-    @State private var isImporterPresented = false
+    @State private var showAddMusic = false
 
     // MARK: Filtered songs for Songs tab (uses debounced search)
 
@@ -69,18 +69,16 @@ struct LibraryView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar { toolbarItems }
             .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
-            .fileImporter(
-                isPresented: $isImporterPresented,
-                allowedContentTypes: [UTType.audio],
-                allowsMultipleSelection: true
-            ) { result in
-                if case .success(let urls) = result {
-                    library.importFiles(urls: urls)
-                }
+            .sheet(isPresented: $showAddMusic) {
+                AddMusicView()
+                    .environmentObject(library)
+                    .environmentObject(folderService)
             }
             .onAppear {
                 // Always rescan the local Documents folder (picks up files added via Files app/Finder)
                 library.scanLocalDocuments()
+                // Rescan any user-selected watched folders
+                library.scanWatchedFolders(using: folderService)
                 // Request Apple Music library access if we have no songs yet
                 if library.allSongs.isEmpty && !library.isScanning {
                     library.requestAccessAndScan()
@@ -104,7 +102,7 @@ struct LibraryView: View {
     private var tabContent: some View {
         switch selectedTab {
         case .songs:
-            SongsTab(songs: filteredSongs, searchText: $searchText)
+            SongsTab(songs: filteredSongs, searchText: $searchText, showAddMusic: $showAddMusic)
         case .artists:
             ArtistsTab()
         case .albums:
@@ -128,9 +126,7 @@ struct LibraryView: View {
                     .tint(AppTheme.accent)
             } else {
                 Button {
-                    // Rescan both local Documents folder and Apple Music library
-                    library.scanLocalDocuments()
-                    library.requestAccessAndScan()
+                    library.scanAll(folderService: folderService)
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -138,9 +134,9 @@ struct LibraryView: View {
             }
 
             Button {
-                isImporterPresented = true
+                showAddMusic = true
             } label: {
-                Image(systemName: "square.and.arrow.down")
+                Image(systemName: "plus")
             }
             .tint(AppTheme.accent)
         }
@@ -186,18 +182,17 @@ private struct LibraryTabBar: View {
 private struct SongsTab: View {
     let songs: [Song]
     @Binding var searchText: String
+    @Binding var showAddMusic: Bool
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var library: LibraryManager
 
     var body: some View {
         List {
             if songs.isEmpty {
-                EmptyStateView(
-                    icon: library.isScanning ? "waveform" : "music.note",
-                    title: library.isScanning ? "Scanning library…" : "No songs yet",
-                    message: library.isScanning
-                        ? "Finding your music, this may take a moment."
-                        : "Import audio files or grant media-library access from Settings."
+                EmptyLibraryView(
+                    isScanning: library.isScanning,
+                    onAddMusic: { showAddMusic = true },
+                    onScan: { library.requestAccessAndScan() }
                 )
                 .listRowBackground(Color.clear)
             } else {
@@ -422,6 +417,59 @@ private struct GenreRow: View {
                 .foregroundStyle(AppTheme.accent)
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Empty Library State (Songs tab)
+
+private struct EmptyLibraryView: View {
+    let isScanning: Bool
+    let onAddMusic: () -> Void
+    let onScan: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: isScanning ? "waveform" : "music.note.list")
+                .font(.system(size: 56, weight: .medium))
+                .foregroundStyle(AppTheme.accent)
+
+            Text(isScanning ? "Scanning…" : "No music yet")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            if !isScanning {
+                Text("Add music from your Files app, iTunes library, or connect via USB")
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+
+                VStack(spacing: 12) {
+                    Button {
+                        onAddMusic()
+                    } label: {
+                        Label("Add Music", systemImage: "plus.circle.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.accent)
+
+                    Button {
+                        onScan()
+                    } label: {
+                        Label("Scan Apple Music Library", systemImage: "arrow.clockwise")
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(AppTheme.accent)
+                }
+                .padding(.horizontal, 32)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 60)
     }
 }
 

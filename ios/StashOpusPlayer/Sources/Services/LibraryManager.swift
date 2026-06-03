@@ -88,6 +88,60 @@ final class LibraryManager: ObservableObject {
         }
     }
 
+    /// Scans all user-selected folders tracked by `MusicFolderService` and adds
+    /// any new audio files not already in the library.
+    func scanWatchedFolders(using folderService: MusicFolderService) {
+        Task {
+            let urls = folderService.resolveAll()
+            guard !urls.isEmpty else { return }
+
+            var candidates: [URL] = []
+            let fm = FileManager.default
+
+            for baseURL in urls {
+                let enumerator = fm.enumerator(
+                    at: baseURL,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                )
+                while let url = enumerator?.nextObject() as? URL {
+                    guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+                    if DocumentImportService.supportedExtensions.contains(url.pathExtension.lowercased()) {
+                        candidates.append(url)
+                    }
+                }
+                baseURL.stopAccessingSecurityScopedResource()
+            }
+
+            guard !candidates.isEmpty else { return }
+
+            let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
+            let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
+            guard !newURLs.isEmpty else { return }
+
+            let service = DocumentImportService()
+            let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
+                var result: [Song] = []
+                for url in newURLs {
+                    // Note: security-scoped access is already active (startAccessingSecurityScopedResource was called above)
+                    let song = await service.makeSong(for: url)
+                    result.append(song)
+                }
+                return result
+            }.value
+
+            importedSongs.append(contentsOf: newSongs)
+            importedSongs = Array(Dictionary(grouping: importedSongs, by: \.id).compactMap { $0.value.first })
+            rebuildAllSongs()
+        }
+    }
+
+    /// Convenience: scans both the local Documents folder and all user-selected watched folders.
+    func scanAll(folderService: MusicFolderService) {
+        scanLocalDocuments()
+        scanWatchedFolders(using: folderService)
+    }
+
     func requestAccessAndScan() {
         Task {
             let status = await MPMediaLibrary.requestAuthorization()

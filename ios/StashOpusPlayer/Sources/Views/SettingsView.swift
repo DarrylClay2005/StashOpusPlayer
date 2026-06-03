@@ -422,6 +422,10 @@ struct SettingsView: View {
                         .shadow(color: AppTheme.dynamicAccent.opacity(0.4), radius: 4, x: 0, y: 2)
                 }
             }
+            NavigationLink(destination: BackgroundSettingsView()) {
+                Label("Gallery Background", systemImage: "photo.on.rectangle")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
         } header: {
             sectionHeader("Appearance")
         }

@@ -55,6 +55,12 @@ struct NowPlayingView: View {
     // Sleep Timer sheet
     @State private var showSleepTimerSheet = false
 
+    // Custom speed / pitch inline editing
+    @State private var editingSpeed = false
+    @State private var speedInput = ""
+    @State private var editingPitch = false
+    @State private var pitchInput = ""
+
     // Lyrics
     @State private var lyricsLines: [LrcLine] = []
 
@@ -371,18 +377,8 @@ struct NowPlayingView: View {
             isExpanded: $showPlaybackControls,
             content: {
                 VStack(spacing: 14) {
-                    labeledSlider(
-                        label: "Speed",
-                        valueText: String(format: "%.2fx", player.audioSettings.speed),
-                        value: audioBinding(\.speed),
-                        range: 0.5...2.0
-                    )
-                    labeledSlider(
-                        label: "Pitch",
-                        valueText: String(format: "%.0f st", player.audioSettings.pitchSemitones),
-                        value: audioBinding(\.pitchSemitones),
-                        range: -12...12
-                    )
+                    speedRow
+                    pitchRow
                 }
                 .padding(.top, 10)
             },
@@ -405,6 +401,110 @@ struct NowPlayingView: View {
         )
         .tint(AppTheme.accent)
         .panelStyle()
+    }
+
+    // MARK: - Speed Row
+
+    private var speedRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Speed")
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                if editingSpeed {
+                    TextField("", text: $speedInput)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 80)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { applySpeedInput() }
+                        .onAppear { speedInput = String(format: "%.2f", player.audioSettings.speed) }
+                        .toolbar {
+                            ToolbarItemGroup(placement: .keyboard) {
+                                Spacer()
+                                Button("Done") { applySpeedInput() }
+                            }
+                        }
+                } else {
+                    HStack(spacing: 4) {
+                        Text(String(format: "%.2fx", player.audioSettings.speed))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .onTapGesture { editingSpeed = true }
+                        Image(systemName: "pencil")
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .onTapGesture { editingSpeed = true }
+                    }
+                }
+            }
+            Slider(value: audioBinding(\.speed), in: 0.5...2.0)
+                .tint(AppTheme.accent)
+        }
+    }
+
+    // MARK: - Pitch Row
+
+    private var pitchRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Pitch")
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                if editingPitch {
+                    TextField("", text: $pitchInput)
+                        .keyboardType(.numbersAndPunctuation)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 80)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { applyPitchInput() }
+                        .onAppear { pitchInput = String(format: "%.1f", player.audioSettings.pitchSemitones) }
+                        .toolbar {
+                            ToolbarItemGroup(placement: .keyboard) {
+                                Spacer()
+                                Button("Done") { applyPitchInput() }
+                            }
+                        }
+                } else {
+                    HStack(spacing: 4) {
+                        Text(String(format: "%.0f st", player.audioSettings.pitchSemitones))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .onTapGesture { editingPitch = true }
+                        Image(systemName: "pencil")
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .onTapGesture { editingPitch = true }
+                    }
+                }
+            }
+            Slider(value: audioBinding(\.pitchSemitones), in: -12...12)
+                .tint(AppTheme.accent)
+        }
+    }
+
+    // MARK: - Apply Helpers
+
+    private func applySpeedInput() {
+        if let parsed = Double(speedInput) {
+            let clamped = Float(min(max(parsed, 0.1), 8.0))
+            var settings = player.audioSettings
+            settings.speed = clamped
+            player.audioSettings = settings
+        }
+        editingSpeed = false
+    }
+
+    private func applyPitchInput() {
+        if let parsed = Double(pitchInput) {
+            let clamped = Float(min(max(parsed, -24.0), 24.0))
+            var settings = player.audioSettings
+            settings.pitchSemitones = clamped
+            player.audioSettings = settings
+        }
+        editingPitch = false
     }
 
     // MARK: - AB Repeat
