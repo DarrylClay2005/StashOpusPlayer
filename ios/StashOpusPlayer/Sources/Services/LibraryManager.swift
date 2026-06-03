@@ -40,39 +40,34 @@ final class LibraryManager: ObservableObject {
     /// Scans the app's Documents directory (root + Imported Music subfolder) for audio
     /// files and adds any that aren't already tracked. Called automatically on init and
     /// can be triggered manually after the user drops files via the Files app.
+    /// Recursively scans the app's entire Documents directory for audio files and
+    /// adds any not already tracked. Picks up files placed via Finder, Files app,
+    /// iTunes file sharing, or any subdirectory the user created inside the app folder.
     func scanLocalDocuments() {
         Task {
             let fm = FileManager.default
             guard let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-            let importedDir = docsDir.appendingPathComponent("Imported Music")
 
             var candidates: [URL] = []
 
-            // Root Documents folder — files dragged in via Finder/Files
-            if let contents = try? fm.contentsOfDirectory(
+            // Walk the full Documents tree recursively — covers root, Imported Music/,
+            // and any nested folders the user may have created (e.g. by artist or album).
+            let enumerator = fm.enumerator(
                 at: docsDir,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            ) {
-                candidates += contents.filter {
-                    DocumentImportService.supportedExtensions.contains($0.pathExtension.lowercased())
-                }
-            }
-
-            // Imported Music subfolder — files copied by DocumentImportService
-            if let contents = try? fm.contentsOfDirectory(
-                at: importedDir,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            ) {
-                candidates += contents.filter {
-                    DocumentImportService.supportedExtensions.contains($0.pathExtension.lowercased())
+                includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            )
+            while let url = enumerator?.nextObject() as? URL {
+                // Skip directories themselves; only process regular files.
+                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+                if DocumentImportService.supportedExtensions.contains(url.pathExtension.lowercased()) {
+                    candidates.append(url)
                 }
             }
 
             guard !candidates.isEmpty else { return }
 
-            // Build Song objects for any files not already in importedSongs
+            // Only process files we haven't seen before.
             let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
             let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
             guard !newURLs.isEmpty else { return }

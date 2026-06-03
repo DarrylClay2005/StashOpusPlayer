@@ -661,12 +661,27 @@ final class AudioPlayerManager: ObservableObject {
 
     private func configureEqualizer() {
         let frequencies: [Float] = [32, 64, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000]
+        // Use shelf filters for the frequency extremes so gain is applied to everything
+        // below 32 Hz or above 16 kHz, not just a narrow peak at those frequencies.
+        // All mid bands use parametric (bell/peak) filters.
+        let filterTypes: [AVAudioUnitEQFilterType] = [
+            .lowShelf,   // 32 Hz  — boosts/cuts all sub-bass below shelf point
+            .parametric, // 64 Hz
+            .parametric, // 125 Hz
+            .parametric, // 250 Hz
+            .parametric, // 500 Hz
+            .parametric, // 1 kHz
+            .parametric, // 2 kHz
+            .parametric, // 4 kHz
+            .parametric, // 8 kHz
+            .highShelf   // 16 kHz — boosts/cuts all air-band above shelf point
+        ]
         for (index, band) in equalizer.bands.enumerated() {
-            band.filterType = .parametric
-            band.frequency = frequencies[index]
-            band.bandwidth = 0.8
-            band.gain = 0
-            band.bypass = true
+            band.filterType = filterTypes[index]
+            band.frequency  = frequencies[index]
+            band.bandwidth  = 0.5   // ~half-octave Q; tighter bands for more precise control
+            band.gain       = 0
+            band.bypass     = true
         }
     }
 
