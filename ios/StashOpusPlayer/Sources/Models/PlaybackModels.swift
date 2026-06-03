@@ -31,7 +31,11 @@ struct AudioSettings: Codable, Equatable {
     var pitchSemitones: Float = 0.0
     var equalizerEnabled: Bool = false
     var eqBands: [Float] = Array(repeating: 0, count: 10)
+    var eqPreset: EQPreset = .flat
     var crossfadeEnabled: Bool = false
-    var crossfadeDuration: TimeInterval = 1.0
+    var crossfadeDuration: TimeInterval = 2.0
+    var gaplessEnabled: Bool = true
     var replayGainEnabled: Bool = false
+    var bassBoostEnabled: Bool = false
+    var bassBoostGain: Float = 0.0  // 0–15 dB extra on 32 Hz and 64 Hz bands
 }

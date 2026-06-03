@@ -15,7 +15,6 @@ struct Song: Identifiable, Hashable, Codable {
     var genre: String
     var bitrate: Int
     var sampleRate: Int
-    var isFavorite: Bool
 
     init(
         id: String = UUID().uuidString,
@@ -30,8 +29,7 @@ struct Song: Identifiable, Hashable, Codable {
         year: String = "",
         genre: String = "",
         bitrate: Int = 0,
-        sampleRate: Int = 0,
-        isFavorite: Bool = false
+        sampleRate: Int = 0
     ) {
         self.id = id
         self.title = title
@@ -46,7 +44,6 @@ struct Song: Identifiable, Hashable, Codable {
         self.genre = genre
         self.bitrate = bitrate
         self.sampleRate = sampleRate
-        self.isFavorite = isFavorite
     }
 
     var displayName: String {
@@ -84,8 +81,7 @@ extension Song {
             artworkCacheKey: String(mediaItem.persistentID),
             trackNumber: mediaItem.albumTrackNumber,
             year: "",
-            genre: mediaItem.genre ?? "",
-            isFavorite: false
+            genre: mediaItem.genre ?? ""
         )
     }
 }

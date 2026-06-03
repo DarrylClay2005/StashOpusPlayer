@@ -1,28 +1,49 @@
 import SwiftUI
 
 struct ContentView: View {
+
+    @EnvironmentObject private var player: AudioPlayerManager
+
+    /// Persists the last-selected tab across launches.
+    @AppStorage("selected_tab") private var selectedTab = 0
+
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
+
+            // MARK: Tab 1 — Library
             LibraryView()
                 .tabItem {
                     Label("Library", systemImage: "music.note.list")
                 }
+                .tag(0)
 
+            // MARK: Tab 2 — Now Playing
+            // Icon fills when a song is active to give a quick visual cue.
             NowPlayingView()
                 .tabItem {
-                    Label("Playing", systemImage: "play.circle")
+                    Label(
+                        "Playing",
+                        systemImage: player.currentSong != nil
+                            ? "play.circle.fill"
+                            : "play.circle"
+                    )
                 }
+                .tag(1)
 
+            // MARK: Tab 3 — Queue
             QueueView()
                 .tabItem {
-                    Label("Queue", systemImage: "list.bullet")
+                    Label("Queue", systemImage: "list.number")
                 }
+                .tag(2)
 
+            // MARK: Tab 4 — Settings
             SettingsView()
                 .tabItem {
-                    Label("Settings", systemImage: "slider.horizontal.3")
+                    Label("Settings", systemImage: "gearshape")
                 }
+                .tag(3)
         }
-        .tint(AppTheme.accent)
+        .tint(AppTheme.dynamicAccent)
     }
 }

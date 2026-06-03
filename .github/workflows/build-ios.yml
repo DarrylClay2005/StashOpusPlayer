@@ -1,0 +1,91 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/build-ios.yml'
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: 'Build configuration'
+        required: false
+        default: 'Release'
+        type: choice
+        options: [ Release, Debug ]
+
+jobs:
+  build:
+    name: Build & export IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          # Use the latest available stable Xcode
+          XCODE=$(ls /Applications | grep '^Xcode' | sort -rV | head -1)
+          sudo xcode-select -s "/Applications/$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build configuration
+        id: config
+        run: |
+          CONFIG="${{ github.event.inputs.configuration || 'Release' }}"
+          echo "configuration=$CONFIG" >> "$GITHUB_OUTPUT"
+
+      - name: Archive (unsigned)
+        working-directory: ios
+        run: |
+          mkdir -p build
+          xcodebuild archive \
+            -project StashOpusPlayer.xcodeproj \
+            -scheme StashOpusPlayer \
+            -configuration ${{ steps.config.outputs.configuration }} \
+            -destination "generic/platform=iOS" \
+            -archivePath build/StashOpusPlayer.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty || true
+          # Verify the .app was produced
+          APP=$(find build/StashOpusPlayer.xcarchive -name "*.app" | head -1)
+          if [ -z "$APP" ]; then
+            echo "::error::Archive did not produce a .app bundle"
+            exit 1
+          fi
+          echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+
+      - name: Package IPA (unsigned)
+        working-directory: ios
+        run: |
+          PAYLOAD_DIR="build/Payload/Payload"
+          mkdir -p "$PAYLOAD_DIR"
+          cp -R "$APP_PATH" "$PAYLOAD_DIR/"
+          cd build/Payload
+          zip -r ../StashOpusPlayer-unsigned.ipa Payload/ -x "*.DS_Store"
+          echo "IPA created: $(du -sh ../StashOpusPlayer-unsigned.ipa)"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StashOpusPlayer-unsigned-ipa
+          path: ios/build/StashOpusPlayer-unsigned.ipa
+          retention-days: 14
+
+      - name: Upload archive (for re-signing)
+        uses: actions/upload-artifact@v4
+        with:
+          name: StashOpusPlayer-xcarchive
+          path: ios/build/StashOpusPlayer.xcarchive
+          retention-days: 7
