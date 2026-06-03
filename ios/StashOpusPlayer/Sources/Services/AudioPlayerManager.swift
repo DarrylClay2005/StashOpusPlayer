@@ -188,20 +188,27 @@ final class AudioPlayerManager: ObservableObject {
             return
         }
 
-        let nextIndex = shuffleEnabled
-            ? Int.random(in: queue.indices)
-            : currentIndex + 1
+        let nextIndex: Int
+        if shuffleEnabled && queue.count > 1 {
+            // Exclude currentIndex so the same track is never picked twice in a row.
+            let pool = queue.indices.filter { $0 != currentIndex }
+            nextIndex = pool.randomElement() ?? currentIndex
+        } else {
+            nextIndex = currentIndex + 1
+        }
 
         if nextIndex < queue.count {
             currentIndex = nextIndex
             currentSong = queue[currentIndex]
             gaplessScheduled = false
             playCurrent(from: 0)
+            savePlaybackState()
         } else if repeatMode == .all {
             currentIndex = 0
             currentSong = queue[currentIndex]
             gaplessScheduled = false
             playCurrent(from: 0)
+            savePlaybackState()
         } else {
             stop()
         }
@@ -217,6 +224,7 @@ final class AudioPlayerManager: ObservableObject {
         currentSong = queue[currentIndex]
         gaplessScheduled = false
         playCurrent(from: 0)
+        savePlaybackState()
     }
 
     func cycleRepeatMode() {
@@ -337,8 +345,21 @@ final class AudioPlayerManager: ObservableObject {
             !snapshot.queue.isEmpty
         else { return }
 
-        queue = snapshot.queue
-        currentIndex = min(max(snapshot.currentIndex, 0), snapshot.queue.count - 1)
+        // Sanitise URLs before restoring.
+        // ipod-library:// asset URLs are session-scoped and expire across app launches.
+        // Clear them so scheduleCurrent() fails gracefully instead of crashing on a
+        // stale MPMediaItem URL. Song metadata (title/artist) is preserved for display.
+        let sanitisedQueue = snapshot.queue.map { song -> Song in
+            if let url = song.url, url.scheme == "ipod-library" {
+                var cleaned = song
+                cleaned.url = nil
+                return cleaned
+            }
+            return song
+        }
+
+        queue = sanitisedQueue
+        currentIndex = min(max(snapshot.currentIndex, 0), sanitisedQueue.count - 1)
         currentSong = queue[currentIndex]
         position = snapshot.position
         repeatMode = snapshot.repeatMode
@@ -366,6 +387,10 @@ final class AudioPlayerManager: ObservableObject {
 
     /// Core scheduler — loads the audio file, seeks to `startTime`, and arms the completion handler
     /// that drives crossfade / gapless / normal track-end logic.
+    ///
+    /// `fileStartFrame` is always set to the absolute frame corresponding to `startTime`.
+    /// When `startTime == 0` this is explicitly 0, which keeps `updatePositionFromPlayer()`
+    /// accurate from the very first rendered frame of a new track.
     private func scheduleCurrent(from startTime: TimeInterval) {
         guard let song = currentSong, let url = song.url else {
             errorMessage = "This song does not have a local playable URL."
@@ -381,6 +406,7 @@ final class AudioPlayerManager: ObservableObject {
             let sampleRate = file.processingFormat.sampleRate
             let startFrame = max(0, AVAudioFramePosition(startTime * sampleRate))
             let framesLeft = max(0, AVAudioFrameCount(file.length - startFrame))
+            // Explicitly reset to 0 for new-track starts so the position formula is exact.
             fileStartFrame = startFrame
             position = startTime
             gaplessScheduled = false
@@ -444,6 +470,7 @@ final class AudioPlayerManager: ObservableObject {
         startEngineIfNeeded()
         incoming.play()
 
+        // When crossfadeDuration == 0, steps clamps to 1 (instantaneous swap). Intentional.
         let steps = max(1, Int(fadeDuration * 30))
         let interval = fadeDuration / Double(steps)
         var step = 0
@@ -518,9 +545,13 @@ final class AudioPlayerManager: ObservableObject {
     private func peekNextSong() -> Song? {
         guard !queue.isEmpty else { return nil }
         if repeatMode == .one { return currentSong }
-        let nextIndex = shuffleEnabled
-            ? Int.random(in: queue.indices)
-            : currentIndex + 1
+        let nextIndex: Int
+        if shuffleEnabled && queue.count > 1 {
+            let pool = queue.indices.filter { $0 != currentIndex }
+            nextIndex = pool.randomElement() ?? currentIndex
+        } else {
+            nextIndex = currentIndex + 1
+        }
         if nextIndex < queue.count { return queue[nextIndex] }
         if repeatMode == .all { return queue[0] }
         return nil
@@ -529,9 +560,13 @@ final class AudioPlayerManager: ObservableObject {
     private func advanceIndex() {
         guard !queue.isEmpty else { return }
         if repeatMode == .one { return }
-        let nextIndex = shuffleEnabled
-            ? Int.random(in: queue.indices)
-            : currentIndex + 1
+        let nextIndex: Int
+        if shuffleEnabled && queue.count > 1 {
+            let pool = queue.indices.filter { $0 != currentIndex }
+            nextIndex = pool.randomElement() ?? currentIndex
+        } else {
+            nextIndex = currentIndex + 1
+        }
         if nextIndex < queue.count {
             currentIndex = nextIndex
         } else if repeatMode == .all {
@@ -585,6 +620,9 @@ final class AudioPlayerManager: ObservableObject {
             guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
             if options.contains(.shouldResume) {
+                // Re-activate the audio session before restarting the engine; the
+                // system deactivates it when an interruption begins.
+                try? AVAudioSession.sharedInstance().setActive(true)
                 resume()
             }
         @unknown default:
@@ -637,7 +675,16 @@ final class AudioPlayerManager: ObservableObject {
         do {
             try engine.start()
         } catch {
-            errorMessage = error.localizedDescription
+            // After an audio-session interruption the engine may need a full reset.
+            // Tear down the graph, rebuild it, and retry once.
+            isEngineConfigured = false
+            configureEngine()
+            configureEqualizer()
+            do {
+                try engine.start()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -669,7 +716,10 @@ final class AudioPlayerManager: ObservableObject {
             }
         }
 
-        // If bass boost is enabled but EQ is disabled, enable EQ just for bass boost.
+        // If bass boost is enabled but EQ is disabled, enable EQ bands 0 & 1 for bass
+        // boost only. This block is mutually exclusive with the EQ block above (which
+        // already adds boost to bands 0/1 when both EQ and bass boost are on), so there
+        // is no double-application.
         if audioSettings.bassBoostEnabled && !audioSettings.equalizerEnabled {
             for (index, band) in equalizer.bands.enumerated() {
                 band.bypass = false

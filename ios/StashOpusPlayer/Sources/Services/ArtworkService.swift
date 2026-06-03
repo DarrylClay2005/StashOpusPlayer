@@ -9,8 +9,20 @@ final class ArtworkService {
     private let memoryCache = NSCache<NSString, UIImage>()
     private let diskCacheURL: URL
 
-    /// One-entry cache so repeated calls for the same persistentID skip re-querying MPMediaLibrary.
-    private var mediaQueryCache: [UInt64: UIImage?] = [:]
+    /// Thread-safe cache for MPMediaLibrary lookups keyed by persistentID.
+    ///
+    /// `NSCache` is thread-safe and can be accessed from any thread or Task.
+    /// Using it here (instead of a plain Swift dictionary) eliminates the data
+    /// race that would otherwise exist when `fetchMediaLibraryArtwork` runs
+    /// inside a `Task.detached` that can execute on any thread.
+    ///
+    /// "No artwork found" sentinel: a zero-size `UIImage()` is stored so that
+    /// we don't re-query MPMediaLibrary for tracks that have no artwork.
+    private let mediaQueryCache = NSCache<NSNumber, UIImage>()
+
+    /// Sentinel image stored in `mediaQueryCache` to signal "already checked,
+    /// no artwork exists for this ID".  Identified by zero pixel size.
+    private let noArtworkSentinel = UIImage()
 
     private init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -33,6 +45,14 @@ final class ArtworkService {
         return nil
     }
 
+    /// Loads artwork asynchronously, checking memory cache → disk cache →
+    /// MPMediaLibrary → embedded asset metadata in that order.
+    ///
+    /// This method may be called from the MainActor (e.g. from an `ArtworkThumbnail`
+    /// view's `.task {}` modifier).  The heavy work is done inside `Task.detached`
+    /// blocks which run on background threads, so the main thread is never blocked.
+    /// The `await` returns on whichever actor the caller resides on — this is
+    /// intentional and correct for async Swift structured concurrency.
     func loadArtwork(for song: Song) async -> UIImage? {
         let key = cacheKey(for: song)
 
@@ -57,7 +77,8 @@ final class ArtworkService {
             let image = await fetchAssetArtwork(url: url, key: key)
             if let image {
                 setMemoryCache(image, forKey: key)
-                saveToDisk(image: image, key: key)
+                let resized = resizedImage(image, maxDimension: 600)
+                saveToDisk(image: resized, key: key)
             }
             return image
         }
@@ -71,8 +92,15 @@ final class ArtworkService {
         song.artworkCacheKey ?? song.id
     }
 
+    /// Returns a sanitized filename-safe version of `key` by replacing characters
+    /// that are illegal in file system paths on common platforms.
+    private func sanitizedKey(_ key: String) -> String {
+        let illegalCharacters = CharacterSet(charactersIn: "/:\\*?\"<>|")
+        return key.components(separatedBy: illegalCharacters).joined(separator: "_")
+    }
+
     private func diskPath(key: String) -> URL {
-        diskCacheURL.appendingPathComponent("\(key).jpg")
+        diskCacheURL.appendingPathComponent("\(sanitizedKey(key)).jpg")
     }
 
     private func loadFromDisk(key: String) -> UIImage? {
@@ -84,6 +112,12 @@ final class ArtworkService {
         return image
     }
 
+    /// Saves `image` to the JPEG disk cache.
+    ///
+    /// Note: disk cache entries are never automatically invalidated when the
+    /// source song file is deleted.  This wastes a small amount of disk space
+    /// but is an acceptable trade-off: the cache is keyed by filename/ID and
+    /// will be evicted if the user clears the app cache through iOS Settings.
     private func saveToDisk(image: UIImage, key: String) {
         let path = diskPath(key: key)
         if let data = image.jpegData(compressionQuality: 0.85) {
@@ -97,11 +131,36 @@ final class ArtworkService {
         memoryCache.setObject(image, forKey: key as NSString, cost: cost)
     }
 
-    /// Fetches artwork from MPMediaLibrary, using `mediaQueryCache` to avoid redundant queries.
+    /// Returns a new image scaled down so that neither dimension exceeds
+    /// `maxDimension` points.  If the image is already within bounds it is
+    /// returned unchanged (no copy).
+    private func resizedImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+        let size = image.size
+        guard size.width > maxDimension || size.height > maxDimension else { return image }
+
+        let scale = min(maxDimension / size.width, maxDimension / size.height)
+        let newSize = CGSize(width: (size.width * scale).rounded(),
+                             height: (size.height * scale).rounded())
+
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+    }
+
+    /// Fetches artwork from MPMediaLibrary.
+    ///
+    /// `mediaQueryCache` (an `NSCache`) is thread-safe, so this method may
+    /// freely be called from `Task.detached` blocks running on background threads
+    /// without additional synchronisation.  The `noArtworkSentinel` (a zero-size
+    /// `UIImage`) is stored in the cache when no artwork is found so that
+    /// subsequent calls skip the MPMediaQuery entirely.
     private func fetchMediaLibraryArtwork(persistentID: UInt64) async -> UIImage? {
-        // Check the per-ID cache first (nil entry means we already tried and found nothing).
-        if let cached = mediaQueryCache[persistentID] {
-            return cached
+        let cacheKey = NSNumber(value: persistentID)
+
+        if let cached = mediaQueryCache.object(forKey: cacheKey) {
+            // Distinguish between "real image" and "already checked, nothing found"
+            return cached.size == .zero ? nil : cached
         }
 
         let image = await Task.detached(priority: .utility) {
@@ -116,14 +175,16 @@ final class ArtworkService {
             return item.artwork?.image(at: size)
         }.value
 
-        // Cache result (including nil so we don't re-query for missing artwork).
-        mediaQueryCache[persistentID] = image
+        // Cache result — use sentinel to record "no artwork" without storing nil
+        mediaQueryCache.setObject(image ?? self.noArtworkSentinel, forKey: cacheKey)
         return image
     }
 
     private func fetchAssetArtwork(url: URL, key: String) async -> UIImage? {
         return await Task.detached(priority: .utility) {
             let asset = AVURLAsset(url: url)
+            // If the file no longer exists, `load(.commonMetadata)` throws and
+            // `try?` returns nil — that is handled correctly below.
             guard let metadata = try? await asset.load(.commonMetadata) else { return nil }
             for item in metadata {
                 if item.commonKey == .commonKeyArtwork {

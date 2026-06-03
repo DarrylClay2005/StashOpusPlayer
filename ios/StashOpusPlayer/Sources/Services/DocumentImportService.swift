@@ -22,12 +22,35 @@ struct DocumentImportService {
     private var supportedExtensions: Set<String> { Self.supportedExtensions }
 
     func importFiles(from urls: [URL]) async throws -> [Song] {
+        // Import up to 4 files concurrently to avoid overloading the filesystem
+        // while still gaining a meaningful throughput win on large batches.
+        let maxConcurrency = 4
         var songs: [Song] = []
-        for url in urls {
-            if let song = try await importFile(from: url) {
-                songs.append(song)
+
+        try await withThrowingTaskGroup(of: Song?.self) { group in
+            var inFlight = 0
+
+            for url in urls {
+                // Throttle: wait for one slot to free before adding another task
+                if inFlight >= maxConcurrency {
+                    if let song = try await group.next() {
+                        if let song { songs.append(song) }
+                        inFlight -= 1
+                    }
+                }
+
+                group.addTask {
+                    try await self.importFile(from: url)
+                }
+                inFlight += 1
+            }
+
+            // Drain remaining tasks
+            for try await song in group {
+                if let song { songs.append(song) }
             }
         }
+
         return songs
     }
 
@@ -46,10 +69,24 @@ struct DocumentImportService {
         let destination = try destinationURL(for: sourceURL)
         let manager = FileManager.default
 
-        do {
-            if manager.fileExists(atPath: destination.path) {
-                try manager.removeItem(at: destination)
+        // If the destination already exists with the same byte size as the source,
+        // the file is already fully imported — skip the redundant copy and just
+        // return a Song built from the existing destination file.
+        if manager.fileExists(atPath: destination.path) {
+            let srcSize = (try? manager.attributesOfItem(atPath: sourceURL.path))?[.size] as? Int
+            let dstSize = (try? manager.attributesOfItem(atPath: destination.path))?[.size] as? Int
+            if let srcSize, let dstSize, srcSize == dstSize {
+                return await makeSong(for: destination)
             }
+            // Sizes differ (partial or updated file) — remove and re-copy.
+            do {
+                try manager.removeItem(at: destination)
+            } catch {
+                throw DocumentImportError.copyFailed
+            }
+        }
+
+        do {
             try manager.copyItem(at: sourceURL, to: destination)
         } catch {
             throw DocumentImportError.copyFailed
@@ -83,10 +120,13 @@ struct DocumentImportService {
         let loadedDuration = (try? await asset.load(.duration)).map(CMTimeGetSeconds) ?? 0
         let commonMetadata = (try? await asset.load(.commonMetadata)) ?? []
         let metadata = (try? await asset.load(.metadata)) ?? []
+
         var title = url.deletingPathExtension().lastPathComponent
         var artist = ""
         var album = ""
         var genre = ""
+        var trackNumber = 0
+        var year = ""
 
         for item in commonMetadata {
             switch item.commonKey?.rawValue {
@@ -101,8 +141,58 @@ struct DocumentImportService {
             }
         }
 
-        if let genreItem = metadata.first(where: { $0.identifier?.rawValue.lowercased().contains("genre") == true }) {
-            genre = genreItem.stringValue ?? ""
+        // Scan all metadata (covers ID3, iTunes atoms, etc.) for fields not
+        // available through the common key set.
+        for item in metadata {
+            let idRaw = item.identifier?.rawValue.lowercased() ?? ""
+
+            if genre.isEmpty, idRaw.contains("genre") {
+                genre = item.stringValue ?? genre
+            }
+
+            // Track number — present as e.g. "tracknumber", "track", "itunes/tracknumber"
+            if trackNumber == 0, idRaw.contains("tracknumber") || idRaw.hasSuffix("/track") {
+                if let raw = item.stringValue {
+                    // ID3 TRCK can be "5/12" — take the part before the slash
+                    let part = raw.split(separator: "/").first.map(String.init) ?? raw
+                    trackNumber = Int(part.trimmingCharacters(in: .whitespaces)) ?? 0
+                } else if let num = try? await item.load(.numberValue) {
+                    trackNumber = num.intValue
+                }
+            }
+
+            // Year — present as "year", "date", "recordingyear" depending on format
+            if year.isEmpty,
+               idRaw.contains("year") || idRaw.contains("date") || idRaw.contains("recordingyear")
+            {
+                if let raw = item.stringValue {
+                    // ISO 8601 date strings like "2003-11-06" — keep only the year portion
+                    year = String(raw.prefix(4))
+                } else if let num = try? await item.load(.numberValue) {
+                    year = "\(num.intValue)"
+                }
+            }
+        }
+
+        // Extract audio technical properties via AVAudioFile, which is the
+        // simplest way to get sampleRate without decoding format descriptions.
+        var sampleRate = 0
+        var bitrate = 0
+
+        if let audioFile = try? AVAudioFile(forReading: url) {
+            let rate = audioFile.processingFormat.sampleRate
+            if rate > 0 { sampleRate = Int(rate.rounded()) }
+        }
+
+        // Bitrate lives in the audio track's format description (kCMFormatDescriptionExtension_VerbatimSampleDescription
+        // or the audio stream basic description bitrate field is not always populated).
+        // The most reliable cross-format path is through AVAssetTrack's estimatedDataRate.
+        let audioTracks = try? await asset.loadTracks(withMediaType: .audio)
+        if let track = audioTracks?.first,
+           let estimatedRate = try? await track.load(.estimatedDataRate),
+           estimatedRate > 0
+        {
+            bitrate = Int((estimatedRate / 1000).rounded())   // store as kbps
         }
 
         return Song(
@@ -112,7 +202,11 @@ struct DocumentImportService {
             duration: loadedDuration.isFinite ? loadedDuration : 0,
             url: url,
             artworkCacheKey: url.lastPathComponent,
-            genre: genre
+            trackNumber: trackNumber,
+            year: year,
+            genre: genre,
+            bitrate: bitrate,
+            sampleRate: sampleRate
         )
     }
 }
