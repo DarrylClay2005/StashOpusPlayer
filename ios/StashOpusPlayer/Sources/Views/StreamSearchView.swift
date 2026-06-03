@@ -27,7 +27,7 @@ struct StreamSearchView: View {
             }
             .navigationTitle("Search Streaming")
             .navigationBarTitleDisplayMode(.large)
-            .background(AppTheme.background.ignoresSafeArea())
+            .background(Color.clear.ignoresSafeArea())
         }
     }
 

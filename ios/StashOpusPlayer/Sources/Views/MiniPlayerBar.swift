@@ -11,10 +11,15 @@ struct MiniPlayerBar: View {
         if player.currentSong != nil {
             barContent
                 .sheet(isPresented: $showingNowPlaying) {
-                    NowPlayingView()
-                        .environmentObject(player)
-                        .environmentObject(library)
-                        .environmentObject(sleepTimer)
+                    // isSheet: true tells NowPlayingView not to wrap itself in a
+                    // NavigationStack — the sheet container provides one already,
+                    // so wrapping again would produce a double navigation bar.
+                    NavigationStack {
+                        NowPlayingView(isSheet: true)
+                            .environmentObject(player)
+                            .environmentObject(library)
+                            .environmentObject(sleepTimer)
+                    }
                 }
         }
     }

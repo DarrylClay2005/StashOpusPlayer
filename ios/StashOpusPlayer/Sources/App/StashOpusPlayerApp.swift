@@ -10,6 +10,7 @@ struct StashOpusPlayerApp: App {
     @StateObject private var streaming = StreamingService()
     @StateObject private var folderService = MusicFolderService()
     @StateObject private var bgService = BackgroundService()
+    @StateObject private var account = AccountService()
 
     var body: some Scene {
         WindowGroup {
@@ -21,6 +22,7 @@ struct StashOpusPlayerApp: App {
                 .environmentObject(streaming)
                 .environmentObject(folderService)
                 .environmentObject(bgService)
+                .environmentObject(account)
                 .preferredColorScheme(.dark)
                 .task {
                     // Restore audio settings first so the player is configured before any resume.

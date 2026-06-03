@@ -78,7 +78,7 @@ struct PlaylistDetailView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(AppTheme.background.ignoresSafeArea())
+        .background(Color.clear.ignoresSafeArea())
         .environment(\.editMode, .constant(isEditing ? .active : .inactive))
         .navigationTitle(playlist.name)
         .navigationBarTitleDisplayMode(.large)
@@ -165,7 +165,7 @@ private struct AddSongsSheet: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .background(AppTheme.background.ignoresSafeArea())
+            .background(Color.clear.ignoresSafeArea())
             .searchable(text: $searchText, prompt: "Search songs")
             .navigationTitle("Add Songs")
             .navigationBarTitleDisplayMode(.inline)

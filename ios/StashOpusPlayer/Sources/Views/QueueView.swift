@@ -27,7 +27,7 @@ struct QueueView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppTheme.background.ignoresSafeArea()
+                Color.clear.ignoresSafeArea()
                 queueList
             }
             .navigationTitle("Queue")
@@ -69,7 +69,7 @@ struct QueueView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background(AppTheme.background)
+        .background(Color.clear)
     }
 
     private var emptyState: some View {

@@ -66,10 +66,14 @@ extension AppTheme {
 // MARK: - View Modifiers
 
 extension View {
-    /// Applies the standard full-screen dark background with primary text color.
+    /// Applies the standard primary text color.
+    /// Background is intentionally omitted here so that GalleryBackgroundView
+    /// (rendered in ContentView's ZStack behind the TabView) can show through.
+    /// Views that need an opaque background on top of the gallery (e.g. sheets,
+    /// standalone NavigationStack roots) must set .background(AppTheme.background
+    /// .ignoresSafeArea()) themselves.
     func appScreenBackground() -> some View {
         self
-            .background(AppTheme.background.ignoresSafeArea())
             .foregroundStyle(AppTheme.textPrimary)
     }
 

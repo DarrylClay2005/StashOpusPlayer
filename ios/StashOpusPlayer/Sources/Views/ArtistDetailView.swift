@@ -72,7 +72,7 @@ struct ArtistDetailView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(AppTheme.background.ignoresSafeArea())
+        .background(Color.clear.ignoresSafeArea())
         .navigationTitle(artist)
         .navigationBarTitleDisplayMode(.large)
         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }

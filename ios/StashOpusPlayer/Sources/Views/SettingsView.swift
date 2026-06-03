@@ -12,6 +12,9 @@ struct SettingsView: View {
     @EnvironmentObject private var sleepTimer: SleepTimerService
     @EnvironmentObject private var updater: UpdateService
     @EnvironmentObject private var streaming: StreamingService
+    @EnvironmentObject private var account: AccountService
+
+    @State private var showLogin = false
 
     // MARK: Body
 
@@ -28,6 +31,7 @@ struct SettingsView: View {
                     .listRowBackground(Color.clear)
                 }
 
+                accountSection
                 librarySection
                 playbackSection
                 streamingSection
@@ -38,10 +42,54 @@ struct SettingsView: View {
                 aboutSection
             }
             .scrollContentBackground(.hidden)
-            .background(AppTheme.background.ignoresSafeArea())
+            .background(Color.clear.ignoresSafeArea())
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
+            .sheet(isPresented: $showLogin) {
+                LoginView()
+                    .environmentObject(account)
+            }
         }
+    }
+
+    // MARK: — Account Section
+
+    private var accountSection: some View {
+        Section {
+            if account.isLoggedIn, let user = account.currentUser {
+                NavigationLink(destination: AccountView()
+                    .environmentObject(account)
+                    .environmentObject(library)
+                ) {
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(AppTheme.accent)
+                            .frame(width: 40, height: 40)
+                            .overlay(
+                                Text(String(user.username.prefix(1)).uppercased())
+                                    .font(.title3.bold())
+                                    .foregroundStyle(.white)
+                            )
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(user.displayName ?? user.username)
+                                .fontWeight(.medium)
+                                .foregroundStyle(AppTheme.textPrimary)
+                            Text("Tap to manage account")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                    }
+                }
+            } else {
+                Button { showLogin = true } label: {
+                    Label("Sign In / Create Account", systemImage: "person.badge.plus")
+                        .foregroundStyle(AppTheme.accent)
+                }
+            }
+        } header: {
+            sectionHeader("Account")
+        }
+        .listRowBackground(AppTheme.surface)
     }
 
     // MARK: — Library Section

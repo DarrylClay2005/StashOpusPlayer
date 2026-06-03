@@ -64,7 +64,7 @@ struct LibraryView: View {
                 // Tab content
                 tabContent
             }
-            .background(AppTheme.background.ignoresSafeArea())
+            .background(Color.clear.ignoresSafeArea())
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.large)
             .toolbar { toolbarItems }
@@ -301,7 +301,7 @@ private struct AlbumsTab: View {
                 .padding(.vertical, 12)
             }
         }
-        .background(AppTheme.background.ignoresSafeArea())
+        .background(Color.clear.ignoresSafeArea())
     }
 }
 

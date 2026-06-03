@@ -28,6 +28,11 @@ private struct VerticalSlider: View {
 // MARK: - NowPlayingView
 
 struct NowPlayingView: View {
+    /// Pass `true` when presenting as a sheet (e.g. from MiniPlayerBar) so the
+    /// view does not wrap itself in a NavigationStack — the sheet already provides
+    /// one, and nesting them produces a double navigation bar.
+    var isSheet: Bool = false
+
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var sleepTimer: SleepTimerService
@@ -68,49 +73,19 @@ struct NowPlayingView: View {
     private let seekHaptic = UIImpactFeedbackGenerator(style: .light)
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    artworkSection
-                    trackInfoSection
-                    timelineSection
-                    transportSection
-                    sleepTimerPill
-                    volumeSection
-                    playbackControlsSection
-                    abRepeatSection
-                    effectsSection
-                    equalizerSection
-                    lyricsSection
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 32)
-            }
-            // Swipe down to dismiss when presented as a sheet
-            .gesture(
-                DragGesture()
-                    .onEnded { value in
-                        if value.translation.height > 60 {
-                            dismiss()
-                        }
-                    }
-            )
-            .navigationTitle("Now Playing")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(AppTheme.textSecondary)
-                    }
-                    .buttonStyle(.plain)
+        // When shown as a tab the view owns its NavigationStack.
+        // When shown as a sheet MiniPlayerBar provides a NavigationStack already,
+        // so we skip creating another one to avoid the double-navigation-bar bug.
+        // Group lets the if/else return a single opaque type.
+        Group {
+            if isSheet {
+                scrollContent
+            } else {
+                NavigationStack {
+                    scrollContent
+                        .appScreenBackground()
                 }
             }
-            .appScreenBackground()
         }
         .sheet(isPresented: $showSleepTimerSheet) {
             SleepTimerSheet()
@@ -124,6 +99,52 @@ struct NowPlayingView: View {
         .onAppear {
             seekHaptic.prepare()
             loadLyrics()
+        }
+    }
+
+    // MARK: - Scroll content (shared between tab and sheet presentations)
+
+    private var scrollContent: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                artworkSection
+                trackInfoSection
+                timelineSection
+                transportSection
+                sleepTimerPill
+                volumeSection
+                playbackControlsSection
+                abRepeatSection
+                effectsSection
+                equalizerSection
+                lyricsSection
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
+        }
+        // Swipe down to dismiss when presented as a sheet
+        .gesture(
+            DragGesture()
+                .onEnded { value in
+                    if value.translation.height > 60 {
+                        dismiss()
+                    }
+                }
+        )
+        .navigationTitle("Now Playing")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 

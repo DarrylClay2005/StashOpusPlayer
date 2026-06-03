@@ -107,7 +107,7 @@ struct FavoritesView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(AppTheme.background.ignoresSafeArea())
+        .background(Color.clear.ignoresSafeArea())
         .navigationTitle("Favorites")
         .navigationBarTitleDisplayMode(.large)
         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }

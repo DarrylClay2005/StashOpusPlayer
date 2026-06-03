@@ -4,6 +4,7 @@ struct ContentView: View {
 
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var streaming: StreamingService
+    @EnvironmentObject private var account: AccountService
 
     /// Persists the last-selected tab across launches.
     @AppStorage("selected_tab") private var selectedTab = 0

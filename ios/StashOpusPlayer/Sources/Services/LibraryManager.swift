@@ -144,11 +144,30 @@ final class LibraryManager: ObservableObject {
 
     func requestAccessAndScan() {
         Task {
+            let existing = MPMediaLibrary.authorizationStatus()
+            // Already denied/restricted — system won't re-prompt; send user to Settings.
+            if existing == .denied || existing == .restricted {
+                await UIApplication.shared.open(
+                    URL(string: UIApplication.openSettingsURLString)!,
+                    options: [:],
+                    completionHandler: nil
+                )
+                errorMessage = "Open Settings → Privacy → Media & Apple Music to allow access."
+                return
+            }
             let status = await MPMediaLibrary.requestAuthorization()
             if status == .authorized {
+                errorMessage = nil
                 scanMediaLibrary()
+            } else if status == .denied || status == .restricted {
+                await UIApplication.shared.open(
+                    URL(string: UIApplication.openSettingsURLString)!,
+                    options: [:],
+                    completionHandler: nil
+                )
+                errorMessage = "Open Settings → Privacy → Media & Apple Music to allow access."
             } else {
-                errorMessage = "Media library access is required to scan Apple Music library items. Imported files still work."
+                errorMessage = "Media library access was declined. Imported files still work."
             }
         }
     }

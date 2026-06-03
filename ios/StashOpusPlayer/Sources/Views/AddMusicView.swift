@@ -6,8 +6,10 @@ struct AddMusicView: View {
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var folderService: MusicFolderService
 
-    @State private var isFileImporterPresented = false
-    @State private var isFolderPickerPresented = false
+    // Single importer state — two modifiers fight each other; use one with a mode flag
+    private enum ImportMode { case folder, audio }
+    @State private var importMode: ImportMode = .folder
+    @State private var isImporterPresented = false
 
     var body: some View {
         NavigationStack {
@@ -16,6 +18,7 @@ struct AddMusicView: View {
                 Section("Apple Music / iTunes Library") {
                     Button {
                         library.requestAccessAndScan()
+                        dismiss()
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "music.note.house.fill")
@@ -37,7 +40,8 @@ struct AddMusicView: View {
                 // MARK: Music Folder (Files App)
                 Section("Music Folder (Files App)") {
                     Button {
-                        isFolderPickerPresented = true
+                        importMode = .folder
+                        isImporterPresented = true
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "folder.fill")
@@ -55,7 +59,6 @@ struct AddMusicView: View {
                     }
                     .buttonStyle(.plain)
 
-                    // Watched folders list with remove option
                     ForEach(folderService.watchedFolders) { folder in
                         HStack(spacing: 12) {
                             Image(systemName: "checkmark.circle.fill")
@@ -83,7 +86,8 @@ struct AddMusicView: View {
                 // MARK: Individual Files
                 Section("Individual Files") {
                     Button {
-                        isFileImporterPresented = true
+                        importMode = .audio
+                        isImporterPresented = true
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "doc.badge.plus")
@@ -93,7 +97,7 @@ struct AddMusicView: View {
                                 Text("Import Audio Files")
                                     .fontWeight(.medium)
                                     .foregroundStyle(AppTheme.textPrimary)
-                                Text("Select individual MP3, FLAC, M4A, WAV or other audio files")
+                                Text("Select MP3, FLAC, M4A, WAV or other audio files")
                                     .font(.caption)
                                     .foregroundStyle(AppTheme.textSecondary)
                             }
@@ -112,7 +116,7 @@ struct AddMusicView: View {
                             Text("Connect iPhone to Mac")
                                 .fontWeight(.medium)
                                 .foregroundStyle(AppTheme.textPrimary)
-                            Text("Open Finder → iPhone → Files → StashOpusPlayer → drag files in")
+                            Text("Finder → iPhone → Files → StashOpusPlayer → drag files in")
                                 .font(.caption)
                                 .foregroundStyle(AppTheme.textSecondary)
                         }
@@ -125,29 +129,27 @@ struct AddMusicView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                        .tint(AppTheme.accent)
+                    Button("Done") { dismiss() }.tint(AppTheme.accent)
                 }
             }
-            // Folder picker — uses .folder UTType so the system shows a directory browser
+            // Single fileImporter — mode determines content types and result handling.
+            // Two separate .fileImporter modifiers on the same view is a SwiftUI bug:
+            // the second modifier silently overrides the first.
             .fileImporter(
-                isPresented: $isFolderPickerPresented,
-                allowedContentTypes: [.folder],
-                allowsMultipleSelection: false
+                isPresented: $isImporterPresented,
+                allowedContentTypes: importMode == .folder ? [.folder] : [.audio],
+                allowsMultipleSelection: importMode == .audio
             ) { result in
-                if case .success(let urls) = result, let url = urls.first {
-                    try? folderService.addFolder(url: url)
-                    library.scanWatchedFolders(using: folderService)
-                }
-            }
-            // Individual file picker
-            .fileImporter(
-                isPresented: $isFileImporterPresented,
-                allowedContentTypes: [.audio],
-                allowsMultipleSelection: true
-            ) { result in
-                if case .success(let urls) = result {
-                    library.importFiles(urls: urls)
+                switch importMode {
+                case .folder:
+                    if case .success(let urls) = result, let url = urls.first {
+                        try? folderService.addFolder(url: url)
+                        library.scanWatchedFolders(using: folderService)
+                    }
+                case .audio:
+                    if case .success(let urls) = result {
+                        library.importFiles(urls: urls)
+                    }
                 }
             }
         }

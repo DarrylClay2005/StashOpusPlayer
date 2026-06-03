@@ -2,63 +2,41 @@ import Foundation
 
 // MARK: - AudioEffectSpecialMode
 
-/// Describes the DSP oscillator or spatial mode that goes beyond static EQ / speed / pitch.
-enum AudioEffectSpecialMode: Codable, Equatable {
-    case none
-    case rotation(hz: Double)               // 8D — rotate listener orientation
-    case tremolo(freq: Double, depth: Float) // volume LFO
-    case vibrato(freq: Double, depth: Double) // pitch LFO (semitones)
-    case karaoke(level: Float)              // center-channel cancellation
+/// Flat, Codable representation of a DSP oscillator or spatial mode.
+/// Uses a tagged-union style struct so Swift can synthesise Codable automatically.
+struct AudioEffectSpecialMode: Codable, Equatable {
 
-    // ── Codable ──────────────────────────────────────────────────────────────
-
-    private enum CodingKeys: String, CodingKey {
-        case type, hz, freq, depth, level
+    enum ModeType: String, Codable {
+        case none, rotation, tremolo, vibrato, karaoke
     }
 
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        let type = try c.decode(String.self, forKey: .type)
-        switch type {
-        case "rotation":
-            let hz = try c.decode(Double.self, forKey: .hz)
-            self = .rotation(hz: hz)
-        case "tremolo":
-            let freq  = try c.decode(Double.self, forKey: .freq)
-            let depth = try c.decode(Float.self,  forKey: .depth)
-            self = .tremolo(freq: freq, depth: depth)
-        case "vibrato":
-            let freq  = try c.decode(Double.self, forKey: .freq)
-            let depth = try c.decode(Double.self, forKey: .depth)
-            self = .vibrato(freq: freq, depth: depth)
-        case "karaoke":
-            let level = try c.decode(Float.self, forKey: .level)
-            self = .karaoke(level: level)
-        default:
-            self = .none
-        }
+    var type: ModeType = .none
+
+    // Parameters for each mode — zero/default when mode is not active.
+    var hz: Double      = 0          // rotation: cycles-per-second
+    var freq: Double    = 0          // tremolo / vibrato: LFO frequency
+    var depth: Float    = 0          // tremolo: depth [0–1]
+    var pitchDepth: Double = 0       // vibrato: semitone deviation
+    var level: Float    = 1.0        // karaoke: cancellation level
+
+    // MARK: Factory helpers (mirror the original enum cases)
+
+    static let none = AudioEffectSpecialMode(type: .none)
+
+    static func rotation(hz: Double) -> AudioEffectSpecialMode {
+        AudioEffectSpecialMode(type: .rotation, hz: hz)
     }
 
-    func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .none:
-            try c.encode("none", forKey: .type)
-        case .rotation(let hz):
-            try c.encode("rotation", forKey: .type)
-            try c.encode(hz, forKey: .hz)
-        case .tremolo(let freq, let depth):
-            try c.encode("tremolo", forKey: .type)
-            try c.encode(freq,  forKey: .freq)
-            try c.encode(depth, forKey: .depth)
-        case .vibrato(let freq, let depth):
-            try c.encode("vibrato", forKey: .type)
-            try c.encode(freq,  forKey: .freq)
-            try c.encode(depth, forKey: .depth)
-        case .karaoke(let level):
-            try c.encode("karaoke", forKey: .type)
-            try c.encode(level, forKey: .level)
-        }
+    static func tremolo(freq: Double, depth: Float) -> AudioEffectSpecialMode {
+        AudioEffectSpecialMode(type: .tremolo, freq: freq, depth: depth)
+    }
+
+    static func vibrato(freq: Double, depth: Double) -> AudioEffectSpecialMode {
+        AudioEffectSpecialMode(type: .vibrato, freq: freq, pitchDepth: depth)
+    }
+
+    static func karaoke(level: Float) -> AudioEffectSpecialMode {
+        AudioEffectSpecialMode(type: .karaoke, level: level)
     }
 }
 

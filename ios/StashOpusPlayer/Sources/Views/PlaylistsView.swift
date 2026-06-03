@@ -55,7 +55,7 @@ struct PlaylistsView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background(AppTheme.background.ignoresSafeArea())
+        .background(Color.clear.ignoresSafeArea())
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -175,7 +175,7 @@ private struct CreatePlaylistSheet: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(AppTheme.background.ignoresSafeArea())
+            .background(Color.clear.ignoresSafeArea())
             .navigationTitle("New Playlist")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

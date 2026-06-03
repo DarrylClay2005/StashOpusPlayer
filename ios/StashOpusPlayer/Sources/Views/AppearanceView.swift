@@ -85,7 +85,7 @@ struct AppearanceView: View {
         }
         .id(refreshToken)
         .scrollContentBackground(.hidden)
-        .background(AppTheme.background.ignoresSafeArea())
+        .background(Color.clear.ignoresSafeArea())
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {

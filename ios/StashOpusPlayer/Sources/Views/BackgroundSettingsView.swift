@@ -25,6 +25,17 @@ struct BackgroundSettingsView: View {
 
             if bg.isEnabled {
 
+                // MARK: Restart note
+                Section {
+                    Label(
+                        "Images are cleared on app restart. Re-select from the gallery each launch.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .listRowBackground(AppTheme.surface)
+                }
+
                 // MARK: Image Picker Section
                 Section("Images (\(bg.images.count) selected)") {
                     PhotosPicker(
@@ -146,7 +157,7 @@ struct BackgroundSettingsView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background(AppTheme.background.ignoresSafeArea())
+        .background(Color.clear.ignoresSafeArea())
         .navigationTitle("Gallery Background")
         .navigationBarTitleDisplayMode(.inline)
     }

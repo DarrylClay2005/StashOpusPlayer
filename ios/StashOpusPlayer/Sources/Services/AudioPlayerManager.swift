@@ -359,15 +359,15 @@ final class AudioPlayerManager: ObservableObject {
         audioSettings = s   // triggers didSet → applyAudioSettings()
 
         // Start the special mode for this effect.
-        switch effect.specialMode {
-        case .rotation(let hz):
-            start8DRotation(hz: hz)
-        case .tremolo(let freq, let depth):
-            startTremolo(frequency: freq, depth: depth)
-        case .vibrato(let freq, let depth):
-            startVibrato(frequency: freq, depth: depth)
-        case .karaoke(let level):
-            enableKaraoke(level: level)
+        switch effect.specialMode.type {
+        case .rotation:
+            start8DRotation(hz: effect.specialMode.hz)
+        case .tremolo:
+            startTremolo(frequency: effect.specialMode.freq, depth: effect.specialMode.depth)
+        case .vibrato:
+            startVibrato(frequency: effect.specialMode.freq, depth: effect.specialMode.pitchDepth)
+        case .karaoke:
+            enableKaraoke(level: effect.specialMode.level)
         case .none:
             break
         }
