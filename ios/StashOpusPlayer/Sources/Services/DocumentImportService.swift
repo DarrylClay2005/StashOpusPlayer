@@ -118,6 +118,7 @@ struct DocumentImportService {
 
     /// Exposed so LibraryManager can build Song objects when scanning the Documents folder directly.
     func makeSong(for url: URL) async -> Song {
+        appLog("Processing: \(url.lastPathComponent)", category: "library")
         let asset = AVURLAsset(url: url)
         let loadedDuration = (try? await asset.load(.duration)).map(CMTimeGetSeconds) ?? 0
         let commonMetadata = (try? await asset.load(.commonMetadata)) ?? []
@@ -256,6 +257,8 @@ struct DocumentImportService {
             sampleRate: sampleRate
         )
 
+        appLog("Metadata: \"\(song.title)\" by \(song.artist.isEmpty ? "unknown" : song.artist) [\(fileExt), \(String(format: "%.0f", song.duration))s]", category: "library")
+
         // Enrich sparse metadata via iTunes Search API. Only fires when artist or
         // genre is missing — common for YouTube downloads where yt-dlp fills in
         // title but leaves artist/album blank. Results are cached across restarts
@@ -286,6 +289,7 @@ struct DocumentImportService {
             return s
         }
 
+        appLog("Enriching metadata via iTunes for \"\(song.title)\"", category: "library")
         let enriched = await MetadataFetchService.shared.enrich(song: song)
         if enriched.artist != song.artist || enriched.album != song.album ||
            enriched.genre  != song.genre  || enriched.year  != song.year {
@@ -295,6 +299,7 @@ struct DocumentImportService {
             if !enriched.genre.isEmpty  { entry["genre"]  = enriched.genre  }
             if !enriched.year.isEmpty   { entry["year"]   = enriched.year   }
             if !entry.isEmpty {
+                appLog("iTunes enrichment applied for \"\(song.title)\": artist=\(enriched.artist), album=\(enriched.album)", category: "library")
                 cache[filename] = entry
                 defaults.set(cache, forKey: enrichCacheKey)
             }

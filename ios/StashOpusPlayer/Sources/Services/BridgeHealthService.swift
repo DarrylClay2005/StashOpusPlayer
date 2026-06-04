@@ -39,6 +39,15 @@ final class BridgeHealthService: ObservableObject {
             isAPIKeyValid = nil  // No key configured — open access
         }
 
+        // Log status changes (not every routine check)
+        if prevHealthy != healthy {
+            if healthy {
+                appLog("Bridge server connected (\(streaming.bridgeURL))", category: "network")
+            } else {
+                appWarn("Bridge server offline (\(streaming.bridgeURL))", category: "network")
+            }
+        }
+
         // Show toast on status change
         if prevHealthy != nil && prevHealthy != healthy {
             toastMessage = healthy ? "✓ Bridge server connected" : "⚠ Bridge server offline"

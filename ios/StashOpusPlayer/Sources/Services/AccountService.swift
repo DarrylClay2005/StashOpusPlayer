@@ -174,6 +174,7 @@ final class AccountService: ObservableObject {
     // MARK: - Public API
 
     func login(username: String, password: String, deviceName: String = UIDevice.current.name) async {
+        appLog("Login attempt: \(username)", category: "account")
         errorMessage = nil
         struct Body: Encodable {
             let username: String
@@ -192,10 +193,13 @@ final class AccountService: ObservableObject {
             isLoggedIn = true
             hasDateOfBirth = response.user.dateOfBirth != nil
             saveUserLocally(response.user)
+            appLog("Login success: \(username) (id: \(response.user.id))", category: "account")
             await loadAvatar(forceRefresh: true)
         } catch let err as AccountError {
+            appError("Login failed [\(err.statusCode)]: \(err.message)", category: "account")
             errorMessage = err.message
         } catch {
+            appError("Login error: \(error.localizedDescription)", category: "account")
             errorMessage = error.localizedDescription
         }
     }
@@ -239,6 +243,7 @@ final class AccountService: ObservableObject {
     }
 
     func logout() async {
+        appLog("Logout: \(currentUser?.username ?? "?")", category: "account")
         errorMessage = nil
         if token != nil {
             _ = try? await makeRequest("/auth/logout", method: "POST", body: EmptyBody())
@@ -284,6 +289,7 @@ final class AccountService: ObservableObject {
     /// Call schedulePush instead of this directly — it debounces rapid mutations.
     func pushSync(library: LibraryManager, audioSettings: AudioSettings? = nil) async {
         guard isLoggedIn else { return }
+        appLog("Push sync started (favorites: \(library.favoriteSongIDs.count), playlists: \(library.playlists.count))", category: "account")
         isSyncing = true
         errorMessage = nil
         defer { isSyncing = false }
@@ -346,15 +352,19 @@ final class AccountService: ObservableObject {
         do {
             _ = try await makeRequest("/user/sync", method: "POST", body: payload)
             lastSyncDate = Date()
+            appLog("Push sync complete", category: "account")
         } catch let err as AccountError {
+            appError("Push sync failed [\(err.statusCode)]: \(err.message)", category: "account")
             errorMessage = err.message
         } catch {
+            appError("Push sync error: \(error.localizedDescription)", category: "account")
             errorMessage = error.localizedDescription
         }
     }
 
     func pullSync(library: LibraryManager) async {
         guard isLoggedIn else { return }
+        appLog("Pull sync started", category: "account")
         isSyncing = true
         errorMessage = nil
         defer { isSyncing = false }
@@ -407,9 +417,12 @@ final class AccountService: ObservableObject {
             }
 
             lastSyncDate = Date()
+            appLog("Pull sync complete (favorites: \(remoteIDs.count), playlists: \(sync.playlists.count))", category: "account")
         } catch let err as AccountError {
+            appError("Pull sync failed [\(err.statusCode)]: \(err.message)", category: "account")
             errorMessage = err.message
         } catch {
+            appError("Pull sync error: \(error.localizedDescription)", category: "account")
             errorMessage = error.localizedDescription
         }
     }

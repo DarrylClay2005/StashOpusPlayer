@@ -160,7 +160,7 @@ final class StreamingService: ObservableObject {
             searchResults = []
             return
         }
-
+        appLog("Search: \"\(query)\" [source: \(source)]", category: "network")
         isSearching = true
         errorMessage = nil
         defer { isSearching = false }
@@ -189,7 +189,9 @@ final class StreamingService: ObservableObject {
             }
             let tracks = try JSONDecoder().decode([StreamTrack].self, from: data)
             searchResults = tracks
+            appLog("Search returned \(tracks.count) result(s) for \"\(query)\"", category: "network")
         } catch {
+            appError("Search failed: \(error.localizedDescription)", category: "network")
             errorMessage = "Unable to reach streaming server. Check your connection."
             searchResults = []
         }
@@ -357,6 +359,7 @@ final class StreamingService: ObservableObject {
     /// `/api/download` endpoint (which embeds metadata and thumbnail into the file).
     /// If the file already exists it is returned immediately without re-downloading.
     func downloadToLibrary(track: StreamTrack) async throws -> URL {
+        appLog("Download started: \"\(track.title)\" [fmt: \(preferredFormat)]", category: "network")
         let fmt = preferredFormat
         let ext = fileExtension(for: fmt)
 
@@ -413,6 +416,7 @@ final class StreamingService: ObservableObject {
 
         try? FileManager.default.removeItem(at: destURL)
         try FileManager.default.moveItem(at: downloadedURL, to: destURL)
+        appLog("Download complete: \(destURL.lastPathComponent)", category: "network")
 
         // Pre-seed the artwork cache with the track's thumbnail so it's immediately
         // available when scanLocalDocuments() creates the Song for this file.

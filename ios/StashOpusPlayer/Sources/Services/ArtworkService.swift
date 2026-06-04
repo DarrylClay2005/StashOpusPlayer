@@ -77,12 +77,14 @@ final class ArtworkService {
         if let cacheKeyStr = song.artworkCacheKey,
            cacheKeyStr.hasPrefix("http"),
            let thumbnailURL = URL(string: cacheKeyStr) {
+            appLog("Artwork: fetching remote thumbnail for \"\(song.displayName)\"", category: "artwork")
             if let image = await fetchRemoteImage(url: thumbnailURL) {
                 setMemoryCache(image, forKey: key)
                 let resized = resizedImage(image, maxDimension: 600)
                 saveToDisk(image: resized, key: key)
                 return image
             }
+            appWarn("Artwork: remote fetch failed for \"\(song.displayName)\"", category: "artwork")
         }
 
         if let persistentID = song.persistentID {
@@ -96,6 +98,7 @@ final class ArtworkService {
         if let url = song.url {
             // Try embedded asset artwork (works for m4a, mp3, flac with embedded tags).
             if let image = await fetchAssetArtwork(url: url) {
+                appLog("Artwork: embedded tag found for \"\(song.displayName)\"", category: "artwork")
                 setMemoryCache(image, forKey: key)
                 saveToDisk(image: resizedImage(image, maxDimension: 600), key: key)
                 return image
@@ -103,21 +106,26 @@ final class ArtworkService {
 
             // For local video files, extract the first frame as artwork.
             if Self.videoExtensions.contains(url.pathExtension.lowercased()) {
+                appLog("Artwork: extracting video frame for \"\(song.displayName)\"", category: "artwork")
                 if let image = await extractVideoFrame(url: url) {
                     setMemoryCache(image, forKey: key)
                     saveToDisk(image: resizedImage(image, maxDimension: 600), key: key)
                     return image
                 }
+                appWarn("Artwork: video frame extraction failed for \"\(song.displayName)\"", category: "artwork")
             }
         }
 
         // Last resort: iTunes Search API using song title + artist.
+        appLog("Artwork: querying iTunes for \"\(song.displayName)\" by \(song.artistName)", category: "artwork")
         if let image = await fetchITunesArtwork(title: song.title, artist: song.artist) {
+            appLog("Artwork: iTunes match found for \"\(song.displayName)\"", category: "artwork")
             setMemoryCache(image, forKey: key)
             saveToDisk(image: resizedImage(image, maxDimension: 600), key: key)
             return image
         }
 
+        appWarn("Artwork: no source found for \"\(song.displayName)\"", category: "artwork")
         return nil
     }
 

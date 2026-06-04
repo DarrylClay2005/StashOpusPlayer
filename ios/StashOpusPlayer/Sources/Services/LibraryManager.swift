@@ -45,6 +45,7 @@ final class LibraryManager: ObservableObject {
     /// adds any not already tracked. Picks up files placed via Finder, Files app,
     /// iTunes file sharing, or any subdirectory the user created inside the app folder.
     func scanLocalDocuments() {
+        appLog("Scanning local documents directory", category: "library")
         Task {
             let fm = FileManager.default
             guard let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
@@ -101,6 +102,7 @@ final class LibraryManager: ObservableObject {
                 }
             }.value
 
+            appLog("Local scan complete: added \(newSongs.count) new song(s)", category: "library")
             importedSongs.append(contentsOf: newSongs)
             importedSongs = Array(Dictionary(grouping: importedSongs, by: \.id).compactMap { $0.value.first })
             rebuildAllSongs()
@@ -300,17 +302,20 @@ final class LibraryManager: ObservableObject {
 
     func importFiles(urls: [URL]) {
         guard !urls.isEmpty else { return }
+        appLog("Importing \(urls.count) file(s)", category: "library")
         isScanning = true
         errorMessage = nil
 
         Task {
             do {
                 let imported = try await importer.importFiles(from: urls)
+                appLog("Import complete: \(imported.count) file(s) added", category: "library")
                 importedSongs.append(contentsOf: imported)
                 importedSongs = Array(
                     Dictionary(grouping: importedSongs, by: \.id).compactMap { $0.value.first }
                 )
             } catch {
+                appError("Import failed: \(error.localizedDescription)", category: "library")
                 errorMessage = error.localizedDescription
             }
             rebuildAllSongs()

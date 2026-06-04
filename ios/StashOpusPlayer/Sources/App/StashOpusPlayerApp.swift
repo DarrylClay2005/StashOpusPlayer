@@ -39,9 +39,8 @@ struct StashOpusPlayerApp: App {
             }
             .preferredColorScheme(.dark)
             .task {
-                    // Configure background logger
+                    // Configure background logger (idempotent — safe if .task fires multiple times)
                     AppLogger.shared.configure(bridgeURL: streaming.bridgeURL)
-                    AppLogger.shared.log("App launched", category: "app")
 
                     // Restore audio settings — player must be configured before any resume.
                     player.audioSettings = PersistenceService.shared.loadAudioSettings() ?? AudioSettings()

@@ -170,6 +170,7 @@ final class AudioPlayerManager: ObservableObject {
     func play(song: Song, in songs: [Song]) {
         let source = songs.isEmpty ? [song] : songs
         let index = source.firstIndex(where: { $0.id == song.id }) ?? 0
+        appLog("Play: \"\(song.displayName)\" by \(song.artistName) (\(source.count) in queue)", category: "audio")
         setQueue(source, startIndex: index, autoplay: true)
     }
 
@@ -185,6 +186,7 @@ final class AudioPlayerManager: ObservableObject {
         stopTimer()
         updateNowPlaying()
         savePlaybackState()
+        appLog("Paused at \(String(format: "%.1f", position))s — \(currentSong?.displayName ?? "?")", category: "audio")
     }
 
     func resume() {
@@ -199,10 +201,12 @@ final class AudioPlayerManager: ObservableObject {
             startTimer()
             updateNowPlaying()
             reapplyActiveEffect()
+            appLog("Resumed — \(currentSong?.displayName ?? "?")", category: "audio")
         }
     }
 
     func stop() {
+        appLog("Stopped — \(currentSong?.displayName ?? "nothing playing")", category: "audio")
         primaryNode.stop()
         secondaryNode.stop()
         isCrossfading = false
@@ -256,12 +260,14 @@ final class AudioPlayerManager: ObservableObject {
             currentIndex = nextIndex
             currentSong = queue[currentIndex]
             gaplessScheduled = false
+            appLog("Skip next → \"\(currentSong?.displayName ?? "?")\"", category: "audio")
             playCurrent(from: 0)
             savePlaybackState()
         } else if repeatMode == .all {
             currentIndex = 0
             currentSong = queue[currentIndex]
             gaplessScheduled = false
+            appLog("Skip next (loop) → \"\(currentSong?.displayName ?? "?")\"", category: "audio")
             playCurrent(from: 0)
             savePlaybackState()
         } else {
@@ -366,6 +372,7 @@ final class AudioPlayerManager: ObservableObject {
     // MARK: - Audio Effects
 
     func applyEffect(_ effect: AudioEffect) {
+        appLog("Effect applied: \(effect.name) (id: \(effect.id))", category: "audio")
         // Stop all running special effects before switching to a new one.
         stop8DRotation()
         stopTremolo()
@@ -627,6 +634,7 @@ final class AudioPlayerManager: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             isPlaying = false
+            appError("Playback error for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
         }
     }
 
@@ -711,6 +719,7 @@ final class AudioPlayerManager: ObservableObject {
         } catch {
             errorMessage = "Could not load audio: \(error.localizedDescription)"
             isPlaying = false
+            appError("Stream load failed for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
         }
     }
 
@@ -920,6 +929,7 @@ final class AudioPlayerManager: ObservableObject {
 
         switch type {
         case .began:
+            appLog("Audio session interrupted", category: "audio")
             if isPlaying {
                 pause()
                 wasInterrupted = true
@@ -929,10 +939,13 @@ final class AudioPlayerManager: ObservableObject {
             guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
             if options.contains(.shouldResume) {
+                appLog("Audio session interruption ended — resuming", category: "audio")
                 // Re-activate the audio session before restarting the engine; the
                 // system deactivates it when an interruption begins.
                 try? AVAudioSession.sharedInstance().setActive(true)
                 resume()
+            } else {
+                appLog("Audio session interruption ended — not resuming", category: "audio")
             }
         @unknown default:
             break
@@ -946,6 +959,7 @@ final class AudioPlayerManager: ObservableObject {
         else { return }
 
         if reason == .oldDeviceUnavailable {
+            appLog("Audio route changed — output device removed, pausing", category: "audio")
             pause()
         }
     }
@@ -1032,6 +1046,7 @@ final class AudioPlayerManager: ObservableObject {
             // Full teardown + rebuild, then reactivate the audio session before retry.
             // engine.reset() detaches all nodes and clears connections, so configureEngine()
             // can re-attach them cleanly without duplicates.
+            appWarn("Audio engine start failed — rebuilding: \(error.localizedDescription)", category: "audio")
             engine.reset()
             isEngineConfigured = false
             configureEngine()
@@ -1039,9 +1054,11 @@ final class AudioPlayerManager: ObservableObject {
             try? AVAudioSession.sharedInstance().setActive(true)
             do {
                 try engine.start()
+                appLog("Audio engine recovered after rebuild", category: "audio")
                 errorMessage = nil
             } catch {
                 errorMessage = error.localizedDescription
+                appError("Audio engine failed to recover: \(error.localizedDescription)", category: "audio")
             }
         }
     }
