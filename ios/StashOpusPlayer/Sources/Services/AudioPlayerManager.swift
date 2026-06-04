@@ -141,6 +141,7 @@ final class AudioPlayerManager: ObservableObject {
         rotationLink?.invalidate()
         tremoloLink?.invalidate()
         vibratoLink?.invalidate()
+        NotificationCenter.default.removeObserver(self)
         let center = MPRemoteCommandCenter.shared()
         center.playCommand.removeTarget(nil)
         center.pauseCommand.removeTarget(nil)

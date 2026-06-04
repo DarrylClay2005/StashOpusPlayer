@@ -592,7 +592,7 @@ struct SettingsView: View {
                 } label: {
                     Label(
                         updater.directDownloadURL != nil
-                            ? "Download v\(updater.latestVersion!) IPA"
+                            ? "Download v\(updater.latestVersion ?? "") IPA"
                             : "Download Update",
                         systemImage: "arrow.down.circle"
                     )

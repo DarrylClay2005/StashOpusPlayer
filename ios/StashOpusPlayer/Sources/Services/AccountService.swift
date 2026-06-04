@@ -151,7 +151,12 @@ final class AccountService: ObservableObject {
             ?? StreamingService.defaultBridgeURL
     }
 
-    // MARK: Init — restore session
+    // MARK: Init / Deinit
+
+    deinit {
+        syncDebounceTask?.cancel()
+        autoPushTimer?.invalidate()
+    }
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.userKey),

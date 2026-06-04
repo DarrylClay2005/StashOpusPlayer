@@ -108,7 +108,8 @@ struct LaunchView: View {
                 logoScale = 1.0
                 logoOpacity = 1.0
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 300_000_000)
                 withAnimation(.easeIn(duration: 0.4)) {
                     contentOpacity = 1.0
                 }

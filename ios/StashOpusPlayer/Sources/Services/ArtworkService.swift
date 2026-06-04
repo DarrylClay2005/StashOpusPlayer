@@ -25,7 +25,9 @@ final class ArtworkService {
     private let noArtworkSentinel = UIImage()
 
     private init() {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            fatalError("Caches directory unavailable")
+        }
         diskCacheURL = caches.appendingPathComponent("Artwork", isDirectory: true)
         try? FileManager.default.createDirectory(at: diskCacheURL, withIntermediateDirectories: true)
 

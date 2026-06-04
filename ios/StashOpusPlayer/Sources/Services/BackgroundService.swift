@@ -95,7 +95,9 @@ final class BackgroundService: ObservableObject {
     // MARK: Disk Storage Directory
 
     private var imageStorageDir: URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            fatalError("Document directory unavailable")
+        }
         return docs.appendingPathComponent("BackgroundImages", isDirectory: true)
     }
 

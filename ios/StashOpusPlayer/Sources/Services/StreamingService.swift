@@ -137,7 +137,9 @@ final class StreamingService: ObservableObject {
                let url = URL(string: savedPath) {
                 return url
             }
-            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                fatalError("Document directory unavailable")
+            }
             return docs.appendingPathComponent("Imported Music")
         }
         set {

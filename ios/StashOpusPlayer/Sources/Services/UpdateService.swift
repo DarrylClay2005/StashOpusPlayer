@@ -9,7 +9,9 @@ final class UpdateService: ObservableObject {
     @Published private(set) var latestVersion: String? = nil
     @Published private(set) var updateAvailable: Bool = false
     @Published private(set) var isChecking: Bool = false
-    @Published private(set) var releasePageURL: URL = URL(string: "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/latest")!
+    // swiftlint:disable:next force_unwrapping
+    private static let fallbackReleaseURL = URL(string: "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/latest")!
+    @Published private(set) var releasePageURL: URL = UpdateService.fallbackReleaseURL
     @Published private(set) var directDownloadURL: URL? = nil
 
     var currentVersion: String {
@@ -49,7 +51,9 @@ final class UpdateService: ObservableObject {
         isChecking = true
         defer { isChecking = false }
 
-        let apiURL = URL(string: "https://api.github.com/repos/HeavenlyXenusVR/StashOpusPlayer/releases")!
+        guard let apiURL = URL(string: "https://api.github.com/repos/HeavenlyXenusVR/StashOpusPlayer/releases") else {
+            return
+        }
         var request = URLRequest(url: apiURL)
         request.setValue("StashOpusPlayer-iOS", forHTTPHeaderField: "User-Agent")
 

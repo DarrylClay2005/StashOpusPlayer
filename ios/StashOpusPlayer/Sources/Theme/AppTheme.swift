@@ -35,7 +35,7 @@ enum AppTheme {
         let uiColor = UIColor(color)
         if let data = try? NSKeyedArchiver.archivedData(
             withRootObject: uiColor,
-            requiringSecureCoding: false
+            requiringSecureCoding: true
         ) {
             UserDefaults.standard.set(data, forKey: "accent_color_data")
         }

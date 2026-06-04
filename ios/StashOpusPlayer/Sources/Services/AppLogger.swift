@@ -18,6 +18,8 @@ final class AppLogger: ObservableObject {
         var extra: [String: String] = [:]
     }
 
+    private static let iso8601 = ISO8601DateFormatter()
+
     private var buffer: [LogEntry] = []
     private let maxBuffer = 500
     private var flushTimer: Timer?
@@ -44,7 +46,7 @@ final class AppLogger: ObservableObject {
             message: message,
             file: URL(fileURLWithPath: file).lastPathComponent,
             line: line,
-            timestamp: ISO8601DateFormatter().string(from: Date()),
+            timestamp: AppLogger.iso8601.string(from: Date()),
             extra: extra
         )
         buffer.append(entry)

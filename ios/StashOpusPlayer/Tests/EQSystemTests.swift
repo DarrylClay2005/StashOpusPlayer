@@ -55,7 +55,9 @@ final class EQSystemTests: XCTestCase {
     // MARK: Test 5 — Bassboost has positive low-band values
 
     func testBassboostHasPositiveLowBands() {
-        let effect = AudioEffectsService.effect(id: "bassboost")!
+        guard let effect = AudioEffectsService.effect(id: "bassboost") else {
+            XCTFail("bassboost effect not found"); return
+        }
         XCTAssertGreaterThan(effect.eqBands[0], 0, "Band 0 (32 Hz) should be boosted")
         XCTAssertGreaterThan(effect.eqBands[1], 0, "Band 1 (64 Hz) should be boosted")
         XCTAssertGreaterThan(effect.eqBands[2], 0, "Band 2 (125 Hz) should be boosted")
@@ -64,7 +66,9 @@ final class EQSystemTests: XCTestCase {
     // MARK: Test 6 — Nightcore has positive speed and pitch
 
     func testNightcoreSpeedAndPitch() {
-        let effect = AudioEffectsService.effect(id: "nightcore")!
+        guard let effect = AudioEffectsService.effect(id: "nightcore") else {
+            XCTFail("nightcore effect not found"); return
+        }
         XCTAssertGreaterThan(effect.speed, 1.0, "Nightcore speed must be > 1.0")
         XCTAssertGreaterThan(effect.pitchSemitones, 0, "Nightcore pitch must be positive")
     }
@@ -87,7 +91,9 @@ final class EQSystemTests: XCTestCase {
         var settings = AudioSettings()
         settings.speed = 1.25
         settings.pitchSemitones = 4.5
-        let noneEffect = AudioEffectsService.effect(id: "none")!
+        guard let noneEffect = AudioEffectsService.effect(id: "none") else {
+            XCTFail("none effect not found"); return
+        }
         let reset = AudioEffectsService.apply(effect: noneEffect, to: settings)
         XCTAssertEqual(reset.speed, 1.0, "Speed must reset to 1.0 after applying 'none'")
         XCTAssertEqual(reset.pitchSemitones, 0.0, "Pitch must reset to 0.0 after applying 'none'")
