@@ -199,6 +199,7 @@ struct DocumentImportService {
 
         // Opus/Ogg files: AVFoundation does not parse Vorbis comments from the Ogg container.
         // As a fallback, read the OpusTags packet directly from the binary file.
+        let fileExt = url.pathExtension.lowercased()
         let opusExtensions: Set<String> = ["opus", "ogg"]
         if opusExtensions.contains(fileExt), title == url.deletingPathExtension().lastPathComponent {
             let vorbis = Self.readVorbisComments(url: url)
@@ -224,7 +225,7 @@ struct DocumentImportService {
         // For video files (.mp4, .m4v, .mov), extract the first video frame as artwork
         // and cache it so ArtworkService can find it by filename key.
         let videoExtensions: Set<String> = ["mp4", "m4v", "mov"]
-        let fileExt = url.pathExtension.lowercased()
+        // fileExt already declared above for the opus check
         if videoExtensions.contains(fileExt) {
             let assetForThumb = AVURLAsset(url: url)
             let generator = AVAssetImageGenerator(asset: assetForThumb)
