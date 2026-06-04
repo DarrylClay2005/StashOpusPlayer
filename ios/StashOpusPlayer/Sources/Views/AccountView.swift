@@ -7,6 +7,9 @@ struct AccountView: View {
     @Environment(\.dismiss) var dismiss
 
     @State private var showLogoutConfirm = false
+    @State private var isEditingDisplayName = false
+    @State private var draftDisplayName = ""
+    @State private var isSavingDisplayName = false
 
     var body: some View {
         ZStack {
@@ -117,6 +120,26 @@ struct AccountView: View {
                 }
                 .listRowBackground(AppTheme.surface)
 
+                // MARK: Stats Section
+                Section {
+                    LabeledContent("Playlists") {
+                        Text("\(library.playlists.count)")
+                            .font(AppTheme.monoFont(size: 14))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                    LabeledContent("Favorites") {
+                        Text("\(library.favoriteSongIDs.count)")
+                            .font(AppTheme.monoFont(size: 14))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    .foregroundStyle(AppTheme.textPrimary)
+                } header: {
+                    sectionHeader("Library")
+                }
+                .listRowBackground(AppTheme.surface)
+
                 // MARK: Account Info Section
                 Section {
                     LabeledContent("Username") {
@@ -134,6 +157,56 @@ struct AccountView: View {
                                 .multilineTextAlignment(.trailing)
                         }
                         .foregroundStyle(AppTheme.textPrimary)
+                    }
+
+                    // Display name — tappable to edit inline
+                    if isEditingDisplayName {
+                        HStack {
+                            TextField("Display name", text: $draftDisplayName)
+                                .textContentType(.name)
+                                .autocorrectionDisabled()
+                                .foregroundStyle(AppTheme.textPrimary)
+                                .submitLabel(.done)
+                                .onSubmit { saveDisplayName() }
+                            if isSavingDisplayName {
+                                ProgressView()
+                                    .tint(AppTheme.accent)
+                                    .padding(.leading, 6)
+                            } else {
+                                Button("Save") { saveDisplayName() }
+                                    .foregroundStyle(AppTheme.accent)
+                                    .font(.subheadline.bold())
+                                Button("Cancel") {
+                                    isEditingDisplayName = false
+                                    draftDisplayName = ""
+                                }
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .font(.subheadline)
+                                .padding(.leading, 4)
+                            }
+                        }
+                    } else {
+                        Button {
+                            draftDisplayName = account.currentUser?.displayName ?? ""
+                            isEditingDisplayName = true
+                        } label: {
+                            HStack {
+                                Text("Display Name")
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Spacer()
+                                Text(
+                                    account.currentUser?.displayName.flatMap {
+                                        $0.isEmpty ? nil : $0
+                                    } ?? "Not set"
+                                )
+                                .font(AppTheme.bodyFont(size: 13))
+                                .foregroundStyle(AppTheme.textSecondary)
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(AppTheme.accent)
+                                    .padding(.leading, 4)
+                            }
+                        }
                     }
 
                 } header: {
@@ -191,5 +264,19 @@ struct AccountView: View {
             .font(AppTheme.bodyFont(size: 11))
             .foregroundStyle(AppTheme.textSecondary)
             .kerning(0.8)
+    }
+
+    private func saveDisplayName() {
+        let trimmed = draftDisplayName.trimmingCharacters(in: .whitespaces)
+        guard !isSavingDisplayName else { return }
+        isSavingDisplayName = true
+        Task {
+            defer {
+                isSavingDisplayName = false
+                isEditingDisplayName = false
+                draftDisplayName = ""
+            }
+            await account.updateDisplayName(trimmed)
+        }
     }
 }

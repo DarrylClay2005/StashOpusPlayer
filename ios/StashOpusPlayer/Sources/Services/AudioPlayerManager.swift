@@ -101,6 +101,11 @@ final class AudioPlayerManager: ObservableObject {
     // Gapless: the next file pre-loaded and scheduled on the active node.
     private var gaplessScheduled = false
 
+    // Set to true while an async HTTP download + schedule is in progress.
+    // Prevents updatePositionFromPlayer() from overwriting `position` with a
+    // stale value from the AVAudioPlayerNode before it has actually started.
+    private var isSchedulingAsync = false
+
     // Audio interruption / route change
     private var wasInterrupted = false
 
@@ -473,8 +478,10 @@ final class AudioPlayerManager: ObservableObject {
     /// For HTTP/HTTPS URLs this method returns early after launching an async Task;
     /// `downloadAndSchedule` completes the setup and starts the node once the file is cached.
     private func scheduleCurrent(from startTime: TimeInterval) {
-        guard let song = currentSong, let url = song.url else {
-            errorMessage = "This song does not have a local playable URL."
+        guard let song = currentSong else { return }
+        guard let url = song.url else {
+            // URL was cleared (e.g. stale ipod-library:// after app restore) — skip silently.
+            // Do not set errorMessage; the user sees the track title with no playback.
             return
         }
 
@@ -520,6 +527,9 @@ final class AudioPlayerManager: ObservableObject {
     /// `playCurrent` returns early before doing so when it detects an HTTP URL.
     @MainActor
     private func downloadAndSchedule(url: URL, startTime: TimeInterval) async {
+        isSchedulingAsync = true
+        defer { isSchedulingAsync = false }
+
         errorMessage = nil
 
         do {
@@ -1117,6 +1127,11 @@ final class AudioPlayerManager: ObservableObject {
     }
 
     private func updatePositionFromPlayer() {
+        // Do not overwrite `position` while an async download is in progress.
+        // The position was already set to the seek target in seek()/downloadAndSchedule();
+        // letting the timer fire here would clobber it with a stale node time.
+        guard !isSchedulingAsync else { return }
+
         let node = activeNode
         guard let nodeTime = node.lastRenderTime,
               let playerTime = node.playerTime(forNodeTime: nodeTime),

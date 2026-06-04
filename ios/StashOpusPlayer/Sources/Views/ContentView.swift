@@ -10,9 +10,19 @@ struct ContentView: View {
     /// Persists the last-selected tab across launches.
     @AppStorage("selected_tab") private var selectedTab = 0
 
+    init() {
+        // Must be set before first render — onAppear fires too late
+        let appearance = UITabBarAppearance()
+        appearance.configureWithTransparentBackground()
+        appearance.backgroundEffect = UIBlurEffect(style: .systemThinMaterialDark)
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
+
     var body: some View {
         ZStack {
             GalleryBackgroundView()
+                .ignoresSafeArea()
 
             TabView(selection: $selectedTab) {
 
@@ -58,14 +68,6 @@ struct ContentView: View {
                     .tag(4)
             }
             .tint(AppTheme.dynamicAccent)
-            .onAppear {
-                // Make the tab bar translucent so gallery shows through
-                let appearance = UITabBarAppearance()
-                appearance.configureWithTransparentBackground()
-                appearance.backgroundEffect = UIBlurEffect(style: .systemThinMaterialDark)
-                UITabBar.appearance().standardAppearance = appearance
-                UITabBar.appearance().scrollEdgeAppearance = appearance
-            }
         }
     }
 }

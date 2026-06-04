@@ -136,6 +136,55 @@ final class LibraryManager: ObservableObject {
         }
     }
 
+    /// Scans a specific directory URL for audio files and adds any not already in the library.
+    /// Designed for use with preset locations (Downloads, Documents) that don't require a
+    /// security-scoped bookmark — just a direct filesystem path the app can enumerate.
+    func scanSpecificDirectory(_ url: URL) {
+        Task {
+            let fm = FileManager.default
+            var candidates: [URL] = []
+            let enumerator = fm.enumerator(
+                at: url,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            )
+            while let fileURL = enumerator?.nextObject() as? URL {
+                guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+                else { continue }
+                if DocumentImportService.supportedExtensions.contains(fileURL.pathExtension.lowercased()) {
+                    candidates.append(fileURL)
+                }
+            }
+
+            guard !candidates.isEmpty else {
+                errorMessage = "No audio files found in \(url.lastPathComponent)"
+                return
+            }
+
+            let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
+            let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
+            guard !newURLs.isEmpty else {
+                errorMessage = "No new audio files found in \(url.lastPathComponent)"
+                return
+            }
+
+            let service = DocumentImportService()
+            let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
+                var result: [Song] = []
+                for fileURL in newURLs {
+                    let song = await service.makeSong(for: fileURL)
+                    result.append(song)
+                }
+                return result
+            }.value
+
+            importedSongs.append(contentsOf: newSongs)
+            importedSongs = Array(Dictionary(grouping: importedSongs, by: \.id).compactMap { $0.value.first })
+            rebuildAllSongs()
+            errorMessage = "Found \(newSongs.count) song\(newSongs.count == 1 ? "" : "s") in \(url.lastPathComponent)"
+        }
+    }
+
     /// Convenience: scans both the local Documents folder and all user-selected watched folders.
     func scanAll(folderService: MusicFolderService) {
         scanLocalDocuments()

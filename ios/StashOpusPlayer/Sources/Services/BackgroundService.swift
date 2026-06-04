@@ -68,12 +68,21 @@ final class BackgroundService: ObservableObject {
         static let animation             = "bgService.animation"
         static let opacity               = "bgService.opacity"
         static let isBlurred             = "bgService.isBlurred"
+        static let imageFilenames        = "bg_image_filenames_v1"  // [String] of filenames
+    }
+
+    // MARK: Disk Storage Directory
+
+    private var imageStorageDir: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("BackgroundImages", isDirectory: true)
     }
 
     // MARK: Image Management
 
     func addImages(_ newImages: [UIImage]) {
         images.append(contentsOf: newImages)
+        saveImagesToDisk()
         if isEnabled, !images.isEmpty {
             if !isActive { startShuffling() }
             // Reset to first image so the newly added image shows immediately
@@ -91,11 +100,59 @@ final class BackgroundService: ObservableObject {
         } else if currentIndex >= images.count {
             currentIndex = images.count - 1
         }
+        saveImagesToDisk()
     }
 
     func clearAll() {
         images.removeAll()
         currentIndex = 0
+        saveImagesToDisk()
+    }
+
+    // MARK: Disk Persistence
+
+    private func loadImagesFromDisk() {
+        let defaults = UserDefaults.standard
+        guard let filenames = defaults.stringArray(forKey: Keys.imageFilenames) else { return }
+        let fm = FileManager.default
+        var loaded: [UIImage] = []
+        for name in filenames {
+            let path = imageStorageDir.appendingPathComponent(name)
+            if let data = try? Data(contentsOf: path), let img = UIImage(data: data) {
+                loaded.append(img)
+            }
+        }
+        images = loaded
+        if isEnabled && !images.isEmpty {
+            startShuffling()
+        }
+    }
+
+    private func saveImagesToDisk() {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: imageStorageDir, withIntermediateDirectories: true)
+
+        // Capture existing files before writing new ones so we can clean up orphans
+        let existing = (try? fm.contentsOfDirectory(atPath: imageStorageDir.path)) ?? []
+
+        var filenames: [String] = []
+        for (i, img) in images.enumerated() {
+            let name = "bg_\(i)_\(Int(Date().timeIntervalSince1970)).jpg"
+            let path = imageStorageDir.appendingPathComponent(name)
+            if let data = img.jpegData(compressionQuality: 0.8) {
+                try? data.write(to: path)
+                filenames.append(name)
+            }
+        }
+
+        // Remove old images not in the new set
+        for file in existing {
+            if !filenames.contains(file) {
+                try? fm.removeItem(at: imageStorageDir.appendingPathComponent(file))
+            }
+        }
+
+        UserDefaults.standard.set(filenames, forKey: Keys.imageFilenames)
     }
 
     // MARK: Shuffle Control
@@ -162,7 +219,10 @@ final class BackgroundService: ObservableObject {
             isBlurred = savedBlur
         }
 
-        // If enabled was saved as true but there are no images (images are not persisted), disable.
+        // Load persisted images from disk; this also starts shuffling if enabled
+        loadImagesFromDisk()
+
+        // If enabled was saved as true but no images could be loaded, disable.
         if isEnabled, images.isEmpty {
             isEnabled = false
         }

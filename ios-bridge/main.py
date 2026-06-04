@@ -362,10 +362,12 @@ async def stream(
     id: str = Query(..., description="Video/track ID"),
     source: str = Query("youtube", description="youtube or soundcloud"),
     url: Optional[str] = Query(None, description="Full URL (required for soundcloud)"),
+    format: str = Query("m4a", description="Audio format: mp3, m4a, flac, opus, best"),
 ):
     await check_auth(request)
 
     source = source.lower()
+    format = format.lower()
 
     if source == "soundcloud":
         if not url:
@@ -376,34 +378,35 @@ async def stream(
     else:
         target_url = f"https://youtube.com/watch?v={id}"
 
-    try:
-        lines = await _run_ytdlp(
-            "-f", "bestaudio[ext=m4a]/bestaudio/best",
-            "--get-url",
-            "--no-playlist",
-            target_url,
-            timeout=15.0,
-        )
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=408, detail="Stream URL fetch timed out")
-    except Exception as exc:
-        logger.error("yt-dlp stream error: %s", exc)
-        raise HTTPException(status_code=404, detail="Could not resolve stream URL")
-
-    # --get-url outputs plain text lines (not JSON); _run_ytdlp only keeps valid JSON,
-    # so we need to handle this separately.  Re-run with raw stdout capture.
-    stream_url = await _get_raw_url(target_url)
+    format_flag = _format_flag(format)
+    stream_url = await _get_raw_url(target_url, format_flag=format_flag)
     if not stream_url:
         raise HTTPException(status_code=404, detail="No stream URL found")
 
     return {"url": stream_url, "expires_in": 21600}
 
 
-async def _get_raw_url(target_url: str) -> Optional[str]:
-    """Like _run_ytdlp but captures the first non-empty line as plain text."""
+def _format_flag(format: str) -> str:
+    """Map a format name to a yt-dlp -f flag value for direct URL extraction."""
+    mapping = {
+        "mp3":  "bestaudio/best",
+        "m4a":  "bestaudio[ext=m4a]/bestaudio/best",
+        "flac": "bestaudio/best",
+        "opus": "bestaudio[ext=webm]/bestaudio/best",
+        "wav":  "bestaudio/best",
+        "best": "bestaudio/best",
+    }
+    return mapping.get(format, "bestaudio[ext=m4a]/bestaudio/best")
+
+
+async def _get_raw_url(
+    target_url: str,
+    format_flag: str = "bestaudio[ext=m4a]/bestaudio/best",
+) -> Optional[str]:
+    """Runs yt-dlp --get-url and returns the first HTTP(S) line from stdout."""
     cmd = [
         "yt-dlp",
-        "-f", "bestaudio[ext=m4a]/bestaudio/best",
+        "-f", format_flag,
         "--get-url",
         "--no-playlist",
         target_url,
@@ -426,6 +429,132 @@ async def _get_raw_url(target_url: str) -> Optional[str]:
         if line.startswith("http"):
             return line
     return None
+
+
+@app.get("/api/download")
+async def download_track(
+    request: Request,
+    id: str = Query(..., description="Video/track ID"),
+    source: str = Query("youtube", description="youtube or soundcloud"),
+    url: Optional[str] = Query(None, description="Full URL (required for soundcloud)"),
+    format: str = Query("m4a", description="Audio format: mp3, m4a, flac, opus, best"),
+    title: Optional[str] = Query(None, description="Safe filename hint (no extension)"),
+):
+    """
+    Download audio with embedded metadata and thumbnail, stream the file bytes back,
+    then clean up the temporary file.
+    """
+    import shutil
+    import tempfile
+
+    from fastapi.responses import FileResponse
+
+    await check_auth(request)
+
+    source = source.lower()
+    format = format.lower()
+
+    if source == "soundcloud":
+        if not url:
+            raise HTTPException(
+                status_code=400, detail="url parameter required for soundcloud source"
+            )
+        target_url = url
+    else:
+        target_url = f"https://youtube.com/watch?v={id}"
+
+    extra_args, expected_ext = _download_format_args(format)
+
+    safe_title = (title or id).replace("/", "-").replace(":", "-")[:100]
+    tmp_dir = tempfile.mkdtemp()
+    output_template = os.path.join(tmp_dir, f"{safe_title}.%(ext)s")
+
+    cmd = [
+        "yt-dlp",
+        "--no-playlist",
+        "--embed-metadata",
+        "--embed-thumbnail",
+        "-o", output_template,
+        *extra_args,
+        target_url,
+    ]
+    logger.info("Download cmd: %s", " ".join(cmd))
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=408, detail="Download timed out")
+
+    if proc.returncode != 0:
+        err_text = stderr_bytes.decode(errors="replace")[-500:]
+        logger.error("yt-dlp download failed: %s", err_text)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=404, detail="Could not download track")
+
+    # yt-dlp may choose a slightly different extension than requested — scan the dir.
+    output_file: Optional[str] = None
+    actual_ext = expected_ext
+    for fname in os.listdir(tmp_dir):
+        output_file = os.path.join(tmp_dir, fname)
+        actual_ext = os.path.splitext(fname)[1].lstrip(".") or expected_ext
+        break
+
+    if not output_file or not os.path.exists(output_file):
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=404, detail="Downloaded file not found")
+
+    content_type_map = {
+        "mp3":  "audio/mpeg",
+        "m4a":  "audio/mp4",
+        "flac": "audio/flac",
+        "opus": "audio/ogg",
+        "ogg":  "audio/ogg",
+        "wav":  "audio/wav",
+        "webm": "audio/webm",
+    }
+    media_type = content_type_map.get(actual_ext, "application/octet-stream")
+
+    # Schedule cleanup after the file has been streamed (5-second grace period).
+    async def _cleanup_later(path: str) -> None:
+        await asyncio.sleep(5)
+        shutil.rmtree(path, ignore_errors=True)
+
+    asyncio.ensure_future(_cleanup_later(tmp_dir))
+
+    return FileResponse(
+        path=output_file,
+        media_type=media_type,
+        filename=f"{safe_title}.{actual_ext}",
+    )
+
+
+def _download_format_args(format: str) -> tuple[list[str], str]:
+    """
+    Returns (extra_yt_dlp_args, expected_ext) for a given format name.
+    Formats requiring transcoding use -x --audio-format so yt-dlp converts and
+    embeds metadata in a single pass.
+    """
+    if format == "mp3":
+        return ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0"], "mp3"
+    elif format == "flac":
+        return ["-f", "bestaudio", "-x", "--audio-format", "flac"], "flac"
+    elif format == "opus":
+        return ["-f", "bestaudio[ext=webm]/bestaudio", "-x", "--audio-format", "opus"], "opus"
+    elif format == "wav":
+        return ["-f", "bestaudio", "-x", "--audio-format", "wav"], "wav"
+    elif format == "best":
+        return ["-f", "bestaudio/best"], "m4a"
+    else:
+        # m4a — native m4a from YouTube, no transcoding needed.
+        return ["-f", "bestaudio[ext=m4a]/bestaudio/best"], "m4a"
 
 
 @app.get("/api/track")
@@ -626,6 +755,33 @@ async def me(payload: dict = Depends(get_current_user)):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, username, email, display_name, avatar_url, created_at, last_login "
+                "FROM ios_users WHERE id = %s AND is_active = TRUE",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=401, detail="User not found")
+    return _user_dict(row)
+
+
+class UpdateMeRequest(BaseModel):
+    display_name: Optional[str] = None
+
+
+@app.put("/auth/me")
+async def update_me(body: UpdateMeRequest, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    display_name = (body.display_name or "").strip()[:100]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_users SET display_name = %s WHERE id = %s AND is_active = TRUE",
+                (display_name if display_name else None, user_id),
+            )
             await cur.execute(
                 "SELECT id, username, email, display_name, avatar_url, created_at, last_login "
                 "FROM ios_users WHERE id = %s AND is_active = TRUE",

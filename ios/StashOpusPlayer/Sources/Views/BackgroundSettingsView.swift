@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UIKit
 
 // MARK: - BackgroundSettingsView
 
@@ -25,10 +26,10 @@ struct BackgroundSettingsView: View {
 
             if bg.isEnabled {
 
-                // MARK: Restart note
+                // MARK: Persistence note
                 Section {
                     Label(
-                        "Images are cleared on app restart. Re-select from the gallery each launch.",
+                        "Images are saved to your device and restored on next launch.",
                         systemImage: "info.circle"
                     )
                     .font(.footnote)
@@ -37,13 +38,13 @@ struct BackgroundSettingsView: View {
                 }
 
                 // MARK: Image Picker Section
-                Section("Images (\(bg.images.count) selected)") {
+                Section("Images (\(bg.images.count) saved)") {
                     PhotosPicker(
                         selection: $selectedItems,
                         maxSelectionCount: 50,
                         matching: .images
                     ) {
-                        Label("Select from Gallery", systemImage: "photo.on.rectangle.angled")
+                        Label("Select from Gallery (\(bg.images.count) saved)", systemImage: "photo.on.rectangle.angled")
                             .foregroundStyle(AppTheme.accent)
                     }
                     .onChange(of: selectedItems) { items in

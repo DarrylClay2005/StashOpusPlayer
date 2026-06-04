@@ -11,6 +11,9 @@ struct DocumentPicker: UIViewControllerRepresentable {
     let mode: Mode
     let onPick: ([URL]) -> Void
 
+    // Associated-object key for retaining the coordinator on the picker instance.
+    private static var coordinatorKey = "DocumentPickerCoordinator"
+
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let types: [UTType]
         let allowsMultiple: Bool
@@ -43,6 +46,14 @@ struct DocumentPicker: UIViewControllerRepresentable {
         picker.allowsMultipleSelection = allowsMultiple
         picker.shouldShowFileExtensions = true
         picker.delegate = context.coordinator
+        // Retain the coordinator strongly on the picker so it is not deallocated if SwiftUI
+        // recreates the DocumentPicker view before the delegate callback fires.
+        objc_setAssociatedObject(
+            picker,
+            &DocumentPicker.coordinatorKey,
+            context.coordinator,
+            .OBJC_ASSOCIATION_RETAIN_NONATOMIC
+        )
         return picker
     }
 

@@ -316,6 +316,23 @@ struct SettingsView: View {
                 .foregroundStyle(AppTheme.textSecondary)
             }
 
+            // Audio Format picker
+            HStack {
+                Label("Audio Format", systemImage: "waveform")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                Picker("Audio Format", selection: Binding(
+                    get: { streaming.preferredFormat },
+                    set: { streaming.preferredFormat = $0 }
+                )) {
+                    ForEach(StreamingService.availableFormats, id: \.value) { fmt in
+                        Text(fmt.label).tag(fmt.value)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(AppTheme.accent)
+            }
+
             // Test connection
             Button {
                 Task {

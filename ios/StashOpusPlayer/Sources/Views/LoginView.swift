@@ -43,8 +43,8 @@ struct LoginView: View {
 
                         // MARK: Mode Picker
                         Picker("Mode", selection: $isRegistering) {
-                            Text("Log In").tag(false)
-                            Text("Create Account").tag(true)
+                            Text("Sign In").tag(false)
+                            Text("Register").tag(true)
                         }
                         .pickerStyle(.segmented)
                         .padding(.horizontal)
@@ -62,17 +62,30 @@ struct LoginView: View {
                                     .font(AppTheme.bodyFont(size: 12))
                                     .foregroundStyle(AppTheme.textSecondary)
                                     .padding(.leading, 4)
-                                TextField("", text: $username)
-                                    .textContentType(.username)
-                                    .autocorrectionDisabled()
-                                    .textInputAutocapitalization(.never)
-                                    .foregroundStyle(AppTheme.textPrimary)
-                                    .padding(12)
-                                    .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .stroke(AppTheme.accent.opacity(0.3), lineWidth: 1)
-                                    )
+                                HStack {
+                                    TextField("", text: $username)
+                                        .textContentType(.username)
+                                        .autocorrectionDisabled()
+                                        .textInputAutocapitalization(.never)
+                                        .foregroundStyle(AppTheme.textPrimary)
+                                        .submitLabel(.next)
+                                        .onSubmit { /* focus shifts to password via submitLabel */ }
+                                    if !username.isEmpty {
+                                        Button {
+                                            username = ""
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundStyle(AppTheme.textSecondary)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(12)
+                                .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(AppTheme.accent.opacity(0.3), lineWidth: 1)
+                                )
                             }
 
                             // Password
@@ -84,6 +97,8 @@ struct LoginView: View {
                                 SecureField("", text: $password)
                                     .textContentType(isRegistering ? .newPassword : .password)
                                     .foregroundStyle(AppTheme.textPrimary)
+                                    .submitLabel(isRegistering ? .next : .done)
+                                    .onSubmit { if !isRegistering { submitTapped() } }
                                     .padding(12)
                                     .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10))
                                     .overlay(
@@ -104,6 +119,7 @@ struct LoginView: View {
                                     SecureField("", text: $confirmPassword)
                                         .textContentType(.newPassword)
                                         .foregroundStyle(AppTheme.textPrimary)
+                                        .submitLabel(.next)
                                         .padding(12)
                                         .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10))
                                         .overlay(
@@ -122,6 +138,7 @@ struct LoginView: View {
                                         .textContentType(.name)
                                         .autocorrectionDisabled()
                                         .foregroundStyle(AppTheme.textPrimary)
+                                        .submitLabel(.next)
                                         .padding(12)
                                         .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10))
                                         .overlay(
@@ -142,6 +159,8 @@ struct LoginView: View {
                                         .autocorrectionDisabled()
                                         .textInputAutocapitalization(.never)
                                         .foregroundStyle(AppTheme.textPrimary)
+                                        .submitLabel(.done)
+                                        .onSubmit { submitTapped() }
                                         .padding(12)
                                         .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10))
                                         .overlay(
@@ -179,7 +198,7 @@ struct LoginView: View {
                                     ProgressView()
                                         .tint(.white)
                                 } else {
-                                    Text(isRegistering ? "Create Account" : "Log In")
+                                    Text(isRegistering ? "Create Account" : "Sign In")
                                         .font(.headline)
                                         .foregroundStyle(.white)
                                 }

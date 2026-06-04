@@ -51,12 +51,24 @@ final class StreamingService: ObservableObject {
 
     // MARK: UserDefaults keys
 
-    static let bridgeURLKey = "ios_bridge_url"
-    static let apiKeyKey    = "ios_bridge_api_key"
+    static let bridgeURLKey      = "ios_bridge_url"
+    static let apiKeyKey         = "ios_bridge_api_key"
+    static let preferredFormatKey = "streaming_preferred_format"
+    static let downloadPathKey    = "download_path_key"
 
     /// Public URL baked into the app — routed via SwarmPanel ngrok proxy so
     /// it works anywhere without home WiFi. Users can override in Settings.
     static let defaultBridgeURL = "https://germinate-props-motive.ngrok-free.dev"
+
+    // MARK: Available formats
+
+    static let availableFormats: [(label: String, value: String)] = [
+        ("M4A (Default)", "m4a"),
+        ("MP3",           "mp3"),
+        ("FLAC",          "flac"),
+        ("Opus",          "opus"),
+        ("Best Quality",  "best"),
+    ]
 
     // MARK: Published state
 
@@ -75,6 +87,28 @@ final class StreamingService: ObservableObject {
     var apiKey: String {
         get { UserDefaults.standard.string(forKey: Self.apiKeyKey) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: Self.apiKeyKey) }
+    }
+
+    var preferredFormat: String {
+        get { UserDefaults.standard.string(forKey: Self.preferredFormatKey) ?? "m4a" }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.preferredFormatKey)
+            objectWillChange.send()
+        }
+    }
+
+    var downloadDirectory: URL {
+        get {
+            if let savedPath = UserDefaults.standard.string(forKey: Self.downloadPathKey),
+               let url = URL(string: savedPath) {
+                return url
+            }
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            return docs.appendingPathComponent("Imported Music")
+        }
+        set {
+            UserDefaults.standard.set(newValue.absoluteString, forKey: Self.downloadPathKey)
+        }
     }
 
     var isConfigured: Bool { true } // always configured via default URL
@@ -138,6 +172,7 @@ final class StreamingService: ObservableObject {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "id",     value: track.id),
             URLQueryItem(name: "source", value: track.source),
+            URLQueryItem(name: "format", value: preferredFormat),
         ]
         if track.source == "soundcloud" {
             queryItems.append(URLQueryItem(name: "url", value: track.youtubeURL))
@@ -195,14 +230,14 @@ final class StreamingService: ObservableObject {
 
     // MARK: - Download to Library
 
-    /// Downloads a stream track's audio permanently to the Imported Music folder
-    /// (Documents/Imported Music/) and returns the saved local URL.
+    /// Downloads a stream track's audio permanently to `downloadDirectory` using the
+    /// `/api/download` endpoint (which embeds metadata and thumbnail into the file).
     /// If the file already exists it is returned immediately without re-downloading.
     func downloadToLibrary(track: StreamTrack) async throws -> URL {
-        let streamURL = try await streamURL(for: track)
+        let fmt = preferredFormat
+        let ext = fileExtension(for: fmt)
 
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let importDir = docs.appendingPathComponent("Imported Music")
+        let importDir = downloadDirectory
         try? FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)
 
         // Build a filesystem-safe filename from the track title (max 100 chars).
@@ -212,16 +247,61 @@ final class StreamingService: ObservableObject {
                 .replacingOccurrences(of: ":", with: "-")
                 .prefix(100)
         )
-        let destURL = importDir.appendingPathComponent("\(safeName).m4a")
+        let destURL = importDir.appendingPathComponent("\(safeName).\(ext)")
 
         if FileManager.default.fileExists(atPath: destURL.path) {
             return destURL
         }
 
-        let (downloadedURL, _) = try await URLSession.shared.download(from: streamURL)
+        // Hit the /api/download endpoint which runs yt-dlp with metadata embedding.
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "id",     value: track.id),
+            URLQueryItem(name: "source", value: track.source),
+            URLQueryItem(name: "format", value: fmt),
+            URLQueryItem(name: "title",  value: safeName),
+        ]
+        if track.source == "soundcloud" {
+            queryItems.append(URLQueryItem(name: "url", value: track.youtubeURL))
+        }
+
+        var components = URLComponents()
+        components.path = "/api/download"
+        components.queryItems = queryItems
+
+        guard var request = makeRequest(components.string ?? "/api/download") else {
+            throw StreamingError.invalidURL
+        }
+        // Downloads can take longer than stream URL fetches.
+        request.timeoutInterval = 120
+
+        let (downloadedURL, response) = try await URLSession.shared.download(for: request)
+        if let httpResponse = response as? HTTPURLResponse {
+            switch httpResponse.statusCode {
+            case 200..<300:
+                break
+            case 408:
+                throw StreamingError.timeout
+            case 404:
+                throw StreamingError.notFound(track.title)
+            default:
+                throw StreamingError.httpError(httpResponse.statusCode)
+            }
+        }
+
         try? FileManager.default.removeItem(at: destURL)
         try FileManager.default.moveItem(at: downloadedURL, to: destURL)
         return destURL
+    }
+
+    /// Maps a format value to the appropriate file extension.
+    private func fileExtension(for format: String) -> String {
+        switch format {
+        case "mp3":  return "mp3"
+        case "flac": return "flac"
+        case "opus": return "opus"
+        case "wav":  return "wav"
+        default:     return "m4a"   // m4a and best both produce m4a
+        }
     }
 
     // MARK: - Health Check

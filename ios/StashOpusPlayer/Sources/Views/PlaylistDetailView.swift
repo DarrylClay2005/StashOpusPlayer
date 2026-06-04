@@ -103,6 +103,7 @@ struct PlaylistDetailView: View {
         }
         .sheet(isPresented: $showingAddSongs) {
             AddSongsSheet(playlist: playlist)
+                .environmentObject(library)
         }
     }
 

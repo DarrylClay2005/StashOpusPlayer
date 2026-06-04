@@ -79,8 +79,9 @@ struct SyncTrack: Codable {
 @MainActor
 final class AccountService: ObservableObject {
 
-    static let tokenKey = "ios_account_token"
-    static let userKey  = "ios_account_user"
+    static let tokenKey       = "ios_account_token"
+    static let userKey        = "ios_account_user"
+    static let lastSyncKey    = "ios_account_last_sync"
 
     // MARK: Published state
 
@@ -88,7 +89,13 @@ final class AccountService: ObservableObject {
     @Published var currentUser: AppUser? = nil
     @Published var isSyncing: Bool = false
     @Published var errorMessage: String? = nil
-    @Published var lastSyncDate: Date? = nil
+    @Published var lastSyncDate: Date? = nil {
+        didSet {
+            if let d = lastSyncDate {
+                UserDefaults.standard.set(d.timeIntervalSince1970, forKey: Self.lastSyncKey)
+            }
+        }
+    }
 
     // MARK: Persisted token
 
@@ -111,6 +118,11 @@ final class AccountService: ObservableObject {
            let user = try? JSONDecoder().decode(AppUser.self, from: data) {
             currentUser = user
             isLoggedIn = token != nil
+        }
+        let ts = UserDefaults.standard.double(forKey: Self.lastSyncKey)
+        if ts > 0 {
+            // Bypass didSet to avoid re-writing the same value on init
+            _lastSyncDate = Published(initialValue: Date(timeIntervalSince1970: ts))
         }
     }
 
@@ -196,6 +208,23 @@ final class AccountService: ObservableObject {
             clearSession()
         } catch {
             // Non-fatal; keep existing cached user
+        }
+    }
+
+    /// Update the display name on the server and locally.
+    func updateDisplayName(_ newName: String) async {
+        guard isLoggedIn else { return }
+        errorMessage = nil
+        struct Body: Encodable { let display_name: String }
+        do {
+            let data = try await makeRequest("/auth/me", method: "PUT", body: Body(display_name: newName))
+            let user = try JSONDecoder().decode(AppUser.self, from: data)
+            currentUser = user
+            saveUserLocally(user)
+        } catch let err as AccountError {
+            errorMessage = err.message
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

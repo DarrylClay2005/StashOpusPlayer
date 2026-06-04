@@ -225,7 +225,7 @@ struct NowPlayingView: View {
                     get: { isSeeking ? draftPosition : player.position },
                     set: { draftPosition = $0 }
                 ),
-                in: 0...max(player.duration, 1),
+                in: 0...max(player.duration, 0.001),
                 onEditingChanged: { editing in
                     isSeeking = editing
                     if editing {
@@ -236,6 +236,7 @@ struct NowPlayingView: View {
                 }
             )
             .tint(AppTheme.accent)
+            .disabled(player.duration <= 0)
 
             HStack {
                 Text(formatTime(isSeeking ? draftPosition : player.position))
