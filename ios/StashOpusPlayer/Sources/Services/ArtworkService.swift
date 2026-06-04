@@ -45,6 +45,13 @@ final class ArtworkService {
         return nil
     }
 
+    /// Stores `image` directly into the memory cache under an arbitrary `key`.
+    /// Used by DocumentImportService to pre-cache video-file thumbnails extracted
+    /// via AVAssetImageGenerator before the Song object is constructed.
+    func cacheImage(_ image: UIImage, forKey key: String) {
+        setMemoryCache(image, forKey: key)
+    }
+
     /// Loads artwork asynchronously, checking memory cache → disk cache →
     /// MPMediaLibrary → embedded asset metadata in that order.
     ///

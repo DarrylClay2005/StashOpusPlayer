@@ -6,6 +6,7 @@ struct ContentView: View {
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var streaming: StreamingService
     @EnvironmentObject private var account: AccountService
+    @EnvironmentObject private var bridgeHealth: BridgeHealthService
 
     /// Persists the last-selected tab across launches.
     @AppStorage("selected_tab") private var selectedTab = 0
@@ -68,6 +69,18 @@ struct ContentView: View {
                     .tag(4)
             }
             .tint(AppTheme.dynamicAccent)
+
+            // MARK: Bridge Health Toast — floats above all content
+            if bridgeHealth.showToast {
+                VStack {
+                    ToastView(message: bridgeHealth.toastMessage, isSuccess: bridgeHealth.toastIsSuccess)
+                        .padding(.top, 56)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    Spacer()
+                }
+                .animation(.spring(response: 0.4, dampingFraction: 0.75), value: bridgeHealth.showToast)
+                .allowsHitTesting(false)
+            }
         }
     }
 }

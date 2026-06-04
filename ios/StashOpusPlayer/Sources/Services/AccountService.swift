@@ -9,13 +9,15 @@ struct AppUser: Codable, Equatable {
     let displayName: String?
     let email: String?
     let avatarURL: String?
+    let dateOfBirth: String?   // ISO YYYY-MM-DD, nil if not set
 
     enum CodingKeys: String, CodingKey {
         case id
         case username
-        case displayName = "display_name"
+        case displayName  = "display_name"
         case email
-        case avatarURL   = "avatar_url"
+        case avatarURL    = "avatar_url"
+        case dateOfBirth  = "date_of_birth"
     }
 }
 
@@ -96,6 +98,8 @@ final class AccountService: ObservableObject {
             }
         }
     }
+    @Published var avatarImage: UIImage? = nil
+    @Published private(set) var hasDateOfBirth: Bool = false
 
     // MARK: Persisted token
 
@@ -107,6 +111,25 @@ final class AccountService: ObservableObject {
     // MARK: Debounce state
 
     private var syncDebounceTask: Task<Void, Never>?
+
+    // MARK: Auto-push timer
+
+    private var autoPushTimer: Timer?
+
+    func startAutoPushTimer(library: LibraryManager) {
+        stopAutoPushTimer()
+        autoPushTimer = Timer.scheduledTimer(withTimeInterval: 8 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isLoggedIn else { return }
+                await self.pushSync(library: library)
+            }
+        }
+    }
+
+    func stopAutoPushTimer() {
+        autoPushTimer?.invalidate()
+        autoPushTimer = nil
+    }
 
     /// Schedules a push sync that fires 2 seconds after the last call.
     /// Rapid successive mutations only trigger one server write.
@@ -161,6 +184,7 @@ final class AccountService: ObservableObject {
             token = response.token
             currentUser = response.user
             isLoggedIn = true
+            hasDateOfBirth = response.user.dateOfBirth != nil
             saveUserLocally(response.user)
         } catch let err as AccountError {
             errorMessage = err.message
@@ -197,6 +221,7 @@ final class AccountService: ObservableObject {
             token = response.token
             currentUser = response.user
             isLoggedIn = true
+            hasDateOfBirth = response.user.dateOfBirth != nil
             saveUserLocally(response.user)
         } catch let err as AccountError {
             errorMessage = err.message
@@ -219,6 +244,7 @@ final class AccountService: ObservableObject {
             let data = try await makeRequest("/auth/me")
             let user = try JSONDecoder().decode(AppUser.self, from: data)
             currentUser = user
+            hasDateOfBirth = user.dateOfBirth != nil
             saveUserLocally(user)
         } catch let err as AccountError where err.statusCode == 401 {
             clearSession()
@@ -236,6 +262,7 @@ final class AccountService: ObservableObject {
             let data = try await makeRequest("/auth/me", method: "PUT", body: Body(display_name: newName))
             let user = try JSONDecoder().decode(AppUser.self, from: data)
             currentUser = user
+            hasDateOfBirth = user.dateOfBirth != nil
             saveUserLocally(user)
         } catch let err as AccountError {
             errorMessage = err.message
@@ -344,6 +371,75 @@ final class AccountService: ObservableObject {
         }
     }
 
+    // MARK: - DOB
+
+    /// Set date of birth (ISO YYYY-MM-DD). Server enforces immutability once set.
+    func setDateOfBirth(_ dob: String) async {
+        guard isLoggedIn else { return }
+        errorMessage = nil
+        struct Body: Encodable { let date_of_birth: String }
+        do {
+            _ = try await makeRequest("/auth/me", method: "PUT", body: Body(date_of_birth: dob))
+            hasDateOfBirth = true
+        } catch let err as AccountError {
+            errorMessage = err.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Avatar
+
+    /// Upload a profile picture as JPEG (max 1 MB enforced server-side).
+    func uploadAvatar(image: UIImage) async {
+        guard isLoggedIn else { return }
+        guard let jpeg = image.jpegData(compressionQuality: 0.8) else { return }
+        guard var req = makeBaseRequest("/user/avatar", method: "POST") else { return }
+        req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        req.httpBody = jpeg
+        _ = try? await URLSession.shared.data(for: req)
+        avatarImage = image
+        saveAvatarLocally(image)
+    }
+
+    /// Load avatar from local cache first, then from server. Updates `avatarImage`.
+    func loadAvatar() async {
+        if let cached = loadAvatarLocally() {
+            avatarImage = cached
+            return
+        }
+        guard isLoggedIn, let userId = currentUser?.id else { return }
+        guard let req = makeBaseRequest("/user/avatar/\(userId)", method: "GET") else { return }
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let img = UIImage(data: data) else { return }
+        avatarImage = img
+        saveAvatarLocally(img)
+    }
+
+    private func makeBaseRequest(_ path: String, method: String) -> URLRequest? {
+        let base = bridgeURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: base + path) else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        if let t = token, !t.isEmpty {
+            req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
+        }
+        return req
+    }
+
+    private func saveAvatarLocally(_ image: UIImage) {
+        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("user_avatar.jpg")
+        image.jpegData(compressionQuality: 0.8).flatMap { try? $0.write(to: url) }
+    }
+
+    private func loadAvatarLocally() -> UIImage? {
+        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("user_avatar.jpg")
+        return (try? Data(contentsOf: url)).flatMap { UIImage(data: $0) }
+    }
+
     func logPlay(song: Song, listenSeconds: Int) async {
         guard isLoggedIn else { return }
         struct Body: Encodable {
@@ -385,6 +481,9 @@ final class AccountService: ObservableObject {
         token = nil
         currentUser = nil
         isLoggedIn = false
+        hasDateOfBirth = false
+        avatarImage = nil
+        stopAutoPushTimer()
         UserDefaults.standard.removeObject(forKey: Self.userKey)
     }
 

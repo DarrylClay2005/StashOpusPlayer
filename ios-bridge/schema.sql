@@ -76,4 +76,57 @@ CREATE TABLE IF NOT EXISTS ios_user_settings (
     theme_color VARCHAR(7) DEFAULT '#EC4079',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Profile extensions: avatar and DOB (DOB immutable once set without admin)
+ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS date_of_birth DATE NULL;
+ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS avatar_data MEDIUMBLOB NULL;
+
+-- User library tracking: what songs the user has played/imported
+CREATE TABLE IF NOT EXISTS ios_user_library (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    song_id VARCHAR(255) NOT NULL,
+    title TEXT NOT NULL,
+    artist TEXT,
+    album TEXT,
+    source VARCHAR(20) DEFAULT 'local',  -- 'local', 'youtube', 'soundcloud', 'apple_music'
+    play_count INT DEFAULT 0,
+    skip_count INT DEFAULT 0,
+    last_played TIMESTAMP NULL,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY user_song (user_id, song_id),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Expanded settings (audio + visual preferences)
+CREATE TABLE IF NOT EXISTS ios_user_settings_expanded (
+    user_id VARCHAR(36) PRIMARY KEY,
+    audio_settings_json MEDIUMTEXT,
+    theme_color VARCHAR(7) DEFAULT '#EC4079',
+    vinyl_disc_enabled BOOLEAN DEFAULT TRUE,
+    show_queue_preview BOOLEAN DEFAULT TRUE,
+    songs_per_row INT DEFAULT 1,
+    albums_per_row INT DEFAULT 2,
+    bg_animation VARCHAR(20) DEFAULT 'fade',
+    bg_opacity FLOAT DEFAULT 0.35,
+    preferred_audio_format VARCHAR(10) DEFAULT 'm4a',
+    download_path TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- iOS client telemetry / background log ingestion
+CREATE TABLE IF NOT EXISTS ios_app_logs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    level VARCHAR(10),
+    category VARCHAR(30),
+    message TEXT,
+    file VARCHAR(100),
+    line INT,
+    timestamp TIMESTAMP NULL,
+    extra JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_level (level),
+    INDEX idx_created (created_at)
 )

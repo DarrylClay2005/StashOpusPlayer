@@ -25,6 +25,100 @@ private struct VerticalSlider: View {
     }
 }
 
+// MARK: - VinylDiscView
+
+private struct VinylDiscView: View {
+    let song: Song?
+    let isPlaying: Bool
+    @EnvironmentObject private var library: LibraryManager
+
+    @State private var rotation: Double = 0
+    @State private var animating = false
+
+    var body: some View {
+        ZStack {
+            // Outer vinyl: dark circle with radial gradient texture
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color(white: 0.08), Color(white: 0.12), Color(white: 0.06)],
+                        center: .center,
+                        startRadius: 50,
+                        endRadius: 150
+                    )
+                )
+                .overlay(vinylGrooves)
+
+            // Center label: album artwork or accent color circle
+            if let song {
+                ArtworkThumbnail(song: song, size: 130)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color(white: 0.15), lineWidth: 2))
+            } else {
+                Circle()
+                    .fill(AppTheme.accent.opacity(0.8))
+                    .frame(width: 130, height: 130)
+                    .overlay(
+                        Image(systemName: "music.note")
+                            .font(.system(size: 40, weight: .semibold))
+                            .foregroundStyle(.white)
+                    )
+            }
+
+            // Center hole
+            Circle()
+                .fill(Color(white: 0.04))
+                .frame(width: 18, height: 18)
+        }
+        .frame(width: 300, height: 300)
+        .rotationEffect(.degrees(rotation))
+        .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
+        .onChange(of: isPlaying) { playing in
+            if playing { startSpinning() } else { pauseSpinning() }
+        }
+        .onAppear {
+            if isPlaying { startSpinning() }
+        }
+    }
+
+    private var vinylGrooves: some View {
+        ZStack {
+            // Concentric semi-transparent rings simulating grooves
+            ForEach([0.78, 0.71, 0.64, 0.57, 0.50], id: \.self) { ratio in
+                Circle()
+                    .stroke(Color(white: 0.18).opacity(0.6), lineWidth: 1)
+                    .frame(width: 300 * ratio, height: 300 * ratio)
+            }
+            // Highlight arc
+            Circle()
+                .trim(from: 0.1, to: 0.35)
+                .stroke(
+                    LinearGradient(
+                        colors: [.white.opacity(0.15), .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ),
+                    lineWidth: 40
+                )
+                .frame(width: 260, height: 260)
+        }
+    }
+
+    private func startSpinning() {
+        withAnimation(.linear(duration: 3).repeatForever(autoreverses: false)) {
+            rotation = 360
+        }
+        animating = true
+    }
+
+    private func pauseSpinning() {
+        withAnimation(.easeOut(duration: 0.5)) {
+            // SwiftUI stops the repeating animation at the current value on next tick
+        }
+        animating = false
+    }
+}
+
 // MARK: - NowPlayingView
 
 struct NowPlayingView: View {
@@ -57,6 +151,12 @@ struct NowPlayingView: View {
     @State private var showEQ = true
     @State private var showLyrics = false
 
+    // Artwork style: vinyl disc vs plain album art
+    @State private var showVinylDisc: Bool = UserDefaults.standard.object(forKey: "nowPlaying_showVinylDisc") as? Bool ?? true
+
+    // Queue preview panel
+    @State private var showQueuePreview = true
+
     // Sleep Timer sheet
     @State private var showSleepTimerSheet = false
 
@@ -69,8 +169,11 @@ struct NowPlayingView: View {
     // Lyrics
     @State private var lyricsLines: [LrcLine] = []
 
-    // Haptic generator for seek start
+    // Haptic generators — created once, prepared in onAppear
     private let seekHaptic = UIImpactFeedbackGenerator(style: .light)
+    private let playHaptic = UIImpactFeedbackGenerator(style: .light)
+    private let skipHaptic = UIImpactFeedbackGenerator(style: .medium)
+    private let selectHaptic = UISelectionFeedbackGenerator()
 
     var body: some View {
         // When shown as a tab the view owns its NavigationStack.
@@ -98,6 +201,9 @@ struct NowPlayingView: View {
         }
         .onAppear {
             seekHaptic.prepare()
+            playHaptic.prepare()
+            skipHaptic.prepare()
+            selectHaptic.prepare()
             loadLyrics()
         }
     }
@@ -114,6 +220,7 @@ struct NowPlayingView: View {
                 sleepTimerPill
                 volumeSection
                 playbackControlsSection
+                queuePreviewSection
                 abRepeatSection
                 effectsSection
                 equalizerSection
@@ -151,35 +258,53 @@ struct NowPlayingView: View {
     // MARK: - Artwork
 
     private var artworkSection: some View {
-        ZStack {
-            if let song = player.currentSong {
-                ArtworkThumbnail(song: song, size: 300)
-                    .shadow(color: AppTheme.accent.opacity(0.3), radius: 24, x: 0, y: 12)
-            } else {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [AppTheme.surface, AppTheme.elevatedSurface],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 300, height: 300)
-                    .overlay {
-                        Image(systemName: "music.note")
-                            .font(.system(size: 80, weight: .semibold))
-                            .foregroundStyle(AppTheme.accent)
+        VStack(spacing: 12) {
+            ZStack {
+                if showVinylDisc {
+                    VinylDiscView(song: player.currentSong, isPlaying: player.isPlaying)
+                } else {
+                    // Plain album art
+                    if let song = player.currentSong {
+                        ArtworkThumbnail(song: song, size: 300)
+                            .shadow(color: AppTheme.accent.opacity(0.3), radius: 24, x: 0, y: 12)
+                    } else {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [AppTheme.surface, AppTheme.elevatedSurface],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 300, height: 300)
+                            .overlay {
+                                Image(systemName: "music.note")
+                                    .font(.system(size: 80, weight: .semibold))
+                                    .foregroundStyle(AppTheme.accent)
+                            }
+                            .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 10)
                     }
-                    .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 10)
+                }
+            }
+            .scaleEffect(artworkScale)
+            .opacity(artworkOpacity)
+            .animation(.spring(response: 0.4, dampingFraction: 0.65), value: artworkScale)
+            .animation(.easeInOut(duration: 0.2), value: artworkOpacity)
+            .id(artworkAnimationID)
+            // Subtle pulse when playing
+            .modifier(PulseModifier(isPlaying: player.isPlaying))
+
+            // Artwork style toggle
+            Picker("Artwork Style", selection: $showVinylDisc) {
+                Text("Vinyl Disc").tag(true)
+                Text("Album Art").tag(false)
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 220)
+            .onChange(of: showVinylDisc) { val in
+                UserDefaults.standard.set(val, forKey: "nowPlaying_showVinylDisc")
             }
         }
-        .scaleEffect(artworkScale)
-        .opacity(artworkOpacity)
-        .animation(.spring(response: 0.4, dampingFraction: 0.65), value: artworkScale)
-        .animation(.easeInOut(duration: 0.2), value: artworkOpacity)
-        .id(artworkAnimationID)
-        // Subtle pulse when playing
-        .modifier(PulseModifier(isPlaying: player.isPlaying))
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
     }
@@ -271,6 +396,7 @@ struct NowPlayingView: View {
                 tint: AppTheme.textPrimary,
                 font: .system(size: 24, weight: .medium)
             ) {
+                skipHaptic.impactOccurred()
                 player.skipToPrevious()
             }
 
@@ -278,6 +404,7 @@ struct NowPlayingView: View {
 
             // Play / Pause — centered, always 68pt circle
             Button {
+                playHaptic.impactOccurred()
                 player.togglePlayPause()
             } label: {
                 ZStack {
@@ -301,6 +428,7 @@ struct NowPlayingView: View {
                 tint: AppTheme.textPrimary,
                 font: .system(size: 24, weight: .medium)
             ) {
+                skipHaptic.impactOccurred()
                 player.skipToNext()
             }
 
@@ -529,6 +657,90 @@ struct NowPlayingView: View {
         editingPitch = false
     }
 
+    // MARK: - Queue Preview
+
+    private var upNextSongs: [Song] {
+        guard !player.queue.isEmpty else { return [] }
+        let start = (player.currentIndex + 1) % player.queue.count
+        var result: [Song] = []
+        var i = start
+        while result.count < 10 && i != player.currentIndex {
+            result.append(player.queue[i])
+            i = (i + 1) % player.queue.count
+        }
+        return result
+    }
+
+    private var queuePreviewSection: some View {
+        DisclosureGroup(
+            isExpanded: $showQueuePreview,
+            content: {
+                VStack(alignment: .leading, spacing: 10) {
+                    if upNextSongs.isEmpty {
+                        Text("Queue is empty")
+                            .font(.subheadline)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 12)
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(Array(upNextSongs.enumerated()), id: \.element.id) { idx, song in
+                                    Button {
+                                        if let queueIdx = player.queue.firstIndex(where: { $0.id == song.id }) {
+                                            player.setQueue(player.queue, startIndex: queueIdx, autoplay: true)
+                                        }
+                                    } label: {
+                                        VStack(spacing: 6) {
+                                            ArtworkThumbnail(song: song, size: 60)
+                                                .overlay(
+                                                    idx == 0
+                                                        ? AnyView(
+                                                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                                .stroke(AppTheme.accent, lineWidth: 2)
+                                                          )
+                                                        : AnyView(EmptyView())
+                                                )
+                                            Text(song.displayName)
+                                                .font(.caption2)
+                                                .foregroundStyle(idx == 0 ? AppTheme.accent : AppTheme.textSecondary)
+                                                .lineLimit(1)
+                                                .frame(width: 60)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal, 2)
+                            .padding(.top, 10)
+                        }
+                    }
+                }
+            },
+            label: {
+                HStack(spacing: 6) {
+                    Text("Up Next")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    if !upNextSongs.isEmpty {
+                        Text("\(upNextSongs.count)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(AppTheme.accent, in: Capsule())
+                    }
+                    Spacer()
+                    Text("\(player.queue.count) tracks")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+        )
+        .tint(AppTheme.accent)
+        .panelStyle()
+    }
+
     // MARK: - AB Repeat
 
     private var abRepeatSection: some View {
@@ -681,6 +893,7 @@ struct NowPlayingView: View {
                             HStack(spacing: 8) {
                                 ForEach(EQPreset.allCases) { preset in
                                     Button {
+                                        selectHaptic.selectionChanged()
                                         player.applyEQPreset(preset)
                                     } label: {
                                         Text(preset.displayName)

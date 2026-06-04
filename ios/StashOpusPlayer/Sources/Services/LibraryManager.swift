@@ -73,14 +73,32 @@ final class LibraryManager: ObservableObject {
             let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
             guard !newURLs.isEmpty else { return }
 
-            let service = DocumentImportService()
             let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
-                var result: [Song] = []
-                for url in newURLs {
-                    let song = await service.makeSong(for: url)
-                    result.append(song)
+                await withTaskGroup(of: Song?.self) { group in
+                    var results: [Song] = []
+                    var pending = 0
+                    let maxConcurrent = 8
+                    var iterator = newURLs.makeIterator()
+
+                    // Seed initial tasks
+                    while pending < maxConcurrent, let url = iterator.next() {
+                        let s = DocumentImportService()
+                        group.addTask { await s.makeSong(for: url) }
+                        pending += 1
+                    }
+
+                    // Process results and add more tasks
+                    for await song in group {
+                        if let song { results.append(song) }
+                        pending -= 1
+                        if let url = iterator.next() {
+                            let s = DocumentImportService()
+                            group.addTask { await s.makeSong(for: url) }
+                            pending += 1
+                        }
+                    }
+                    return results
                 }
-                return result
             }.value
 
             importedSongs.append(contentsOf: newSongs)
@@ -120,15 +138,33 @@ final class LibraryManager: ObservableObject {
             let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
             guard !newURLs.isEmpty else { return }
 
-            let service = DocumentImportService()
+            // Note: security-scoped access is already active (startAccessingSecurityScopedResource was called above)
             let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
-                var result: [Song] = []
-                for url in newURLs {
-                    // Note: security-scoped access is already active (startAccessingSecurityScopedResource was called above)
-                    let song = await service.makeSong(for: url)
-                    result.append(song)
+                await withTaskGroup(of: Song?.self) { group in
+                    var results: [Song] = []
+                    var pending = 0
+                    let maxConcurrent = 8
+                    var iterator = newURLs.makeIterator()
+
+                    // Seed initial tasks
+                    while pending < maxConcurrent, let url = iterator.next() {
+                        let s = DocumentImportService()
+                        group.addTask { await s.makeSong(for: url) }
+                        pending += 1
+                    }
+
+                    // Process results and add more tasks
+                    for await song in group {
+                        if let song { results.append(song) }
+                        pending -= 1
+                        if let url = iterator.next() {
+                            let s = DocumentImportService()
+                            group.addTask { await s.makeSong(for: url) }
+                            pending += 1
+                        }
+                    }
+                    return results
                 }
-                return result
             }.value
 
             importedSongs.append(contentsOf: newSongs)
@@ -170,14 +206,32 @@ final class LibraryManager: ObservableObject {
             // All files already in library — return silently.
             guard !newURLs.isEmpty else { return }
 
-            let service = DocumentImportService()
             let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
-                var result: [Song] = []
-                for fileURL in newURLs {
-                    let song = await service.makeSong(for: fileURL)
-                    result.append(song)
+                await withTaskGroup(of: Song?.self) { group in
+                    var results: [Song] = []
+                    var pending = 0
+                    let maxConcurrent = 8
+                    var iterator = newURLs.makeIterator()
+
+                    // Seed initial tasks
+                    while pending < maxConcurrent, let fileURL = iterator.next() {
+                        let s = DocumentImportService()
+                        group.addTask { await s.makeSong(for: fileURL) }
+                        pending += 1
+                    }
+
+                    // Process results and add more tasks
+                    for await song in group {
+                        if let song { results.append(song) }
+                        pending -= 1
+                        if let fileURL = iterator.next() {
+                            let s = DocumentImportService()
+                            group.addTask { await s.makeSong(for: fileURL) }
+                            pending += 1
+                        }
+                    }
+                    return results
                 }
-                return result
             }.value
 
             importedSongs.append(contentsOf: newSongs)

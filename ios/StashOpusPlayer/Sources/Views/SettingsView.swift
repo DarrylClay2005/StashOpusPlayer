@@ -188,6 +188,14 @@ struct SettingsView: View {
             }
             .tint(AppTheme.accent)
 
+            if player.audioSettings.crossfadeEnabled {
+                Text("Songs will fade into each other over \(Int(player.audioSettings.crossfadeDuration))s. A smooth, uninterrupted listening experience.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Crossfade duration — only shown when crossfade is on
             if player.audioSettings.crossfadeEnabled {
                 HStack {
@@ -215,12 +223,28 @@ struct SettingsView: View {
             }
             .tint(AppTheme.accent)
 
+            if player.audioSettings.gaplessEnabled {
+                Text("Tracks play back-to-back with no silence between them. Ideal for live albums and DJ mixes.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // ReplayGain
             Toggle(isOn: $player.audioSettings.replayGainEnabled) {
                 Label("ReplayGain", systemImage: "speaker.wave.3")
                     .foregroundStyle(AppTheme.textPrimary)
             }
             .tint(AppTheme.accent)
+
+            if player.audioSettings.replayGainEnabled {
+                Text("Normalises loudness across tracks so volume stays consistent. Reads REPLAYGAIN_TRACK_GAIN metadata when available.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             // Default speed
             VStack(alignment: .leading, spacing: 6) {
@@ -264,6 +288,9 @@ struct SettingsView: View {
             sectionHeader("Playback")
         }
         .listRowBackground(AppTheme.surface)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.crossfadeEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.gaplessEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.replayGainEnabled)
     }
 
     // MARK: — Streaming Section
@@ -434,6 +461,14 @@ struct SettingsView: View {
             }
             .tint(AppTheme.accent)
 
+            if player.audioSettings.bassBoostEnabled {
+                Text("Boosts the 32 Hz and 64 Hz bands for deeper, punchier bass. Adjust the gain below to taste.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Bass Boost gain slider — only shown when enabled
             if player.audioSettings.bassBoostEnabled {
                 VStack(alignment: .leading, spacing: 6) {
@@ -469,6 +504,7 @@ struct SettingsView: View {
             sectionHeader("Audio")
         }
         .listRowBackground(AppTheme.surface)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.bassBoostEnabled)
     }
 
     // MARK: — Appearance Section
@@ -560,12 +596,34 @@ struct SettingsView: View {
             }
             .foregroundStyle(AppTheme.textPrimary)
 
-            LabeledContent("Version") {
-                Text("1.0.0")
-                    .font(AppTheme.monoFont(size: 14))
-                    .foregroundStyle(AppTheme.textSecondary)
+            HStack {
+                Label("Version", systemImage: updater.updateStatusIcon)
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(updater.currentVersion)
+                        .font(AppTheme.monoFont(size: 13))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Text(updater.updateStatusText)
+                        .font(.caption)
+                        .foregroundStyle(updater.updateStatusColor)
+                }
             }
-            .foregroundStyle(AppTheme.textPrimary)
+
+            Button {
+                Task { await updater.checkForUpdates() }
+            } label: {
+                HStack {
+                    Label("Check Now", systemImage: "arrow.clockwise")
+                        .foregroundStyle(AppTheme.accent)
+                    Spacer()
+                    if updater.isChecking {
+                        ProgressView()
+                            .tint(AppTheme.accent)
+                    }
+                }
+            }
+            .disabled(updater.isChecking)
 
             // Open Source Libraries
             VStack(alignment: .leading, spacing: 6) {

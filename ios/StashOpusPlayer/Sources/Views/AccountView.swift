@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct AccountView: View {
 
@@ -11,6 +12,15 @@ struct AccountView: View {
     @State private var draftDisplayName = ""
     @State private var isSavingDisplayName = false
 
+    // Avatar
+    @State private var photosPickerItem: PhotosPickerItem? = nil
+    @State private var isUploadingAvatar = false
+
+    // DOB
+    @State private var isPickingDOB = false
+    @State private var draftDOB = Date()
+    @State private var isSavingDOB = false
+
     var body: some View {
         ZStack {
             Color.clear.ignoresSafeArea()
@@ -19,22 +29,39 @@ struct AccountView: View {
                 // MARK: Header — avatar + username
                 Section {
                     HStack(spacing: 16) {
-                        // Avatar circle with initials
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [AppTheme.accent, AppTheme.accentSoft],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 64, height: 64)
-                            .overlay(
-                                Text(initials)
-                                    .font(.title2.bold())
-                                    .foregroundStyle(.white)
-                            )
-                            .shadow(color: AppTheme.accent.opacity(0.4), radius: 8, x: 0, y: 4)
+                        // Avatar circle: photo if available, else gradient + initials
+                        ZStack {
+                            if let img = account.avatarImage {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 64, height: 64)
+                                    .clipShape(Circle())
+                            } else {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [AppTheme.accent, AppTheme.accentSoft],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 64, height: 64)
+                                    .overlay(
+                                        Text(initials)
+                                            .font(.title2.bold())
+                                            .foregroundStyle(.white)
+                                    )
+                            }
+                            if isUploadingAvatar {
+                                Circle()
+                                    .fill(.black.opacity(0.45))
+                                    .frame(width: 64, height: 64)
+                                ProgressView()
+                                    .tint(.white)
+                            }
+                        }
+                        .shadow(color: AppTheme.accent.opacity(0.4), radius: 8, x: 0, y: 4)
 
                         VStack(alignment: .leading, spacing: 4) {
                             if let displayName = account.currentUser?.displayName,
@@ -58,6 +85,31 @@ struct AccountView: View {
                         }
                     }
                     .padding(.vertical, 8)
+
+                    // Upload photo button
+                    PhotosPicker(
+                        selection: $photosPickerItem,
+                        matching: .images,
+                        photoLibrary: .shared()
+                    ) {
+                        Label(
+                            account.avatarImage == nil ? "Upload Profile Photo" : "Change Profile Photo",
+                            systemImage: "camera.circle"
+                        )
+                        .foregroundStyle(AppTheme.accent)
+                    }
+                    .onChange(of: photosPickerItem) { item in
+                        guard let item else { return }
+                        isUploadingAvatar = true
+                        Task {
+                            defer { isUploadingAvatar = false }
+                            if let data = try? await item.loadTransferable(type: Data.self),
+                               let image = UIImage(data: data) {
+                                await account.uploadAvatar(image: image)
+                            }
+                            photosPickerItem = nil
+                        }
+                    }
                 }
                 .listRowBackground(AppTheme.surface)
 
@@ -73,6 +125,16 @@ struct AccountView: View {
                                 .font(AppTheme.bodyFont(size: 13))
                                 .foregroundStyle(AppTheme.textSecondary)
                         }
+                    }
+
+                    // Auto-sync cadence info
+                    HStack {
+                        Label("Auto-sync", systemImage: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer()
+                        Text("every 8 min")
+                            .font(AppTheme.bodyFont(size: 13))
+                            .foregroundStyle(AppTheme.textSecondary)
                     }
 
                     // Push to server
@@ -157,6 +219,57 @@ struct AccountView: View {
                                 .multilineTextAlignment(.trailing)
                         }
                         .foregroundStyle(AppTheme.textPrimary)
+                    }
+
+                    // Date of birth — show once set; show picker if not yet set
+                    if account.hasDateOfBirth {
+                        LabeledContent("Date of Birth") {
+                            Text(account.currentUser?.dateOfBirth ?? "Set")
+                                .font(AppTheme.monoFont(size: 13))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        .foregroundStyle(AppTheme.textPrimary)
+                    } else if isPickingDOB {
+                        VStack(alignment: .leading, spacing: 6) {
+                            DatePicker(
+                                "Date of Birth",
+                                selection: $draftDOB,
+                                in: ...Calendar.current.date(byAdding: .year, value: -13, to: Date())!,
+                                displayedComponents: .date
+                            )
+                            .datePickerStyle(.compact)
+                            .foregroundStyle(AppTheme.textPrimary)
+                            HStack {
+                                if isSavingDOB {
+                                    ProgressView().tint(AppTheme.accent)
+                                } else {
+                                    Button("Save") { saveDOB() }
+                                        .foregroundStyle(AppTheme.accent)
+                                        .font(.subheadline.bold())
+                                    Button("Cancel") { isPickingDOB = false }
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                        .font(.subheadline)
+                                        .padding(.leading, 8)
+                                }
+                            }
+                        }
+                    } else {
+                        Button {
+                            isPickingDOB = true
+                        } label: {
+                            HStack {
+                                Text("Date of Birth")
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Spacer()
+                                Text("Not set")
+                                    .font(AppTheme.bodyFont(size: 13))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(AppTheme.accent)
+                                    .padding(.leading, 4)
+                            }
+                        }
                     }
 
                     // Display name — tappable to edit inline
@@ -264,6 +377,21 @@ struct AccountView: View {
             .font(AppTheme.bodyFont(size: 11))
             .foregroundStyle(AppTheme.textSecondary)
             .kerning(0.8)
+    }
+
+    private func saveDOB() {
+        guard !isSavingDOB else { return }
+        isSavingDOB = true
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        let iso = formatter.string(from: draftDOB)
+        Task {
+            defer {
+                isSavingDOB = false
+                isPickingDOB = false
+            }
+            await account.setDateOfBirth(iso)
+        }
     }
 
     private func saveDisplayName() {

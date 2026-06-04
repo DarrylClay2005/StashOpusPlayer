@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - EffectsView
 
@@ -6,6 +7,8 @@ struct EffectsView: View {
     @EnvironmentObject private var player: AudioPlayerManager
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 5)
+    private let selectHaptic = UISelectionFeedbackGenerator()
+    private let successHaptic = UINotificationFeedbackGenerator()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -28,10 +31,16 @@ struct EffectsView: View {
                         effect: effect,
                         isActive: player.audioSettings.activeEffectID == effect.id
                     ) {
+                        selectHaptic.selectionChanged()
                         player.applyEffect(effect)
+                        successHaptic.notificationOccurred(.success)
                     }
                 }
             }
+        }
+        .onAppear {
+            selectHaptic.prepare()
+            successHaptic.prepare()
         }
     }
 }

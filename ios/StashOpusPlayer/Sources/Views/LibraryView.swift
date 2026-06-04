@@ -186,30 +186,142 @@ private struct SongsTab: View {
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var library: LibraryManager
 
+    @AppStorage("library_songs_columns") private var songColumns: Int = 1
+
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 12), count: songColumns)
+    }
+
     var body: some View {
-        List {
-            if songs.isEmpty {
-                EmptyLibraryView(
-                    isScanning: library.isScanning,
-                    onAddMusic: { showAddMusic = true },
-                    onScan: { library.requestAccessAndScan() }
-                )
-                .listRowBackground(Color.clear)
-            } else {
-                ForEach(songs) { song in
-                    Button {
-                        player.play(song: song, in: songs)
-                    } label: {
-                        SongRow(song: song, isCurrent: player.currentSong?.id == song.id)
+        Group {
+            if songColumns == 1 {
+                // List view
+                List {
+                    if songs.isEmpty {
+                        EmptyLibraryView(
+                            isScanning: library.isScanning,
+                            onAddMusic: { showAddMusic = true },
+                            onScan: { library.requestAccessAndScan() }
+                        )
+                        .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(songs) { song in
+                            Button {
+                                player.play(song: song, in: songs)
+                            } label: {
+                                SongRow(song: song, isCurrent: player.currentSong?.id == song.id)
+                            }
+                            .buttonStyle(.plain)
+                            .listRowBackground(AppTheme.surface.opacity(0.5))
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .listRowBackground(AppTheme.surface.opacity(0.5))
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .searchable(text: $searchText, prompt: "Search songs, artists, albums")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        columnMenuButton(current: songColumns, key: "library_songs_columns", max: 3)
+                    }
+                }
+            } else {
+                // Grid view
+                ScrollView {
+                    if songs.isEmpty {
+                        EmptyLibraryView(
+                            isScanning: library.isScanning,
+                            onAddMusic: { showAddMusic = true },
+                            onScan: { library.requestAccessAndScan() }
+                        )
+                        .padding(.top, 60)
+                    } else {
+                        LazyVGrid(columns: gridColumns, spacing: 12) {
+                            ForEach(songs) { song in
+                                Button {
+                                    player.play(song: song, in: songs)
+                                } label: {
+                                    SongGridCell(song: song, isCurrent: player.currentSong?.id == song.id)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                    }
+                }
+                .background(Color.clear.ignoresSafeArea())
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        columnMenuButton(current: songColumns, key: "library_songs_columns", max: 3)
+                    }
                 }
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .searchable(text: $searchText, prompt: "Search songs, artists, albums")
+    }
+
+    @ViewBuilder
+    private func columnMenuButton(current: Int, key: String, max maxCols: Int) -> some View {
+        Menu {
+            Button {
+                UserDefaults.standard.set(1, forKey: key)
+            } label: {
+                Label("List", systemImage: "list.bullet")
+            }
+            Button {
+                UserDefaults.standard.set(2, forKey: key)
+            } label: {
+                Label("2 Columns", systemImage: "square.grid.2x2")
+            }
+            Button {
+                UserDefaults.standard.set(3, forKey: key)
+            } label: {
+                Label("3 Columns", systemImage: "square.grid.3x3")
+            }
+        } label: {
+            Image(systemName: current == 1 ? "list.bullet" : current == 2 ? "square.grid.2x2" : "square.grid.3x3")
+                .tint(AppTheme.accent)
+        }
+    }
+}
+
+// MARK: - Song Grid Cell
+
+private struct SongGridCell: View {
+    let song: Song
+    let isCurrent: Bool
+    @EnvironmentObject private var library: LibraryManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ArtworkThumbnail(song: song, size: 120)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    if isCurrent {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(4)
+                            .background(AppTheme.accent, in: Circle())
+                            .padding(4)
+                    }
+                }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(song.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isCurrent ? AppTheme.accent : AppTheme.textPrimary)
+                    .lineLimit(2)
+                Text(song.artistName)
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 2)
+        }
+        .padding(6)
+        .background(AppTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -276,10 +388,11 @@ private struct ArtistRow: View {
 private struct AlbumsTab: View {
     @EnvironmentObject private var library: LibraryManager
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 16),
-        GridItem(.flexible(), spacing: 16)
-    ]
+    @AppStorage("library_albums_columns") private var albumColumns: Int = 2
+
+    private var columns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 12), count: albumColumns)
+    }
 
     var body: some View {
         ScrollView {
@@ -302,6 +415,30 @@ private struct AlbumsTab: View {
             }
         }
         .background(Color.clear.ignoresSafeArea())
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button {
+                        albumColumns = 1
+                    } label: {
+                        Label("1 Column", systemImage: "rectangle.grid.1x2")
+                    }
+                    Button {
+                        albumColumns = 2
+                    } label: {
+                        Label("2 Columns", systemImage: "square.grid.2x2")
+                    }
+                    Button {
+                        albumColumns = 3
+                    } label: {
+                        Label("3 Columns", systemImage: "square.grid.3x3")
+                    }
+                } label: {
+                    Image(systemName: albumColumns == 1 ? "rectangle.grid.1x2" : albumColumns == 2 ? "square.grid.2x2" : "square.grid.3x3")
+                        .tint(AppTheme.accent)
+                }
+            }
+        }
     }
 }
 

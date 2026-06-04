@@ -51,12 +51,28 @@ final class BackgroundService: ObservableObject {
     @Published var opacity: Double = 0.35
     @Published var isBlurred: Bool = true
 
+    /// True when the shuffle timer is running. Stored property so iOS backgrounding
+    /// doesn't silently invalidate it without us knowing.
+    @Published private(set) var isActive: Bool = false
+
     // MARK: Private
 
     private var shuffleTimer: Timer?
 
-    /// Returns true when the shuffle timer is running.
-    var isActive: Bool { shuffleTimer != nil }
+    // MARK: Init — register for foreground notification
+
+    init() {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isEnabled, !self.images.isEmpty else { return }
+                if !self.isActive { self.startShuffling() }
+            }
+        }
+    }
 
     // MARK: Interval Presets
 
@@ -164,17 +180,23 @@ final class BackgroundService: ObservableObject {
 
     func startShuffling() {
         shuffleTimer?.invalidate()
-        guard isEnabled, images.count > 1 else { return }
+        shuffleTimer = nil
+        guard isEnabled, !images.isEmpty else {
+            isActive = false
+            return
+        }
         shuffleTimer = Timer.scheduledTimer(withTimeInterval: shuffleIntervalSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.advance()
             }
         }
+        isActive = true
     }
 
     func stopShuffling() {
         shuffleTimer?.invalidate()
         shuffleTimer = nil
+        isActive = false
     }
 
     func nextImage() {

@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import SwiftUI
 
 @MainActor
 final class UpdateService: ObservableObject {
@@ -12,6 +13,25 @@ final class UpdateService: ObservableObject {
 
     var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+    }
+
+    // MARK: - Status display helpers
+
+    var updateStatusText: String {
+        if isChecking { return "Checking…" }
+        if updateAvailable, let v = latestVersion { return "v\(v) available" }
+        return "Up to date"
+    }
+
+    var updateStatusIcon: String {
+        if isChecking { return "arrow.clockwise" }
+        if updateAvailable { return "arrow.down.circle.fill" }
+        return "checkmark.circle.fill"
+    }
+
+    var updateStatusColor: Color {
+        if updateAvailable { return AppTheme.warning }
+        return AppTheme.success
     }
 
     private init() {}

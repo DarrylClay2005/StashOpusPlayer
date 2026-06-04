@@ -11,20 +11,38 @@ struct StashOpusPlayerApp: App {
     @StateObject private var folderService = MusicFolderService()
     @StateObject private var bgService = BackgroundService()
     @StateObject private var account = AccountService()
+    @StateObject private var bridgeHealth = BridgeHealthService()
+
+    @State private var showLaunch = true
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(libraryManager)
-                .environmentObject(player)
-                .environmentObject(sleepTimer)
-                .environmentObject(updater)
-                .environmentObject(streaming)
-                .environmentObject(folderService)
-                .environmentObject(bgService)
-                .environmentObject(account)
-                .preferredColorScheme(.dark)
-                .task {
+            ZStack {
+                ContentView()
+                    .environmentObject(libraryManager)
+                    .environmentObject(player)
+                    .environmentObject(sleepTimer)
+                    .environmentObject(updater)
+                    .environmentObject(streaming)
+                    .environmentObject(folderService)
+                    .environmentObject(bgService)
+                    .environmentObject(account)
+                    .environmentObject(bridgeHealth)
+                    .opacity(showLaunch ? 0 : 1)
+
+                if showLaunch {
+                    LaunchView(isLoading: $showLaunch)
+                        .environmentObject(account)
+                        .environmentObject(libraryManager)
+                        .transition(.opacity)
+                }
+            }
+            .preferredColorScheme(.dark)
+            .task {
+                    // Configure background logger
+                    AppLogger.shared.configure(bridgeURL: streaming.bridgeURL)
+                    AppLogger.shared.log("App launched", category: "app")
+
                     // Restore audio settings — player must be configured before any resume.
                     player.audioSettings = PersistenceService.shared.loadAudioSettings() ?? AudioSettings()
 
@@ -34,7 +52,12 @@ struct StashOpusPlayerApp: App {
                     // If logged in, pull latest state from DB as primary storage source.
                     if account.isLoggedIn {
                         await account.pullSync(library: libraryManager)
+                        account.startAutoPushTimer(library: libraryManager)
+                        await account.loadAvatar()
                     }
+
+                    // Start periodic bridge health checks.
+                    bridgeHealth.startPeriodicChecks(streaming: streaming)
 
                     // Check for updates after a brief delay.
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -68,6 +91,15 @@ struct StashOpusPlayerApp: App {
                 }
                 .onReceive(sleepTimer.$didExpire) { expired in
                     if expired { player.pause() }
+                }
+                // When the user logs in after launch, start the auto-push timer and load avatar.
+                .onReceive(account.$isLoggedIn) { loggedIn in
+                    guard loggedIn else {
+                        account.stopAutoPushTimer()
+                        return
+                    }
+                    account.startAutoPushTimer(library: libraryManager)
+                    Task { await account.loadAvatar() }
                 }
         }
     }

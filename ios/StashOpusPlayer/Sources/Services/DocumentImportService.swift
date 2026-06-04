@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import UIKit
 
 enum DocumentImportError: LocalizedError {
     case unreadableFile
@@ -17,7 +18,8 @@ enum DocumentImportError: LocalizedError {
 
 struct DocumentImportService {
     static let supportedExtensions: Set<String> = [
-        "mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "mp4", "opus"
+        "mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "mp4", "opus",
+        "m4v", "mov"  // video containers with audio tracks
     ]
     private var supportedExtensions: Set<String> { Self.supportedExtensions }
 
@@ -193,6 +195,22 @@ struct DocumentImportService {
            estimatedRate > 0
         {
             bitrate = Int((estimatedRate / 1000).rounded())   // store as kbps
+        }
+
+        // For video files (.mp4, .m4v, .mov), extract the first video frame as artwork
+        // and cache it so ArtworkService can find it by filename key.
+        let videoExtensions: Set<String> = ["mp4", "m4v", "mov"]
+        let fileExt = url.pathExtension.lowercased()
+        if videoExtensions.contains(fileExt) {
+            let assetForThumb = AVURLAsset(url: url)
+            let generator = AVAssetImageGenerator(asset: assetForThumb)
+            generator.appliesPreferredTrackTransform = true
+            let time = CMTime(seconds: 1, preferredTimescale: 600)
+            if let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) {
+                let thumbImage = UIImage(cgImage: cgImage)
+                let thumbKey = url.lastPathComponent
+                ArtworkService.shared.cacheImage(thumbImage, forKey: thumbKey)
+            }
         }
 
         return Song(

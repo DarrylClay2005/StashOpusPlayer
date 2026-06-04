@@ -97,6 +97,8 @@ final class AudioPlayerManager: ObservableObject {
     // Crossfade state
     private var isCrossfading = false
     private var crossfadeTimer: Timer?
+    // Fires crossfadeDuration seconds before a track ends so we begin fading early.
+    private var crossfadeStartTimer: Timer?
 
     // Gapless: the next file pre-loaded and scheduled on the active node.
     private var gaplessScheduled = false
@@ -105,6 +107,11 @@ final class AudioPlayerManager: ObservableObject {
     // Prevents updatePositionFromPlayer() from overwriting `position` with a
     // stale value from the AVAudioPlayerNode before it has actually started.
     private var isSchedulingAsync = false
+
+    // Schedule generation counter — incremented before every node stop/reschedule.
+    // Completion blocks capture the generation at registration time and bail out if it
+    // has changed, preventing ghost completions from firing after a seek or skip.
+    private var scheduleGeneration: UInt64 = 0
 
     // Audio interruption / route change
     private var wasInterrupted = false
@@ -130,6 +137,7 @@ final class AudioPlayerManager: ObservableObject {
     deinit {
         timer?.invalidate()
         crossfadeTimer?.invalidate()
+        crossfadeStartTimer?.invalidate()
         rotationLink?.invalidate()
         tremoloLink?.invalidate()
         vibratoLink?.invalidate()
@@ -198,6 +206,8 @@ final class AudioPlayerManager: ObservableObject {
         isCrossfading = false
         crossfadeTimer?.invalidate()
         crossfadeTimer = nil
+        crossfadeStartTimer?.invalidate()
+        crossfadeStartTimer = nil
         gaplessScheduled = false
         position = 0
         isPlaying = false
@@ -214,6 +224,8 @@ final class AudioPlayerManager: ObservableObject {
         let target = max(0, min(newPosition, duration))
         position = target
         gaplessScheduled = false
+        crossfadeStartTimer?.invalidate()
+        crossfadeStartTimer = nil
         if isPlaying {
             playCurrent(from: target)
         } else {
@@ -446,6 +458,11 @@ final class AudioPlayerManager: ObservableObject {
     }
 
     private func playCurrent(from startTime: TimeInterval) {
+        // Invalidate any pending completion callbacks BEFORE cancelCrossfade() or node.stop()
+        // so that the stopped node's completion block never fires handleTrackEnded().
+        scheduleGeneration &+= 1
+        crossfadeStartTimer?.invalidate()
+        crossfadeStartTimer = nil
         cancelCrossfade()
 
         // For HTTP/HTTPS URLs the download is async — scheduleCurrent handles the full play
@@ -498,6 +515,9 @@ final class AudioPlayerManager: ObservableObject {
         // Local file — schedule directly.
         do {
             let node = activeNode
+            // Increment generation before stopping so the old completion is invalidated.
+            let gen = scheduleGeneration &+ 1
+            scheduleGeneration = gen
             node.stop()
             let file = try AVAudioFile(forReading: url)
             audioFile = file
@@ -511,7 +531,74 @@ final class AudioPlayerManager: ObservableObject {
             gaplessScheduled = false
 
             node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
-                Task { @MainActor in self?.handleTrackEnded() }
+                Task { @MainActor in
+                    guard let self, self.scheduleGeneration == gen else { return }
+                    self.handleTrackEnded()
+                }
+            }
+
+            // Schedule crossfade to begin crossfadeDuration seconds before the track ends,
+            // so the incoming track fades in while the current track is still playing.
+            if audioSettings.crossfadeEnabled && audioSettings.crossfadeDuration > 0 {
+                let trackLength = Double(framesLeft) / file.processingFormat.sampleRate
+                let crossfadeOffset = max(0, trackLength - audioSettings.crossfadeDuration)
+                if crossfadeOffset > 0 {
+                    crossfadeStartTimer?.invalidate()
+                    crossfadeStartTimer = Timer.scheduledTimer(
+                        withTimeInterval: crossfadeOffset, repeats: false
+                    ) { [weak self] _ in
+                        Task { @MainActor in
+                            guard let self, self.isPlaying, !self.isCrossfading else { return }
+                            self.beginCrossfade()
+                        }
+                    }
+                }
+            }
+
+            // Pre-schedule the next track for gapless playback 0.1 s after this segment
+            // starts, giving the engine enough time to buffer it seamlessly.
+            if audioSettings.gaplessEnabled {
+                Task { [weak self] in
+                    guard let self else { return }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    await MainActor.run {
+                        guard self.isPlaying, self.audioSettings.gaplessEnabled,
+                              !self.gaplessScheduled else { return }
+                        self.scheduleGaplessNext()
+                    }
+                }
+            }
+
+            // Metadata-based ReplayGain: attempt to read REPLAYGAIN_TRACK_GAIN from the
+            // file's AVAsset metadata. Runs off the main thread to avoid blocking playback.
+            if audioSettings.replayGainEnabled {
+                let asset = AVURLAsset(url: url)
+                Task.detached(priority: .utility) { [weak self] in
+                    let metadata = (try? await asset.load(.metadata)) ?? []
+                    var gainDB: Float? = nil
+                    for item in metadata {
+                        let id = item.identifier?.rawValue.lowercased() ?? ""
+                        if id.contains("replaygain_track_gain") || id.contains("replaygain") {
+                            if let str = item.stringValue {
+                                // Tag format: "+1.23 dB" or "-1.23 dB"
+                                let numeric = str.components(
+                                    separatedBy: CharacterSet(
+                                        charactersIn: "-+0123456789."
+                                    ).inverted
+                                ).joined()
+                                gainDB = Float(numeric)
+                            }
+                        }
+                    }
+                    if let gain = gainDB {
+                        await MainActor.run { [weak self] in
+                            guard let self else { return }
+                            // Convert dB to linear and scale by user volume, clamped to [0, 1].
+                            let linear = pow(10.0, gain / 20.0)
+                            self.crossfadeMixer.outputVolume = min(linear * self.audioSettings.volume, 1.0)
+                        }
+                    }
+                }
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -567,6 +654,9 @@ final class AudioPlayerManager: ObservableObject {
 
             // From here on this is identical to the local-file path in scheduleCurrent.
             let node = activeNode
+            // Increment generation before stopping so the old completion is invalidated.
+            let gen = scheduleGeneration &+ 1
+            scheduleGeneration = gen
             node.stop()
             let file = try AVAudioFile(forReading: tempURL)
             audioFile = file
@@ -579,7 +669,10 @@ final class AudioPlayerManager: ObservableObject {
             gaplessScheduled = false
 
             node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
-                Task { @MainActor in self?.handleTrackEnded() }
+                Task { @MainActor in
+                    guard let self, self.scheduleGeneration == gen else { return }
+                    self.handleTrackEnded()
+                }
             }
 
             // Start playback — playCurrent already set isPlaying = true before the download.
@@ -611,6 +704,9 @@ final class AudioPlayerManager: ObservableObject {
         }
 
         if audioSettings.crossfadeEnabled {
+            // The crossfadeStartTimer may have already started the crossfade;
+            // don't trigger a second crossfade if we're already mid-fade.
+            guard !isCrossfading else { return }
             beginCrossfade()
         } else {
             skipToNext()
@@ -635,12 +731,15 @@ final class AudioPlayerManager: ObservableObject {
         let incoming = usingPrimaryNode ? secondaryNode : primaryNode
 
         incoming.volume = 0
+        let gen = scheduleGeneration &+ 1
+        scheduleGeneration = gen
         incoming.scheduleFile(nextFile, at: nil) { [weak self] in
             Task { @MainActor in
                 // Incoming finished its full file — crossfade is complete; swap active node.
-                self?.isCrossfading = false
-                self?.usingPrimaryNode.toggle()
-                self?.handleTrackEnded()
+                guard let self, self.scheduleGeneration == gen else { return }
+                self.isCrossfading = false
+                self.usingPrimaryNode.toggle()
+                self.handleTrackEnded()
             }
         }
         startEngineIfNeeded()
@@ -690,6 +789,8 @@ final class AudioPlayerManager: ObservableObject {
     private func cancelCrossfade() {
         crossfadeTimer?.invalidate()
         crossfadeTimer = nil
+        crossfadeStartTimer?.invalidate()
+        crossfadeStartTimer = nil
         if isCrossfading {
             // Stop the incoming node and restore both volumes.
             let incoming = usingPrimaryNode ? secondaryNode : primaryNode
@@ -711,8 +812,13 @@ final class AudioPlayerManager: ObservableObject {
         guard let nextFile = try? AVAudioFile(forReading: nextURL) else { return }
 
         gaplessScheduled = true
+        let gen = scheduleGeneration &+ 1
+        scheduleGeneration = gen
         activeNode.scheduleFile(nextFile, at: nil) { [weak self] in
-            Task { @MainActor in self?.handleTrackEnded() }
+            Task { @MainActor in
+                guard let self, self.scheduleGeneration == gen else { return }
+                self.handleTrackEnded()
+            }
         }
     }
 
@@ -886,7 +992,7 @@ final class AudioPlayerManager: ObservableObject {
         for (index, band) in equalizer.bands.enumerated() {
             band.filterType = filterTypes[index]
             band.frequency  = frequencies[index]
-            band.bandwidth  = 0.5   // ~half-octave Q; tighter bands for more precise control
+            band.bandwidth  = 1.0   // 1-octave bandwidth — musical, smooth boost/cut response
             band.gain       = 0
             band.bypass     = true
         }
@@ -927,7 +1033,9 @@ final class AudioPlayerManager: ObservableObject {
         rotationLink?.invalidate()
         rotationLink = nil
         is8DActive = false
-        // Reset listener to neutral orientation so no spatial coloration remains.
+        // Reset pan to center so no stereo imbalance remains after 8D effect stops.
+        crossfadeMixer.pan = 0.0
+        // Also reset environment node orientation to neutral.
         environmentNode.listenerAngularOrientation = AVAudio3DAngularOrientation(
             yaw: 0, pitch: 0, roll: 0
         )
@@ -940,12 +1048,12 @@ final class AudioPlayerManager: ObservableObject {
         rotationAngle += 2 * .pi * rotationHz / 60.0
         // Wrap to keep angle in [0, 2π) to avoid floating-point drift.
         if rotationAngle >= 2 * .pi { rotationAngle -= 2 * .pi }
-        // Rotate the listener's yaw. The spatial source is fixed to the right (x=2),
-        // so rotating the listener's facing direction makes the source appear to orbit.
-        let yawDegrees = Float(rotationAngle * 180.0 / .pi)
-        environmentNode.listenerAngularOrientation = AVAudio3DAngularOrientation(
-            yaw: yawDegrees, pitch: 0, roll: 0
-        )
+        // Pan oscillates between -1.0 (full left) and +1.0 (full right) at the rotation
+        // frequency. This produces a clear, audible 8D "surround" effect on any stereo
+        // output (headphones or speakers), unlike AVAudioEnvironmentNode yaw rotation which
+        // requires HRTF rendering to be perceptible and is unreliable on standard stereo paths.
+        let pan = Float(sin(rotationAngle))
+        crossfadeMixer.pan = pan
     }
 
     // MARK: - Tremolo
@@ -1105,6 +1213,17 @@ final class AudioPlayerManager: ObservableObject {
                     band.gain = 0
                 }
             }
+        }
+
+        // ReplayGain: apply a gain offset via the crossfade mixer's output volume.
+        // When enabled, output is limited to 75 % of the user-chosen volume to guard against
+        // clipping on loud masters (equivalent to a -2.5 dB protective ceiling).
+        // A full implementation would read REPLAYGAIN_TRACK_GAIN from file metadata and
+        // compute a per-track linear gain; see scheduleCurrent for the metadata path.
+        if audioSettings.replayGainEnabled {
+            crossfadeMixer.outputVolume = min(audioSettings.volume, 0.75)
+        } else {
+            crossfadeMixer.outputVolume = 1.0
         }
 
         // Do NOT call updateNowPlaying() here — this runs on every EQ slider drag.

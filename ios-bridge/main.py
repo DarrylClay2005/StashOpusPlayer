@@ -366,7 +366,7 @@ class SyncPushRequest(BaseModel):
 
 
 def _user_dict(row: tuple) -> dict:
-    """Map a (id, username, email, display_name, avatar_url, created_at, last_login) row."""
+    """Map a (id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth) row."""
     return {
         "id": row[0],
         "username": row[1],
@@ -375,6 +375,7 @@ def _user_dict(row: tuple) -> dict:
         "avatar_url": row[4],
         "created_at": row[5].isoformat() if row[5] else None,
         "last_login": row[6].isoformat() if row[6] else None,
+        "date_of_birth": row[7].isoformat() if len(row) > 7 and row[7] else None,
     }
 
 
@@ -755,7 +756,7 @@ async def register(body: RegisterRequest, request: Request):
             token = create_token(user_id, token_id)
 
             await cur.execute(
-                "SELECT id, username, email, display_name, avatar_url, created_at, last_login "
+                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth "
                 "FROM ios_users WHERE id = %s",
                 (user_id,),
             )
@@ -845,7 +846,7 @@ async def me(payload: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, username, email, display_name, avatar_url, created_at, last_login "
+                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth "
                 "FROM ios_users WHERE id = %s AND is_active = TRUE",
                 (user_id,),
             )
@@ -858,6 +859,7 @@ async def me(payload: dict = Depends(get_current_user)):
 
 class UpdateMeRequest(BaseModel):
     display_name: Optional[str] = None
+    date_of_birth: Optional[str] = None  # ISO format YYYY-MM-DD
 
 
 @app.put("/auth/me")
@@ -871,8 +873,25 @@ async def update_me(body: UpdateMeRequest, payload: dict = Depends(get_current_u
                 "UPDATE ios_users SET display_name = %s WHERE id = %s AND is_active = TRUE",
                 (display_name if display_name else None, user_id),
             )
+
+            # DOB: immutable once set
+            if body.date_of_birth:
+                await cur.execute(
+                    "SELECT date_of_birth FROM ios_users WHERE id = %s",
+                    (user_id,),
+                )
+                dob_row = await cur.fetchone()
+                if dob_row and dob_row[0]:
+                    raise HTTPException(
+                        status_code=400, detail="Date of birth cannot be changed once set"
+                    )
+                await cur.execute(
+                    "UPDATE ios_users SET date_of_birth = %s WHERE id = %s",
+                    (body.date_of_birth, user_id),
+                )
+
             await cur.execute(
-                "SELECT id, username, email, display_name, avatar_url, created_at, last_login "
+                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth "
                 "FROM ios_users WHERE id = %s AND is_active = TRUE",
                 (user_id,),
             )
@@ -881,6 +900,94 @@ async def update_me(body: UpdateMeRequest, payload: dict = Depends(get_current_u
     if not row:
         raise HTTPException(status_code=401, detail="User not found")
     return _user_dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Avatar Endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/user/avatar")
+async def upload_avatar(request: Request, user: dict = Depends(get_current_user)):
+    """Upload profile picture as JPEG bytes (max 1MB)."""
+    body = await request.body()
+    if len(body) > 1_048_576:  # 1MB limit
+        raise HTTPException(status_code=413, detail="Avatar must be under 1MB")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_users SET avatar_data = %s WHERE id = %s",
+                (body, user["sub"]),
+            )
+    return {"ok": True}
+
+
+@app.get("/user/avatar/{user_id}")
+async def get_avatar(user_id: str):
+    """Returns raw JPEG bytes or 404."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT avatar_data FROM ios_users WHERE id = %s", (user_id,)
+            )
+            row = await cur.fetchone()
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="No avatar set")
+    from fastapi.responses import Response
+    return Response(content=bytes(row[0]), media_type="image/jpeg")
+
+
+# ---------------------------------------------------------------------------
+# Expanded Settings Endpoints
+# ---------------------------------------------------------------------------
+
+_EXPANDED_SETTINGS_COLS = [
+    "user_id", "audio_settings_json", "theme_color", "vinyl_disc_enabled",
+    "show_queue_preview", "songs_per_row", "albums_per_row", "bg_animation",
+    "bg_opacity", "preferred_audio_format", "download_path", "updated_at",
+]
+
+_EXPANDED_SETTINGS_ALLOWED = [
+    "audio_settings_json", "theme_color", "vinyl_disc_enabled",
+    "show_queue_preview", "songs_per_row", "albums_per_row", "bg_animation",
+    "bg_opacity", "preferred_audio_format", "download_path",
+]
+
+
+@app.get("/user/settings/expanded")
+async def get_expanded_settings(user: dict = Depends(get_current_user)):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT * FROM ios_user_settings_expanded WHERE user_id = %s",
+                (user["sub"],),
+            )
+            row = await cur.fetchone()
+    if not row:
+        return {}  # Return empty dict — client uses defaults
+    return dict(zip(_EXPANDED_SETTINGS_COLS, row))
+
+
+@app.put("/user/settings/expanded")
+async def put_expanded_settings(request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    updates = {k: v for k, v in body.items() if k in _EXPANDED_SETTINGS_ALLOWED}
+    if not updates:
+        return {"ok": True}
+    set_clause = ", ".join(f"{k} = %s" for k in updates)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"INSERT INTO ios_user_settings_expanded (user_id, {', '.join(updates)}) "
+                f"VALUES (%s, {', '.join(['%s'] * len(updates))}) "
+                f"ON DUPLICATE KEY UPDATE {set_clause}",
+                [user["sub"]] + list(updates.values()) + list(updates.values()),
+            )
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
@@ -1416,6 +1523,44 @@ async def sync_push(
 
     return {"status": "synced"}
 
+
+
+
+# ---------------------------------------------------------------------------
+# Internal Telemetry Endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/internal/logs", status_code=204)
+async def ingest_logs(request: Request):
+    """Receives batched log entries from iOS clients. No auth required for
+    internal telemetry. Inserts into ios_app_logs table."""
+    try:
+        entries = await request.json()
+        if not isinstance(entries, list):
+            return
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                for e in entries[:100]:  # cap at 100 entries per batch
+                    if not isinstance(e, dict):
+                        continue
+                    await cur.execute(
+                        "INSERT IGNORE INTO ios_app_logs "
+                        "(level, category, message, file, line, timestamp, extra) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        (
+                            str(e.get("level", "info"))[:10],
+                            str(e.get("category", "general"))[:30],
+                            str(e.get("message", ""))[:500],
+                            str(e.get("file", ""))[:100],
+                            int(e.get("line", 0)),
+                            e.get("timestamp"),
+                            json.dumps(e.get("extra", {})),
+                        ),
+                    )
+    except Exception:
+        pass  # Logging must never fail the app
 
 # ---------------------------------------------------------------------------
 # Entry point (for local dev without Docker)
