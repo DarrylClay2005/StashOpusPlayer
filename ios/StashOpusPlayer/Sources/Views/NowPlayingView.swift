@@ -661,14 +661,24 @@ struct NowPlayingView: View {
 
     private var upNextSongs: [Song] {
         guard !player.queue.isEmpty else { return [] }
-        let start = (player.currentIndex + 1) % player.queue.count
-        var result: [Song] = []
-        var i = start
-        while result.count < 10 && i != player.currentIndex {
-            result.append(player.queue[i])
-            i = (i + 1) % player.queue.count
+        if player.shuffleEnabled {
+            // When shuffle is on, show remaining songs (excluding current) in queue order.
+            // Referencing player.shuffleEnabled ensures this recomputes on toggle.
+            var pool = player.queue
+            if let idx = pool.firstIndex(where: { $0.id == player.currentSong?.id }) {
+                pool.remove(at: idx)
+            }
+            return Array(pool.prefix(10))
+        } else {
+            let start = (player.currentIndex + 1) % player.queue.count
+            var result: [Song] = []
+            var i = start
+            while result.count < 10 && i != player.currentIndex {
+                result.append(player.queue[i])
+                i = (i + 1) % player.queue.count
+            }
+            return result
         }
-        return result
     }
 
     private var queuePreviewSection: some View {
@@ -729,6 +739,11 @@ struct NowPlayingView: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(AppTheme.accent, in: Capsule())
+                    }
+                    if player.shuffleEnabled {
+                        Image(systemName: "shuffle")
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.accent)
                     }
                     Spacer()
                     Text("\(player.queue.count) tracks")

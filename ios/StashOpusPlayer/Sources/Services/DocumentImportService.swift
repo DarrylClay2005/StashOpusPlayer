@@ -247,6 +247,16 @@ struct DocumentImportService {
             }
         }
 
+        // When no album tag is present, use the immediate parent folder name as album
+        // so music organised in Artist/Album/track.mp3 structures is grouped correctly.
+        if album.isEmpty {
+            let parentName = url.deletingLastPathComponent().lastPathComponent
+            let skipFolders: Set<String> = ["Imported Music", "Documents", ""]
+            if !skipFolders.contains(parentName) {
+                album = parentName
+            }
+        }
+
         var song = Song(
             title: title,
             artist: artist,

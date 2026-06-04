@@ -116,6 +116,18 @@ CREATE TABLE IF NOT EXISTS ios_user_settings_expanded (
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
+-- Per-user music upload audit log (actual files live on disk in USER_MUSIC_DIR)
+CREATE TABLE IF NOT EXISTS ios_user_music_uploads (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    filename TEXT NOT NULL,
+    folder VARCHAR(255) DEFAULT '',
+    file_size_bytes INT DEFAULT 0,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user_uploads (user_id, uploaded_at),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
 -- iOS client telemetry / background log ingestion
 CREATE TABLE IF NOT EXISTS ios_app_logs (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

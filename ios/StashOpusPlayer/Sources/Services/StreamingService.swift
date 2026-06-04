@@ -32,6 +32,35 @@ struct StreamTrack: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - UserMusicTrack  (personal server library, per-user)
+
+struct UserMusicTrack: Identifiable, Codable, Hashable {
+    let id: String
+    let title: String
+    let artist: String
+    let album: String
+    let duration: Double
+    let genre: String
+    let trackNumber: String
+    let hasArtwork: Bool
+    let serverPath: String   // relative to the user's personal music dir
+    let filename: String
+    let ext: String
+
+    var durationText: String {
+        let s = Int(duration)
+        return "\(s / 60):\(String(format: "%02d", s % 60))"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, artist, album, duration, genre
+        case trackNumber = "track_number"
+        case hasArtwork  = "has_artwork"
+        case serverPath  = "server_path"
+        case filename, ext
+    }
+}
+
 // MARK: - ServerTrack
 
 struct ServerTrack: Identifiable, Codable, Hashable {
@@ -110,6 +139,13 @@ final class StreamingService: ObservableObject {
 
     @Published var serverTracks: [ServerTrack] = []
     @Published var isSearchingServer = false
+
+    // MARK: User Music Library state (personal per-user storage)
+
+    @Published var userMusicTracks: [UserMusicTrack] = []
+    @Published var isLoadingUserMusic = false
+    @Published var isUploadingUserMusic = false
+    @Published var uploadProgress: Double = 0
 
     // MARK: Persisted settings
 
@@ -457,6 +493,150 @@ final class StreamingService: ObservableObject {
         case "wav":  return "wav"
         default:     return "m4a"   // m4a and best both produce m4a
         }
+    }
+
+    // MARK: - User Music Library (personal per-user server storage)
+
+    /// Returns the stream URL for a user music track (requires JWT token).
+    func userMusicStreamURL(for track: UserMusicTrack, token: String) -> URL? {
+        guard let encoded = track.serverPath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
+        let base = bridgeURL.trimmingCharacters(in: .init(charactersIn: "/"))
+        return URL(string: "\(base)/user/music/stream?path=\(encoded)")
+    }
+
+    /// Returns the artwork URL for a user music track (requires JWT token).
+    func userMusicArtworkURL(for track: UserMusicTrack) -> URL? {
+        guard track.hasArtwork,
+              let encoded = track.serverPath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
+        let base = bridgeURL.trimmingCharacters(in: .init(charactersIn: "/"))
+        return URL(string: "\(base)/user/music/artwork?path=\(encoded)")
+    }
+
+    /// Wraps a `UserMusicTrack` in a `Song` for playback.
+    func toSong(userMusicTrack: UserMusicTrack, token: String) -> Song {
+        let streamURL = userMusicStreamURL(for: userMusicTrack, token: token)
+        let artworkKey = userMusicArtworkURL(for: userMusicTrack)?.absoluteString
+        return Song(
+            id: userMusicTrack.id,
+            title: userMusicTrack.title,
+            artist: userMusicTrack.artist,
+            album: userMusicTrack.album,
+            duration: userMusicTrack.duration,
+            url: streamURL,
+            persistentID: nil,
+            artworkCacheKey: artworkKey,
+            trackNumber: Int(userMusicTrack.trackNumber) ?? 0,
+            year: "",
+            genre: userMusicTrack.genre,
+            bitrate: 0,
+            sampleRate: 0
+        )
+    }
+
+    /// Fetches the user's personal music library from the server.
+    func fetchUserMusic(token: String, search: String = "") async {
+        appLog("fetchUserMusic: search=\"\(search)\"", category: "network")
+        isLoadingUserMusic = true
+        errorMessage = nil
+        defer { isLoadingUserMusic = false }
+
+        var components = URLComponents()
+        components.path = "/user/music"
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "200"),
+        ]
+        if !search.isEmpty {
+            components.queryItems?.append(URLQueryItem(name: "search", value: search))
+        }
+
+        guard var request = makeRequest(components.string ?? "/user/music") else {
+            errorMessage = "Invalid bridge URL."
+            return
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse, !(200..<300).contains(httpResponse.statusCode) {
+                appWarn("fetchUserMusic: HTTP \(httpResponse.statusCode)", category: "network")
+                errorMessage = "Unable to reach server. Check your connection."
+                return
+            }
+
+            struct Response: Decodable {
+                let tracks: [UserMusicTrack]
+                let total: Int
+                let configured: Bool
+            }
+            let decoded = try JSONDecoder().decode(Response.self, from: data)
+            if !decoded.configured {
+                errorMessage = "User music storage is not configured on the server."
+                userMusicTracks = []
+            } else {
+                userMusicTracks = decoded.tracks
+                appLog("fetchUserMusic: \(decoded.tracks.count) tracks", category: "network")
+            }
+        } catch {
+            appError("fetchUserMusic: \(error.localizedDescription)", category: "network")
+            errorMessage = "Failed to load your library: \(error.localizedDescription)"
+        }
+    }
+
+    /// Uploads a local audio file to the user's personal music library on the server.
+    func uploadToUserLibrary(fileURL: URL, token: String, folder: String = "") async throws {
+        appLog("uploadToUserLibrary: \(fileURL.lastPathComponent)", category: "network")
+        isUploadingUserMusic = true
+        uploadProgress = 0
+        defer { isUploadingUserMusic = false; uploadProgress = 0 }
+
+        let filename = fileURL.lastPathComponent
+        var components = URLComponents()
+        components.path = "/user/music/upload"
+        components.queryItems = [
+            URLQueryItem(name: "filename", value: filename),
+        ]
+        if !folder.isEmpty {
+            components.queryItems?.append(URLQueryItem(name: "folder", value: folder))
+        }
+
+        guard var request = makeRequest(components.string ?? "/user/music/upload") else {
+            throw StreamingError.invalidURL
+        }
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 180
+
+        let data = try Data(contentsOf: fileURL)
+        request.httpBody = data
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse {
+            switch http.statusCode {
+            case 200..<300: break
+            case 413: throw StreamingError.httpError(413)
+            default: throw StreamingError.httpError(http.statusCode)
+            }
+        }
+        appLog("uploadToUserLibrary: uploaded \(filename)", category: "network")
+    }
+
+    /// Deletes a file from the user's personal music library on the server.
+    func deleteUserMusic(path: String, token: String) async throws {
+        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
+        guard var request = makeRequest("/user/music/\(encoded)") else {
+            throw StreamingError.invalidURL
+        }
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw StreamingError.httpError(http.statusCode)
+        }
+        appLog("deleteUserMusic: deleted \(path)", category: "network")
     }
 
     // MARK: - Health Check

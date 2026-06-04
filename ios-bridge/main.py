@@ -45,6 +45,9 @@ logger = logging.getLogger("ios-bridge")
 YTDLP_CACHE_DIR: str = os.getenv("YTDLP_CACHE_DIR", "/app/.cache/yt-dlp")
 API_KEY: str = os.getenv("IOS_BRIDGE_API_KEY", "")
 SERVER_MUSIC_DIR: str = os.getenv("SERVER_MUSIC_DIR", "")
+# Per-user music directory. Each user gets {USER_MUSIC_DIR}/{user_id}/.
+# Falls back to {SERVER_MUSIC_DIR}/users/ if SERVER_MUSIC_DIR is set.
+USER_MUSIC_DIR: str = os.getenv("USER_MUSIC_DIR", "")
 SUPPORTED_AUDIO_EXTS: frozenset[str] = frozenset({
     ".mp3", ".m4a", ".aac", ".wav", ".aif", ".aiff",
     ".flac", ".opus", ".ogg", ".caf", ".mp4", ".m4v",
@@ -247,10 +250,12 @@ def _parse_track(entry: dict, source: str) -> dict:
     track_id = entry.get("id") or entry.get("webpage_url_basename") or ""
     title = entry.get("title") or entry.get("fulltitle") or "Unknown Title"
 
-    # Artist: uploader / channel / artist tag, in priority order
+    # Artist: uploader / channel / artist tag, in priority order.
+    # SoundCloud flat-playlist entries often use uploader_id rather than uploader.
     artist = (
         entry.get("artist")
         or entry.get("uploader")
+        or entry.get("uploader_id")
         or entry.get("channel")
         or entry.get("creator")
         or "Unknown Artist"
@@ -417,14 +422,22 @@ async def search(
     prefix = "ytsearch" if source == "youtube" else "scsearch"
     search_url = f"{prefix}{limit}:{q}"
 
-    base_args = [
-        search_url,
-        "--dump-json",
-        "--flat-playlist",
-        "--no-playlist",
-    ]
-    if source == "youtube":
-        base_args += ["--cache-dir", YTDLP_CACHE_DIR]
+    # SoundCloud flat-playlist entries are sparse (often missing thumbnails and artist).
+    # Use full --dump-json (no --flat-playlist) for SoundCloud so we get complete metadata.
+    if source == "soundcloud":
+        base_args = [
+            search_url,
+            "--dump-json",
+            "--no-playlist",
+        ]
+    else:
+        base_args = [
+            search_url,
+            "--dump-json",
+            "--flat-playlist",
+            "--no-playlist",
+            "--cache-dir", YTDLP_CACHE_DIR,
+        ]
 
     try:
         entries = await _run_ytdlp(*base_args, timeout=30.0)
@@ -1684,11 +1697,20 @@ async def server_library(
             if search_lower not in title.lower() and search_lower not in artist.lower():
                 continue
 
+        # Use embedded album tag; if absent, fall back to parent folder name so
+        # tracks organised in subdirectories (e.g. Music/AlbumName/track.mp3)
+        # are grouped correctly in the album view without requiring tags.
+        album_name = meta.get("album") or ""
+        if not album_name:
+            parent = fpath.parent
+            if parent.resolve() != music_root.resolve():
+                album_name = parent.name
+
         tracks.append({
             "id": _stable_id(abs_path),
             "title": title,
             "artist": artist,
-            "album": meta.get("album") or "",
+            "album": album_name,
             "duration": meta.get("duration") or 0.0,
             "genre": meta.get("genre") or "",
             "track_number": meta.get("track_number") or "",
@@ -1776,6 +1798,227 @@ async def server_artwork(
 
     from fastapi.responses import Response
     return Response(content=stdout_bytes, media_type="image/jpeg")
+
+
+# ---------------------------------------------------------------------------
+# Per-user Music Library Endpoints
+# ---------------------------------------------------------------------------
+
+def _resolve_user_music_root() -> Optional[pathlib.Path]:
+    """Returns the base directory for per-user music, or None if unconfigured."""
+    if USER_MUSIC_DIR:
+        return pathlib.Path(USER_MUSIC_DIR).resolve()
+    if SERVER_MUSIC_DIR:
+        return (pathlib.Path(SERVER_MUSIC_DIR) / "users").resolve()
+    return None
+
+
+def _user_music_dir(user_id: str) -> Optional[pathlib.Path]:
+    root = _resolve_user_music_root()
+    if root is None:
+        return None
+    return root / user_id
+
+
+@app.get("/user/music")
+async def get_user_music(
+    search: str = Query("", description="Filter by title/artist/album"),
+    limit: int = Query(200, ge=1, le=500),
+    user: dict = Depends(get_current_user),
+):
+    """Lists all music files in the authenticated user's personal server directory."""
+    user_id = user["sub"]
+    music_dir = _user_music_dir(user_id)
+    if music_dir is None:
+        return {"tracks": [], "total": 0, "configured": False}
+
+    music_dir.mkdir(parents=True, exist_ok=True)
+
+    audio_files: list[pathlib.Path] = []
+    try:
+        for entry in music_dir.rglob("*"):
+            if entry.is_file() and entry.suffix.lower() in SUPPORTED_AUDIO_EXTS:
+                audio_files.append(entry)
+    except Exception as exc:
+        logger.error("Error scanning user music dir for %s: %s", user_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to scan music directory")
+
+    abs_paths = [str(f.resolve()) for f in audio_files]
+    tag_results = await asyncio.gather(*(_ffprobe_tags(p) for p in abs_paths))
+
+    tracks: list[dict] = []
+    for fpath, meta in zip(audio_files, tag_results):
+        abs_path = str(fpath.resolve())
+        try:
+            rel_path = str(fpath.relative_to(music_dir))
+        except ValueError:
+            rel_path = fpath.name
+
+        ext = fpath.suffix.lstrip(".").lower()
+        title = meta.get("title") or fpath.stem
+        artist = meta.get("artist") or "Unknown Artist"
+        album_name = meta.get("album") or ""
+        if not album_name:
+            parent = fpath.parent
+            if parent.resolve() != music_dir.resolve():
+                album_name = parent.name
+
+        if search:
+            q = search.lower()
+            if q not in title.lower() and q not in artist.lower() and q not in album_name.lower():
+                continue
+
+        tracks.append({
+            "id": _stable_id(abs_path),
+            "title": title,
+            "artist": artist,
+            "album": album_name,
+            "duration": meta.get("duration") or 0.0,
+            "genre": meta.get("genre") or "",
+            "track_number": meta.get("track_number") or "",
+            "has_artwork": meta.get("has_artwork") or False,
+            "server_path": rel_path,
+            "filename": fpath.name,
+            "ext": ext,
+        })
+
+    tracks.sort(key=lambda t: (t["album"].lower(), t["title"].lower()))
+    total = len(tracks)
+    return {"tracks": tracks[:limit], "total": total, "configured": True}
+
+
+@app.post("/user/music/upload", status_code=201)
+async def upload_user_music(
+    request: Request,
+    filename: str = Query(..., description="Destination filename (e.g. song.mp3)"),
+    folder: str = Query("", description="Optional subfolder inside user's music dir"),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Uploads raw audio bytes to the authenticated user's personal music directory.
+    Max 100 MB. The Content-Type header should match the audio format.
+    """
+    user_id = user["sub"]
+    music_dir = _user_music_dir(user_id)
+    if music_dir is None:
+        raise HTTPException(status_code=503, detail="User music storage not configured on server")
+
+    # Sanitise the destination filename
+    safe_name = pathlib.Path(filename).name.replace("..", "").strip()
+    if not safe_name or pathlib.Path(safe_name).suffix.lower().lstrip(".") not in {
+        e.lstrip(".") for e in SUPPORTED_AUDIO_EXTS
+    }:
+        raise HTTPException(status_code=400, detail="Unsupported or invalid filename")
+
+    dest_dir = music_dir / folder.strip("/") if folder.strip("/") else music_dir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / safe_name
+
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty file body")
+    if len(body) > 100 * 1024 * 1024:  # 100 MB
+        raise HTTPException(status_code=413, detail="File too large (max 100 MB)")
+
+    try:
+        dest_path.write_bytes(body)
+    except Exception as exc:
+        logger.error("upload_user_music: write failed for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to save file")
+
+    logger.info("upload_user_music: saved %s for user %s (%d bytes)", safe_name, user_id, len(body))
+    abs_path = str(dest_path.resolve())
+    try:
+        rel = str(dest_path.relative_to(music_dir))
+    except ValueError:
+        rel = safe_name
+    return {"filename": safe_name, "path": rel, "id": _stable_id(abs_path), "size": len(body)}
+
+
+@app.get("/user/music/stream")
+async def stream_user_music(
+    path: str = Query(..., description="Relative path within user's music dir"),
+    user: dict = Depends(get_current_user),
+):
+    """Streams an audio file from the authenticated user's personal music directory."""
+    user_id = user["sub"]
+    music_dir = _user_music_dir(user_id)
+    if music_dir is None:
+        raise HTTPException(status_code=503, detail="User music storage not configured")
+
+    full_path = (music_dir / path).resolve()
+    if not str(full_path).startswith(str(music_dir)):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not full_path.exists() or not full_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = full_path.suffix.lstrip(".").lower()
+    return FileResponse(path=str(full_path), media_type=_audio_media_type(ext), filename=full_path.name)
+
+
+@app.get("/user/music/artwork")
+async def user_music_artwork(
+    path: str = Query(..., description="Relative path within user's music dir"),
+    user: dict = Depends(get_current_user),
+):
+    """Extracts embedded album art from a user music file and returns it as JPEG."""
+    user_id = user["sub"]
+    music_dir = _user_music_dir(user_id)
+    if music_dir is None:
+        raise HTTPException(status_code=503, detail="User music storage not configured")
+
+    full_path = (music_dir / path).resolve()
+    if not str(full_path).startswith(str(music_dir)):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not full_path.exists() or not full_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    cmd = ["ffmpeg", "-i", str(full_path), "-map", "0:v", "-frames:v", "1", "-f", "image2", "-vcodec", "copy", "-"]
+    try:
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=408, detail="Artwork extraction timed out")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Artwork extraction failed")
+
+    if not stdout_bytes:
+        raise HTTPException(status_code=404, detail="No embedded artwork found")
+
+    from fastapi.responses import Response
+    return Response(content=stdout_bytes, media_type="image/jpeg")
+
+
+@app.delete("/user/music/{filepath:path}", status_code=204)
+async def delete_user_music(
+    filepath: str,
+    user: dict = Depends(get_current_user),
+):
+    """Deletes a file from the authenticated user's personal music directory."""
+    user_id = user["sub"]
+    music_dir = _user_music_dir(user_id)
+    if music_dir is None:
+        raise HTTPException(status_code=503, detail="User music storage not configured")
+
+    full_path = (music_dir / filepath).resolve()
+    if not str(full_path).startswith(str(music_dir)):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        full_path.unlink()
+        # Remove empty parent directories up to the user root
+        parent = full_path.parent
+        while parent != music_dir and parent.exists():
+            try:
+                parent.rmdir()  # only removes if empty
+                parent = parent.parent
+            except OSError:
+                break
+    except Exception as exc:
+        logger.error("delete_user_music: failed for user %s path %s: %s", user_id, filepath, exc)
+        raise HTTPException(status_code=500, detail="Failed to delete file")
 
 
 # ---------------------------------------------------------------------------

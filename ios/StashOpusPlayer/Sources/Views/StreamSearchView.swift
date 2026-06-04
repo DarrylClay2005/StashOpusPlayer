@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - StreamSearchView
 
@@ -7,6 +8,7 @@ struct StreamSearchView: View {
     @EnvironmentObject private var streaming: StreamingService
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var library: LibraryManager
+    @EnvironmentObject private var account: AccountService
 
     @State private var searchText        = ""
     @State private var selectedSource    = "youtube"
@@ -20,7 +22,11 @@ struct StreamSearchView: View {
     @State private var downloadingServerTrackID: String? = nil
     @State private var downloadedServerTrackIDs: Set<String> = []
 
-    private let sources = ["youtube", "soundcloud", "server"]
+    // My Library upload
+    @State private var showUploadPicker = false
+    @State private var deletingUserTrackPath: String? = nil
+
+    private let sources = ["youtube", "soundcloud", "server", "my"]
 
     var body: some View {
         NavigationStack {
@@ -113,6 +119,8 @@ struct StreamSearchView: View {
             // Results
             if selectedSource == "server" {
                 serverResultsBody
+            } else if selectedSource == "my" {
+                userLibraryBody
             } else {
                 streamResultsBody
             }
@@ -120,8 +128,8 @@ struct StreamSearchView: View {
         .searchable(
             text: $searchText,
             placement: .navigationBarDrawer(displayMode: .always),
-            prompt: selectedSource == "server"
-                ? "Search server library…"
+            prompt: selectedSource == "server" ? "Search server library…"
+                : selectedSource == "my" ? "Search your library…"
                 : "Search YouTube, SoundCloud…"
         )
         .onSubmit(of: .search) {
@@ -132,6 +140,17 @@ struct StreamSearchView: View {
                 streaming.searchResults = []
                 streaming.serverTracks = []
                 streaming.errorMessage = nil
+            }
+        }
+        .onChange(of: selectedSource) { src in
+            if src == "my" {
+                guard let token = account.token else { return }
+                Task { await streaming.fetchUserMusic(token: token) }
+            }
+        }
+        .onAppear {
+            if selectedSource == "my", let token = account.token {
+                Task { await streaming.fetchUserMusic(token: token) }
             }
         }
     }
@@ -223,6 +242,117 @@ struct StreamSearchView: View {
         }
     }
 
+    // MARK: — My Library body
+
+    private var userLibraryBody: some View {
+        Group {
+            if !account.isLoggedIn {
+                VStack {
+                    Spacer()
+                    VStack(spacing: 12) {
+                        Image(systemName: "person.crop.circle.badge.questionmark")
+                            .font(.system(size: 44))
+                            .foregroundStyle(AppTheme.textSecondary)
+                        Text("Log in to access your personal library")
+                            .font(AppTheme.bodyFont(size: 15))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                    }
+                    Spacer()
+                }
+            } else if streaming.isLoadingUserMusic {
+                VStack {
+                    Spacer()
+                    ProgressView("Loading your library…")
+                        .tint(AppTheme.accent)
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Spacer()
+                }
+            } else {
+                List {
+                    // Upload button header
+                    Section {
+                        Button {
+                            showUploadPicker = true
+                        } label: {
+                            HStack {
+                                Label("Upload Music to Server", systemImage: "icloud.and.arrow.up")
+                                    .foregroundStyle(AppTheme.accent)
+                                Spacer()
+                                if streaming.isUploadingUserMusic {
+                                    ProgressView()
+                                        .tint(AppTheme.accent)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(streaming.isUploadingUserMusic)
+                    }
+                    .listRowBackground(AppTheme.surface)
+
+                    if streaming.userMusicTracks.isEmpty {
+                        Section {
+                            VStack(spacing: 12) {
+                                Image(systemName: "folder.badge.plus")
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                Text("Your library is empty")
+                                    .font(AppTheme.headlineFont(size: 16))
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Text("Upload music files to your personal server folder to play them anywhere.")
+                                    .font(AppTheme.bodyFont(size: 14))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 20)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 30)
+                            .listRowBackground(Color.clear)
+                        }
+                    } else {
+                        ForEach(streaming.userMusicTracks) { track in
+                            UserMusicTrackRow(
+                                track: track,
+                                artworkURL: streaming.userMusicArtworkURL(for: track),
+                                onPlay: { handleUserLibraryPlay(track: track) },
+                                onDelete: { handleUserLibraryDelete(track: track) }
+                            )
+                            .listRowBackground(AppTheme.surface)
+                            .listRowSeparatorTint(AppTheme.background)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .fileImporter(
+                    isPresented: $showUploadPicker,
+                    allowedContentTypes: [.audio],
+                    allowsMultipleSelection: true
+                ) { result in
+                    guard let token = account.token else { return }
+                    switch result {
+                    case .success(let urls):
+                        Task {
+                            for url in urls {
+                                let didAccess = url.startAccessingSecurityScopedResource()
+                                defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+                                do {
+                                    try await streaming.uploadToUserLibrary(fileURL: url, token: token)
+                                } catch {
+                                    streaming.errorMessage = "Upload failed: \(error.localizedDescription)"
+                                }
+                            }
+                            await streaming.fetchUserMusic(token: token)
+                        }
+                    case .failure(let error):
+                        streaming.errorMessage = "File picker error: \(error.localizedDescription)"
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: — Helpers
 
     private func sourceLabel(_ src: String) -> String {
@@ -230,6 +360,7 @@ struct StreamSearchView: View {
         case "youtube":    return "YouTube"
         case "soundcloud": return "SoundCloud"
         case "server":     return "Server"
+        case "my":         return "My Library"
         default:           return src.capitalized
         }
     }
@@ -237,6 +368,9 @@ struct StreamSearchView: View {
     private func triggerSearch() {
         if selectedSource == "server" {
             Task { await streaming.searchServerLibrary(query: searchText) }
+        } else if selectedSource == "my" {
+            guard let token = account.token else { return }
+            Task { await streaming.fetchUserMusic(token: token, search: searchText) }
         } else {
             Task { await streaming.search(query: searchText, source: selectedSource) }
         }
@@ -286,6 +420,28 @@ struct StreamSearchView: View {
                 streaming.errorMessage = "Download failed: \(error.localizedDescription)"
             }
             downloadingTrackID = nil
+        }
+    }
+
+    // MARK: — User Library Actions
+
+    private func handleUserLibraryPlay(track: UserMusicTrack) {
+        guard let token = account.token else { return }
+        let song = streaming.toSong(userMusicTrack: track, token: token)
+        player.play(song: song, in: streaming.userMusicTracks.map { streaming.toSong(userMusicTrack: $0, token: token) })
+    }
+
+    private func handleUserLibraryDelete(track: UserMusicTrack) {
+        guard let token = account.token else { return }
+        deletingUserTrackPath = track.serverPath
+        Task {
+            do {
+                try await streaming.deleteUserMusic(path: track.serverPath, token: token)
+                await streaming.fetchUserMusic(token: token)
+            } catch {
+                streaming.errorMessage = "Delete failed: \(error.localizedDescription)"
+            }
+            deletingUserTrackPath = nil
         }
     }
 
@@ -544,6 +700,80 @@ private struct ServerTrackRow: View {
             }
             .buttonStyle(.plain)
             .disabled(isDownloading || isDownloaded)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onPlay)
+    }
+}
+
+// MARK: - UserMusicTrackRow
+
+private struct UserMusicTrackRow: View {
+    let track: UserMusicTrack
+    let artworkURL: URL?
+    let onPlay: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AsyncImage(url: artworkURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().aspectRatio(contentMode: .fill)
+                case .failure, .empty:
+                    Image(systemName: "music.note")
+                        .font(.system(size: 18))
+                        .foregroundStyle(AppTheme.textSecondary)
+                @unknown default:
+                    Color.clear
+                }
+            }
+            .frame(width: 44, height: 44)
+            .background(AppTheme.elevatedSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(track.title)
+                    .font(AppTheme.bodyFont(size: 14))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .lineLimit(1)
+                if !track.artist.isEmpty && track.artist != "Unknown Artist" {
+                    Text(track.artist)
+                        .font(AppTheme.bodyFont(size: 12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(1)
+                }
+                if !track.album.isEmpty {
+                    Text(track.album)
+                        .font(AppTheme.bodyFont(size: 11))
+                        .foregroundStyle(AppTheme.textSecondary.opacity(0.7))
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            Text(track.durationText)
+                .font(AppTheme.monoFont(size: 12))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(minWidth: 36, alignment: .trailing)
+
+            Button(action: onPlay) {
+                Image(systemName: "play.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "trash")
+                    .font(.system(size: 16))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())

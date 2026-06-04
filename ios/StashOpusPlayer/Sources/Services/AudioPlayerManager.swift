@@ -52,7 +52,9 @@ final class AudioPlayerManager: ObservableObject {
     private let environmentNode = AVAudioEnvironmentNode()
     private let spatialSourceMixer = AVAudioMixerNode()
     private var rotationAngle: Double = 0
-    private var rotationHz: Double = 0.18
+    /// The 8D rotation speed in Hz. Persisted across sessions. Published so EffectsView can bind to it.
+    @Published var rotationHz: Double = UserDefaults.standard.double(forKey: "8d_rotation_hz") > 0
+        ? UserDefaults.standard.double(forKey: "8d_rotation_hz") : 0.18
     private var rotationLink: CADisplayLink?
     private var is8DActive = false
 
@@ -1087,6 +1089,16 @@ final class AudioPlayerManager: ObservableObject {
         )
     }
 
+    /// Updates the 8D rotation speed while the effect is running. Persists to UserDefaults.
+    func set8DSpeed(hz: Double) {
+        let clamped = min(max(hz, 0.02), 2.0)
+        rotationHz = clamped
+        UserDefaults.standard.set(clamped, forKey: "8d_rotation_hz")
+        if is8DActive {
+            start8DRotation(hz: clamped)
+        }
+    }
+
     @objc private func update8DRotation() {
         guard is8DActive else { return }
         // Advance angle by one display-link frame (assume 60 fps; CADisplayLink duration
@@ -1094,12 +1106,9 @@ final class AudioPlayerManager: ObservableObject {
         rotationAngle += 2 * .pi * rotationHz / 60.0
         // Wrap to keep angle in [0, 2π) to avoid floating-point drift.
         if rotationAngle >= 2 * .pi { rotationAngle -= 2 * .pi }
-        // Pan oscillates between -1.0 (full left) and +1.0 (full right) at the rotation
-        // frequency. This produces a clear, audible 8D "surround" effect on any stereo
-        // output (headphones or speakers), unlike AVAudioEnvironmentNode yaw rotation which
-        // requires HRTF rendering to be perceptible and is unreliable on standard stereo paths.
-        // Scale to ±0.7 so neither side ever goes fully silent during rotation.
-        let pan = Float(sin(rotationAngle)) * 0.7
+        // Pan oscillates at the rotation frequency. Scaled to ±0.5 — enough for a clear
+        // spatial effect while keeping both channels audible (~-6 dB on the receding side).
+        let pan = Float(sin(rotationAngle)) * 0.5
         crossfadeMixer.pan = pan
     }
 

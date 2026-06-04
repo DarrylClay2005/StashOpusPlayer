@@ -7,42 +7,102 @@ import UIKit
 struct BackgroundSettingsView: View {
     @EnvironmentObject var bg: BackgroundService
     @State private var selectedItems: [PhotosPickerItem] = []
+    @State private var isLoadingPhotos = false
 
     var body: some View {
         List {
-            // MARK: Enable Toggle
+            // MARK: Status + Start/Stop button
             Section {
-                Toggle("Enable Gallery Background", isOn: $bg.isEnabled)
-                    .tint(AppTheme.accent)
-                    .onChange(of: bg.isEnabled) { _ in
-                        bg.saveSettings()
-                        if bg.isEnabled {
-                            bg.startShuffling()
-                        } else {
-                            bg.stopShuffling()
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(bg.isEnabled && bg.isActive ? "Gallery Running" : bg.images.isEmpty ? "No images added" : "Gallery Paused")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(bg.isEnabled && bg.isActive ? AppTheme.accent : AppTheme.textPrimary)
+                        if !bg.images.isEmpty {
+                            Text("\(bg.images.count) image\(bg.images.count == 1 ? "" : "s") loaded")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.textSecondary)
                         }
                     }
+                    Spacer()
+                    if !bg.images.isEmpty {
+                        Button {
+                            if bg.isEnabled && bg.isActive {
+                                bg.isEnabled = false
+                                bg.stopShuffling()
+                                bg.saveSettings()
+                            } else {
+                                bg.isEnabled = true
+                                bg.saveSettings()
+                                bg.startShuffling()
+                            }
+                        } label: {
+                            Text(bg.isEnabled && bg.isActive ? "Stop" : "Start")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 7)
+                                .background(bg.isEnabled && bg.isActive ? Color.red.opacity(0.8) : AppTheme.accent, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .animation(.easeInOut(duration: 0.2), value: bg.isEnabled && bg.isActive)
+                    }
+                }
+                .padding(.vertical, 4)
+
+                // Preview current background image
+                if bg.isEnabled, !bg.images.isEmpty {
+                    Image(uiImage: bg.images[bg.currentIndex % bg.images.count])
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 120)
+                        .clipped()
+                        .cornerRadius(10)
+                        .blur(radius: bg.isBlurred ? 8 : 0, opaque: true)
+                        .opacity(bg.opacity)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(AppTheme.accent.opacity(0.4), lineWidth: 1)
+                        )
+                }
             }
 
-            // MARK: Image Picker Section (always visible so images can be added before enabling)
+            // MARK: Image Picker Section
             Section("Images (\(bg.images.count) saved)") {
                 PhotosPicker(
                     selection: $selectedItems,
                     maxSelectionCount: 50,
                     matching: .images
                 ) {
-                    Label("Add from Photo Library", systemImage: "photo.on.rectangle.angled")
-                        .foregroundStyle(AppTheme.accent)
+                    HStack {
+                        Label("Add from Photo Library", systemImage: "photo.on.rectangle.angled")
+                            .foregroundStyle(AppTheme.accent)
+                        Spacer()
+                        if isLoadingPhotos {
+                            ProgressView()
+                                .tint(AppTheme.accent)
+                        }
+                    }
                 }
                 .onChange(of: selectedItems) { items in
+                    guard !items.isEmpty else { return }
+                    isLoadingPhotos = true
                     Task {
+                        var loaded: [UIImage] = []
                         for item in items {
                             if let data = try? await item.loadTransferable(type: Data.self),
                                let image = UIImage(data: data) {
-                                await MainActor.run { bg.addImages([image]) }
+                                loaded.append(image)
                             }
                         }
-                        await MainActor.run { selectedItems = [] }
+                        await MainActor.run {
+                            if !loaded.isEmpty {
+                                bg.addImages(loaded)
+                            }
+                            selectedItems = []
+                            isLoadingPhotos = false
+                        }
                     }
                 }
 
@@ -71,6 +131,15 @@ struct BackgroundSettingsView: View {
                                                 .font(.caption)
                                         }
                                     }
+                                    .overlay(alignment: .bottomLeading) {
+                                        if i == bg.currentIndex && bg.isEnabled {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(AppTheme.accent)
+                                                .background(Color.black.opacity(0.5), in: Circle())
+                                                .font(.caption)
+                                                .padding(3)
+                                        }
+                                    }
                             }
                         }
                         .padding(.vertical, 4)
@@ -78,7 +147,8 @@ struct BackgroundSettingsView: View {
                 }
             }
 
-            if bg.isEnabled {
+            // Show settings as soon as images exist (not just when enabled)
+            if !bg.images.isEmpty {
 
                 // MARK: Shuffle Interval Section
                 Section("Shuffle Interval") {
