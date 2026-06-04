@@ -136,16 +136,22 @@ final class BackgroundService: ObservableObject {
 
     private func loadImagesFromDisk() {
         let defaults = UserDefaults.standard
-        guard let filenames = defaults.stringArray(forKey: Keys.imageFilenames) else { return }
+        guard let filenames = defaults.stringArray(forKey: Keys.imageFilenames) else {
+            appLog("loadImagesFromDisk: no saved filenames", category: "background")
+            return
+        }
         let fm = FileManager.default
         var loaded: [UIImage] = []
         for name in filenames {
             let path = imageStorageDir.appendingPathComponent(name)
             if let data = try? Data(contentsOf: path), let img = UIImage(data: data) {
                 loaded.append(img)
+            } else {
+                appWarn("loadImagesFromDisk: failed to load \(name)", category: "background")
             }
         }
         images = loaded
+        appLog("loadImagesFromDisk: loaded \(loaded.count)/\(filenames.count) images", category: "background")
         if isEnabled && !images.isEmpty {
             startShuffling()
         }
@@ -185,20 +191,26 @@ final class BackgroundService: ObservableObject {
         shuffleTimer = nil
         guard isEnabled, !images.isEmpty else {
             isActive = false
+            appLog("startShuffling: skipped (enabled=\(isEnabled) images=\(images.count))", category: "background")
             return
         }
-        shuffleTimer = Timer.scheduledTimer(withTimeInterval: shuffleIntervalSeconds, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.advance()
-            }
+        // Use RunLoop.main + .common mode so the timer fires even while a List/ScrollView
+        // is being tracked (default mode timers are suspended during UITrackingRunLoopMode).
+        // MainActor.assumeIsolated is safe here because we add to RunLoop.main explicitly.
+        let timer = Timer(timeInterval: shuffleIntervalSeconds, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.advance() }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        shuffleTimer = timer
         isActive = true
+        appLog("startShuffling: timer started interval=\(shuffleIntervalSeconds)s images=\(images.count)", category: "background")
     }
 
     func stopShuffling() {
         shuffleTimer?.invalidate()
         shuffleTimer = nil
         isActive = false
+        appLog("stopShuffling: timer stopped", category: "background")
     }
 
     func nextImage() {
@@ -212,6 +224,7 @@ final class BackgroundService: ObservableObject {
     private func advance() {
         guard !images.isEmpty else { return }
         currentIndex = (currentIndex + 1) % images.count
+        appLog("advance: index → \(currentIndex)/\(images.count)", category: "background")
     }
 
     // MARK: Persistence
@@ -255,5 +268,6 @@ final class BackgroundService: ObservableObject {
         if isEnabled, images.isEmpty {
             isEnabled = false
         }
+        appLog("loadSettings: enabled=\(isEnabled) images=\(images.count) interval=\(shuffleIntervalSeconds)s active=\(isActive)", category: "background")
     }
 }
