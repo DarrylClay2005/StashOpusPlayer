@@ -14,8 +14,11 @@ struct OnlineMetadata {
 
 // MARK: - MetadataFetchService
 
-/// Fetches song metadata and artwork from the iTunes Search API (free, no key required).
-/// Results are cached in memory for the lifetime of the app to avoid redundant network calls.
+/// Fetches song metadata from a chain of free public APIs:
+///   1. iTunes Search API  (best coverage for mainstream music)
+///   2. MusicBrainz        (open music encyclopedia, great for indie/classical)
+///   3. Deezer Search API  (European catalogue, often fills gaps)
+/// Results are cached in memory for the lifetime of the app.
 actor MetadataFetchService {
     static let shared = MetadataFetchService()
 
@@ -24,8 +27,7 @@ actor MetadataFetchService {
 
     private init() {}
 
-    /// Looks up `title` + `artist` on the iTunes Search API.
-    /// Returns nil if no match is found or the network is unavailable.
+    /// Looks up metadata using a chain of free APIs. Returns the first successful result.
     func fetchMetadata(title: String, artist: String) async -> OnlineMetadata? {
         let rawTitle  = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let rawArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -33,58 +35,131 @@ actor MetadataFetchService {
 
         let cacheKey = "\(rawTitle)|\(rawArtist)"
         if let cached = cache[cacheKey] {
-            AppLogger.shared.log("MetadataFetch: cache \(cached != nil ? "hit" : "miss(nil)") for \"\(rawTitle)\"", category: "network")
             return cached
         }
 
-        let query = [rawTitle, rawArtist].filter { !$0.isEmpty }.joined(separator: " ")
-        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://itunes.apple.com/search?term=\(encoded)&entity=song&limit=3&country=US")
-        else {
-            AppLogger.shared.warn("MetadataFetch: could not build URL for \"\(rawTitle)\"", category: "network")
-            cache[cacheKey] = .some(nil)
-            return nil
+        // 1. iTunes
+        if let meta = await fetchFromItunes(title: rawTitle, artist: rawArtist) {
+            cache[cacheKey] = meta
+            AppLogger.shared.log("MetadataFetch[iTunes]: \"\(rawTitle)\"", category: "network")
+            return meta
         }
 
-        AppLogger.shared.log("MetadataFetch: querying iTunes for \"\(rawTitle)\" by \"\(rawArtist)\"", category: "network")
-        guard let (data, response) = try? await URLSession.shared.data(from: url) else {
-            AppLogger.shared.warn("MetadataFetch: network error for \"\(rawTitle)\"", category: "network")
-            cache[cacheKey] = .some(nil)
-            return nil
+        // 2. MusicBrainz (rate-limited: 1 req/sec — acceptable for one-off enrichment)
+        if let meta = await fetchFromMusicBrainz(title: rawTitle, artist: rawArtist) {
+            cache[cacheKey] = meta
+            AppLogger.shared.log("MetadataFetch[MusicBrainz]: \"\(rawTitle)\"", category: "network")
+            return meta
         }
-        guard (response as? HTTPURLResponse)?.statusCode == 200,
+
+        // 3. Deezer
+        if let meta = await fetchFromDeezer(title: rawTitle, artist: rawArtist) {
+            cache[cacheKey] = meta
+            AppLogger.shared.log("MetadataFetch[Deezer]: \"\(rawTitle)\"", category: "network")
+            return meta
+        }
+
+        AppLogger.shared.warn("MetadataFetch: no results from any source for \"\(rawTitle)\"", category: "network")
+        cache[cacheKey] = .some(nil)
+        return nil
+    }
+
+    // MARK: - iTunes
+
+    private func fetchFromItunes(title: String, artist: String) async -> OnlineMetadata? {
+        let query = [title, artist].filter { !$0.isEmpty }.joined(separator: " ")
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://itunes.apple.com/search?term=\(encoded)&entity=song&limit=3&country=US"),
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let results = json["results"] as? [[String: Any]],
               !results.isEmpty
-        else {
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            AppLogger.shared.warn("MetadataFetch: no results for \"\(rawTitle)\" (http \(status))", category: "network")
-            cache[cacheKey] = .some(nil)
-            return nil
-        }
+        else { return nil }
 
-        // Pick the best matching result — prefer an exact title match.
-        let best = results.first(where: { result in
-            let name = (result["trackName"] as? String ?? "").lowercased()
-            return name == rawTitle.lowercased()
+        let best = results.first(where: {
+            ($0["trackName"] as? String ?? "").lowercased() == title.lowercased()
         }) ?? results[0]
-
         let art100 = best["artworkUrl100"] as? String ?? ""
         let art600 = best["artworkUrl600"] as? String
             ?? art100.replacingOccurrences(of: "100x100bb", with: "600x600bb")
-
-        let meta = OnlineMetadata(
-            trackName:  best["trackName"]          as? String,
-            artistName: best["artistName"]          as? String,
-            albumName:  best["collectionName"]      as? String,
-            genre:      best["primaryGenreName"]    as? String,
+        return OnlineMetadata(
+            trackName:  best["trackName"]       as? String,
+            artistName: best["artistName"]       as? String,
+            albumName:  best["collectionName"]   as? String,
+            genre:      best["primaryGenreName"] as? String,
             year:       (best["releaseDate"] as? String).map { String($0.prefix(4)) },
             artworkURL: URL(string: art600)
         )
+    }
 
-        cache[cacheKey] = meta
-        AppLogger.shared.log("MetadataFetch: found \"\(meta.trackName ?? rawTitle)\" by \(meta.artistName ?? "?")", category: "network")
-        return meta
+    // MARK: - MusicBrainz
+
+    private func fetchFromMusicBrainz(title: String, artist: String) async -> OnlineMetadata? {
+        let query = artist.isEmpty ? "recording:\"\(title)\"" : "recording:\"\(title)\" AND artist:\"\(artist)\""
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://musicbrainz.org/ws/2/recording?query=\(encoded)&limit=3&fmt=json")
+        else { return nil }
+
+        var req = URLRequest(url: url)
+        req.setValue("Lumisound/1.0 (https://github.com/HeavenlyXenusVR/Lumisound)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 10
+
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let recordings = json["recordings"] as? [[String: Any]],
+              !recordings.isEmpty
+        else { return nil }
+
+        let best = recordings.first(where: {
+            ($0["title"] as? String ?? "").lowercased() == title.lowercased()
+        }) ?? recordings[0]
+
+        let trackName   = best["title"] as? String
+        let artistName  = (best["artist-credit"] as? [[String: Any]])?.first?["name"] as? String
+        let releases    = best["releases"] as? [[String: Any]]
+        let albumName   = releases?.first?["title"] as? String
+        let date        = releases?.first?["date"] as? String
+
+        return OnlineMetadata(
+            trackName:  trackName,
+            artistName: artistName,
+            albumName:  albumName,
+            genre:      nil,    // MusicBrainz doesn't return genre directly in recording search
+            year:       date.map { String($0.prefix(4)) },
+            artworkURL: nil     // Artwork requires Cover Art Archive; skip for speed
+        )
+    }
+
+    // MARK: - Deezer
+
+    private func fetchFromDeezer(title: String, artist: String) async -> OnlineMetadata? {
+        let query = [title, artist].filter { !$0.isEmpty }.joined(separator: " ")
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://api.deezer.com/search?q=\(encoded)&limit=3"),
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let results = json["data"] as? [[String: Any]],
+              !results.isEmpty
+        else { return nil }
+
+        let best = results.first(where: {
+            ($0["title"] as? String ?? "").lowercased() == title.lowercased()
+        }) ?? results[0]
+        let album     = best["album"] as? [String: Any]
+        let artist2   = best["artist"] as? [String: Any]
+        let coverURL  = album?["cover_big"] as? String ?? album?["cover"] as? String
+
+        return OnlineMetadata(
+            trackName:  best["title"]    as? String,
+            artistName: artist2?["name"] as? String,
+            albumName:  album?["title"]  as? String,
+            genre:      nil,
+            year:       nil,
+            artworkURL: coverURL.flatMap { URL(string: $0) }
+        )
     }
 
     /// Convenience: enriches `song` with any fields currently missing, using a single

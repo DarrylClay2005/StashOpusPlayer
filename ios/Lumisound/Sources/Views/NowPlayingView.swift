@@ -1099,16 +1099,90 @@ struct NowPlayingView: View {
     }
 
     private func loadLyrics() {
-        guard let url = player.currentSong?.url else {
-            lyricsLines = []
-            return
+        guard let song = player.currentSong else { lyricsLines = []; return }
+
+        // 1. Sidecar .lrc file next to the audio file (highest priority)
+        if let url = song.url {
+            let lrcURL = url.deletingPathExtension().appendingPathExtension("lrc")
+            if let content = try? String(contentsOf: lrcURL, encoding: .utf8) {
+                lyricsLines = LrcParser.parse(content)
+                return
+            }
         }
-        let lrcURL = url.deletingPathExtension().appendingPathExtension("lrc")
-        if let content = try? String(contentsOf: lrcURL, encoding: .utf8) {
-            lyricsLines = LrcParser.parse(content)
-        } else {
-            lyricsLines = []
+
+        // 2. LRCLIB — free, open lyrics database with synced LRC support
+        //    Falls back to LyricsOVH if LRCLIB has no synced version.
+        Task {
+            let title  = song.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let artist = song.artist.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return }
+
+            // LRCLIB: returns synced LRC if available
+            if let lines = await fetchLRCLIB(title: title, artist: artist), !lines.isEmpty {
+                await MainActor.run { lyricsLines = lines }
+                return
+            }
+
+            // LyricsOVH: plain text fallback (no timestamps — shown as static block)
+            if let lines = await fetchLyricsOVH(title: title, artist: artist), !lines.isEmpty {
+                await MainActor.run { lyricsLines = lines }
+            }
         }
+    }
+
+    // MARK: - LRCLIB fetch (synced LRC)
+
+    private func fetchLRCLIB(title: String, artist: String) async -> [LrcLine]? {
+        var components = URLComponents(string: "https://lrclib.net/api/search")!
+        components.queryItems = [
+            URLQueryItem(name: "track_name",   value: title),
+            URLQueryItem(name: "artist_name",  value: artist),
+        ]
+        guard let url = components.url else { return nil }
+        var req = URLRequest(url: url)
+        req.setValue("Lumisound/1.0 (https://github.com/HeavenlyXenusVR/Lumisound)", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 8
+
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let results = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let best = results.first
+        else { return nil }
+
+        // Prefer synced lyrics; fall back to plain text with no timestamps
+        if let syncedLrc = best["syncedLyrics"] as? String, !syncedLrc.isEmpty {
+            let lines = LrcParser.parse(syncedLrc)
+            if !lines.isEmpty { return lines }
+        }
+        if let plain = best["plainLyrics"] as? String, !plain.isEmpty {
+            // Wrap plain text lines as LrcLine with time=0 so they all display together
+            return plain.components(separatedBy: "\n")
+                .map { LrcLine(time: 0, text: $0) }
+                .filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+        }
+        return nil
+    }
+
+    // MARK: - LyricsOVH fetch (plain text)
+
+    private func fetchLyricsOVH(title: String, artist: String) async -> [LrcLine]? {
+        guard !artist.isEmpty,
+              let encArtist = artist.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let encTitle  = title.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "https://api.lyrics.ovh/v1/\(encArtist)/\(encTitle)")
+        else { return nil }
+
+        var req = URLRequest(url: url); req.timeoutInterval = 8
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let lyrics = json["lyrics"] as? String,
+              !lyrics.isEmpty
+        else { return nil }
+
+        return lyrics.components(separatedBy: "\n")
+            .map { LrcLine(time: 0, text: $0) }
+            .filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
     }
 }
 

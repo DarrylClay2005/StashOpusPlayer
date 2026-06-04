@@ -676,12 +676,60 @@ final class AudioPlayerManager: ObservableObject {
                 return String(hash, radix: 16)
             } ?? UUID().uuidString
 
+            // Detect the actual audio container from the URL path before choosing an extension.
+            // YouTube CDN URLs often include the itag/mime in the path or may serve webm/opus
+            // even when we requested m4a. AVAudioFile reads magic bytes but uses the file
+            // extension for format hints — a mismatch causes silent failure.
+            let urlPath = url.path.lowercased()
+            let ext: String
+            if urlPath.contains("audio/webm") || urlPath.hasSuffix(".webm") || urlPath.contains("mime=audio%2fwebm") {
+                ext = "webm"
+            } else if urlPath.hasSuffix(".opus") || urlPath.contains("mime=audio%2fogg") {
+                ext = "opus"
+            } else if urlPath.hasSuffix(".mp3") {
+                ext = "mp3"
+            } else {
+                ext = "m4a"    // default; covers m4a, aac, mp4 audio
+            }
+
             let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("stream_\(cacheKey).m4a")
+                .appendingPathComponent("stream_\(cacheKey).\(ext)")
 
             if !FileManager.default.fileExists(atPath: tempURL.path) {
-                let (downloaded, _) = try await URLSession.shared.download(from: url)
-                // Move from the system-assigned temp location to our named cache file.
+                // Build a request with a realistic browser UA so CDN servers don't reject it.
+                var req = URLRequest(url: url)
+                req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", forHTTPHeaderField: "User-Agent")
+                req.timeoutInterval = 60
+                let (downloaded, response) = try await URLSession.shared.download(for: req)
+                // Detect extension from Content-Type if URL path was inconclusive
+                if ext == "m4a", let ct = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") {
+                    let refinedExt: String
+                    if ct.contains("webm") { refinedExt = "webm" }
+                    else if ct.contains("ogg") || ct.contains("opus") { refinedExt = "opus" }
+                    else if ct.contains("mpeg") { refinedExt = "mp3" }
+                    else { refinedExt = "m4a" }
+                    let refinedURL = tempURL.deletingPathExtension().appendingPathExtension(refinedExt)
+                    try? FileManager.default.removeItem(at: refinedURL)
+                    try FileManager.default.moveItem(at: downloaded, to: refinedURL)
+                    // Re-enter with the corrected URL
+                    let file2 = try AVAudioFile(forReading: refinedURL)
+                    audioFile = file2
+                    duration = file2.duration
+                    let node = activeNode
+                    let gen = scheduleGeneration &+ 1
+                    scheduleGeneration = gen
+                    node.stop()
+                    let sr = file2.processingFormat.sampleRate
+                    let sf = max(0, AVAudioFramePosition(startTime * sr))
+                    let fl = max(0, AVAudioFrameCount(file2.length - sf))
+                    fileStartFrame = sf; position = startTime; gaplessScheduled = false
+                    node.scheduleSegment(file2, startingFrame: sf, frameCount: fl, at: nil) { [weak self] in
+                        Task { @MainActor in guard let self, self.scheduleGeneration == gen else { return }; self.handleTrackEnded() }
+                    }
+                    if isPlaying { startEngineIfNeeded(); node.play(); startTimer(); reapplyActiveEffect() }
+                    updateNowPlaying()
+                    return
+                }
                 try? FileManager.default.removeItem(at: tempURL)
                 try FileManager.default.moveItem(at: downloaded, to: tempURL)
             }

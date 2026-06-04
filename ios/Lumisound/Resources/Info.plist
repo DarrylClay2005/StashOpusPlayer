@@ -2,6 +2,41 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Explicit icon declarations so sideloading services (Signulous, AltStore)
+         preserve the app icon after re-signing. Xcode normally injects these from
+         xcassets at build time; having them in the source plist is the robust fallback. -->
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>CFBundleIcons</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconFiles</key>
+            <array>
+                <string>AppIcon60x60</string>
+            </array>
+            <key>CFBundleIconName</key>
+            <string>AppIcon</string>
+            <key>UIPrerenderedIcon</key>
+            <false/>
+        </dict>
+    </dict>
+    <key>CFBundleIcons~ipad</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconFiles</key>
+            <array>
+                <string>AppIcon76x76</string>
+                <string>AppIcon83.5x83.5</string>
+            </array>
+            <key>CFBundleIconName</key>
+            <string>AppIcon</string>
+            <key>UIPrerenderedIcon</key>
+            <false/>
+        </dict>
+    </dict>
+
     <!-- Bundle identity -->
     <key>CFBundleName</key>
     <string>$(PRODUCT_NAME)</string>

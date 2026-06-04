@@ -219,7 +219,7 @@ final class StreamingService: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse,
                !(200..<300).contains(httpResponse.statusCode) {
-                errorMessage = "Unable to reach streaming server. Check your connection."
+                errorMessage = "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
                 searchResults = []
                 return
             }
@@ -228,7 +228,7 @@ final class StreamingService: ObservableObject {
             appLog("Search returned \(tracks.count) result(s) for \"\(query)\"", category: "network")
         } catch {
             appError("Search failed: \(error.localizedDescription)", category: "network")
-            errorMessage = "Unable to reach streaming server. Check your connection."
+            errorMessage = "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
             searchResults = []
         }
     }
@@ -339,7 +339,7 @@ final class StreamingService: ObservableObject {
             if let httpResponse = response as? HTTPURLResponse,
                !(200..<300).contains(httpResponse.statusCode) {
                 appWarn("searchServerLibrary: HTTP \(httpResponse.statusCode) for \"\(query)\"", category: "network")
-                errorMessage = "Unable to reach streaming server. Check your connection."
+                errorMessage = "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
                 serverTracks = []
                 return
             }
@@ -347,7 +347,7 @@ final class StreamingService: ObservableObject {
             appLog("searchServerLibrary: \(serverTracks.count) result(s) for \"\(query)\"", category: "network")
         } catch {
             appError("searchServerLibrary: \(error.localizedDescription)", category: "network")
-            errorMessage = "Unable to reach streaming server. Check your connection."
+            errorMessage = "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
             serverTracks = []
         }
     }
@@ -560,7 +560,7 @@ final class StreamingService: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse, !(200..<300).contains(httpResponse.statusCode) {
                 appWarn("fetchUserMusic: HTTP \(httpResponse.statusCode)", category: "network")
-                errorMessage = "Unable to reach server. Check your connection."
+                errorMessage = "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
                 return
             }
 
@@ -699,7 +699,7 @@ enum StreamingError: LocalizedError {
         case .notFound(let title):
             return "Could not find a stream URL for \"\(title)\"."
         case .httpError:
-            return "Unable to reach streaming server. Check your connection."
+            return "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
         }
     }
 }
