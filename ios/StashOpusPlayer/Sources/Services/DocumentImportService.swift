@@ -197,6 +197,30 @@ struct DocumentImportService {
             bitrate = Int((estimatedRate / 1000).rounded())   // store as kbps
         }
 
+        // Opus/Ogg files: AVFoundation does not parse Vorbis comments from the Ogg container.
+        // As a fallback, read the OpusTags packet directly from the binary file.
+        let opusExtensions: Set<String> = ["opus", "ogg"]
+        if opusExtensions.contains(fileExt), title == url.deletingPathExtension().lastPathComponent {
+            let vorbis = Self.readVorbisComments(url: url)
+            if let v = vorbis["TITLE"],  !v.isEmpty { title  = v }
+            if let v = vorbis["ARTIST"], !v.isEmpty { artist = v }
+            if let v = vorbis["ALBUM"],  !v.isEmpty { album  = v }
+            if let v = vorbis["GENRE"],  !v.isEmpty { genre  = v }
+            if let v = vorbis["DATE"] ?? vorbis["YEAR"], !v.isEmpty { year = String(v.prefix(4)) }
+            if trackNumber == 0, let v = vorbis["TRACKNUMBER"] ?? vorbis["TRACK"], !v.isEmpty {
+                trackNumber = Int(v.split(separator: "/").first.map(String.init) ?? v) ?? 0
+            }
+        }
+
+        // Filename fallback: if title is still the raw filename, try "Artist - Title" pattern
+        if title == url.deletingPathExtension().lastPathComponent && title.contains(" - ") {
+            let parts = title.components(separatedBy: " - ")
+            if parts.count >= 2 {
+                if artist.isEmpty { artist = parts[0].trimmingCharacters(in: .whitespaces) }
+                title = parts.dropFirst().joined(separator: " - ").trimmingCharacters(in: .whitespaces)
+            }
+        }
+
         // For video files (.mp4, .m4v, .mov), extract the first video frame as artwork
         // and cache it so ArtworkService can find it by filename key.
         let videoExtensions: Set<String> = ["mp4", "m4v", "mov"]
@@ -226,5 +250,86 @@ struct DocumentImportService {
             bitrate: bitrate,
             sampleRate: sampleRate
         )
+    }
+
+    // MARK: - Vorbis comment binary parser
+
+    /// Reads Vorbis comments directly from the binary data of an Opus (Ogg) file.
+    ///
+    /// AVFoundation does not expose Vorbis comments for .opus/.ogg files through the
+    /// standard `AVURLAsset.commonMetadata` or `.metadata` APIs. The OpusTags packet
+    /// lives in the SECOND Ogg page of the stream and has a simple binary format:
+    ///   "OpusTags" magic | vendor string (length + UTF-8) | user comment list
+    /// Each user comment is a "KEY=VALUE" UTF-8 string preceded by its 4-byte LE length.
+    static func readVorbisComments(url: URL) -> [String: String] {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+              data.count > 60 else { return [:] }
+        let bytes = data
+
+        // Walk Ogg pages; we want the SECOND one (OpusTags)
+        var offset = 0
+        var pageIndex = 0
+
+        while offset + 27 < bytes.count {
+            // Verify OggS capture pattern
+            guard bytes[offset] == 0x4F, bytes[offset+1] == 0x67,
+                  bytes[offset+2] == 0x67, bytes[offset+3] == 0x53 else { break }
+
+            let segCount = Int(bytes[offset + 26])
+            let headerSize = 27 + segCount
+            guard offset + headerSize <= bytes.count else { break }
+
+            // Sum segment sizes to find page data length
+            var pageDataLen = 0
+            for i in 0..<segCount { pageDataLen += Int(bytes[offset + 27 + i]) }
+
+            let dataStart = offset + headerSize
+            guard dataStart + pageDataLen <= bytes.count else { break }
+
+            pageIndex += 1
+            if pageIndex == 2 {
+                // OpusTags magic
+                let magic = [UInt8]("OpusTags".utf8)
+                guard pageDataLen >= 8,
+                      bytes[dataStart..<(dataStart+8)].elementsEqual(magic) else { break }
+
+                var pos = dataStart + 8
+
+                // Skip vendor string
+                guard pos + 4 <= bytes.count else { break }
+                let vendorLen = le32(bytes, pos); pos += 4
+                pos += vendorLen
+
+                // Comment count
+                guard pos + 4 <= bytes.count else { break }
+                let count = le32(bytes, pos); pos += 4
+
+                var result: [String: String] = [:]
+                for _ in 0..<min(count, 200) {
+                    guard pos + 4 <= bytes.count else { break }
+                    let cLen = le32(bytes, pos); pos += 4
+                    guard cLen > 0, pos + cLen <= bytes.count else { pos += cLen; continue }
+                    if let str = String(bytes: bytes[pos..<(pos+cLen)], encoding: .utf8),
+                       let eq = str.firstIndex(of: "=") {
+                        let key   = String(str[str.startIndex..<eq]).uppercased()
+                        let value = String(str[str.index(after: eq)...])
+                        result[key] = value
+                    }
+                    pos += cLen
+                }
+                return result
+            }
+
+            offset = dataStart + pageDataLen
+        }
+        return [:]
+    }
+
+    /// Reads a 4-byte little-endian UInt32 from `data` at `offset`.
+    private static func le32(_ data: Data, _ offset: Int) -> Int {
+        Int(UInt32(data[offset])
+          | UInt32(data[offset+1]) << 8
+          | UInt32(data[offset+2]) << 16
+          | UInt32(data[offset+3]) << 24)
     }
 }

@@ -32,6 +32,35 @@ struct StreamTrack: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - ServerTrack
+
+struct ServerTrack: Identifiable, Codable, Hashable {
+    let id: String
+    let title: String
+    let artist: String
+    let album: String
+    let duration: Double
+    let genre: String
+    let trackNumber: String
+    let hasArtwork: Bool
+    let serverPath: String
+    let filename: String
+    let ext: String
+
+    var durationText: String {
+        let s = Int(duration)
+        return "\(s / 60):\(String(format: "%02d", s % 60))"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, artist, album, duration, genre
+        case trackNumber = "track_number"
+        case hasArtwork  = "has_artwork"
+        case serverPath  = "server_path"
+        case filename, ext
+    }
+}
+
 // MARK: - StreamResponse helpers
 
 private struct StreamResponse: Decodable {
@@ -76,6 +105,11 @@ final class StreamingService: ObservableObject {
     @Published var isSearching      = false
     @Published var isLoadingStream  = false
     @Published var errorMessage: String?
+
+    // MARK: Server Library state
+
+    @Published var serverTracks: [ServerTrack] = []
+    @Published var isSearchingServer = false
 
     // MARK: Persisted settings
 
@@ -223,6 +257,93 @@ final class StreamingService: ObservableObject {
             trackNumber: 0,
             year: "",
             genre: "",
+            bitrate: 0,
+            sampleRate: 0
+        )
+    }
+
+    // MARK: - Server Library Search
+
+    /// Searches the server's local music library via `GET /api/library/server`.
+    /// Results are published on `serverTracks`. On error the `errorMessage` is set.
+    func searchServerLibrary(query: String) async {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+            serverTracks = []
+            return
+        }
+
+        isSearchingServer = true
+        errorMessage = nil
+        defer { isSearchingServer = false }
+
+        var components = URLComponents()
+        components.path = "/api/library/server"
+        components.queryItems = [
+            URLQueryItem(name: "search", value: query),
+            URLQueryItem(name: "limit",  value: "100"),
+        ]
+
+        guard var request = makeRequest(components.string ?? "/api/library/server") else {
+            errorMessage = "Invalid bridge URL."
+            return
+        }
+        request.timeoutInterval = 20
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse,
+               !(200..<300).contains(httpResponse.statusCode) {
+                errorMessage = "Unable to reach streaming server. Check your connection."
+                serverTracks = []
+                return
+            }
+            serverTracks = try JSONDecoder().decode([ServerTrack].self, from: data)
+        } catch {
+            errorMessage = "Unable to reach streaming server. Check your connection."
+            serverTracks = []
+        }
+    }
+
+    // MARK: - Server Library URLs
+
+    /// Returns the direct stream URL for a server library track.
+    func serverStreamURL(for track: ServerTrack) -> URL? {
+        guard let encoded = track.serverPath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return nil
+        }
+        let base = bridgeURL.trimmingCharacters(in: .init(charactersIn: "/"))
+        return URL(string: "\(base)/api/library/server/stream?path=\(encoded)")
+    }
+
+    /// Returns the artwork URL for a server library track.
+    func serverArtworkURL(for track: ServerTrack) -> URL? {
+        guard track.hasArtwork,
+              let encoded = track.serverPath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return nil
+        }
+        let base = bridgeURL.trimmingCharacters(in: .init(charactersIn: "/"))
+        return URL(string: "\(base)/api/library/server/artwork?path=\(encoded)")
+    }
+
+    // MARK: - Convert ServerTrack to Song
+
+    /// Wraps a `ServerTrack` in a `Song` so it can be handed to `AudioPlayerManager`.
+    /// The stream URL is baked in; artwork is loaded lazily via `ArtworkService` using
+    /// the server artwork URL as the cache key.
+    func toSong(serverTrack: ServerTrack) -> Song {
+        let artworkKey = serverArtworkURL(for: serverTrack)?.absoluteString
+        return Song(
+            id: serverTrack.id,
+            title: serverTrack.title,
+            artist: serverTrack.artist,
+            album: serverTrack.album,
+            duration: serverTrack.duration,
+            url: serverStreamURL(for: serverTrack),
+            persistentID: nil,
+            artworkCacheKey: artworkKey,
+            trackNumber: Int(serverTrack.trackNumber) ?? 0,
+            year: "",
+            genre: serverTrack.genre,
             bitrate: 0,
             sampleRate: 0
         )

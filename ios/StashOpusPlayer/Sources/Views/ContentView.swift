@@ -24,6 +24,7 @@ struct ContentView: View {
         ZStack {
             GalleryBackgroundView()
                 .ignoresSafeArea()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             TabView(selection: $selectedTab) {
 
@@ -69,6 +70,8 @@ struct ContentView: View {
                     .tag(4)
             }
             .tint(AppTheme.dynamicAccent)
+            // No explicit .frame() on TabView — it must size itself from its content.
+            // An explicit frame here can cause stretch/overflow on certain device sizes.
 
             // MARK: Bridge Health Toast — floats above all content
             if bridgeHealth.showToast {
@@ -82,5 +85,6 @@ struct ContentView: View {
                 .allowsHitTesting(false)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

@@ -16,7 +16,11 @@ struct StreamSearchView: View {
     @State private var healthOK: Bool? = nil
     @State private var showHealthToast   = false
 
-    private let sources = ["youtube", "soundcloud"]
+    // Server library download tracking (separate from streaming downloads)
+    @State private var downloadingServerTrackID: String? = nil
+    @State private var downloadedServerTrackIDs: Set<String> = []
+
+    private let sources = ["youtube", "soundcloud", "server"]
 
     var body: some View {
         NavigationStack {
@@ -70,7 +74,7 @@ struct StreamSearchView: View {
             // Source picker
             Picker("Source", selection: $selectedSource) {
                 ForEach(sources, id: \.self) { src in
-                    Text(src.capitalized).tag(src)
+                    Text(sourceLabel(src)).tag(src)
                 }
             }
             .pickerStyle(.segmented)
@@ -79,7 +83,7 @@ struct StreamSearchView: View {
             .padding(.bottom, 4)
             .onChange(of: selectedSource) { _ in
                 if !searchText.isEmpty {
-                    Task { await streaming.search(query: searchText, source: selectedSource) }
+                    triggerSearch()
                 }
             }
 
@@ -95,7 +99,7 @@ struct StreamSearchView: View {
                     Spacer()
                     if !searchText.isEmpty {
                         Button("Retry") {
-                            Task { await streaming.search(query: searchText, source: selectedSource) }
+                            triggerSearch()
                         }
                         .font(AppTheme.bodyFont(size: 13).weight(.semibold))
                         .foregroundStyle(AppTheme.accent)
@@ -107,6 +111,35 @@ struct StreamSearchView: View {
             }
 
             // Results
+            if selectedSource == "server" {
+                serverResultsBody
+            } else {
+                streamResultsBody
+            }
+        }
+        .searchable(
+            text: $searchText,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: selectedSource == "server"
+                ? "Search server library…"
+                : "Search YouTube, SoundCloud…"
+        )
+        .onSubmit(of: .search) {
+            triggerSearch()
+        }
+        .onChange(of: searchText) { newValue in
+            if newValue.isEmpty {
+                streaming.searchResults = []
+                streaming.serverTracks = []
+                streaming.errorMessage = nil
+            }
+        }
+    }
+
+    // MARK: — Streaming results (YouTube / SoundCloud)
+
+    private var streamResultsBody: some View {
+        Group {
             if streaming.isSearching {
                 Spacer()
                 ProgressView("Searching…")
@@ -137,23 +170,79 @@ struct StreamSearchView: View {
                 .scrollContentBackground(.hidden)
             }
         }
-        .searchable(
-            text: $searchText,
-            placement: .navigationBarDrawer(displayMode: .always),
-            prompt: "Search YouTube, SoundCloud…"
-        )
-        .onSubmit(of: .search) {
-            Task { await streaming.search(query: searchText, source: selectedSource) }
-        }
-        .onChange(of: searchText) { newValue in
-            if newValue.isEmpty {
-                streaming.searchResults = []
-                streaming.errorMessage = nil
+    }
+
+    // MARK: — Server library results
+
+    private var serverResultsBody: some View {
+        Group {
+            if streaming.isSearchingServer {
+                Spacer()
+                ProgressView("Searching server library…")
+                    .tint(AppTheme.accent)
+                    .foregroundStyle(AppTheme.textSecondary)
+                Spacer()
+            } else if streaming.serverTracks.isEmpty && !searchText.isEmpty {
+                Spacer()
+                Text("No results for \"\(searchText)\"")
+                    .font(AppTheme.bodyFont(size: 15))
+                    .foregroundStyle(AppTheme.textSecondary)
+                Spacer()
+            } else if streaming.serverTracks.isEmpty {
+                Spacer()
+                VStack(spacing: 12) {
+                    Image(systemName: "externaldrive.connected.to.line.below")
+                        .font(.system(size: 44))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Text("Server Library")
+                        .font(AppTheme.headlineFont(size: 16))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text("Search your bridge server's local music collection.")
+                        .font(AppTheme.bodyFont(size: 14))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+                Spacer()
+            } else {
+                List(streaming.serverTracks) { track in
+                    ServerTrackRow(
+                        track: track,
+                        artworkURL: streaming.serverArtworkURL(for: track),
+                        isDownloading: downloadingServerTrackID == track.id,
+                        isDownloaded: downloadedServerTrackIDs.contains(track.id),
+                        onPlay: { handleServerPlay(track: track) },
+                        onDownload: { handleServerDownload(track: track) }
+                    )
+                    .listRowBackground(AppTheme.surface)
+                    .listRowSeparatorTint(AppTheme.background)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
     }
 
-    // MARK: — Actions
+    // MARK: — Helpers
+
+    private func sourceLabel(_ src: String) -> String {
+        switch src {
+        case "youtube":    return "YouTube"
+        case "soundcloud": return "SoundCloud"
+        case "server":     return "Server"
+        default:           return src.capitalized
+        }
+    }
+
+    private func triggerSearch() {
+        if selectedSource == "server" {
+            Task { await streaming.searchServerLibrary(query: searchText) }
+        } else {
+            Task { await streaming.search(query: searchText, source: selectedSource) }
+        }
+    }
+
+    // MARK: — Streaming Actions
 
     private func handlePlay(track: StreamTrack) {
         guard loadingTrackID == nil else { return }
@@ -197,6 +286,62 @@ struct StreamSearchView: View {
                 streaming.errorMessage = "Download failed: \(error.localizedDescription)"
             }
             downloadingTrackID = nil
+        }
+    }
+
+    // MARK: — Server Library Actions
+
+    private func handleServerPlay(track: ServerTrack) {
+        let song = streaming.toSong(serverTrack: track)
+        player.play(song: song, in: [song])
+    }
+
+    private func handleServerDownload(track: ServerTrack) {
+        guard downloadingServerTrackID == nil,
+              let streamURL = streaming.serverStreamURL(for: track) else { return }
+        downloadingServerTrackID = track.id
+
+        Task {
+            do {
+                let importDir = streaming.downloadDirectory
+                try? FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)
+
+                let safeName = String(
+                    track.title
+                        .replacingOccurrences(of: "/", with: "-")
+                        .replacingOccurrences(of: ":", with: "-")
+                        .prefix(100)
+                )
+                let ext = track.ext.isEmpty ? "m4a" : track.ext
+                let destURL = importDir.appendingPathComponent("\(safeName).\(ext)")
+
+                if FileManager.default.fileExists(atPath: destURL.path) {
+                    downloadedServerTrackIDs.insert(track.id)
+                    downloadingServerTrackID = nil
+                    return
+                }
+
+                var request = URLRequest(url: streamURL)
+                request.httpMethod = "GET"
+                if !streaming.apiKey.isEmpty {
+                    request.setValue("Bearer \(streaming.apiKey)", forHTTPHeaderField: "Authorization")
+                }
+                request.timeoutInterval = 120
+
+                let (tmpURL, response) = try await URLSession.shared.download(for: request)
+                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    throw StreamingError.httpError(http.statusCode)
+                }
+
+                try? FileManager.default.removeItem(at: destURL)
+                try FileManager.default.moveItem(at: tmpURL, to: destURL)
+
+                library.scanLocalDocuments()
+                downloadedServerTrackIDs.insert(track.id)
+            } catch {
+                streaming.errorMessage = "Download failed: \(error.localizedDescription)"
+            }
+            downloadingServerTrackID = nil
         }
     }
 }
@@ -307,5 +452,101 @@ private struct StreamTrackRow: View {
 
     private var sourceIcon: String {
         track.source == "soundcloud" ? "cloud.fill" : "play.rectangle.fill"
+    }
+}
+
+// MARK: - ServerTrackRow
+
+private struct ServerTrackRow: View {
+
+    let track: ServerTrack
+    let artworkURL: URL?
+    let isDownloading: Bool
+    let isDownloaded: Bool
+    let onPlay: () -> Void
+    let onDownload: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Artwork
+            AsyncImage(url: artworkURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                case .failure, .empty:
+                    Image(systemName: "externaldrive.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(AppTheme.textSecondary)
+                @unknown default:
+                    Color.clear
+                }
+            }
+            .frame(width: 44, height: 44)
+            .background(AppTheme.elevatedSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            // Title + artist + album
+            VStack(alignment: .leading, spacing: 2) {
+                Text(track.title)
+                    .font(AppTheme.bodyFont(size: 14))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .lineLimit(1)
+                if !track.artist.isEmpty {
+                    Text(track.artist)
+                        .font(AppTheme.bodyFont(size: 12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(1)
+                }
+                if !track.album.isEmpty {
+                    Text(track.album)
+                        .font(AppTheme.bodyFont(size: 11))
+                        .foregroundStyle(AppTheme.textSecondary.opacity(0.7))
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            // Duration
+            Text(track.durationText)
+                .font(AppTheme.monoFont(size: 12))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(minWidth: 36, alignment: .trailing)
+
+            // Play button
+            Button(action: onPlay) {
+                Image(systemName: "play.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+
+            // Download button
+            Button(action: onDownload) {
+                if isDownloading {
+                    ProgressView()
+                        .tint(AppTheme.accent)
+                        .frame(width: 32, height: 32)
+                } else if isDownloaded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(AppTheme.success)
+                        .frame(width: 32, height: 32)
+                } else {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.title2)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .frame(width: 32, height: 32)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isDownloading || isDownloaded)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onPlay)
     }
 }

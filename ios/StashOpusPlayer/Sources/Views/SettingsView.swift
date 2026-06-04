@@ -574,8 +574,13 @@ struct SettingsView: View {
                 Button {
                     updater.openReleasePage()
                 } label: {
-                    Label("Download Update", systemImage: "arrow.down.circle")
-                        .foregroundStyle(AppTheme.accent)
+                    Label(
+                        updater.directDownloadURL != nil
+                            ? "Download v\(updater.latestVersion!) IPA"
+                            : "Download Update",
+                        systemImage: "arrow.down.circle"
+                    )
+                    .foregroundStyle(AppTheme.accent)
                 }
             }
 

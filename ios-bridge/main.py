@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -43,6 +44,11 @@ logger = logging.getLogger("ios-bridge")
 
 YTDLP_CACHE_DIR: str = os.getenv("YTDLP_CACHE_DIR", "/app/.cache/yt-dlp")
 API_KEY: str = os.getenv("IOS_BRIDGE_API_KEY", "")
+SERVER_MUSIC_DIR: str = os.getenv("SERVER_MUSIC_DIR", "")
+SUPPORTED_AUDIO_EXTS: frozenset[str] = frozenset({
+    ".mp3", ".m4a", ".aac", ".wav", ".aif", ".aiff",
+    ".flac", ".opus", ".ogg", ".caf", ".mp4", ".m4v",
+})
 VERSION = "1.0.0"
 
 # ---------------------------------------------------------------------------
@@ -1524,6 +1530,250 @@ async def sync_push(
     return {"status": "synced"}
 
 
+
+
+# ---------------------------------------------------------------------------
+# Server Music Library helpers
+# ---------------------------------------------------------------------------
+
+_FFPROBE_SEMAPHORE = asyncio.Semaphore(8)  # max 8 concurrent ffprobe processes
+
+
+async def _ffprobe_tags(path: str) -> dict:
+    """
+    Run ffprobe on *path* and return a normalised track metadata dict.
+    Returns a dict with all fields set to sensible defaults on any failure.
+    """
+    cmd = [
+        "ffprobe",
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_streams",
+        path,
+    ]
+    async with _FFPROBE_SEMAPHORE:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        except asyncio.TimeoutError:
+            logger.warning("ffprobe timed out for %s", path)
+            return {}
+        except Exception as exc:
+            logger.warning("ffprobe error for %s: %s", path, exc)
+            return {}
+
+    try:
+        data = json.loads(stdout_bytes)
+    except json.JSONDecodeError:
+        return {}
+
+    streams = data.get("streams") or []
+
+    # Find the primary audio stream for tags + duration
+    audio_stream: dict = {}
+    has_artwork = False
+    for s in streams:
+        codec_type = s.get("codec_type", "")
+        codec_name = s.get("codec_name", "")
+        if codec_type == "audio" and not audio_stream:
+            audio_stream = s
+        if codec_name in ("png", "mjpeg"):
+            has_artwork = True
+
+    tags: dict = audio_stream.get("tags") or {}
+    # ffprobe stores tags in varying case depending on container
+    tags_lower = {k.lower(): v for k, v in tags.items()}
+
+    # Duration: prefer stream duration, fall back to format duration
+    duration = 0.0
+    raw_dur = audio_stream.get("duration") or data.get("format", {}).get("duration")
+    if raw_dur:
+        try:
+            duration = float(raw_dur)
+        except (ValueError, TypeError):
+            duration = 0.0
+
+    return {
+        "title": tags_lower.get("title") or tags_lower.get("name") or "",
+        "artist": tags_lower.get("artist") or tags_lower.get("album_artist") or "",
+        "album": tags_lower.get("album") or "",
+        "genre": tags_lower.get("genre") or "",
+        "track_number": tags_lower.get("track") or tags_lower.get("tracknumber") or "",
+        "duration": duration,
+        "has_artwork": has_artwork,
+    }
+
+
+def _stable_id(abs_path: str) -> str:
+    """Return a stable 16-char hex ID based on the SHA-256 of the absolute path."""
+    return hashlib.sha256(abs_path.encode()).hexdigest()[:16]
+
+
+def _audio_media_type(ext: str) -> str:
+    """Map a file extension (without dot, lower-case) to a MIME type."""
+    mapping = {
+        "opus": "audio/ogg",
+        "ogg": "audio/ogg",
+        "mp3": "audio/mpeg",
+        "m4a": "audio/mp4",
+        "m4v": "audio/mp4",
+        "mp4": "audio/mp4",
+        "aac": "audio/aac",
+        "flac": "audio/flac",
+        "wav": "audio/wav",
+        "aif": "audio/aiff",
+        "aiff": "audio/aiff",
+        "caf": "audio/x-caf",
+    }
+    return mapping.get(ext, "application/octet-stream")
+
+
+# ---------------------------------------------------------------------------
+# Server Music Library Endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/library/server")
+async def server_library(
+    search: str = Query("", description="Filter by title/artist"),
+    limit: int = Query(200, ge=1, le=500),
+):
+    """Lists all music files in the server's music directory with metadata.
+    Configure via SERVER_MUSIC_DIR environment variable."""
+    if not SERVER_MUSIC_DIR:
+        return {"tracks": [], "total": 0, "dir": None, "configured": False}
+
+    music_root = pathlib.Path(SERVER_MUSIC_DIR).resolve()
+
+    # Collect all matching audio files
+    audio_files: list[pathlib.Path] = []
+    try:
+        for entry in music_root.rglob("*"):
+            if entry.is_file() and entry.suffix.lower() in SUPPORTED_AUDIO_EXTS:
+                audio_files.append(entry)
+    except Exception as exc:
+        logger.error("Error scanning SERVER_MUSIC_DIR %s: %s", music_root, exc)
+        raise HTTPException(status_code=500, detail="Failed to scan music directory")
+
+    # Run all ffprobe calls concurrently (bounded by _FFPROBE_SEMAPHORE)
+    abs_paths = [str(f.resolve()) for f in audio_files]
+    tag_results = await asyncio.gather(*(_ffprobe_tags(p) for p in abs_paths))
+
+    tracks: list[dict] = []
+    for fpath, meta in zip(audio_files, tag_results):
+        abs_path = str(fpath.resolve())
+        try:
+            rel_path = str(fpath.relative_to(music_root))
+        except ValueError:
+            rel_path = fpath.name
+
+        ext = fpath.suffix.lstrip(".").lower()
+        filename = fpath.name
+        title = meta.get("title") or fpath.stem
+        artist = meta.get("artist") or "Unknown Artist"
+
+        # Apply search filter
+        if search:
+            search_lower = search.lower()
+            if search_lower not in title.lower() and search_lower not in artist.lower():
+                continue
+
+        tracks.append({
+            "id": _stable_id(abs_path),
+            "title": title,
+            "artist": artist,
+            "album": meta.get("album") or "",
+            "duration": meta.get("duration") or 0.0,
+            "genre": meta.get("genre") or "",
+            "track_number": meta.get("track_number") or "",
+            "has_artwork": meta.get("has_artwork") or False,
+            "server_path": rel_path,
+            "filename": filename,
+            "ext": ext,
+        })
+
+    tracks.sort(key=lambda t: (t["artist"].lower(), t["album"].lower(), t["title"].lower()))
+    total = len(tracks)
+    tracks = tracks[:limit]
+
+    return {
+        "tracks": tracks,
+        "total": total,
+        "dir": str(music_root),
+    }
+
+
+@app.get("/api/library/server/stream")
+async def server_stream(
+    path: str = Query(..., description="Relative path within SERVER_MUSIC_DIR"),
+):
+    """Streams an audio file from the server music directory."""
+    music_root = pathlib.Path(SERVER_MUSIC_DIR).resolve()
+    full_path = (music_root / path).resolve()
+
+    # Path traversal guard
+    if not str(full_path).startswith(str(music_root)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not full_path.exists() or not full_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = full_path.suffix.lstrip(".").lower()
+    media_type = _audio_media_type(ext)
+
+    return FileResponse(
+        path=str(full_path),
+        media_type=media_type,
+        filename=full_path.name,
+    )
+
+
+@app.get("/api/library/server/artwork")
+async def server_artwork(
+    path: str = Query(..., description="Relative path within SERVER_MUSIC_DIR"),
+):
+    """Extracts embedded album art from a server file and returns it as JPEG."""
+    music_root = pathlib.Path(SERVER_MUSIC_DIR).resolve()
+    full_path = (music_root / path).resolve()
+
+    # Path traversal guard
+    if not str(full_path).startswith(str(music_root)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not full_path.exists() or not full_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    cmd = [
+        "ffmpeg",
+        "-i", str(full_path),
+        "-map", "0:v",
+        "-frames:v", "1",
+        "-f", "image2",
+        "-vcodec", "copy",
+        "-",
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=408, detail="Artwork extraction timed out")
+    except Exception as exc:
+        logger.error("ffmpeg artwork error for %s: %s", full_path, exc)
+        raise HTTPException(status_code=500, detail="Artwork extraction failed")
+
+    if not stdout_bytes:
+        raise HTTPException(status_code=404, detail="No embedded artwork found")
+
+    from fastapi.responses import Response
+    return Response(content=stdout_bytes, media_type="image/jpeg")
 
 
 # ---------------------------------------------------------------------------

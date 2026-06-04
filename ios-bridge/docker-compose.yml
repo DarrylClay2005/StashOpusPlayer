@@ -16,8 +16,14 @@ services:
       - DB_NAME=discord_music_gws
       # JWT secret for account tokens
       - IOS_JWT_SECRET=${IOS_JWT_SECRET:-stash-opus-player-jwt-secret-2026}
+      # Optional: set SERVER_MUSIC_DIR to a path inside the container to enable
+      # the server music library feature. Mount your music directory as a volume.
+      # Example: SERVER_MUSIC_DIR=/music  (then add: - /your/music:/music:ro)
+      - SERVER_MUSIC_DIR=${SERVER_MUSIC_DIR:-}
     volumes:
       - ./cache/yt-dlp:/app/.cache/yt-dlp
+      # Add your music directory mount here if using SERVER_MUSIC_DIR, e.g.:
+      # - /path/to/your/music:/music:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
       interval: 30s

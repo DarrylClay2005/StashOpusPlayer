@@ -10,6 +10,7 @@ final class UpdateService: ObservableObject {
     @Published private(set) var updateAvailable: Bool = false
     @Published private(set) var isChecking: Bool = false
     @Published private(set) var releasePageURL: URL = URL(string: "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/latest")!
+    @Published private(set) var directDownloadURL: URL? = nil
 
     var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
@@ -37,7 +38,10 @@ final class UpdateService: ObservableObject {
     private init() {}
 
     func openReleasePage() {
-        UIApplication.shared.open(releasePageURL)
+        // Use the direct IPA download URL when available so Safari immediately
+        // starts the download instead of navigating to the release web page.
+        let target = directDownloadURL ?? releasePageURL
+        UIApplication.shared.open(target)
     }
 
     func checkForUpdates() async {
@@ -59,6 +63,7 @@ final class UpdateService: ObservableObject {
             // falling back to any tag starting with "v".
             var bestTag: String? = nil
             var bestPageURL: URL? = nil
+            var bestIPADownloadURL: URL? = nil
 
             for release in releases {
                 guard let tagName = release["tag_name"] as? String,
@@ -72,12 +77,36 @@ final class UpdateService: ObservableObject {
                 if tagName.hasPrefix("ios/v") {
                     bestTag = String(tagName.dropFirst("ios/v".count))
                     bestPageURL = URL(string: htmlURL)
+                    // Scan release assets for the IPA direct download link.
+                    if let assets = release["assets"] as? [[String: Any]] {
+                        for asset in assets {
+                            if let name = asset["name"] as? String,
+                               name.lowercased().hasSuffix(".ipa"),
+                               let urlStr = asset["browser_download_url"] as? String,
+                               let url = URL(string: urlStr) {
+                                bestIPADownloadURL = url
+                                break
+                            }
+                        }
+                    }
                     break   // ios/v prefix is preferred; stop on first match.
                 }
 
                 if tagName.hasPrefix("v"), bestTag == nil {
                     bestTag = String(tagName.dropFirst(1))
                     bestPageURL = URL(string: htmlURL)
+                    // Scan assets for this fallback release too.
+                    if let assets = release["assets"] as? [[String: Any]] {
+                        for asset in assets {
+                            if let name = asset["name"] as? String,
+                               name.lowercased().hasSuffix(".ipa"),
+                               let urlStr = asset["browser_download_url"] as? String,
+                               let url = URL(string: urlStr) {
+                                bestIPADownloadURL = url
+                                break
+                            }
+                        }
+                    }
                 }
             }
 
@@ -87,6 +116,7 @@ final class UpdateService: ObservableObject {
             if let pageURL = bestPageURL {
                 releasePageURL = pageURL
             }
+            directDownloadURL = bestIPADownloadURL
             updateAvailable = isNewerVersion(versionString, than: currentVersion)
         } catch {
             // Silently fail — network errors should not crash or alert the user.
