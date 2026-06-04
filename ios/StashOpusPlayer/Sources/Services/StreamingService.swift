@@ -413,6 +413,13 @@ final class StreamingService: ObservableObject {
 
         try? FileManager.default.removeItem(at: destURL)
         try FileManager.default.moveItem(at: downloadedURL, to: destURL)
+
+        // Pre-seed the artwork cache with the track's thumbnail so it's immediately
+        // available when scanLocalDocuments() creates the Song for this file.
+        if !track.thumbnailURL.isEmpty, let thumbURL = URL(string: track.thumbnailURL) {
+            await ArtworkService.shared.prefetchRemoteImage(url: thumbURL, forKey: destURL.lastPathComponent)
+        }
+
         return destURL
     }
 

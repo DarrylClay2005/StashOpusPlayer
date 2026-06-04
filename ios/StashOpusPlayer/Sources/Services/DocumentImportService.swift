@@ -222,23 +222,27 @@ struct DocumentImportService {
             }
         }
 
-        // For video files (.mp4, .m4v, .mov), extract the first video frame as artwork
-        // and cache it so ArtworkService can find it by filename key.
+        // For video files (.mp4, .m4v, .mov), extract the first frame as artwork and
+        // write it to both memory and disk cache so it survives restarts.
         let videoExtensions: Set<String> = ["mp4", "m4v", "mov"]
-        // fileExt already declared above for the opus check
         if videoExtensions.contains(fileExt) {
-            let assetForThumb = AVURLAsset(url: url)
-            let generator = AVAssetImageGenerator(asset: assetForThumb)
+            let asset = AVURLAsset(url: url)
+            let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 600, height: 600)
             let time = CMTime(seconds: 1, preferredTimescale: 600)
-            if let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) {
-                let thumbImage = UIImage(cgImage: cgImage)
-                let thumbKey = url.lastPathComponent
-                ArtworkService.shared.cacheImage(thumbImage, forKey: thumbKey)
+            var thumbImage: UIImage?
+            if #available(iOS 16, *) {
+                thumbImage = (try? await generator.image(at: time)).map { UIImage(cgImage: $0.image) }
+            } else {
+                thumbImage = (try? generator.copyCGImage(at: time, actualTime: nil)).map { UIImage(cgImage: $0) }
+            }
+            if let img = thumbImage {
+                ArtworkService.shared.cacheImage(img, forKey: url.lastPathComponent)
             }
         }
 
-        return Song(
+        var song = Song(
             title: title,
             artist: artist,
             album: album,
@@ -251,6 +255,51 @@ struct DocumentImportService {
             bitrate: bitrate,
             sampleRate: sampleRate
         )
+
+        // Enrich sparse metadata via iTunes Search API. Only fires when artist or
+        // genre is missing — common for YouTube downloads where yt-dlp fills in
+        // title but leaves artist/album blank. Results are cached across restarts
+        // via UserDefaults so the API isn't hit every launch.
+        if song.artist.isEmpty || song.genre.isEmpty {
+            song = await Self.enrichFromCache(song: song)
+        }
+
+        return song
+    }
+
+    // MARK: - Online Metadata Enrichment
+
+    private static let enrichCacheKey = "doc_import_enrich_v1"
+
+    /// Returns a song with missing fields filled from UserDefaults cache or the iTunes API.
+    private static func enrichFromCache(song: Song) async -> Song {
+        let filename = song.url?.lastPathComponent ?? song.title
+        let defaults = UserDefaults.standard
+        var cache = (defaults.dictionary(forKey: enrichCacheKey) as? [String: [String: String]]) ?? [:]
+
+        if let saved = cache[filename] {
+            var s = song
+            if s.artist.isEmpty,      let v = saved["artist"], !v.isEmpty { s.artist = v }
+            if s.album.isEmpty,       let v = saved["album"],  !v.isEmpty { s.album  = v }
+            if s.genre.isEmpty,       let v = saved["genre"],  !v.isEmpty { s.genre  = v }
+            if s.year.isEmpty,        let v = saved["year"],   !v.isEmpty { s.year   = v }
+            return s
+        }
+
+        let enriched = await MetadataFetchService.shared.enrich(song: song)
+        if enriched.artist != song.artist || enriched.album != song.album ||
+           enriched.genre  != song.genre  || enriched.year  != song.year {
+            var entry: [String: String] = [:]
+            if !enriched.artist.isEmpty { entry["artist"] = enriched.artist }
+            if !enriched.album.isEmpty  { entry["album"]  = enriched.album  }
+            if !enriched.genre.isEmpty  { entry["genre"]  = enriched.genre  }
+            if !enriched.year.isEmpty   { entry["year"]   = enriched.year   }
+            if !entry.isEmpty {
+                cache[filename] = entry
+                defaults.set(cache, forKey: enrichCacheKey)
+            }
+        }
+        return enriched
     }
 
     // MARK: - Vorbis comment binary parser
