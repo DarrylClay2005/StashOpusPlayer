@@ -65,31 +65,41 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            SKIP_INSTALL=NO \
-            2>&1 | grep -E "error:|warning:|actool|CompileAssetCatalog|ARCHIVE|\.app$" || true
-          xcodebuild archive \
-            -project Lumisound.xcodeproj \
-            -scheme Lumisound \
-            -configuration Release \
-            -destination "generic/platform=iOS" \
-            -archivePath build/Lumisound.xcarchive \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
             SKIP_INSTALL=NO 2>&1 | tail -5
           APP=$(find build/Lumisound.xcarchive -name "*.app" | head -1)
           if [ -z "$APP" ]; then
             echo "::error::Archive did not produce a .app bundle"
             exit 1
           fi
-          # Verify Assets.car was compiled into the bundle
-          if [ ! -f "$APP/Assets.car" ]; then
-            echo "::warning::Assets.car missing from bundle — listing .app contents:"
-            ls -la "$APP/"
-          else
-            echo "Assets.car present: $(du -sh "$APP/Assets.car")"
-          fi
           echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+
+      - name: Compile asset catalogs (actool)
+        working-directory: ios
+        run: |
+          APP="$APP_PATH"
+          XCASSETS="Lumisound/Resources/Assets.xcassets"
+          echo "Compiling $XCASSETS into $APP"
+          # xcrun actool compiles xcassets and writes Assets.car + icon PNGs directly
+          # into the .app bundle. This step is needed because XcodeGen does not
+          # generate a 'Compile Asset Catalogs' build phase for unsigned archive builds.
+          xcrun actool \
+            --output-format human-readable-text \
+            --notices \
+            --warnings \
+            --platform iphoneos \
+            --minimum-deployment-target 16.0 \
+            --target-device iphone \
+            --target-device ipad \
+            --app-icon AppIcon \
+            --output-partial-info-plist /tmp/assetcatalog_output.plist \
+            --compress-pngs \
+            --compile "$APP" \
+            "$XCASSETS"
+          echo "Assets.car: $(du -sh "$APP/Assets.car" 2>/dev/null || echo MISSING)"
+          echo "Icons in bundle:"
+          ls "$APP/"AppIcon*.png 2>/dev/null | head -5 || echo "  none"
+          echo "AppIconDisplay:"
+          ls "$APP/"AppIconDisplay*.png 2>/dev/null | head -3 || echo "  none"
 
       - name: Package IPA (unsigned)
         id: ipa

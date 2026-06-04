@@ -61,19 +61,32 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            SKIP_INSTALL=NO
+            SKIP_INSTALL=NO 2>&1 | tail -5
           APP=$(find build/Lumisound.xcarchive -name "*.app" | head -1)
           if [ -z "$APP" ]; then
             echo "::error::Archive did not produce a .app bundle"
             exit 1
           fi
-          if [ ! -f "$APP/Assets.car" ]; then
-            echo "::warning::Assets.car missing — bundle contents:"
-            ls "$APP/"
-          else
-            echo "Assets.car present: $(du -sh "$APP/Assets.car")"
-          fi
           echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+
+      - name: Compile asset catalogs (actool)
+        working-directory: ios
+        run: |
+          APP="$APP_PATH"
+          xcrun actool \
+            --output-format human-readable-text \
+            --notices \
+            --warnings \
+            --platform iphoneos \
+            --minimum-deployment-target 16.0 \
+            --target-device iphone \
+            --target-device ipad \
+            --app-icon AppIcon \
+            --output-partial-info-plist /tmp/assetcatalog_output.plist \
+            --compress-pngs \
+            --compile "$APP" \
+            "Lumisound/Resources/Assets.xcassets"
+          echo "Assets.car: $(du -sh "$APP/Assets.car" 2>/dev/null || echo MISSING)"
 
       - name: Package IPA (unsigned)
         working-directory: ios
