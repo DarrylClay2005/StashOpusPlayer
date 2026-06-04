@@ -31,15 +31,21 @@ targets:
   Lumisound:
     type: application
     platform: iOS
+    # Swift sources
     sources:
       - path: Lumisound/Sources
+    # Resources listed EXPLICITLY so XcodeGen creates proper build phases:
+    #  - .xcassets  → "Compile Asset Catalogs" (actool) — produces Assets.car + icon PNGs
+    #  - .strings   → "Copy Bundle Resources"
+    # Info.plist and .entitlements are handled via build settings, not here.
     resources:
-      - path: Lumisound/Resources
+      - path: Lumisound/Resources/Assets.xcassets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lumisound.ios
         INFOPLIST_FILE: Lumisound/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPS_IN_ASSET_CATALOG_COMPILATION: "YES"
         CODE_SIGN_ENTITLEMENTS: Lumisound/Resources/Lumisound.entitlements
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""

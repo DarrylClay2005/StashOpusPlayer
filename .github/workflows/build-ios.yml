@@ -60,11 +60,18 @@ jobs:
             -archivePath build/Lumisound.xcarchive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            SKIP_INSTALL=NO
           APP=$(find build/Lumisound.xcarchive -name "*.app" | head -1)
           if [ -z "$APP" ]; then
             echo "::error::Archive did not produce a .app bundle"
             exit 1
+          fi
+          if [ ! -f "$APP/Assets.car" ]; then
+            echo "::warning::Assets.car missing — bundle contents:"
+            ls "$APP/"
+          else
+            echo "Assets.car present: $(du -sh "$APP/Assets.car")"
           fi
           echo "APP_PATH=$APP" >> "$GITHUB_ENV"
 
