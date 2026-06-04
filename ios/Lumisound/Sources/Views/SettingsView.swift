@@ -42,9 +42,10 @@ struct SettingsView: View {
                 aboutSection
             }
             .scrollContentBackground(.hidden)
-            .background(Color.clear.ignoresSafeArea())
+            .background(GalleryBackgroundView().ignoresSafeArea())
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .sheet(isPresented: $showLogin) {
                 LoginView()
                     .environmentObject(account)

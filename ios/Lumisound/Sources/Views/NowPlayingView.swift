@@ -187,7 +187,9 @@ struct NowPlayingView: View {
                 NavigationStack {
                     scrollContent
                         .appScreenBackground()
+                        .background(GalleryBackgroundView().ignoresSafeArea())
                 }
+                .toolbarBackground(.hidden, for: .navigationBar)
             }
         }
         .sheet(isPresented: $showSleepTimerSheet) {

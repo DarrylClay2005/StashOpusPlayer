@@ -27,10 +27,11 @@ struct QueueView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.clear.ignoresSafeArea()
+                GalleryBackgroundView().ignoresSafeArea()
                 queueList
             }
             .navigationTitle("Queue")
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarLeading) {
                     // Shuffle toggle

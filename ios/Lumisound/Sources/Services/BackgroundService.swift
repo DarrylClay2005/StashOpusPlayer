@@ -58,6 +58,8 @@ final class BackgroundService: ObservableObject {
     // MARK: Private
 
     private var shuffleTimer: Timer?
+    // Tracks every timer added to the RunLoop so none are orphaned on rapid addImages calls.
+    private var allTimers: [Timer] = []
 
     // MARK: Init — register for foreground notification
 
@@ -106,15 +108,15 @@ final class BackgroundService: ObservableObject {
     func addImages(_ newImages: [UIImage]) {
         images.append(contentsOf: newImages)
         saveImagesToDisk()
-        // Auto-enable so users don't have to toggle the switch before adding images.
         if !isEnabled {
             isEnabled = true
             saveSettings()
-            appLog("addImages: auto-enabled (images=\(images.count))", category: "background")
         }
-        if !isActive { startShuffling() }
+        // Always (re)start to ensure a single clean timer — startShuffling() kills all orphans first.
         currentIndex = 0
+        startShuffling()
         objectWillChange.send()
+        appLog("addImages: gallery ready (images=\(images.count), active=\(isActive))", category: "background")
     }
 
     func removeImage(at index: Int) {
@@ -190,27 +192,29 @@ final class BackgroundService: ObservableObject {
     // MARK: Shuffle Control
 
     func startShuffling() {
-        shuffleTimer?.invalidate()
+        // Kill every tracked timer — prevents orphaned timers from rapid addImages calls.
+        allTimers.forEach { $0.invalidate() }
+        allTimers.removeAll()
         shuffleTimer = nil
+
         guard isEnabled, !images.isEmpty else {
             isActive = false
             appLog("startShuffling: skipped (enabled=\(isEnabled) images=\(images.count))", category: "background")
             return
         }
-        // Use RunLoop.main + .common mode so the timer fires even while a List/ScrollView
-        // is being tracked (default mode timers are suspended during UITrackingRunLoopMode).
-        // MainActor.assumeIsolated is safe here because we add to RunLoop.main explicitly.
         let timer = Timer(timeInterval: shuffleIntervalSeconds, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.advance() }
         }
         RunLoop.main.add(timer, forMode: .common)
         shuffleTimer = timer
+        allTimers = [timer]
         isActive = true
         appLog("startShuffling: timer started interval=\(shuffleIntervalSeconds)s images=\(images.count)", category: "background")
     }
 
     func stopShuffling() {
-        shuffleTimer?.invalidate()
+        allTimers.forEach { $0.invalidate() }
+        allTimers.removeAll()
         shuffleTimer = nil
         isActive = false
         appLog("stopShuffling: timer stopped", category: "background")

@@ -39,7 +39,8 @@ struct StreamSearchView: View {
             }
             .navigationTitle("Search Streaming")
             .navigationBarTitleDisplayMode(.large)
-            .background(Color.clear.ignoresSafeArea())
+            .background(GalleryBackgroundView().ignoresSafeArea())
+            .toolbarBackground(.hidden, for: .navigationBar)
         }
     }
 

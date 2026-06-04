@@ -12,12 +12,25 @@ struct ContentView: View {
     @AppStorage("selected_tab") private var selectedTab = 0
 
     init() {
-        // Must be set before first render — onAppear fires too late
-        let appearance = UITabBarAppearance()
-        appearance.configureWithTransparentBackground()
-        appearance.backgroundEffect = UIBlurEffect(style: .systemThinMaterialDark)
-        UITabBar.appearance().standardAppearance = appearance
-        UITabBar.appearance().scrollEdgeAppearance = appearance
+        // Tab bar — transparent with dark blur
+        let tabAppearance = UITabBarAppearance()
+        tabAppearance.configureWithTransparentBackground()
+        tabAppearance.backgroundEffect = UIBlurEffect(style: .systemThinMaterialDark)
+        UITabBar.appearance().standardAppearance = tabAppearance
+        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+
+        // Navigation bar — fully transparent so gallery background shows through.
+        // Each NavigationStack also adds .toolbarBackground(.hidden) for the scroll-edge state.
+        let navAppearance = UINavigationBarAppearance()
+        navAppearance.configureWithTransparentBackground()
+        navAppearance.backgroundColor = .clear
+        navAppearance.shadowColor = .clear
+        UINavigationBar.appearance().standardAppearance = navAppearance
+        UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
+        UINavigationBar.appearance().compactAppearance = navAppearance
+
+        // List/TableView — clear background so gallery shows through list rows.
+        UITableView.appearance().backgroundColor = .clear
     }
 
     var body: some View {

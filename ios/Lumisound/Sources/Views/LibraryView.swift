@@ -65,9 +65,10 @@ struct LibraryView: View {
                 // Tab content
                 tabContent
             }
-            .background(Color.clear.ignoresSafeArea())
+            .background(GalleryBackgroundView().ignoresSafeArea())
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.large)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar { toolbarItems }
             .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
             .sheet(isPresented: $showAddMusic) {
