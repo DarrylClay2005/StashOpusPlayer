@@ -606,12 +606,11 @@ final class StreamingService: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 180
+        request.timeoutInterval = 300   // 5 min for large files
 
-        let data = try Data(contentsOf: fileURL)
-        request.httpBody = data
-
-        let (_, response) = try await URLSession.shared.data(for: request)
+        // Use URLSession.upload(for:fromFile:) instead of loading the whole file into memory.
+        // This streams the file directly from disk, critical for large audio files.
+        let (_, response) = try await URLSession.shared.upload(for: request, fromFile: fileURL)
         if let http = response as? HTTPURLResponse {
             switch http.statusCode {
             case 200..<300: break

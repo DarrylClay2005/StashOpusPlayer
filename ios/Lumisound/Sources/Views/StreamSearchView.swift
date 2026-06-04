@@ -154,6 +154,32 @@ struct StreamSearchView: View {
                 Task { await streaming.fetchUserMusic(token: token) }
             }
         }
+        // fileImporter must be at this level (NavigationStack content root), NOT inside
+        // a nested List or conditional branch — SwiftUI can't present the picker from deep hierarchy.
+        .fileImporter(
+            isPresented: $showUploadPicker,
+            allowedContentTypes: [.audio],
+            allowsMultipleSelection: true
+        ) { result in
+            guard let token = account.token else { return }
+            switch result {
+            case .success(let urls):
+                Task {
+                    for url in urls {
+                        let didAccess = url.startAccessingSecurityScopedResource()
+                        do {
+                            try await streaming.uploadToUserLibrary(fileURL: url, token: token)
+                        } catch {
+                            streaming.errorMessage = "Upload failed: \(error.localizedDescription)"
+                        }
+                        if didAccess { url.stopAccessingSecurityScopedResource() }
+                    }
+                    await streaming.fetchUserMusic(token: token)
+                }
+            case .failure(let error):
+                streaming.errorMessage = "File picker error: \(error.localizedDescription)"
+            }
+        }
     }
 
     // MARK: — Streaming results (YouTube / SoundCloud)
@@ -326,30 +352,6 @@ struct StreamSearchView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
-                .fileImporter(
-                    isPresented: $showUploadPicker,
-                    allowedContentTypes: [.audio],
-                    allowsMultipleSelection: true
-                ) { result in
-                    guard let token = account.token else { return }
-                    switch result {
-                    case .success(let urls):
-                        Task {
-                            for url in urls {
-                                let didAccess = url.startAccessingSecurityScopedResource()
-                                defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
-                                do {
-                                    try await streaming.uploadToUserLibrary(fileURL: url, token: token)
-                                } catch {
-                                    streaming.errorMessage = "Upload failed: \(error.localizedDescription)"
-                                }
-                            }
-                            await streaming.fetchUserMusic(token: token)
-                        }
-                    case .failure(let error):
-                        streaming.errorMessage = "File picker error: \(error.localizedDescription)"
-                    }
-                }
             }
         }
     }
