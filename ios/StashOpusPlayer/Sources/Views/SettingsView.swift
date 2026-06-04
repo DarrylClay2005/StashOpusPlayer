@@ -62,14 +62,30 @@ struct SettingsView: View {
                     .environmentObject(library)
                 ) {
                     HStack(spacing: 12) {
-                        Circle()
-                            .fill(AppTheme.accent)
-                            .frame(width: 40, height: 40)
-                            .overlay(
-                                Text(String(user.username.prefix(1)).uppercased())
+                        // Avatar: real image or initials fallback
+                        ZStack {
+                            if let img = account.avatarImage {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 40, height: 40)
+                                    .clipShape(Circle())
+                            } else {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [AppTheme.accent, AppTheme.accentSoft],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 40, height: 40)
+                                Text(String((user.displayName ?? user.username).prefix(1)).uppercased())
                                     .font(.title3.bold())
                                     .foregroundStyle(.white)
-                            )
+                            }
+                        }
+                        .shadow(color: AppTheme.accent.opacity(0.3), radius: 4, x: 0, y: 2)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(user.displayName ?? user.username)
                                 .fontWeight(.medium)

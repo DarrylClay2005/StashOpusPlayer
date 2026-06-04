@@ -53,13 +53,7 @@ final class ArtworkService {
     }
 
     /// Loads artwork asynchronously, checking memory cache → disk cache →
-    /// MPMediaLibrary → embedded asset metadata in that order.
-    ///
-    /// This method may be called from the MainActor (e.g. from an `ArtworkThumbnail`
-    /// view's `.task {}` modifier).  The heavy work is done inside `Task.detached`
-    /// blocks which run on background threads, so the main thread is never blocked.
-    /// The `await` returns on whichever actor the caller resides on — this is
-    /// intentional and correct for async Swift structured concurrency.
+    /// remote thumbnail URL (for streaming tracks) → MPMediaLibrary → embedded asset metadata.
     func loadArtwork(for song: Song) async -> UIImage? {
         let key = cacheKey(for: song)
 
@@ -70,6 +64,18 @@ final class ArtworkService {
         if let onDisk = loadFromDisk(key: key) {
             setMemoryCache(onDisk, forKey: key)
             return onDisk
+        }
+
+        // For streaming tracks the artworkCacheKey is a remote thumbnail URL (YouTube/SoundCloud).
+        if let cacheKeyStr = song.artworkCacheKey,
+           cacheKeyStr.hasPrefix("http"),
+           let thumbnailURL = URL(string: cacheKeyStr) {
+            if let image = await fetchRemoteImage(url: thumbnailURL) {
+                setMemoryCache(image, forKey: key)
+                let resized = resizedImage(image, maxDimension: 600)
+                saveToDisk(image: resized, key: key)
+                return image
+            }
         }
 
         if let persistentID = song.persistentID {
@@ -185,6 +191,13 @@ final class ArtworkService {
         // Cache result — use sentinel to record "no artwork" without storing nil
         mediaQueryCache.setObject(image ?? self.noArtworkSentinel, forKey: cacheKey)
         return image
+    }
+
+    /// Downloads an image from a remote URL (used for streaming track thumbnails).
+    private func fetchRemoteImage(url: URL) async -> UIImage? {
+        guard let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return UIImage(data: data)
     }
 
     private func fetchAssetArtwork(url: URL, key: String) async -> UIImage? {

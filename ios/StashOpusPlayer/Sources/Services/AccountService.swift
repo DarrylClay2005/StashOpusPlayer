@@ -187,6 +187,7 @@ final class AccountService: ObservableObject {
             isLoggedIn = true
             hasDateOfBirth = response.user.dateOfBirth != nil
             saveUserLocally(response.user)
+            await loadAvatar(forceRefresh: true)
         } catch let err as AccountError {
             errorMessage = err.message
         } catch {
@@ -224,6 +225,7 @@ final class AccountService: ObservableObject {
             isLoggedIn = true
             hasDateOfBirth = response.user.dateOfBirth != nil
             saveUserLocally(response.user)
+            await loadAvatar(forceRefresh: true)
         } catch let err as AccountError {
             errorMessage = err.message
         } catch {
@@ -439,8 +441,8 @@ final class AccountService: ObservableObject {
     }
 
     /// Load avatar from local cache first, then from server. Updates `avatarImage`.
-    func loadAvatar() async {
-        if let cached = loadAvatarLocally() {
+    func loadAvatar(forceRefresh: Bool = false) async {
+        if !forceRefresh, let cached = loadAvatarLocally() {
             avatarImage = cached
             return
         }

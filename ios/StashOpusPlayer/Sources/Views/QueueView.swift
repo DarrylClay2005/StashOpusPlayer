@@ -32,6 +32,24 @@ struct QueueView: View {
             }
             .navigationTitle("Queue")
             .toolbar {
+                ToolbarItemGroup(placement: .navigationBarLeading) {
+                    // Shuffle toggle
+                    Button {
+                        player.toggleShuffle()
+                    } label: {
+                        Image(systemName: "shuffle")
+                            .foregroundStyle(player.shuffleEnabled ? AppTheme.accent : AppTheme.textSecondary)
+                            .fontWeight(player.shuffleEnabled ? .bold : .regular)
+                    }
+                    // Repeat cycle button
+                    Button {
+                        player.cycleRepeatMode()
+                    } label: {
+                        Image(systemName: repeatIcon)
+                            .foregroundStyle(player.repeatMode != .off ? AppTheme.accent : AppTheme.textSecondary)
+                            .fontWeight(player.repeatMode != .off ? .bold : .regular)
+                    }
+                }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     if !player.queue.isEmpty {
                         Button {
@@ -56,6 +74,14 @@ struct QueueView: View {
             .safeAreaInset(edge: .bottom) {
                 MiniPlayerBar()
             }
+        }
+    }
+
+    private var repeatIcon: String {
+        switch player.repeatMode {
+        case .off: return "repeat"
+        case .all: return "repeat"
+        case .one: return "repeat.1"
         }
     }
 

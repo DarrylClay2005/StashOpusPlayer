@@ -197,6 +197,7 @@ final class AudioPlayerManager: ObservableObject {
             isPlaying = true
             startTimer()
             updateNowPlaying()
+            reapplyActiveEffect()
         }
     }
 
@@ -390,6 +391,27 @@ final class AudioPlayerManager: ObservableObject {
         }
     }
 
+    /// Re-starts any dynamic effect (8D, tremolo, vibrato, karaoke) that was active before
+    /// playback began. Called after the engine starts so CADisplayLink effects actually run.
+    private func reapplyActiveEffect() {
+        let effectID = audioSettings.activeEffectID
+        guard !effectID.isEmpty, effectID != "none",
+              let effect = AudioEffectsService.allEffects.first(where: { $0.id == effectID })
+        else { return }
+        switch effect.specialMode.type {
+        case .rotation:
+            if !is8DActive { start8DRotation(hz: effect.specialMode.hz) }
+        case .tremolo:
+            if !isTremoloActive { startTremolo(frequency: effect.specialMode.freq, depth: effect.specialMode.depth) }
+        case .vibrato:
+            if !isVibratoActive { startVibrato(frequency: effect.specialMode.freq, depth: effect.specialMode.pitchDepth) }
+        case .karaoke:
+            if !isKaraokeActive { enableKaraoke(level: effect.specialMode.level) }
+        case .none:
+            break
+        }
+    }
+
     // MARK: - EQ Presets
 
     func applyEQPreset(_ preset: EQPreset) {
@@ -483,6 +505,7 @@ final class AudioPlayerManager: ObservableObject {
         isPlaying = true
         startTimer()
         updateNowPlaying()
+        reapplyActiveEffect()
     }
 
     /// Core scheduler — loads the audio file, seeks to `startTime`, and arms the completion handler
@@ -680,6 +703,7 @@ final class AudioPlayerManager: ObservableObject {
                 startEngineIfNeeded()
                 node.play()
                 startTimer()
+                reapplyActiveEffect()
             }
             updateNowPlaying()
 
@@ -1002,14 +1026,19 @@ final class AudioPlayerManager: ObservableObject {
         guard !engine.isRunning else { return }
         do {
             try engine.start()
+            errorMessage = nil
         } catch {
-            // After an audio-session interruption the engine may need a full reset.
-            // Tear down the graph, rebuild it, and retry once.
+            // Full teardown + rebuild, then reactivate the audio session before retry.
+            // engine.reset() detaches all nodes and clears connections, so configureEngine()
+            // can re-attach them cleanly without duplicates.
+            engine.reset()
             isEngineConfigured = false
             configureEngine()
             configureEqualizer()
+            try? AVAudioSession.sharedInstance().setActive(true)
             do {
                 try engine.start()
+                errorMessage = nil
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -1020,7 +1049,6 @@ final class AudioPlayerManager: ObservableObject {
 
     func start8DRotation(hz: Double = 0.18) {
         stop8DRotation()
-        guard engine.isRunning else { return }  // engine must be running for spatial audio
         rotationHz = hz
         rotationAngle = 0
         is8DActive = true
@@ -1052,7 +1080,8 @@ final class AudioPlayerManager: ObservableObject {
         // frequency. This produces a clear, audible 8D "surround" effect on any stereo
         // output (headphones or speakers), unlike AVAudioEnvironmentNode yaw rotation which
         // requires HRTF rendering to be perceptible and is unreliable on standard stereo paths.
-        let pan = Float(sin(rotationAngle))
+        // Scale to ±0.7 so neither side ever goes fully silent during rotation.
+        let pan = Float(sin(rotationAngle)) * 0.7
         crossfadeMixer.pan = pan
     }
 
@@ -1060,7 +1089,6 @@ final class AudioPlayerManager: ObservableObject {
 
     func startTremolo(frequency: Double = 4.0, depth: Float = 0.45) {
         stopTremolo()
-        guard engine.isRunning else { return }  // engine must be running for tremolo to be heard
         tremoloFrequency = frequency
         tremoloDepth = depth
         tremoloPhase = 0
@@ -1100,7 +1128,6 @@ final class AudioPlayerManager: ObservableObject {
 
     func startVibrato(frequency: Double = 4.5, depth: Double = 0.35) {
         stopVibrato()
-        guard engine.isRunning else { return }  // engine must be running for vibrato to be heard
         vibratoFrequency = frequency
         vibratoDepth = depth
         vibratoPhase = 0

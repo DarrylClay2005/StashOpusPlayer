@@ -53,7 +53,7 @@ struct StashOpusPlayerApp: App {
                     if account.isLoggedIn {
                         await account.pullSync(library: libraryManager)
                         account.startAutoPushTimer(library: libraryManager)
-                        await account.loadAvatar()
+                        await account.loadAvatar(forceRefresh: true)
                     }
 
                     // Start periodic bridge health checks.
@@ -100,7 +100,7 @@ struct StashOpusPlayerApp: App {
                         return
                     }
                     account.startAutoPushTimer(library: libraryManager)
-                    Task { await account.loadAvatar() }
+                    Task { await account.loadAvatar(forceRefresh: true) }
                 }
         }
     }

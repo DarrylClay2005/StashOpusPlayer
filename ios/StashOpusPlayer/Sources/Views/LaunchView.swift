@@ -19,45 +19,57 @@ struct LaunchView: View {
             VStack(spacing: 24) {
                 Spacer()
 
-                // App icon / logo
-                Group {
-                    if let uiImage = UIImage(named: "AppIcon") {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                    } else {
-                        // Fallback: accent-colored rounded square with music note
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .fill(AppTheme.accent)
-                            Image(systemName: "music.note")
-                                .font(.system(size: 50, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
+                // App logo — styled accent tile with music note
+                ZStack {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [AppTheme.accent, AppTheme.accentSoft],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    Image(systemName: "music.note.list")
+                        .font(.system(size: 48, weight: .bold))
+                        .foregroundStyle(.white)
                 }
-                .scaledToFit()
-                .frame(width: 100, height: 100)
+                .frame(width: 110, height: 110)
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .shadow(color: AppTheme.accent.opacity(0.4), radius: 20)
+                .shadow(color: AppTheme.accent.opacity(0.5), radius: 24, x: 0, y: 8)
                 .scaleEffect(logoScale)
                 .opacity(logoOpacity)
 
                 if account.isLoggedIn, let user = account.currentUser {
                     // Logged in — personalised greeting
                     VStack(spacing: 8) {
-                        // Profile avatar
+                        // Profile avatar — real image or initials fallback
                         ZStack {
-                            Circle()
-                                .fill(AppTheme.accent)
-                                .frame(width: 70, height: 70)
-                            Text(String(user.username.prefix(1)).uppercased())
-                                .font(.title.bold())
-                                .foregroundStyle(.white)
+                            if let img = account.avatarImage {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 70, height: 70)
+                                    .clipShape(Circle())
+                            } else {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [AppTheme.accent, AppTheme.accentSoft],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 70, height: 70)
+                                Text(String((user.displayName ?? user.username).prefix(1)).uppercased())
+                                    .font(.title.bold())
+                                    .foregroundStyle(.white)
+                            }
                         }
+                        .shadow(color: AppTheme.accent.opacity(0.4), radius: 8, x: 0, y: 4)
                         Text("Hello! @\(user.username)")
                             .font(.title2.bold())
                             .foregroundStyle(AppTheme.textPrimary)
-                        if let name = user.displayName {
+                        if let name = user.displayName, !name.isEmpty {
                             Text(name)
                                 .font(.subheadline)
                                 .foregroundStyle(AppTheme.textSecondary)

@@ -821,16 +821,18 @@ async def login(body: LoginRequest, request: Request):
             )
 
     token = create_token(user_id, token_id)
-    user = {
-        "id": user_id,
-        "username": username,
-        "email": email,
-        "display_name": display_name,
-        "avatar_url": avatar_url,
-        "created_at": created_at.isoformat() if created_at else None,
-        "last_login": datetime.now(timezone.utc).isoformat(),
-    }
-    return {"user": user, "token": token}
+
+    # Fetch full user row so we return date_of_birth and all fields consistently.
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth "
+                "FROM ios_users WHERE id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+
+    return {"user": _user_dict(row), "token": token}
 
 
 @app.post("/auth/logout", status_code=204)
