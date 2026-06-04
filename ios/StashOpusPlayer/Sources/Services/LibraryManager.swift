@@ -119,6 +119,8 @@ final class LibraryManager: ObservableObject {
                 appLog("scanWatchedFolders: no accessible watched folders", category: "library")
                 return
             }
+            // Keep security-scoped access open until after makeSong reads the files.
+            defer { for url in urls { url.stopAccessingSecurityScopedResource() } }
 
             var candidates: [URL] = []
             let fm = FileManager.default
@@ -135,7 +137,6 @@ final class LibraryManager: ObservableObject {
                         candidates.append(url)
                     }
                 }
-                baseURL.stopAccessingSecurityScopedResource()
             }
 
             guard !candidates.isEmpty else { return }
@@ -144,7 +145,6 @@ final class LibraryManager: ObservableObject {
             let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
             guard !newURLs.isEmpty else { return }
 
-            // Note: security-scoped access is already active (startAccessingSecurityScopedResource was called above)
             let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
                 await withTaskGroup(of: Song?.self) { group in
                     var results: [Song] = []
