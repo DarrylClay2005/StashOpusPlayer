@@ -1,7 +1,7 @@
-name: StashOpusPlayer
+name: Lumisound
 
 options:
-  bundleIdPrefix: com.stash
+  bundleIdPrefix: com.lumisound
   deploymentTarget:
     iOS: "16.0"
 
@@ -28,7 +28,7 @@ settings:
       VALIDATE_PRODUCT: "YES"
 
 targets:
-  StashOpusPlayer:
+  Lumisound:
     type: application
     platform: iOS
     sources:
@@ -37,7 +37,7 @@ targets:
       - path: StashOpusPlayer/Resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.stash.opusplayer.ios
+        PRODUCT_BUNDLE_IDENTIFIER: com.lumisound.ios
         INFOPLIST_FILE: StashOpusPlayer/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: StashOpusPlayer/Resources/StashOpusPlayer.entitlements
@@ -46,7 +46,7 @@ targets:
     scheme:
       buildAction:
         targets:
-          - StashOpusPlayer
+          - Lumisound
       runAction:
         config: Debug
       testAction:
@@ -58,16 +58,16 @@ targets:
       analyzeAction:
         config: Debug
       testTargets:
-        - StashOpusPlayerTests
+        - LumisoundTests
 
-  StashOpusPlayerTests:
+  LumisoundTests:
     type: bundle.unit-test
     platform: iOS
     sources:
       - path: StashOpusPlayer/Tests
     dependencies:
-      - target: StashOpusPlayer
+      - target: Lumisound
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.stash.opusplayer.ios.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.lumisound.ios.tests
         INFOPLIST_FILE: ""

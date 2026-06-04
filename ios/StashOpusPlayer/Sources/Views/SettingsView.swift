@@ -627,7 +627,7 @@ struct SettingsView: View {
     private var aboutSection: some View {
         Section {
             LabeledContent("App") {
-                Text("Stash Opus Player")
+                Text("Lumisound")
                     .foregroundStyle(AppTheme.textSecondary)
             }
             .foregroundStyle(AppTheme.textPrimary)

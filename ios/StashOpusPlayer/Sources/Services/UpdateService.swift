@@ -10,7 +10,7 @@ final class UpdateService: ObservableObject {
     @Published private(set) var updateAvailable: Bool = false
     @Published private(set) var isChecking: Bool = false
     // swiftlint:disable:next force_unwrapping
-    private static let fallbackReleaseURL = URL(string: "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/latest")!
+    private static let fallbackReleaseURL = URL(string: "https://github.com/HeavenlyXenusVR/Lumisound/releases/latest")!
     @Published private(set) var releasePageURL: URL = UpdateService.fallbackReleaseURL
     @Published private(set) var directDownloadURL: URL? = nil
 
@@ -52,12 +52,12 @@ final class UpdateService: ObservableObject {
         defer { isChecking = false }
         appLog("checkForUpdates: current=\(currentVersion)", category: "network")
 
-        guard let apiURL = URL(string: "https://api.github.com/repos/HeavenlyXenusVR/StashOpusPlayer/releases") else {
+        guard let apiURL = URL(string: "https://api.github.com/repos/HeavenlyXenusVR/Lumisound/releases") else {
             appWarn("checkForUpdates: could not build GitHub API URL", category: "network")
             return
         }
         var request = URLRequest(url: apiURL)
-        request.setValue("StashOpusPlayer-iOS", forHTTPHeaderField: "User-Agent")
+        request.setValue("Lumisound-iOS", forHTTPHeaderField: "User-Agent")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)

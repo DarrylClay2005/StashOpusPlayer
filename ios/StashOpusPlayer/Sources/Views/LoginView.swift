@@ -2,6 +2,9 @@ import SwiftUI
 
 struct LoginView: View {
 
+    /// Pass `true` to open directly on the Register tab (e.g. from the "Create Account" button).
+    var startOnRegister: Bool = false
+
     @EnvironmentObject var account: AccountService
     @Environment(\.dismiss) var dismiss
 
@@ -31,7 +34,7 @@ struct LoginView: View {
                                 .foregroundStyle(AppTheme.accent)
                                 .shadow(color: AppTheme.accent.opacity(0.4), radius: 12, x: 0, y: 6)
 
-                            Text("Stash Opus Player")
+                            Text("Lumisound")
                                 .font(.title2.bold())
                                 .foregroundStyle(AppTheme.textPrimary)
 
@@ -221,6 +224,9 @@ struct LoginView: View {
             }
             .onChange(of: account.isLoggedIn) { loggedIn in
                 if loggedIn { dismiss() }
+            }
+            .onAppear {
+                if startOnRegister { isRegistering = true }
             }
         }
     }

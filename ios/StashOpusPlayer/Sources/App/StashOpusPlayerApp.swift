@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 @main
-struct StashOpusPlayerApp: App {
+struct LumisoundApp: App {
     @StateObject private var libraryManager = LibraryManager()
     @StateObject private var player = AudioPlayerManager()
     @StateObject private var sleepTimer = SleepTimerService()

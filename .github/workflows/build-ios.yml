@@ -29,7 +29,6 @@ jobs:
 
       - name: Select Xcode
         run: |
-          # Use the latest available stable Xcode
           XCODE=$(ls /Applications | grep '^Xcode' | sort -rV | head -1)
           sudo xcode-select -s "/Applications/$XCODE/Contents/Developer"
 
@@ -54,16 +53,15 @@ jobs:
         run: |
           mkdir -p build
           xcodebuild archive \
-            -project StashOpusPlayer.xcodeproj \
-            -scheme StashOpusPlayer \
+            -project Lumisound.xcodeproj \
+            -scheme Lumisound \
             -configuration ${{ steps.config.outputs.configuration }} \
             -destination "generic/platform=iOS" \
-            -archivePath build/StashOpusPlayer.xcarchive \
+            -archivePath build/Lumisound.xcarchive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
-          # Verify the .app was produced
-          APP=$(find build/StashOpusPlayer.xcarchive -name "*.app" | head -1)
+          APP=$(find build/Lumisound.xcarchive -name "*.app" | head -1)
           if [ -z "$APP" ]; then
             echo "::error::Archive did not produce a .app bundle"
             exit 1
@@ -74,7 +72,7 @@ jobs:
         working-directory: ios
         run: |
           MARKETING_VERSION=$(grep 'MARKETING_VERSION' project.yml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          IPA_NAME="StashOpusPlayer-v${MARKETING_VERSION}-unsigned.ipa"
+          IPA_NAME="Lumisound-v${MARKETING_VERSION}-unsigned.ipa"
           PAYLOAD_DIR="build/Payload/Payload"
           mkdir -p "$PAYLOAD_DIR"
           cp -R "$APP_PATH" "$PAYLOAD_DIR/"
@@ -86,13 +84,13 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: StashOpusPlayer-unsigned-ipa
+          name: Lumisound-unsigned-ipa
           path: ios/build/${{ env.IPA_NAME }}
           retention-days: 14
 
       - name: Upload archive (for re-signing)
         uses: actions/upload-artifact@v4
         with:
-          name: StashOpusPlayer-xcarchive
-          path: ios/build/StashOpusPlayer.xcarchive
+          name: Lumisound-xcarchive
+          path: ios/build/Lumisound.xcarchive
           retention-days: 7

@@ -7,7 +7,10 @@ struct LaunchView: View {
     @EnvironmentObject private var library: LibraryManager
     @Binding var isLoading: Bool
 
-    @State private var showNewUserPrompt = false
+    @State private var showPrompt = false
+    @State private var showLoginSheet = false
+    @State private var loginStartOnRegister = false
+
     @State private var logoScale: CGFloat = 0.6
     @State private var logoOpacity: Double = 0
     @State private var contentOpacity: Double = 0
@@ -19,30 +22,18 @@ struct LaunchView: View {
             VStack(spacing: 24) {
                 Spacer()
 
-                // App logo — styled accent tile with music note
-                ZStack {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [AppTheme.accent, AppTheme.accentSoft],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                    Image(systemName: "music.note.list")
-                        .font(.system(size: 48, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 110, height: 110)
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .shadow(color: AppTheme.accent.opacity(0.5), radius: 24, x: 0, y: 8)
-                .scaleEffect(logoScale)
-                .opacity(logoOpacity)
+                // App icon — uses the real Lumisound icon from Assets.xcassets
+                Image("AppIconDisplay")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 110, height: 110)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .shadow(color: AppTheme.accent.opacity(0.5), radius: 24, x: 0, y: 8)
+                    .scaleEffect(logoScale)
+                    .opacity(logoOpacity)
 
                 if account.isLoggedIn, let user = account.currentUser {
-                    // Logged in — personalised greeting
                     VStack(spacing: 8) {
-                        // Profile avatar — real image or initials fallback
                         ZStack {
                             if let img = account.avatarImage {
                                 Image(uiImage: img)
@@ -77,9 +68,8 @@ struct LaunchView: View {
                     }
                     .opacity(contentOpacity)
                 } else {
-                    // Not logged in
                     VStack(spacing: 8) {
-                        Text("StashOpusPlayer")
+                        Text("Lumisound")
                             .font(.title.bold())
                             .foregroundStyle(AppTheme.textPrimary)
                         Text("Your music, your way")
@@ -91,7 +81,6 @@ struct LaunchView: View {
 
                 Spacer()
 
-                // Loading indicator at bottom
                 VStack(spacing: 8) {
                     ProgressView()
                         .tint(AppTheme.accent)
@@ -102,6 +91,85 @@ struct LaunchView: View {
                 .opacity(contentOpacity)
                 .padding(.bottom, 40)
             }
+
+            // Account prompt overlay — shown when not logged in after load
+            if showPrompt && !account.isLoggedIn {
+                Color.black.opacity(0.6).ignoresSafeArea()
+                    .transition(.opacity)
+
+                VStack(spacing: 0) {
+                    Spacer()
+
+                    VStack(spacing: 16) {
+                        VStack(spacing: 6) {
+                            Text("Welcome to Lumisound")
+                                .font(.title2.bold())
+                                .foregroundStyle(AppTheme.textPrimary)
+                            Text("Create a free account to sync playlists, settings, and your personal library across devices.")
+                                .font(.subheadline)
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 8)
+                        }
+
+                        // Create Account
+                        Button {
+                            loginStartOnRegister = true
+                            showLoginSheet = true
+                        } label: {
+                            Text("Create Account")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(AppTheme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .foregroundStyle(.white)
+                        }
+                        .buttonStyle(.plain)
+
+                        // Log In
+                        Button {
+                            loginStartOnRegister = false
+                            showLoginSheet = true
+                        } label: {
+                            Text("Log In")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .foregroundStyle(AppTheme.textPrimary)
+                        }
+                        .buttonStyle(.plain)
+
+                        // Skip
+                        Button {
+                            withAnimation(.easeOut(duration: 0.5)) {
+                                showPrompt = false
+                                isLoading = false
+                            }
+                        } label: {
+                            Text("Continue without account")
+                                .font(.subheadline)
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(24)
+                    .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 40)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: showPrompt)
+        .sheet(isPresented: $showLoginSheet, onDismiss: {
+            if account.isLoggedIn {
+                withAnimation(.easeOut(duration: 0.5)) { isLoading = false }
+            }
+        }) {
+            LoginView(startOnRegister: loginStartOnRegister)
+                .environmentObject(account)
         }
         .onAppear {
             withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
@@ -110,37 +178,25 @@ struct LaunchView: View {
             }
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 300_000_000)
-                withAnimation(.easeIn(duration: 0.4)) {
-                    contentOpacity = 1.0
-                }
+                withAnimation(.easeIn(duration: 0.4)) { contentOpacity = 1.0 }
             }
-            // Auto-dismiss after minimum 1.5 seconds once library is loading
             Task {
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 await MainActor.run {
                     if !account.isLoggedIn {
-                        showNewUserPrompt = true
+                        withAnimation { showPrompt = true }
                     } else {
-                        withAnimation(.easeOut(duration: 0.5)) {
-                            isLoading = false
-                        }
+                        withAnimation(.easeOut(duration: 0.5)) { isLoading = false }
                     }
                 }
             }
         }
-        .alert("Create an Account?", isPresented: $showNewUserPrompt) {
-            Button("Create Account") {
-                withAnimation(.easeOut(duration: 0.5)) {
-                    isLoading = false
-                }
+        // Auto-dismiss once login completes
+        .onChange(of: account.isLoggedIn) { loggedIn in
+            if loggedIn {
+                showLoginSheet = false
+                withAnimation(.easeOut(duration: 0.5)) { isLoading = false }
             }
-            Button("Skip for Now", role: .cancel) {
-                withAnimation(.easeOut(duration: 0.5)) {
-                    isLoading = false
-                }
-            }
-        } message: {
-            Text("Without an account, your playlists and settings won't be saved to the cloud. If you delete the app, your data will be lost!")
         }
     }
 }

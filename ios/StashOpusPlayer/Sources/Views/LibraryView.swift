@@ -194,99 +194,139 @@ private struct SongsTab: View {
     @EnvironmentObject private var library: LibraryManager
 
     @AppStorage("library_songs_columns") private var songColumns: Int = 1
+    @State private var showSearch: Bool = false
+    @FocusState private var searchFocused: Bool
 
     private var gridColumns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: 12), count: songColumns)
     }
 
     var body: some View {
-        Group {
-            if songColumns == 1 {
-                // List view
-                List {
-                    if songs.isEmpty {
-                        EmptyLibraryView(
-                            isScanning: library.isScanning,
-                            onAddMusic: { showAddMusic = true },
-                            onScan: { library.requestAccessAndScan() }
-                        )
-                        .listRowBackground(Color.clear)
-                    } else {
-                        ForEach(songs) { song in
-                            Button {
-                                player.play(song: song, in: songs)
-                            } label: {
-                                SongRow(song: song, isCurrent: player.currentSong?.id == song.id)
-                            }
-                            .buttonStyle(.plain)
-                            .listRowBackground(AppTheme.surface.opacity(0.5))
+        VStack(spacing: 0) {
+            // Inline search bar — shown when search icon is tapped
+            if showSearch {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 15))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    TextField("Search songs, artists, albums…", text: $searchText)
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .focused($searchFocused)
+                        .submitLabel(.search)
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(AppTheme.textSecondary)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .searchable(text: $searchText, prompt: "Search songs, artists, albums")
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        columnMenuButton(current: songColumns, key: "library_songs_columns", max: 3)
-                    }
-                }
-            } else {
-                // Grid view
-                ScrollView {
-                    if songs.isEmpty {
-                        EmptyLibraryView(
-                            isScanning: library.isScanning,
-                            onAddMusic: { showAddMusic = true },
-                            onScan: { library.requestAccessAndScan() }
-                        )
-                        .padding(.top, 60)
-                    } else {
-                        LazyVGrid(columns: gridColumns, spacing: 12) {
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .onAppear { searchFocused = true }
+            }
+
+            // Content — list or grid
+            Group {
+                if songColumns == 1 {
+                    List {
+                        if songs.isEmpty {
+                            EmptyLibraryView(
+                                isScanning: library.isScanning,
+                                onAddMusic: { showAddMusic = true },
+                                onScan: { library.requestAccessAndScan() }
+                            )
+                            .listRowBackground(Color.clear)
+                        } else {
                             ForEach(songs) { song in
                                 Button {
                                     player.play(song: song, in: songs)
                                 } label: {
-                                    SongGridCell(song: song, isCurrent: player.currentSong?.id == song.id)
+                                    SongRow(song: song, isCurrent: player.currentSong?.id == song.id)
                                 }
                                 .buttonStyle(.plain)
+                                .listRowBackground(AppTheme.surface.opacity(0.5))
                             }
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 12)
                     }
-                }
-                .background(Color.clear.ignoresSafeArea())
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        columnMenuButton(current: songColumns, key: "library_songs_columns", max: 3)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                } else {
+                    ScrollView {
+                        if songs.isEmpty {
+                            EmptyLibraryView(
+                                isScanning: library.isScanning,
+                                onAddMusic: { showAddMusic = true },
+                                onScan: { library.requestAccessAndScan() }
+                            )
+                            .padding(.top, 60)
+                        } else {
+                            LazyVGrid(columns: gridColumns, spacing: 12) {
+                                ForEach(songs) { song in
+                                    Button {
+                                        player.play(song: song, in: songs)
+                                    } label: {
+                                        SongGridCell(song: song, isCurrent: player.currentSong?.id == song.id)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 12)
+                        }
                     }
+                    .background(Color.clear.ignoresSafeArea())
                 }
             }
         }
-    }
+        .animation(.easeInOut(duration: 0.2), value: showSearch)
+        .toolbar {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                // Layout toggles
+                Button {
+                    UserDefaults.standard.set(1, forKey: "library_songs_columns")
+                } label: {
+                    Image(systemName: "list.bullet")
+                        .foregroundStyle(songColumns == 1 ? AppTheme.accent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
 
-    @ViewBuilder
-    private func columnMenuButton(current: Int, key: String, max maxCols: Int) -> some View {
-        Menu {
-            Button {
-                UserDefaults.standard.set(1, forKey: key)
-            } label: {
-                Label("List", systemImage: "list.bullet")
+                Button {
+                    UserDefaults.standard.set(2, forKey: "library_songs_columns")
+                } label: {
+                    Image(systemName: "square.grid.2x2")
+                        .foregroundStyle(songColumns == 2 ? AppTheme.accent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    UserDefaults.standard.set(3, forKey: "library_songs_columns")
+                } label: {
+                    Image(systemName: "square.grid.3x3")
+                        .foregroundStyle(songColumns == 3 ? AppTheme.accent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+
+                // Search toggle
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showSearch.toggle()
+                        if !showSearch { searchText = "" }
+                    }
+                } label: {
+                    Image(systemName: showSearch ? "magnifyingglass.circle.fill" : "magnifyingglass")
+                        .foregroundStyle(showSearch ? AppTheme.accent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
             }
-            Button {
-                UserDefaults.standard.set(2, forKey: key)
-            } label: {
-                Label("2 Columns", systemImage: "square.grid.2x2")
-            }
-            Button {
-                UserDefaults.standard.set(3, forKey: key)
-            } label: {
-                Label("3 Columns", systemImage: "square.grid.3x3")
-            }
-        } label: {
-            Image(systemName: current == 1 ? "list.bullet" : current == 2 ? "square.grid.2x2" : "square.grid.3x3")
-                .tint(AppTheme.accent)
         }
     }
 }

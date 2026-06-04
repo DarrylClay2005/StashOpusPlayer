@@ -30,7 +30,7 @@ jobs:
           VERSION="${TAG#ios/v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Releasing iOS version: $VERSION (tag: $TAG)"
+          echo "Releasing Lumisound iOS version: $VERSION (tag: $TAG)"
 
       - name: Stamp version into project.yml
         run: |
@@ -57,16 +57,16 @@ jobs:
         run: |
           mkdir -p build
           xcodebuild archive \
-            -project StashOpusPlayer.xcodeproj \
-            -scheme StashOpusPlayer \
+            -project Lumisound.xcodeproj \
+            -scheme Lumisound \
             -configuration Release \
             -destination "generic/platform=iOS" \
-            -archivePath build/StashOpusPlayer.xcarchive \
+            -archivePath build/Lumisound.xcarchive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tail -20
-          APP=$(find build/StashOpusPlayer.xcarchive -name "*.app" | head -1)
+          APP=$(find build/Lumisound.xcarchive -name "*.app" | head -1)
           if [ -z "$APP" ]; then
             echo "::error::Archive did not produce a .app bundle"
             exit 1
@@ -78,7 +78,7 @@ jobs:
         working-directory: ios
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          IPA_NAME="StashOpusPlayer-${VERSION}-unsigned.ipa"
+          IPA_NAME="Lumisound-${VERSION}-unsigned.ipa"
           PAYLOAD_DIR="build/Payload/Payload"
           mkdir -p "$PAYLOAD_DIR"
           cp -R "$APP_PATH" "$PAYLOAD_DIR/"
@@ -92,7 +92,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           VERSION_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          DOWNLOAD_URL="https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv${VERSION}/StashOpusPlayer-${VERSION}-unsigned.ipa"
+          DOWNLOAD_URL="https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv${VERSION}/Lumisound-${VERSION}-unsigned.ipa"
 
           python3 - <<EOF
           import json, sys
@@ -107,11 +107,10 @@ jobs:
               "date": "$VERSION_DATE",
               "downloadURL": "$DOWNLOAD_URL",
               "localizedDescription": "See release notes on GitHub.",
-              "size": 370000,
+              "size": 400000,
               "minOSVersion": "16.0"
           }
 
-          # Prepend new version so it appears first (most recent)
           existing = [v for v in app.get("versions", []) if v.get("version") != "$VERSION"]
           app["versions"] = [new_version] + existing
 
@@ -138,6 +137,6 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           TAG="${{ steps.version.outputs.tag }}"
           gh release create "$TAG" \
-            --title "Stash Opus Player iOS v${VERSION}" \
-            --notes "$(printf '## iOS v%s\n\n**Installation:** Download the IPA and install with [Sideloadly](https://sideloadly.io/) or [AltStore](https://altstore.io/).\n\n**AltStore users:** Add the source URL from Settings to get automatic updates.' "$VERSION")" \
-            "ios/build/StashOpusPlayer-${VERSION}-unsigned.ipa"
+            --title "Lumisound iOS v${VERSION}" \
+            --notes "$(printf '## Lumisound iOS v%s\n\n**Installation:** Download the IPA and install with [Sideloadly](https://sideloadly.io/) or [AltStore](https://altstore.io/).\n\n**AltStore users:** Add the source URL from Settings → Streaming to get automatic updates.' "$VERSION")" \
+            "ios/build/Lumisound-${VERSION}-unsigned.ipa"

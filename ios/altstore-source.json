@@ -1,15 +1,15 @@
 {
-  "name": "Stash Opus Player",
-  "identifier": "com.stash.opusplayer.altstore-source",
-  "sourceURL": "https://raw.githubusercontent.com/HeavenlyXenusVR/StashOpusPlayer/main/ios/altstore-source.json",
+  "name": "Lumisound",
+  "identifier": "com.lumisound.altstore-source",
+  "sourceURL": "https://raw.githubusercontent.com/HeavenlyXenusVR/Lumisound/main/ios/altstore-source.json",
   "apps": [
     {
-      "name": "Stash Opus Player",
-      "bundleIdentifier": "com.stash.opusplayer.ios",
+      "name": "Lumisound",
+      "bundleIdentifier": "com.lumisound.ios",
       "developerName": "HeavenlyXenusVR",
-      "subtitle": "Music player with EQ, crossfade, and more",
-      "localizedDescription": "Stash Opus Player is a full-featured iOS music player with 10-band EQ, crossfade, gapless playback, AB repeat, sleep timer, lyrics support, and library management.",
-      "iconURL": "https://raw.githubusercontent.com/HeavenlyXenusVR/StashOpusPlayer/main/app/src/main/ic_launcher.png",
+      "subtitle": "Spatial music player with 8D audio, EQ, and personal cloud library",
+      "localizedDescription": "Lumisound is a full-featured iOS music player with 10-band EQ, 8D spatial audio, crossfade, gapless playback, AB repeat, sleep timer, lyrics, personal cloud library, and SoundCloud/YouTube streaming.",
+      "iconURL": "https://raw.githubusercontent.com/HeavenlyXenusVR/Lumisound/main/app/src/main/ic_launcher.png",
       "tintColor": "EC4079",
       "screenshotURLs": [],
       "versions": [
@@ -24,7 +24,7 @@
         {
           "version": "1.1.10",
           "date": "2026-06-04T17:43:42Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.1.10/StashOpusPlayer-1.1.10-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.1.10/Lumisound-1.1.10-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -32,7 +32,7 @@
         {
           "version": "1.1.9",
           "date": "2026-06-04T17:26:36Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.1.9/StashOpusPlayer-1.1.9-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.1.9/Lumisound-1.1.9-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -40,7 +40,7 @@
         {
           "version": "1.1.8",
           "date": "2026-06-04T17:16:15Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.1.8/StashOpusPlayer-1.1.8-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.1.8/Lumisound-1.1.8-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -48,7 +48,7 @@
         {
           "version": "1.1.7",
           "date": "2026-06-04T16:29:01Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.1.7/StashOpusPlayer-1.1.7-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.1.7/Lumisound-1.1.7-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -56,7 +56,7 @@
         {
           "version": "1.1.6",
           "date": "2026-06-04T16:16:46Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.1.6/StashOpusPlayer-1.1.6-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.1.6/Lumisound-1.1.6-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -64,7 +64,7 @@
         {
           "version": "1.1.5",
           "date": "2026-06-04T15:36:57Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.1.5/StashOpusPlayer-1.1.5-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.1.5/Lumisound-1.1.5-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -72,7 +72,7 @@
         {
           "version": "1.1.4",
           "date": "2026-06-04T15:24:54Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.1.4/StashOpusPlayer-1.1.4-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.1.4/Lumisound-1.1.4-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -80,7 +80,7 @@
         {
           "version": "1.1.3",
           "date": "2026-06-04T15:08:16Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.1.3/StashOpusPlayer-1.1.3-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.1.3/Lumisound-1.1.3-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -88,7 +88,7 @@
         {
           "version": "1.1.2",
           "date": "2026-06-04T14:47:44Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.1.2/StashOpusPlayer-1.1.2-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.1.2/Lumisound-1.1.2-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -96,7 +96,7 @@
         {
           "version": "1.1.1",
           "date": "2026-06-04T05:31:57Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.1.1/StashOpusPlayer-1.1.1-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.1.1/Lumisound-1.1.1-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -104,7 +104,7 @@
         {
           "version": "1.1.0",
           "date": "2026-06-04T05:11:52Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.1.0/StashOpusPlayer-1.1.0-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.1.0/Lumisound-1.1.0-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -112,7 +112,7 @@
         {
           "version": "1.0.9",
           "date": "2026-06-04T04:48:55Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.0.9/StashOpusPlayer-1.0.9-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.0.9/Lumisound-1.0.9-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -120,7 +120,7 @@
         {
           "version": "1.0.8",
           "date": "2026-06-04T04:35:53Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.0.8/StashOpusPlayer-1.0.8-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.0.8/Lumisound-1.0.8-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -128,7 +128,7 @@
         {
           "version": "1.0.7",
           "date": "2026-06-04T04:19:40Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.0.7/StashOpusPlayer-1.0.7-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.0.7/Lumisound-1.0.7-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -136,7 +136,7 @@
         {
           "version": "1.0.6",
           "date": "2026-06-04T01:08:10Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.0.6/StashOpusPlayer-1.0.6-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.0.6/Lumisound-1.0.6-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -144,7 +144,7 @@
         {
           "version": "1.0.5",
           "date": "2026-06-04T00:52:59Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.0.5/StashOpusPlayer-1.0.5-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.0.5/Lumisound-1.0.5-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -152,7 +152,7 @@
         {
           "version": "1.0.4",
           "date": "2026-06-04T00:41:26Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.0.4/StashOpusPlayer-1.0.4-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.0.4/Lumisound-1.0.4-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -160,7 +160,7 @@
         {
           "version": "1.0.3",
           "date": "2026-06-04T00:03:41Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.0.3/StashOpusPlayer-1.0.3-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.0.3/Lumisound-1.0.3-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -168,7 +168,7 @@
         {
           "version": "1.0.2",
           "date": "2026-06-03T23:41:34Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.0.2/StashOpusPlayer-1.0.2-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.0.2/Lumisound-1.0.2-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -176,7 +176,7 @@
         {
           "version": "1.0.1",
           "date": "2026-06-03T19:08:28Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.0.1/StashOpusPlayer-1.0.1-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.0.1/Lumisound-1.0.1-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -184,7 +184,7 @@
         {
           "version": "1.0.0",
           "date": "2026-06-03T18:26:49Z",
-          "downloadURL": "https://github.com/HeavenlyXenusVR/StashOpusPlayer/releases/download/ios%2Fv1.0.0/StashOpusPlayer-1.0.0-unsigned.ipa",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.0.0/Lumisound-1.0.0-unsigned.ipa",
           "localizedDescription": "See release notes on GitHub.",
           "size": 370000,
           "minOSVersion": "16.0"
@@ -193,7 +193,7 @@
       "appPermissions": {
         "entitlements": [],
         "privacy": {
-          "NSAppleMusicUsageDescription": "Stash Opus Player reads your music library to display and play your songs."
+          "NSAppleMusicUsageDescription": "Lumisound reads your music library to display and play your songs."
         }
       }
     }
