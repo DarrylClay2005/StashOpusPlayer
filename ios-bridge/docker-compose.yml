@@ -20,13 +20,13 @@ services:
       # the server music library feature. Mount your music directory as a volume.
       # Example: SERVER_MUSIC_DIR=/music  (then add: - /your/music:/music:ro)
       - SERVER_MUSIC_DIR=${SERVER_MUSIC_DIR:-}
-      # Optional: per-user music storage. Each user gets their own subdirectory.
-      # If unset, falls back to {SERVER_MUSIC_DIR}/users/ when SERVER_MUSIC_DIR is set.
-      # Example: USER_MUSIC_DIR=/usermusic  (then add: - /your/usermusic:/usermusic)
-      - USER_MUSIC_DIR=${USER_MUSIC_DIR:-}
+      # Per-user music storage. Each user gets their own subdirectory under this path.
+      # Defaults to /mnt/Seagate-MariaDB/lumisound-user-music (mounted as /usermusic).
+      - USER_MUSIC_DIR=${USER_MUSIC_DIR:-/usermusic}
     volumes:
       - ./cache/yt-dlp:/app/.cache/yt-dlp
-      # Add your music directory mount here if using SERVER_MUSIC_DIR, e.g.:
+      - /mnt/Seagate-MariaDB/lumisound-user-music:/usermusic
+      # Optional: server-wide shared music directory (read-only)
       # - /path/to/your/music:/music:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
