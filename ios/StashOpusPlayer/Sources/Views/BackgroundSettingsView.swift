@@ -24,75 +24,61 @@ struct BackgroundSettingsView: View {
                     }
             }
 
-            if bg.isEnabled {
-
-                // MARK: Persistence note
-                Section {
-                    Label(
-                        "Images are saved to your device and restored on next launch.",
-                        systemImage: "info.circle"
-                    )
-                    .font(.footnote)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .listRowBackground(AppTheme.surface)
+            // MARK: Image Picker Section (always visible so images can be added before enabling)
+            Section("Images (\(bg.images.count) saved)") {
+                PhotosPicker(
+                    selection: $selectedItems,
+                    maxSelectionCount: 50,
+                    matching: .images
+                ) {
+                    Label("Add from Photo Library", systemImage: "photo.on.rectangle.angled")
+                        .foregroundStyle(AppTheme.accent)
+                }
+                .onChange(of: selectedItems) { items in
+                    Task {
+                        for item in items {
+                            if let data = try? await item.loadTransferable(type: Data.self),
+                               let image = UIImage(data: data) {
+                                await MainActor.run { bg.addImages([image]) }
+                            }
+                        }
+                        await MainActor.run { selectedItems = [] }
+                    }
                 }
 
-                // MARK: Image Picker Section
-                Section("Images (\(bg.images.count) saved)") {
-                    PhotosPicker(
-                        selection: $selectedItems,
-                        maxSelectionCount: 50,
-                        matching: .images
-                    ) {
-                        Label("Select from Gallery (\(bg.images.count) saved)", systemImage: "photo.on.rectangle.angled")
-                            .foregroundStyle(AppTheme.accent)
-                    }
-                    .onChange(of: selectedItems) { items in
-                        Task {
-                            for item in items {
-                                if let data = try? await item.loadTransferable(type: Data.self),
-                                   let image = UIImage(data: data) {
-                                    await MainActor.run { bg.addImages([image]) }
-                                }
-                            }
-                            await MainActor.run {
-                                selectedItems = []
-                                if bg.isEnabled { bg.startShuffling() }
-                            }
-                        }
+                if !bg.images.isEmpty {
+                    Button(role: .destructive) {
+                        bg.clearAll()
+                    } label: {
+                        Label("Clear All Images", systemImage: "trash")
                     }
 
-                    if !bg.images.isEmpty {
-                        Button(role: .destructive) {
-                            bg.clearAll()
-                        } label: {
-                            Label("Clear All Images", systemImage: "trash")
-                        }
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(bg.images.indices, id: \.self) { i in
-                                    Image(uiImage: bg.images[i])
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 60, height: 60)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        .overlay(alignment: .topTrailing) {
-                                            Button {
-                                                bg.removeImage(at: i)
-                                            } label: {
-                                                Image(systemName: "xmark.circle.fill")
-                                                    .foregroundStyle(.white)
-                                                    .background(Color.black.opacity(0.5), in: Circle())
-                                                    .font(.caption)
-                                            }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(bg.images.indices, id: \.self) { i in
+                                Image(uiImage: bg.images[i])
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 60, height: 60)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .overlay(alignment: .topTrailing) {
+                                        Button {
+                                            bg.removeImage(at: i)
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundStyle(.white)
+                                                .background(Color.black.opacity(0.5), in: Circle())
+                                                .font(.caption)
                                         }
-                                }
+                                    }
                             }
-                            .padding(.vertical, 4)
                         }
+                        .padding(.vertical, 4)
                     }
                 }
+            }
+
+            if bg.isEnabled {
 
                 // MARK: Shuffle Interval Section
                 Section("Shuffle Interval") {

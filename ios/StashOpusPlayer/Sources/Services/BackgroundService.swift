@@ -106,20 +106,23 @@ final class BackgroundService: ObservableObject {
     func addImages(_ newImages: [UIImage]) {
         images.append(contentsOf: newImages)
         saveImagesToDisk()
-        if isEnabled, !images.isEmpty {
-            if !isActive { startShuffling() }
-            // Reset to first image so the newly added image shows immediately
-            currentIndex = 0
-            objectWillChange.send()
+        // Auto-enable so users don't have to toggle the switch before adding images.
+        if !isEnabled {
+            isEnabled = true
+            saveSettings()
+            appLog("addImages: auto-enabled (images=\(images.count))", category: "background")
         }
+        if !isActive { startShuffling() }
+        currentIndex = 0
+        objectWillChange.send()
     }
 
     func removeImage(at index: Int) {
         guard images.indices.contains(index) else { return }
         images.remove(at: index)
-        // Keep currentIndex in bounds
         if images.isEmpty {
             currentIndex = 0
+            stopShuffling()
         } else if currentIndex >= images.count {
             currentIndex = images.count - 1
         }

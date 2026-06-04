@@ -104,7 +104,7 @@ final class LibraryManager: ObservableObject {
 
             appLog("Local scan complete: added \(newSongs.count) new song(s)", category: "library")
             importedSongs.append(contentsOf: newSongs)
-            importedSongs = Array(Dictionary(grouping: importedSongs, by: \.id).compactMap { $0.value.first })
+            importedSongs = Array(Dictionary(grouping: importedSongs, by: { $0.url?.standardizedFileURL?.absoluteString ?? $0.id }).compactMap { $0.value.first })
             rebuildAllSongs()
         }
     }
@@ -175,7 +175,7 @@ final class LibraryManager: ObservableObject {
 
             appLog("scanWatchedFolders: added \(newSongs.count) new song(s) from \(urls.count) folder(s)", category: "library")
             importedSongs.append(contentsOf: newSongs)
-            importedSongs = Array(Dictionary(grouping: importedSongs, by: \.id).compactMap { $0.value.first })
+            importedSongs = Array(Dictionary(grouping: importedSongs, by: { $0.url?.standardizedFileURL?.absoluteString ?? $0.id }).compactMap { $0.value.first })
             rebuildAllSongs()
         }
     }
@@ -244,7 +244,7 @@ final class LibraryManager: ObservableObject {
 
             appLog("scanSpecificDirectory: added \(newSongs.count) new song(s) from \(url.lastPathComponent)", category: "library")
             importedSongs.append(contentsOf: newSongs)
-            importedSongs = Array(Dictionary(grouping: importedSongs, by: \.id).compactMap { $0.value.first })
+            importedSongs = Array(Dictionary(grouping: importedSongs, by: { $0.url?.standardizedFileURL?.absoluteString ?? $0.id }).compactMap { $0.value.first })
             rebuildAllSongs()
             lastScanResult = "Found \(newSongs.count) song\(newSongs.count == 1 ? "" : "s") in \(url.lastPathComponent)"
         }
@@ -325,7 +325,8 @@ final class LibraryManager: ObservableObject {
                 appLog("Import complete: \(imported.count) file(s) added", category: "library")
                 importedSongs.append(contentsOf: imported)
                 importedSongs = Array(
-                    Dictionary(grouping: importedSongs, by: \.id).compactMap { $0.value.first }
+                    Dictionary(grouping: importedSongs, by: { $0.url?.standardizedFileURL?.absoluteString ?? $0.id })
+                        .compactMap { $0.value.first }
                 )
             } catch {
                 appError("Import failed: \(error.localizedDescription)", category: "library")
@@ -410,9 +411,9 @@ final class LibraryManager: ObservableObject {
     /// This prevents runaway work when rapid successive mutations occur (e.g. bulk imports).
     private func rebuildAllSongs() {
         pendingRebuildTask?.cancel()
-        pendingRebuildTask = Task {
+        pendingRebuildTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 s
-            guard !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled else { return }
             let combined = (self.mediaSongs + self.importedSongs).sorted {
                 $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
             }

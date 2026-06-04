@@ -141,7 +141,7 @@ struct DocumentImportService {
                 title = item.stringValue ?? title
             case "artist":
                 artist = item.stringValue ?? artist
-            case "albumName":
+            case "album":
                 album = item.stringValue ?? album
             default:
                 break
@@ -267,7 +267,7 @@ struct DocumentImportService {
         // genre is missing — common for YouTube downloads where yt-dlp fills in
         // title but leaves artist/album blank. Results are cached across restarts
         // via UserDefaults so the API isn't hit every launch.
-        if song.artist.isEmpty || song.genre.isEmpty {
+        if song.artist.isEmpty || song.album.isEmpty || song.genre.isEmpty {
             song = await Self.enrichFromCache(song: song)
         }
 

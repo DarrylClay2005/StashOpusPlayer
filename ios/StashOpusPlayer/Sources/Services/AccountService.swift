@@ -525,14 +525,14 @@ final class AccountService: ObservableObject {
     }
 
     private func saveAvatarLocally(_ image: UIImage) {
-        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("user_avatar.jpg")
+        guard let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("user_avatar.jpg") else { return }
         image.jpegData(compressionQuality: 0.8).flatMap { try? $0.write(to: url) }
     }
 
     private func loadAvatarLocally() -> UIImage? {
-        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("user_avatar.jpg")
+        guard let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("user_avatar.jpg") else { return nil }
         return (try? Data(contentsOf: url)).flatMap { UIImage(data: $0) }
     }
 
