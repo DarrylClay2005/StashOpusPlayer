@@ -193,6 +193,37 @@ final class StreamingService: ObservableObject {
         )
     }
 
+    // MARK: - Download to Library
+
+    /// Downloads a stream track's audio permanently to the Imported Music folder
+    /// (Documents/Imported Music/) and returns the saved local URL.
+    /// If the file already exists it is returned immediately without re-downloading.
+    func downloadToLibrary(track: StreamTrack) async throws -> URL {
+        let streamURL = try await streamURL(for: track)
+
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let importDir = docs.appendingPathComponent("Imported Music")
+        try? FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)
+
+        // Build a filesystem-safe filename from the track title (max 100 chars).
+        let safeName = String(
+            track.title
+                .replacingOccurrences(of: "/", with: "-")
+                .replacingOccurrences(of: ":", with: "-")
+                .prefix(100)
+        )
+        let destURL = importDir.appendingPathComponent("\(safeName).m4a")
+
+        if FileManager.default.fileExists(atPath: destURL.path) {
+            return destURL
+        }
+
+        let (downloadedURL, _) = try await URLSession.shared.download(from: streamURL)
+        try? FileManager.default.removeItem(at: destURL)
+        try FileManager.default.moveItem(at: downloadedURL, to: destURL)
+        return destURL
+    }
+
     // MARK: - Health Check
 
     func checkHealth() async -> Bool {

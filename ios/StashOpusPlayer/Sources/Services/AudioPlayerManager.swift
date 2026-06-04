@@ -442,6 +442,19 @@ final class AudioPlayerManager: ObservableObject {
 
     private func playCurrent(from startTime: TimeInterval) {
         cancelCrossfade()
+
+        // For HTTP/HTTPS URLs the download is async — scheduleCurrent handles the full play
+        // flow internally (including calling node.play() after the download completes).
+        if let url = currentSong?.url,
+           ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            isPlaying = true  // optimistically set — confirmed once download finishes
+            startTimer()
+            updateNowPlaying()
+            scheduleCurrent(from: startTime)  // kicks off async download path
+            return
+        }
+
+        // Local file — synchronous path.
         scheduleCurrent(from: startTime)
         startEngineIfNeeded()
         activeNode.play()
@@ -456,12 +469,26 @@ final class AudioPlayerManager: ObservableObject {
     /// `fileStartFrame` is always set to the absolute frame corresponding to `startTime`.
     /// When `startTime == 0` this is explicitly 0, which keeps `updatePositionFromPlayer()`
     /// accurate from the very first rendered frame of a new track.
+    ///
+    /// For HTTP/HTTPS URLs this method returns early after launching an async Task;
+    /// `downloadAndSchedule` completes the setup and starts the node once the file is cached.
     private func scheduleCurrent(from startTime: TimeInterval) {
         guard let song = currentSong, let url = song.url else {
             errorMessage = "This song does not have a local playable URL."
             return
         }
 
+        // HTTP URLs must be downloaded to a temp file before AVAudioFile can read them.
+        // AVAudioFile only reads local filesystem paths, not HTTP streams.
+        let scheme = url.scheme?.lowercased() ?? ""
+        if scheme == "http" || scheme == "https" {
+            Task {
+                await downloadAndSchedule(url: url, startTime: startTime)
+            }
+            return
+        }
+
+        // Local file — schedule directly.
         do {
             let node = activeNode
             node.stop()
@@ -481,6 +508,65 @@ final class AudioPlayerManager: ObservableObject {
             }
         } catch {
             errorMessage = error.localizedDescription
+            isPlaying = false
+        }
+    }
+
+    /// Downloads an HTTP/HTTPS audio URL to a named temp file (using a simple hash as the cache
+    /// key), then schedules it for playback via the existing AVAudioFile pipeline.
+    ///
+    /// Called from `scheduleCurrent` when the song URL has an http/https scheme.
+    /// This method is responsible for starting the engine and calling `node.play()` because
+    /// `playCurrent` returns early before doing so when it detects an HTTP URL.
+    @MainActor
+    private func downloadAndSchedule(url: URL, startTime: TimeInterval) async {
+        errorMessage = nil
+
+        do {
+            // Derive a stable cache filename from the URL string.
+            let cacheKey: String = url.absoluteString.data(using: .utf8).map { bytes in
+                var hash: UInt64 = 5381
+                for byte in bytes { hash = hash &* 31 &+ UInt64(byte) }
+                return String(hash, radix: 16)
+            } ?? UUID().uuidString
+
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("stream_\(cacheKey).m4a")
+
+            if !FileManager.default.fileExists(atPath: tempURL.path) {
+                let (downloaded, _) = try await URLSession.shared.download(from: url)
+                // Move from the system-assigned temp location to our named cache file.
+                try? FileManager.default.removeItem(at: tempURL)
+                try FileManager.default.moveItem(at: downloaded, to: tempURL)
+            }
+
+            // From here on this is identical to the local-file path in scheduleCurrent.
+            let node = activeNode
+            node.stop()
+            let file = try AVAudioFile(forReading: tempURL)
+            audioFile = file
+            duration = file.duration
+            let sampleRate = file.processingFormat.sampleRate
+            let startFrame = max(0, AVAudioFramePosition(startTime * sampleRate))
+            let framesLeft = max(0, AVAudioFrameCount(file.length - startFrame))
+            fileStartFrame = startFrame
+            position = startTime
+            gaplessScheduled = false
+
+            node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
+                Task { @MainActor in self?.handleTrackEnded() }
+            }
+
+            // Start playback — playCurrent already set isPlaying = true before the download.
+            if isPlaying {
+                startEngineIfNeeded()
+                node.play()
+                startTimer()
+            }
+            updateNowPlaying()
+
+        } catch {
+            errorMessage = "Could not load audio: \(error.localizedDescription)"
             isPlaying = false
         }
     }

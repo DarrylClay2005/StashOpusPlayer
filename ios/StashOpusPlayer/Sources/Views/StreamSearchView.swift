@@ -8,11 +8,13 @@ struct StreamSearchView: View {
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var library: LibraryManager
 
-    @State private var searchText     = ""
-    @State private var selectedSource = "youtube"
-    @State private var loadingTrackID: String? = nil
+    @State private var searchText        = ""
+    @State private var selectedSource    = "youtube"
+    @State private var loadingTrackID:   String? = nil
+    @State private var downloadingTrackID: String? = nil
+    @State private var downloadedTrackIDs: Set<String> = []
     @State private var healthOK: Bool? = nil
-    @State private var showHealthToast = false
+    @State private var showHealthToast   = false
 
     private let sources = ["youtube", "soundcloud"]
 
@@ -122,8 +124,11 @@ struct StreamSearchView: View {
                     StreamTrackRow(
                         track: track,
                         isLoading: loadingTrackID == track.id,
+                        isDownloading: downloadingTrackID == track.id,
+                        isDownloaded: downloadedTrackIDs.contains(track.id),
                         onPlay: { handlePlay(track: track) },
-                        onAddToQueue: { handleAddToQueue(track: track) }
+                        onAddToQueue: { handleAddToQueue(track: track) },
+                        onDownload: { handleDownload(track: track) }
                     )
                     .listRowBackground(AppTheme.surface)
                     .listRowSeparatorTint(AppTheme.background)
@@ -179,6 +184,21 @@ struct StreamSearchView: View {
             }
         }
     }
+
+    private func handleDownload(track: StreamTrack) {
+        guard downloadingTrackID == nil else { return }
+        downloadingTrackID = track.id
+        Task {
+            do {
+                _ = try await streaming.downloadToLibrary(track: track)
+                library.scanLocalDocuments()
+                downloadedTrackIDs.insert(track.id)
+            } catch {
+                streaming.errorMessage = "Download failed: \(error.localizedDescription)"
+            }
+            downloadingTrackID = nil
+        }
+    }
 }
 
 // MARK: - StreamTrackRow
@@ -187,8 +207,11 @@ private struct StreamTrackRow: View {
 
     let track: StreamTrack
     let isLoading: Bool
+    let isDownloading: Bool
+    let isDownloaded: Bool
     let onPlay: () -> Void
     let onAddToQueue: () -> Void
+    let onDownload: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -238,13 +261,34 @@ private struct StreamTrackRow: View {
                     .frame(width: 32, height: 32)
             } else {
                 Button(action: onPlay) {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 14, weight: .semibold))
+                    Image(systemName: "play.circle.fill")
+                        .font(.title2)
                         .foregroundStyle(AppTheme.accent)
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
             }
+
+            // Download button
+            Button(action: onDownload) {
+                if isDownloading {
+                    ProgressView()
+                        .tint(AppTheme.accent)
+                        .frame(width: 32, height: 32)
+                } else if isDownloaded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(AppTheme.success)
+                        .frame(width: 32, height: 32)
+                } else {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.title2)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .frame(width: 32, height: 32)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isDownloading || isDownloaded)
 
             // Queue button
             Button(action: onAddToQueue) {
