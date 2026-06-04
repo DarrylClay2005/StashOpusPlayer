@@ -133,13 +133,13 @@ final class AccountService: ObservableObject {
 
     /// Schedules a push sync that fires 2 seconds after the last call.
     /// Rapid successive mutations only trigger one server write.
-    func schedulePush(library: LibraryManager) {
+    func schedulePush(library: LibraryManager, audioSettings: AudioSettings? = nil) {
         guard isLoggedIn else { return }
         syncDebounceTask?.cancel()
         syncDebounceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
             guard let self, !Task.isCancelled, self.isLoggedIn else { return }
-            await self.pushSync(library: library)
+            await self.pushSync(library: library, audioSettings: audioSettings)
         }
     }
 
@@ -273,7 +273,8 @@ final class AccountService: ObservableObject {
 
     // MARK: - Sync
 
-    func pushSync(library: LibraryManager) async {
+    /// Call schedulePush instead of this directly — it debounces rapid mutations.
+    func pushSync(library: LibraryManager, audioSettings: AudioSettings? = nil) async {
         guard isLoggedIn else { return }
         isSyncing = true
         errorMessage = nil
@@ -313,11 +314,25 @@ final class AccountService: ObservableObject {
             )
         }
 
+        // Serialize audio settings to JSON if provided
+        let audioJSON: String? = audioSettings.flatMap { settings in
+            (try? JSONEncoder().encode(settings)).flatMap { String(data: $0, encoding: .utf8) }
+        }
+        // Read current accent colour from UserDefaults (saved by AppTheme.saveAccentColor)
+        let themeHex: String? = {
+            guard let data = UserDefaults.standard.data(forKey: "accent_color_data"),
+                  let uiColor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: data)
+            else { return nil }
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+            return String(format: "#%02X%02X%02X", Int(r*255), Int(g*255), Int(b*255))
+        }()
+
         let payload = SyncData(
             favorites: favorites,
             playlists: playlists,
-            audioSettingsJSON: nil,
-            themeColor: nil
+            audioSettingsJSON: audioJSON,
+            themeColor: themeHex ?? "#EC4079"
         )
 
         do {
@@ -360,6 +375,26 @@ final class AccountService: ObservableObject {
                             library.addSong(id: sid, toPlaylistID: newPL.id)
                         }
                     }
+                }
+            }
+
+            // Restore audio settings from DB and save locally so player can pick them up
+            if let json = sync.audioSettingsJSON,
+               let jsonData = json.data(using: .utf8),
+               let restoredSettings = try? JSONDecoder().decode(AudioSettings.self, from: jsonData) {
+                PersistenceService.shared.saveAudioSettings(restoredSettings)
+                // Signal the player to apply them (observers in StashOpusPlayerApp reload on launch)
+            }
+
+            // Restore theme colour
+            if let hex = sync.themeColor, hex.hasPrefix("#"), hex.count == 7 {
+                let scanner = Scanner(string: String(hex.dropFirst()))
+                var rgb: UInt64 = 0
+                if scanner.scanHexInt64(&rgb) {
+                    let r = CGFloat((rgb >> 16) & 0xFF) / 255
+                    let g = CGFloat((rgb >> 8)  & 0xFF) / 255
+                    let b = CGFloat( rgb        & 0xFF) / 255
+                    AppTheme.saveAccentColor(Color(red: r, green: g, blue: b))
                 }
             }
 

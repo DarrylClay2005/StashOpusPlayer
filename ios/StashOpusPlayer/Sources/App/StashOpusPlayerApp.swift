@@ -77,10 +77,11 @@ struct StashOpusPlayerApp: App {
                 .onChange(of: libraryManager.playlists) { _ in
                     account.schedulePush(library: libraryManager)
                 }
-                // Persist audio settings to both local and DB when they change.
+                // Persist audio settings to local AND DB when they change.
                 .onChange(of: player.audioSettings) { newSettings in
                     PersistenceService.shared.saveAudioSettings(newSettings)
-                    account.schedulePush(library: libraryManager) // no-op if not logged in
+                    // Pass audioSettings so the server saves them too
+                    account.schedulePush(library: libraryManager, audioSettings: newSettings)
                 }
                 .onReceive(
                     NotificationCenter.default.publisher(
