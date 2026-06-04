@@ -1,15 +1,15 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 struct AddMusicView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var folderService: MusicFolderService
 
-    // Single importer state — two modifiers fight each other; use one with a mode flag
-    private enum ImportMode { case folder, audio }
-    @State private var importMode: ImportMode = .folder
-    @State private var isImporterPresented = false
+    @State private var showFolderPicker = false
+    @State private var showFilePicker = false
+    @State private var importSuccess: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -18,6 +18,7 @@ struct AddMusicView: View {
                 Section("Apple Music / iTunes Library") {
                     Button {
                         library.requestAccessAndScan()
+                        importSuccess = "Scanning Apple Music library…"
                         dismiss()
                     } label: {
                         HStack(spacing: 12) {
@@ -40,8 +41,7 @@ struct AddMusicView: View {
                 // MARK: Music Folder (Files App)
                 Section("Music Folder (Files App)") {
                     Button {
-                        importMode = .folder
-                        isImporterPresented = true
+                        showFolderPicker = true
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "folder.fill")
@@ -86,8 +86,7 @@ struct AddMusicView: View {
                 // MARK: Individual Files
                 Section("Individual Files") {
                     Button {
-                        importMode = .audio
-                        isImporterPresented = true
+                        showFilePicker = true
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "doc.badge.plus")
@@ -122,6 +121,14 @@ struct AddMusicView: View {
                         }
                     }
                 }
+
+                // MARK: Import feedback
+                if let msg = importSuccess {
+                    Section {
+                        Label(msg, systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(AppTheme.success)
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
             .background(AppTheme.background.ignoresSafeArea())
@@ -132,25 +139,30 @@ struct AddMusicView: View {
                     Button("Done") { dismiss() }.tint(AppTheme.accent)
                 }
             }
-            // Single fileImporter — mode determines content types and result handling.
-            // Two separate .fileImporter modifiers on the same view is a SwiftUI bug:
-            // the second modifier silently overrides the first.
-            .fileImporter(
-                isPresented: $isImporterPresented,
-                allowedContentTypes: importMode == .folder ? [.folder] : [.audio],
-                allowsMultipleSelection: importMode == .audio
-            ) { result in
-                switch importMode {
-                case .folder:
-                    if case .success(let urls) = result, let url = urls.first {
-                        try? folderService.addFolder(url: url)
+            // MARK: Folder picker — security-scoped URL, handled by MusicFolderService
+            .sheet(isPresented: $showFolderPicker) {
+                DocumentPicker(mode: .folder) { urls in
+                    showFolderPicker = false
+                    guard let url = urls.first else { return }
+                    do {
+                        try folderService.addFolder(url: url)
                         library.scanWatchedFolders(using: folderService)
-                    }
-                case .audio:
-                    if case .success(let urls) = result {
-                        library.importFiles(urls: urls)
+                        importSuccess = "Folder '\(url.lastPathComponent)' added successfully"
+                    } catch {
+                        importSuccess = "Could not add folder: \(error.localizedDescription)"
                     }
                 }
+                .ignoresSafeArea()
+            }
+            // MARK: Audio file picker — files copied to app sandbox (asCopy: true), no scoped access needed
+            .sheet(isPresented: $showFilePicker) {
+                DocumentPicker(mode: .audioFiles) { urls in
+                    showFilePicker = false
+                    guard !urls.isEmpty else { return }
+                    library.importFiles(urls: urls)
+                    importSuccess = "\(urls.count) file\(urls.count == 1 ? "" : "s") imported"
+                }
+                .ignoresSafeArea()
             }
         }
     }

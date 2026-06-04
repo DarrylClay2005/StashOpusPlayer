@@ -91,6 +91,13 @@ struct StreamSearchView: View {
                         .foregroundStyle(AppTheme.warning)
                         .lineLimit(2)
                     Spacer()
+                    if !searchText.isEmpty {
+                        Button("Retry") {
+                            Task { await streaming.search(query: searchText, source: selectedSource) }
+                        }
+                        .font(AppTheme.bodyFont(size: 13).weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
 
@@ -57,6 +58,14 @@ struct ContentView: View {
                     .tag(4)
             }
             .tint(AppTheme.dynamicAccent)
+            .onAppear {
+                // Make the tab bar translucent so gallery shows through
+                let appearance = UITabBarAppearance()
+                appearance.configureWithTransparentBackground()
+                appearance.backgroundEffect = UIBlurEffect(style: .systemThinMaterialDark)
+                UITabBar.appearance().standardAppearance = appearance
+                UITabBar.appearance().scrollEdgeAppearance = appearance
+            }
         }
     }
 }

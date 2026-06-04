@@ -56,7 +56,7 @@ final class StreamingService: ObservableObject {
 
     /// Public URL baked into the app — routed via SwarmPanel ngrok proxy so
     /// it works anywhere without home WiFi. Users can override in Settings.
-    static let defaultBridgeURL = "https://germinate-props-motive.ngrok-free.dev/ios-bridge"
+    static let defaultBridgeURL = "https://germinate-props-motive.ngrok-free.dev"
 
     // MARK: Published state
 
@@ -113,14 +113,14 @@ final class StreamingService: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse,
                !(200..<300).contains(httpResponse.statusCode) {
-                errorMessage = "Search failed: HTTP \(httpResponse.statusCode)"
+                errorMessage = "Unable to reach streaming server. Check your connection."
                 searchResults = []
                 return
             }
             let tracks = try JSONDecoder().decode([StreamTrack].self, from: data)
             searchResults = tracks
         } catch {
-            errorMessage = "Search error: \(error.localizedDescription)"
+            errorMessage = "Unable to reach streaming server. Check your connection."
             searchResults = []
         }
     }
@@ -244,8 +244,8 @@ enum StreamingError: LocalizedError {
             return "Stream URL fetch timed out. Try again."
         case .notFound(let title):
             return "Could not find a stream URL for \"\(title)\"."
-        case .httpError(let code):
-            return "Bridge server error (HTTP \(code))."
+        case .httpError:
+            return "Unable to reach streaming server. Check your connection."
         }
     }
 }

@@ -50,6 +50,9 @@ final class BackgroundService: ObservableObject {
 
     private var shuffleTimer: Timer?
 
+    /// Returns true when the shuffle timer is running.
+    var isActive: Bool { shuffleTimer != nil }
+
     // MARK: Interval Presets
 
     static let intervalPresets: [(label: String, seconds: Double)] = [
@@ -71,6 +74,12 @@ final class BackgroundService: ObservableObject {
 
     func addImages(_ newImages: [UIImage]) {
         images.append(contentsOf: newImages)
+        if isEnabled, !images.isEmpty {
+            if !isActive { startShuffling() }
+            // Reset to first image so the newly added image shows immediately
+            currentIndex = 0
+            objectWillChange.send()
+        }
     }
 
     func removeImage(at index: Int) {

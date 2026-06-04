@@ -17,7 +17,8 @@ struct GalleryBackgroundView: View {
                     .resizable()
                     .scaledToFill()
                     .ignoresSafeArea()
-                    .blur(radius: bg.isBlurred ? 12 : 0, opaque: true)
+                    .clipped()
+                    .blur(radius: bg.isBlurred ? 16 : 0, opaque: true)
                     .opacity(bg.opacity)
                     .id(animationID)
                     .transition(transitionForAnimation(bg.animation))
@@ -30,6 +31,11 @@ struct GalleryBackgroundView: View {
                 if !bg.images.isEmpty {
                     displayedImage = bg.images[bg.currentIndex % bg.images.count]
                 }
+            }
+        }
+        .onChange(of: bg.isEnabled) { enabled in
+            if enabled, !bg.images.isEmpty {
+                displayedImage = bg.images[bg.currentIndex % bg.images.count]
             }
         }
         .onAppear {

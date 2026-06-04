@@ -54,7 +54,10 @@ struct BackgroundSettingsView: View {
                                     await MainActor.run { bg.addImages([image]) }
                                 }
                             }
-                            selectedItems = []
+                            await MainActor.run {
+                                selectedItems = []
+                                if bg.isEnabled { bg.startShuffling() }
+                            }
                         }
                     }
 
@@ -134,6 +137,17 @@ struct BackgroundSettingsView: View {
                         }
                     }
                     .listRowBackground(Color.clear)
+                }
+
+                // MARK: Preview Section
+                Section {
+                    Button {
+                        bg.nextImage()
+                    } label: {
+                        Label("Preview Next Image", systemImage: "photo.on.rectangle")
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                    .disabled(bg.images.count < 2)
                 }
 
                 // MARK: Appearance Section
