@@ -1,4 +1,5 @@
 import SwiftUI
+import MediaPlayer
 
 // MARK: - Tab enum
 
@@ -75,13 +76,19 @@ struct LibraryView: View {
                     .environmentObject(folderService)
             }
             .onAppear {
-                // Always rescan the local Documents folder (picks up files added via Files app/Finder)
-                library.scanLocalDocuments()
-                // Rescan any user-selected watched folders
+                let scanSource = UserDefaults.standard.string(forKey: "default_scan_source") ?? "apple_music"
                 library.scanWatchedFolders(using: folderService)
-                // Request Apple Music library access if we have no songs yet
-                if library.allSongs.isEmpty && !library.isScanning {
+                switch scanSource {
+                case "app_storage":
+                    library.scanLocalDocuments()
+                case "both":
+                    library.scanLocalDocuments()
                     library.requestAccessAndScan()
+                default: // "apple_music" — also scan Documents for transferred files
+                    library.scanLocalDocuments()
+                    if library.allSongs.isEmpty && !library.isScanning {
+                        library.requestAccessAndScan()
+                    }
                 }
             }
             // Debounce search: wait 0.3 s after the user stops typing

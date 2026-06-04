@@ -96,6 +96,21 @@ struct SettingsView: View {
 
     private var librarySection: some View {
         Section {
+            // Default scan source picker
+            Picker(selection: Binding(
+                get: { UserDefaults.standard.string(forKey: "default_scan_source") ?? "apple_music" },
+                set: { UserDefaults.standard.set($0, forKey: "default_scan_source") }
+            )) {
+                Text("iPhone Music Library (Apple Music)").tag("apple_music")
+                Text("App Files (Transferred via Mac)").tag("app_storage")
+                Text("Both").tag("both")
+            } label: {
+                Label("Scan on Launch", systemImage: "magnifyingglass.circle")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .pickerStyle(.menu)
+            .tint(AppTheme.accent)
+
             // Access status row
             HStack {
                 Label("Media Library Access", systemImage: "music.note.house")
