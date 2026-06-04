@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROJECT_NAME="StashOpusPlayer"
-SCHEME="StashOpusPlayer"
+PROJECT_NAME="Lumisound"
+SCHEME="Lumisound"
 ARCHIVE_PATH="$ROOT_DIR/build/$PROJECT_NAME.xcarchive"
 EXPORT_PATH="$ROOT_DIR/build/export"
 EXPORT_OPTIONS="$ROOT_DIR/ExportOptions.plist"

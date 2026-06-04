@@ -87,7 +87,7 @@ struct AddMusicView: View {
                 } header: {
                     sectionLabel("App Storage")
                 } footer: {
-                    Text("Files dragged into this app via Finder/Files app (Mac USB or Files → On My iPhone → StashOpusPlayer) are stored here. Subfolders are included.")
+                    Text("Files dragged into this app via Finder/Files app (Mac USB or Files → On My iPhone → Lumisound) are stored here. Subfolders are included.")
                         .font(.caption).foregroundStyle(AppTheme.textSecondary)
                 }
                 .listRowBackground(AppTheme.surface)
@@ -123,7 +123,7 @@ struct AddMusicView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Transfer via Mac (USB or WiFi)")
                                 .fontWeight(.medium).foregroundStyle(AppTheme.textPrimary)
-                            Text("Finder → your iPhone → Files tab → StashOpusPlayer → drag files/folders in")
+                            Text("Finder → your iPhone → Files tab → Lumisound → drag files/folders in")
                                 .font(.caption).foregroundStyle(AppTheme.textSecondary)
                         }
                     }

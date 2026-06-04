@@ -32,15 +32,15 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: StashOpusPlayer/Sources
+      - path: Lumisound/Sources
     resources:
-      - path: StashOpusPlayer/Resources
+      - path: Lumisound/Resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lumisound.ios
-        INFOPLIST_FILE: StashOpusPlayer/Resources/Info.plist
+        INFOPLIST_FILE: Lumisound/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        CODE_SIGN_ENTITLEMENTS: StashOpusPlayer/Resources/StashOpusPlayer.entitlements
+        CODE_SIGN_ENTITLEMENTS: Lumisound/Resources/Lumisound.entitlements
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
     scheme:
@@ -64,7 +64,7 @@ targets:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: StashOpusPlayer/Tests
+      - path: Lumisound/Tests
     dependencies:
       - target: Lumisound
     settings:

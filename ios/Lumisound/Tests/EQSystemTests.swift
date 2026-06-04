@@ -1,5 +1,5 @@
 import XCTest
-@testable import StashOpusPlayer
+@testable import Lumisound
 
 final class EQSystemTests: XCTestCase {
 

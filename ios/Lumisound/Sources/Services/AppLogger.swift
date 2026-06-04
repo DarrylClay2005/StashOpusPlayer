@@ -43,7 +43,7 @@ final class AppLogger: ObservableObject {
         isConfigured = true
         self.bridgeURL = bridgeURL
         _append(LogEntry(level: "info", category: "app", message: "App launched",
-                         file: "StashOpusPlayerApp.swift", line: 0,
+                         file: "LumisoundApp.swift", line: 0,
                          timestamp: Date().formatted(.iso8601), extra: [:]))
         startFlushTimer()
     }

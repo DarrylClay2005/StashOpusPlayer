@@ -411,7 +411,7 @@ final class AccountService: ObservableObject {
                let jsonData = json.data(using: .utf8),
                let restoredSettings = try? JSONDecoder().decode(AudioSettings.self, from: jsonData) {
                 PersistenceService.shared.saveAudioSettings(restoredSettings)
-                // Signal the player to apply them (observers in StashOpusPlayerApp reload on launch)
+                // Signal the player to apply them (observers in LumisoundApp reload on launch)
             }
 
             // Restore theme colour
