@@ -525,8 +525,23 @@ final class AudioPlayerManager: ObservableObject {
     /// Called from `scheduleCurrent` when the song URL has an http/https scheme.
     /// This method is responsible for starting the engine and calling `node.play()` because
     /// `playCurrent` returns early before doing so when it detects an HTTP URL.
+    /// Removes stream cache temp files older than 1 hour to prevent unbounded disk growth.
+    private func cleanOldStreamCache() {
+        let tempDir = FileManager.default.temporaryDirectory
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: [.creationDateKey]) else { return }
+        let cutoff = Date().addingTimeInterval(-3600)  // 1 hour
+        for file in files where file.lastPathComponent.hasPrefix("stream_") {
+            if let created = try? file.resourceValues(forKeys: [.creationDateKey]).creationDate,
+               created < cutoff {
+                try? fm.removeItem(at: file)
+            }
+        }
+    }
+
     @MainActor
     private func downloadAndSchedule(url: URL, startTime: TimeInterval) async {
+        cleanOldStreamCache()
         isSchedulingAsync = true
         defer { isSchedulingAsync = false }
 
@@ -899,15 +914,10 @@ final class AudioPlayerManager: ObservableObject {
 
     func start8DRotation(hz: Double = 0.18) {
         stop8DRotation()
+        guard engine.isRunning else { return }  // engine must be running for spatial audio
         rotationHz = hz
         rotationAngle = 0
         is8DActive = true
-        // Enable spatialisation on the audio session.
-        try? AVAudioSession.sharedInstance().setCategory(
-            .playback,
-            mode: .default,
-            options: [.allowAirPlay, .allowBluetoothA2DP]
-        )
         let link = CADisplayLink(target: self, selector: #selector(update8DRotation))
         link.add(to: .main, forMode: .common)
         rotationLink = link
@@ -942,6 +952,7 @@ final class AudioPlayerManager: ObservableObject {
 
     func startTremolo(frequency: Double = 4.0, depth: Float = 0.45) {
         stopTremolo()
+        guard engine.isRunning else { return }  // engine must be running for tremolo to be heard
         tremoloFrequency = frequency
         tremoloDepth = depth
         tremoloPhase = 0
@@ -981,6 +992,7 @@ final class AudioPlayerManager: ObservableObject {
 
     func startVibrato(frequency: Double = 4.5, depth: Double = 0.35) {
         stopVibrato()
+        guard engine.isRunning else { return }  // engine must be running for vibrato to be heard
         vibratoFrequency = frequency
         vibratoDepth = depth
         vibratoPhase = 0

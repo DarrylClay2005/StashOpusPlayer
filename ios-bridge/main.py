@@ -2,19 +2,29 @@ import asyncio
 import json
 import logging
 import os
+import pathlib
+import shutil
+import tempfile
 import time
 import uuid
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
-from auth import create_token, decode_token, hash_password, verify_password
-from db import get_pool, init_db
+from auth import (
+    create_token,
+    decode_token,
+    hash_password_async,
+    verify_password_async,
+)
+from db import _pool as _db_pool_ref, get_pool, init_db
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -36,6 +46,62 @@ API_KEY: str = os.getenv("IOS_BRIDGE_API_KEY", "")
 VERSION = "1.0.0"
 
 # ---------------------------------------------------------------------------
+# yt-dlp concurrency limit (Fix 3)
+# ---------------------------------------------------------------------------
+
+_YTDLP_SEMAPHORE = asyncio.Semaphore(4)  # max 4 concurrent yt-dlp processes
+
+# ---------------------------------------------------------------------------
+# Rate limiter for auth endpoints (Fix 2)
+# ---------------------------------------------------------------------------
+
+_auth_attempts: dict[str, list[float]] = defaultdict(list)
+_AUTH_RATE_LIMIT = 10   # max attempts per window
+_AUTH_WINDOW = 60       # seconds
+
+
+def _check_auth_rate(client_ip: str) -> None:
+    """Raises HTTPException(429) if the IP has exceeded the auth rate limit."""
+    now = time.time()
+    attempts = _auth_attempts[client_ip]
+    _auth_attempts[client_ip] = [t for t in attempts if now - t < _AUTH_WINDOW]
+    if len(_auth_attempts[client_ip]) >= _AUTH_RATE_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many authentication attempts. Try again in {_AUTH_WINDOW} seconds.",
+        )
+    _auth_attempts[client_ip].append(now)
+
+
+def _get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Startup temp-dir cleanup (Fix 6)
+# ---------------------------------------------------------------------------
+
+
+async def cleanup_old_temp_dirs() -> None:
+    """Remove download temp dirs (prefix 'dl_') older than 10 minutes."""
+    tmp = pathlib.Path(tempfile.gettempdir())
+    cutoff = time.time() - 600
+    cleaned = 0
+    for item in tmp.iterdir():
+        try:
+            if item.is_dir() and item.name.startswith("dl_") and item.stat().st_mtime < cutoff:
+                shutil.rmtree(item, ignore_errors=True)
+                cleaned += 1
+        except Exception:
+            pass
+    if cleaned:
+        logger.info("Startup cleanup: removed %d stale temp download dirs", cleaned)
+
+
+# ---------------------------------------------------------------------------
 # Lifespan
 # ---------------------------------------------------------------------------
 
@@ -43,7 +109,15 @@ VERSION = "1.0.0"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await cleanup_old_temp_dirs()
     yield
+    # Shutdown: close the DB connection pool (Fix 8)
+    import db as _db_module
+    pool = _db_module._pool
+    if pool is not None:
+        pool.close()
+        await pool.wait_closed()
+        logger.info("DB connection pool closed")
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +187,7 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Authentication required")
     payload = decode_token(credentials.credentials)
     if not payload:
+        logger.warning("JWT decode failed for token (invalid or expired)")
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     return payload
 
@@ -127,22 +202,24 @@ async def _run_ytdlp(*args: str, timeout: float = 30.0) -> list[dict]:
     Run yt-dlp with the given arguments.
     Returns a list of parsed JSON objects (one per stdout line).
     Raises asyncio.TimeoutError if the process exceeds *timeout* seconds.
+    Max 4 concurrent yt-dlp processes are allowed (semaphore).
     """
     cmd = ["yt-dlp", *args]
     logger.info("Running: %s", " ".join(cmd))
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
+    async with _YTDLP_SEMAPHORE:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.communicate()
-        raise
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()  # reap the zombie (Fix 7)
+            raise
 
     if stderr_bytes:
         logger.debug("yt-dlp stderr: %s", stderr_bytes.decode(errors="replace")[:500])
@@ -412,17 +489,18 @@ async def _get_raw_url(
         target_url,
     ]
     logger.info("Running (raw): %s", " ".join(cmd))
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=15.0)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.communicate()
-        raise HTTPException(status_code=408, detail="Stream URL fetch timed out")
+    async with _YTDLP_SEMAPHORE:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()  # reap the zombie (Fix 7)
+            raise HTTPException(status_code=408, detail="Stream URL fetch timed out")
 
     for raw_line in stdout_bytes.splitlines():
         line = raw_line.strip().decode(errors="replace")
@@ -444,11 +522,6 @@ async def download_track(
     Download audio with embedded metadata and thumbnail, stream the file bytes back,
     then clean up the temporary file.
     """
-    import shutil
-    import tempfile
-
-    from fastapi.responses import FileResponse
-
     await check_auth(request)
 
     source = source.lower()
@@ -466,32 +539,37 @@ async def download_track(
     extra_args, expected_ext = _download_format_args(format)
 
     safe_title = (title or id).replace("/", "-").replace(":", "-")[:100]
-    tmp_dir = tempfile.mkdtemp()
-    output_template = os.path.join(tmp_dir, f"{safe_title}.%(ext)s")
+    # Use UUID-based temp dir to prevent collisions (Fix 6)
+    tmp_dir = pathlib.Path(tempfile.gettempdir()) / f"dl_{uuid.uuid4().hex}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    output_template = str(tmp_dir / f"{safe_title}.%(ext)s")
 
     cmd = [
         "yt-dlp",
         "--no-playlist",
         "--embed-metadata",
-        "--embed-thumbnail",
+        # --embed-thumbnail intentionally omitted: requires AtomicParsley for M4A
+        # which is not in the Docker image. The iOS ArtworkService handles artwork
+        # display separately via the thumbnailURL field from search results.
         "-o", output_template,
         *extra_args,
         target_url,
     ]
     logger.info("Download cmd: %s", " ".join(cmd))
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=120.0)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.communicate()
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise HTTPException(status_code=408, detail="Download timed out")
+    async with _YTDLP_SEMAPHORE:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()  # reap the zombie (Fix 7)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise HTTPException(status_code=408, detail="Download timed out")
 
     if proc.returncode != 0:
         err_text = stderr_bytes.decode(errors="replace")[-500:]
@@ -500,14 +578,14 @@ async def download_track(
         raise HTTPException(status_code=404, detail="Could not download track")
 
     # yt-dlp may choose a slightly different extension than requested — scan the dir.
-    output_file: Optional[str] = None
+    output_file: Optional[pathlib.Path] = None
     actual_ext = expected_ext
-    for fname in os.listdir(tmp_dir):
-        output_file = os.path.join(tmp_dir, fname)
-        actual_ext = os.path.splitext(fname)[1].lstrip(".") or expected_ext
+    for fname in tmp_dir.iterdir():
+        output_file = fname
+        actual_ext = fname.suffix.lstrip(".") or expected_ext
         break
 
-    if not output_file or not os.path.exists(output_file):
+    if not output_file or not output_file.exists():
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise HTTPException(status_code=404, detail="Downloaded file not found")
 
@@ -523,14 +601,14 @@ async def download_track(
     media_type = content_type_map.get(actual_ext, "application/octet-stream")
 
     # Schedule cleanup after the file has been streamed (5-second grace period).
-    async def _cleanup_later(path: str) -> None:
+    async def _cleanup_later(path: pathlib.Path) -> None:
         await asyncio.sleep(5)
         shutil.rmtree(path, ignore_errors=True)
 
     asyncio.ensure_future(_cleanup_later(tmp_dir))
 
     return FileResponse(
-        path=output_file,
+        path=str(output_file),
         media_type=media_type,
         filename=f"{safe_title}.{actual_ext}",
     )
@@ -618,7 +696,10 @@ async def resolve_playlist(
 
 
 @app.post("/auth/register", status_code=201)
-async def register(body: RegisterRequest):
+async def register(body: RegisterRequest, request: Request):
+    # Rate limit check (Fix 2)
+    _check_auth_rate(_get_client_ip(request))
+
     username = body.username.strip()
     if len(username) < 3:
         raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
@@ -644,7 +725,8 @@ async def register(body: RegisterRequest):
                     raise HTTPException(status_code=409, detail="Email already registered")
 
             user_id = str(uuid.uuid4())
-            password_hash = hash_password(body.password)
+            # Fix 1: run bcrypt off the event loop
+            password_hash = await hash_password_async(body.password)
 
             await cur.execute(
                 """
@@ -683,7 +765,10 @@ async def register(body: RegisterRequest):
 
 
 @app.post("/auth/login")
-async def login(body: LoginRequest):
+async def login(body: LoginRequest, request: Request):
+    # Rate limit check (Fix 2)
+    _check_auth_rate(_get_client_ip(request))
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -696,15 +781,19 @@ async def login(body: LoginRequest):
             row = await cur.fetchone()
 
     if not row:
+        logger.warning("Login attempt for unknown username: %r", body.username.strip())
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     (user_id, username, email, display_name, avatar_url,
      created_at, last_login, password_hash, is_active) = row
 
     if not is_active:
+        logger.warning("Login attempt for disabled account: %r (user_id=%s)", username, user_id)
         raise HTTPException(status_code=403, detail="Account is disabled")
 
-    if not verify_password(body.password, password_hash):
+    # Fix 1: run bcrypt off the event loop
+    if not await verify_password_async(body.password, password_hash):
+        logger.warning("Failed password attempt for username: %r (user_id=%s)", username, user_id)
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     async with pool.acquire() as conn:

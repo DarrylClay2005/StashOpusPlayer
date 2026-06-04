@@ -104,6 +104,7 @@ struct PlaylistDetailView: View {
         .sheet(isPresented: $showingAddSongs) {
             AddSongsSheet(playlist: playlist)
                 .environmentObject(library)
+                .environmentObject(player) // SongRow context menu (SongContextMenuContent) needs it
         }
     }
 

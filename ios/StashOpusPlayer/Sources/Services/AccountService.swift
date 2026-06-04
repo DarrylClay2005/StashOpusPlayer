@@ -104,6 +104,22 @@ final class AccountService: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: Self.tokenKey) }
     }
 
+    // MARK: Debounce state
+
+    private var syncDebounceTask: Task<Void, Never>?
+
+    /// Schedules a push sync that fires 2 seconds after the last call.
+    /// Rapid successive mutations only trigger one server write.
+    func schedulePush(library: LibraryManager) {
+        guard isLoggedIn else { return }
+        syncDebounceTask?.cancel()
+        syncDebounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+            guard let self, !Task.isCancelled, self.isLoggedIn else { return }
+            await self.pushSync(library: library)
+        }
+    }
+
     // MARK: Bridge URL — defaults to public baked-in URL, overridable in Settings
 
     var bridgeURL: String {

@@ -10,6 +10,9 @@ final class PersistenceService {
     }
 
     private let defaults = UserDefaults.standard
+    // JSONEncoder/JSONDecoder are not thread-safe for concurrent access, but all callers
+    // of PersistenceService.shared invoke it from @MainActor context, so a single shared
+    // instance per type is safe here.
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 

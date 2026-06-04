@@ -41,7 +41,12 @@ final class BackgroundService: ObservableObject {
     @Published var isEnabled: Bool = false
     @Published var images: [UIImage] = []
     @Published var currentIndex: Int = 0
-    @Published var shuffleIntervalSeconds: Double = 30.0
+    @Published var shuffleIntervalSeconds: Double = 30.0 {
+        didSet {
+            saveSettings()
+            if isActive { startShuffling() }  // restart with new interval
+        }
+    }
     @Published var animation: BackgroundAnimation = .fade
     @Published var opacity: Double = 0.35
     @Published var isBlurred: Bool = true

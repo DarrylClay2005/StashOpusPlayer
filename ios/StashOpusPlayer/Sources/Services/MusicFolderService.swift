@@ -100,14 +100,14 @@ final class MusicFolderService: ObservableObject {
                 }
             }
 
-            // The resolved URL is a security-scoped resource; start access for the caller.
-            if resolved.startAccessingSecurityScopedResource() {
+            // Call startAccessingSecurityScopedResource() regardless — it's a no-op for
+            // URLs already within the app's sandbox, and activates access for out-of-sandbox
+            // URLs obtained via document picker. Only exclude the URL if it doesn't exist.
+            _ = resolved.startAccessingSecurityScopedResource()
+            if FileManager.default.fileExists(atPath: resolved.path) {
                 valid.append(resolved)
-            }
-            // If startAccessing returns false the URL is still valid but may not need
-            // explicit access (e.g. it's within our sandbox already).
-            else {
-                valid.append(resolved)
+            } else {
+                staleIDs.append(folder.id)
             }
         }
 

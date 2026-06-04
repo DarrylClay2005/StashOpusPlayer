@@ -12,6 +12,7 @@ final class LibraryManager: ObservableObject {
     @Published private(set) var favoriteSongIDs: Set<String> = []
     @Published private(set) var isScanning: Bool = false
     @Published var errorMessage: String?
+    @Published var lastScanResult: String? = nil
 
     private let persistence: PersistenceService
     private let artwork: ArtworkService
@@ -137,10 +138,14 @@ final class LibraryManager: ObservableObject {
     }
 
     /// Scans a specific directory URL for audio files and adds any not already in the library.
-    /// Designed for use with preset locations (Downloads, Documents) that don't require a
+    /// Designed for use with preset locations (Documents) that don't require a
     /// security-scoped bookmark — just a direct filesystem path the app can enumerate.
     func scanSpecificDirectory(_ url: URL) {
+        isScanning = true
+        lastScanResult = nil
         Task {
+            defer { isScanning = false }
+
             let fm = FileManager.default
             var candidates: [URL] = []
             let enumerator = fm.enumerator(
@@ -156,17 +161,14 @@ final class LibraryManager: ObservableObject {
                 }
             }
 
-            guard !candidates.isEmpty else {
-                errorMessage = "No audio files found in \(url.lastPathComponent)"
-                return
-            }
+            // No audio files at all — return silently (not an error).
+            guard !candidates.isEmpty else { return }
 
             let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
             let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
-            guard !newURLs.isEmpty else {
-                errorMessage = "No new audio files found in \(url.lastPathComponent)"
-                return
-            }
+
+            // All files already in library — return silently.
+            guard !newURLs.isEmpty else { return }
 
             let service = DocumentImportService()
             let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
@@ -181,7 +183,7 @@ final class LibraryManager: ObservableObject {
             importedSongs.append(contentsOf: newSongs)
             importedSongs = Array(Dictionary(grouping: importedSongs, by: \.id).compactMap { $0.value.first })
             rebuildAllSongs()
-            errorMessage = "Found \(newSongs.count) song\(newSongs.count == 1 ? "" : "s") in \(url.lastPathComponent)"
+            lastScanResult = "Found \(newSongs.count) song\(newSongs.count == 1 ? "" : "s") in \(url.lastPathComponent)"
         }
     }
 

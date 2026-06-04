@@ -3,9 +3,10 @@ import SwiftUI
 // MARK: - Sort Order
 
 private enum FavoritesSortOrder: String, CaseIterable {
-    case title          = "Title"
-    case artist         = "Artist"
-    case recentlyAdded  = "Recently Added"
+    case title  = "Title"
+    case artist = "Artist"
+    // "Recently Added" removed: favoriteSongIDs is a Set<String> with no insertion order,
+    // so there is no timestamp data to sort by.
 }
 
 // MARK: - FavoritesView
@@ -30,12 +31,6 @@ struct FavoritesView: View {
                 let cmp = $0.artistName.localizedCaseInsensitiveCompare($1.artistName)
                 if cmp != .orderedSame { return cmp == .orderedAscending }
                 return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-            }
-        case .recentlyAdded:
-            // favoriteSongs preserves insertion order from favoriteSongIDs (Set has no order),
-            // so we reverse the alphabetical order as a proxy for "reverse / recently added" feel.
-            return raw.sorted {
-                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedDescending
             }
         }
     }

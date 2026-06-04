@@ -1,4 +1,5 @@
 import SwiftUI
+import MediaPlayer
 
 struct AddMusicView: View {
     @Environment(\.dismiss) private var dismiss
@@ -7,72 +8,93 @@ struct AddMusicView: View {
     @State private var showFilePicker = false
     @State private var importSuccess: String? = nil
 
-    // MARK: Preset locations (computed fresh each time the view appears)
-
-    private var presetLocations: [URL] {
-        var urls: [URL] = []
-        let fm = FileManager.default
-        if let dl = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first {
-            urls.append(dl)
-        }
-        if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
-            urls.append(docs)
-        }
-        return urls.filter { fm.fileExists(atPath: $0.path) }
-    }
-
     var body: some View {
         NavigationStack {
             List {
-                // MARK: Apple Music Library
-                Section("Apple Music / iTunes Library") {
+
+                // ─────────────────────────────────────────────────────────────
+                // MARK: Primary — iPhone Music Library (Apple Music / iTunes)
+                // This IS "the device's music library" on iOS.
+                // ─────────────────────────────────────────────────────────────
+                Section {
                     Button {
                         library.requestAccessAndScan()
-                        importSuccess = "Scanning Apple Music library…"
+                        importSuccess = "Scanning iPhone music library…"
                         dismiss()
                     } label: {
+                        HStack(spacing: 14) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color.pink)
+                                    .frame(width: 44, height: 44)
+                                Image(systemName: "music.note.house.fill")
+                                    .foregroundStyle(.white)
+                                    .font(.system(size: 20))
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("iPhone Music Library")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Text("Your songs synced via iTunes, Finder, or Apple Music")
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    // Show current access status
+                    let status = MPMediaLibrary.authorizationStatus()
+                    if status == .denied || status == .restricted {
+                        Label("Access denied — tap above to open Settings", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.warning)
+                    } else if status == .authorized {
+                        Label("\(library.allSongs.count) songs in library", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.success)
+                    }
+                } header: {
+                    sectionLabel("Your iPhone's Music")
+                } footer: {
+                    Text("On iOS, your iPhone's music library is managed by Apple Music / iTunes. Tap above to grant access and scan all songs stored on your device.")
+                        .font(.caption).foregroundStyle(AppTheme.textSecondary)
+                }
+                .listRowBackground(AppTheme.surface)
+
+                // ─────────────────────────────────────────────────────────────
+                // MARK: Scan app storage (files transferred via Mac/Finder)
+                // ─────────────────────────────────────────────────────────────
+                Section {
+                    Button {
+                        if let docs = FileManager.default
+                            .urls(for: .documentDirectory, in: .userDomainMask).first {
+                            library.scanSpecificDirectory(docs)
+                            importSuccess = "Scanning app storage…"
+                        }
+                    } label: {
                         importRow(
-                            icon: "music.note.house.fill", color: .pink,
-                            title: "Scan Apple Music Library",
-                            subtitle: "Access songs synced via iTunes or Apple Music"
+                            icon: "folder.fill", color: .yellow,
+                            title: "Scan App Storage",
+                            subtitle: "Scans files you've transferred to this app"
                         )
                     }
                     .buttonStyle(.plain)
-                }
-
-                // MARK: Scan a Preset Location
-                Section {
-                    ForEach(presetLocations, id: \.path) { url in
-                        Button {
-                            library.scanSpecificDirectory(url)
-                            importSuccess = "Scanning \(url.lastPathComponent)…"
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "folder.badge.plus")
-                                    .frame(width: 32)
-                                    .foregroundStyle(.yellow)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(url.lastPathComponent)
-                                        .fontWeight(.medium)
-                                        .foregroundStyle(AppTheme.textPrimary)
-                                    Text(url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                                        .font(.caption)
-                                        .foregroundStyle(AppTheme.textSecondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
                 } header: {
-                    Text("Scan a Location")
+                    sectionLabel("App Storage")
                 } footer: {
-                    Text("Tap a location to scan it for audio files immediately. No permission dialog required.")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.textSecondary)
+                    Text("Files dragged into this app via Finder/Files app (Mac USB or Files → On My iPhone → StashOpusPlayer) are stored here. Subfolders are included.")
+                        .font(.caption).foregroundStyle(AppTheme.textSecondary)
                 }
+                .listRowBackground(AppTheme.surface)
 
-                // MARK: Individual Files
+                // ─────────────────────────────────────────────────────────────
+                // MARK: Import individual files from anywhere
+                // ─────────────────────────────────────────────────────────────
                 Section {
                     Button {
                         showFilePicker = true
@@ -80,38 +102,41 @@ struct AddMusicView: View {
                         importRow(
                             icon: "doc.badge.plus", color: .blue,
                             title: "Import Audio Files",
-                            subtitle: "Navigate to any folder, select one or more songs"
+                            subtitle: "Browse Files app — select any MP3, M4A, FLAC, WAV…"
                         )
                     }
                     .buttonStyle(.plain)
                 } header: {
-                    Text("Individual Files")
+                    sectionLabel("Individual Files")
                 } footer: {
-                    Text("Select multiple files from any folder by navigating to it and tapping each file.")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.textSecondary)
+                    Text("Navigate to any folder in the Files app (Downloads, iCloud Drive, etc.) and select multiple songs to import.")
+                        .font(.caption).foregroundStyle(AppTheme.textSecondary)
                 }
+                .listRowBackground(AppTheme.surface)
 
-                // MARK: Finder / USB
-                Section("Finder / USB") {
+                // ─────────────────────────────────────────────────────────────
+                // MARK: Mac / USB transfer instructions
+                // ─────────────────────────────────────────────────────────────
+                Section {
                     HStack(spacing: 12) {
-                        Image(systemName: "cable.connector")
-                            .frame(width: 32).foregroundStyle(.gray)
+                        Image(systemName: "cable.connector").frame(width: 32).foregroundStyle(.gray)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Connect iPhone to Mac")
+                            Text("Transfer via Mac (USB or WiFi)")
                                 .fontWeight(.medium).foregroundStyle(AppTheme.textPrimary)
-                            Text("Finder → iPhone → Files → StashOpusPlayer → drag files in")
+                            Text("Finder → your iPhone → Files tab → StashOpusPlayer → drag files/folders in")
                                 .font(.caption).foregroundStyle(AppTheme.textSecondary)
                         }
                     }
                 }
+                .listRowBackground(AppTheme.surface)
 
-                // MARK: Import feedback
+                // MARK: Feedback banner
                 if let msg = importSuccess {
                     Section {
                         Label(msg, systemImage: "checkmark.circle.fill")
                             .foregroundStyle(AppTheme.success)
                     }
+                    .listRowBackground(Color.clear)
                 }
             }
             .scrollContentBackground(.hidden)
@@ -123,7 +148,6 @@ struct AddMusicView: View {
                     Button("Done") { dismiss() }.tint(AppTheme.accent)
                 }
             }
-            // Individual file picker — navigate to any folder, select audio files
             .sheet(isPresented: $showFilePicker) {
                 DocumentPicker(mode: .audioFiles) { urls in
                     showFilePicker = false
@@ -138,12 +162,18 @@ struct AddMusicView: View {
 
     private func importRow(icon: String, color: Color, title: String, subtitle: String) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: icon)
-                .frame(width: 32).foregroundStyle(color)
+            Image(systemName: icon).frame(width: 32).foregroundStyle(color)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).fontWeight(.medium).foregroundStyle(AppTheme.textPrimary)
                 Text(subtitle).font(.caption).foregroundStyle(AppTheme.textSecondary)
             }
         }
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(AppTheme.bodyFont(size: 11))
+            .foregroundStyle(AppTheme.textSecondary)
+            .kerning(0.8)
     }
 }

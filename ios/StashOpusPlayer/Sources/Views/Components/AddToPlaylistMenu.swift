@@ -58,8 +58,11 @@ struct SongContextMenuContent: View {
 
         // MARK: New Playlist with Song
         Button {
-            library.createPlaylist(name: song.displayName)
-            if let newPlaylist = library.playlists.last {
+            let playlistName = song.displayName
+            library.createPlaylist(name: playlistName)
+            // Find by name rather than using .last, which is fragile if the array is sorted
+            // or another concurrent mutation has appended to it.
+            if let newPlaylist = library.playlists.last(where: { $0.name == playlistName }) {
                 library.addSong(id: song.id, toPlaylistID: newPlaylist.id)
             }
         } label: {

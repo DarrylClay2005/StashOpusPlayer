@@ -47,20 +47,17 @@ struct StashOpusPlayerApp: App {
                     }
                 }
                 // DB as primary storage: push to server whenever favorites or playlists change.
+                // schedulePush debounces rapid bursts (e.g. initial library scan) into one write.
                 .onChange(of: libraryManager.favoriteSongIDs) { _ in
-                    guard account.isLoggedIn else { return }
-                    Task { await account.pushSync(library: libraryManager) }
+                    account.schedulePush(library: libraryManager)
                 }
                 .onChange(of: libraryManager.playlists) { _ in
-                    guard account.isLoggedIn else { return }
-                    Task { await account.pushSync(library: libraryManager) }
+                    account.schedulePush(library: libraryManager)
                 }
                 // Persist audio settings to both local and DB when they change.
                 .onChange(of: player.audioSettings) { newSettings in
                     PersistenceService.shared.saveAudioSettings(newSettings)
-                    if account.isLoggedIn {
-                        Task { await account.pushSync(library: libraryManager) }
-                    }
+                    account.schedulePush(library: libraryManager) // no-op if not logged in
                 }
                 .onReceive(
                     NotificationCenter.default.publisher(

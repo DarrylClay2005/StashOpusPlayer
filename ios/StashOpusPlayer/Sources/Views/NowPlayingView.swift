@@ -859,7 +859,8 @@ struct NowPlayingView: View {
             artworkOpacity = 0
             artworkScale = 0.92
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
             withAnimation(.spring(response: 0.45, dampingFraction: 0.65)) {
                 artworkOpacity = 1
                 artworkScale = 1.0

@@ -1,6 +1,9 @@
 import aiomysql
+import logging
 import os
 import pathlib
+
+logger = logging.getLogger("ios-bridge.db")
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "127.0.0.1"),
@@ -23,12 +26,19 @@ async def get_pool() -> aiomysql.Pool:
 
 
 async def init_db():
-    """Create iOS-specific tables if they don't exist."""
+    """Create iOS-specific tables if they don't exist, wrapped in a transaction."""
     pool = await get_pool()
+    sql = pathlib.Path(__file__).parent.joinpath("schema.sql").read_text()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            sql = pathlib.Path(__file__).parent.joinpath("schema.sql").read_text()
-            for stmt in sql.split(";"):
-                stmt = stmt.strip()
-                if stmt:
-                    await cur.execute(stmt)
+            await conn.begin()
+            try:
+                for stmt in sql.split(";"):
+                    stmt = stmt.strip()
+                    if stmt:
+                        await cur.execute(stmt)
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                logger.exception("init_db failed; rolled back schema migration")
+                raise
