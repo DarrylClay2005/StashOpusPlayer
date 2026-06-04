@@ -90,7 +90,10 @@ final class ArtworkService {
         if let persistentID = song.persistentID {
             let image = await fetchMediaLibraryArtwork(persistentID: persistentID)
             if let image {
+                appLog("Artwork: media library hit for \"\(song.displayName)\"", category: "artwork")
                 setMemoryCache(image, forKey: key)
+            } else {
+                appLog("Artwork: media library miss for \"\(song.displayName)\"", category: "artwork")
             }
             return image
         }
@@ -155,8 +158,14 @@ final class ArtworkService {
 
     private func saveToDisk(image: UIImage, key: String) {
         let path = diskPath(key: key)
-        if let data = image.jpegData(compressionQuality: 0.85) {
-            try? data.write(to: path, options: .atomic)
+        guard let data = image.jpegData(compressionQuality: 0.85) else {
+            appWarn("Artwork: saveToDisk encode failed for key \(key)", category: "artwork")
+            return
+        }
+        do {
+            try data.write(to: path, options: .atomic)
+        } catch {
+            appWarn("Artwork: saveToDisk write failed for key \(key): \(error)", category: "artwork")
         }
     }
 

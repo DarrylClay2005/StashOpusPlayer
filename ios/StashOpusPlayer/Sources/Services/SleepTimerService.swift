@@ -30,6 +30,7 @@ final class SleepTimerService: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.tick() }
         }
+        appLog("SleepTimer: started for \(Int(d))s (\(formattedRemaining))", category: "general")
     }
 
     func cancel() {
@@ -38,6 +39,7 @@ final class SleepTimerService: ObservableObject {
         isActive = false
         remainingSeconds = 0
         didExpire = false
+        appLog("SleepTimer: cancelled", category: "general")
     }
 
     var formattedRemaining: String {
@@ -59,6 +61,7 @@ final class SleepTimerService: ObservableObject {
             timer = nil
             isActive = false
             didExpire = true
+            appLog("SleepTimer: expired — pausing playback", category: "general")
             // Reset the flag after one run loop so observers don't re-trigger.
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 100_000_000)

@@ -19,41 +19,56 @@ final class PersistenceService {
     private init() {}
 
     func savePlaylists(_ playlists: [Playlist]) {
-        if let data = try? encoder.encode(playlists) {
-            defaults.set(data, forKey: Keys.playlists)
+        do {
+            defaults.set(try encoder.encode(playlists), forKey: Keys.playlists)
+        } catch {
+            appError("savePlaylists failed: \(error)", category: "persistence")
         }
     }
 
     func loadPlaylists() -> [Playlist] {
-        guard let data = defaults.data(forKey: Keys.playlists),
-              let playlists = try? decoder.decode([Playlist].self, from: data)
-        else { return [] }
-        return playlists
+        guard let data = defaults.data(forKey: Keys.playlists) else { return [] }
+        do {
+            return try decoder.decode([Playlist].self, from: data)
+        } catch {
+            appError("loadPlaylists decode failed: \(error)", category: "persistence")
+            return []
+        }
     }
 
     func saveFavorites(_ ids: Set<String>) {
-        if let data = try? encoder.encode(Array(ids)) {
-            defaults.set(data, forKey: Keys.favorites)
+        do {
+            defaults.set(try encoder.encode(Array(ids)), forKey: Keys.favorites)
+        } catch {
+            appError("saveFavorites failed: \(error)", category: "persistence")
         }
     }
 
     func loadFavorites() -> Set<String> {
-        guard let data = defaults.data(forKey: Keys.favorites),
-              let ids = try? decoder.decode([String].self, from: data)
-        else { return [] }
-        return Set(ids)
+        guard let data = defaults.data(forKey: Keys.favorites) else { return [] }
+        do {
+            return Set(try decoder.decode([String].self, from: data))
+        } catch {
+            appError("loadFavorites decode failed: \(error)", category: "persistence")
+            return []
+        }
     }
 
     func saveAudioSettings(_ settings: AudioSettings) {
-        if let data = try? encoder.encode(settings) {
-            defaults.set(data, forKey: Keys.audioSettings)
+        do {
+            defaults.set(try encoder.encode(settings), forKey: Keys.audioSettings)
+        } catch {
+            appError("saveAudioSettings failed: \(error)", category: "persistence")
         }
     }
 
     func loadAudioSettings() -> AudioSettings? {
-        guard let data = defaults.data(forKey: Keys.audioSettings),
-              let settings = try? decoder.decode(AudioSettings.self, from: data)
-        else { return nil }
-        return settings
+        guard let data = defaults.data(forKey: Keys.audioSettings) else { return nil }
+        do {
+            return try decoder.decode(AudioSettings.self, from: data)
+        } catch {
+            appError("loadAudioSettings decode failed: \(error)", category: "persistence")
+            return nil
+        }
     }
 }

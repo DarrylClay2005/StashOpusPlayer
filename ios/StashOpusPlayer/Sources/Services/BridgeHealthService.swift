@@ -15,6 +15,7 @@ final class BridgeHealthService: ObservableObject {
 
     func startPeriodicChecks(streaming: StreamingService) {
         stopPeriodicChecks()
+        appLog("startPeriodicChecks: bridge=\(streaming.bridgeURL)", category: "network")
         checkTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.check(streaming: streaming)
@@ -34,7 +35,15 @@ final class BridgeHealthService: ObservableObject {
         isHealthy = healthy
 
         if healthy && !streaming.apiKey.isEmpty {
-            isAPIKeyValid = try? await checkAPIKey(streaming: streaming)
+            do {
+                isAPIKeyValid = try await checkAPIKey(streaming: streaming)
+                if isAPIKeyValid == false {
+                    appWarn("checkAPIKey: key rejected by server", category: "network")
+                }
+            } catch {
+                appWarn("checkAPIKey: error \(error.localizedDescription)", category: "network")
+                isAPIKeyValid = false
+            }
         } else if healthy {
             isAPIKeyValid = nil  // No key configured — open access
         }

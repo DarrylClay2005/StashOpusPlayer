@@ -32,22 +32,33 @@ actor MetadataFetchService {
         guard !rawTitle.isEmpty else { return nil }
 
         let cacheKey = "\(rawTitle)|\(rawArtist)"
-        if let cached = cache[cacheKey] { return cached }
+        if let cached = cache[cacheKey] {
+            AppLogger.shared.log("MetadataFetch: cache \(cached != nil ? "hit" : "miss(nil)") for \"\(rawTitle)\"", category: "network")
+            return cached
+        }
 
         let query = [rawTitle, rawArtist].filter { !$0.isEmpty }.joined(separator: " ")
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "https://itunes.apple.com/search?term=\(encoded)&entity=song&limit=3&country=US")
         else {
+            AppLogger.shared.warn("MetadataFetch: could not build URL for \"\(rawTitle)\"", category: "network")
             cache[cacheKey] = .some(nil)
             return nil
         }
 
-        guard let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+        AppLogger.shared.log("MetadataFetch: querying iTunes for \"\(rawTitle)\" by \"\(rawArtist)\"", category: "network")
+        guard let (data, response) = try? await URLSession.shared.data(from: url) else {
+            AppLogger.shared.warn("MetadataFetch: network error for \"\(rawTitle)\"", category: "network")
+            cache[cacheKey] = .some(nil)
+            return nil
+        }
+        guard (response as? HTTPURLResponse)?.statusCode == 200,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let results = json["results"] as? [[String: Any]],
               !results.isEmpty
         else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            AppLogger.shared.warn("MetadataFetch: no results for \"\(rawTitle)\" (http \(status))", category: "network")
             cache[cacheKey] = .some(nil)
             return nil
         }
@@ -72,6 +83,7 @@ actor MetadataFetchService {
         )
 
         cache[cacheKey] = meta
+        AppLogger.shared.log("MetadataFetch: found \"\(meta.trackName ?? rawTitle)\" by \(meta.artistName ?? "?")", category: "network")
         return meta
     }
 

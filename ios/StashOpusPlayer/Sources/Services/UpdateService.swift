@@ -50,16 +50,20 @@ final class UpdateService: ObservableObject {
         guard !isChecking else { return }
         isChecking = true
         defer { isChecking = false }
+        appLog("checkForUpdates: current=\(currentVersion)", category: "network")
 
         guard let apiURL = URL(string: "https://api.github.com/repos/HeavenlyXenusVR/StashOpusPlayer/releases") else {
+            appWarn("checkForUpdates: could not build GitHub API URL", category: "network")
             return
         }
         var request = URLRequest(url: apiURL)
         request.setValue("StashOpusPlayer-iOS", forHTTPHeaderField: "User-Agent")
 
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard let releases = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                appWarn("checkForUpdates: unexpected response format (http \(status))", category: "network")
                 return
             }
 
@@ -114,7 +118,10 @@ final class UpdateService: ObservableObject {
                 }
             }
 
-            guard let versionString = bestTag else { return }
+            guard let versionString = bestTag else {
+                appLog("checkForUpdates: no suitable release found in \(releases.count) release(s)", category: "network")
+                return
+            }
 
             latestVersion = versionString
             if let pageURL = bestPageURL {
@@ -122,8 +129,9 @@ final class UpdateService: ObservableObject {
             }
             directDownloadURL = bestIPADownloadURL
             updateAvailable = isNewerVersion(versionString, than: currentVersion)
+            appLog("checkForUpdates: latest=\(versionString) updateAvailable=\(updateAvailable)", category: "network")
         } catch {
-            // Silently fail — network errors should not crash or alert the user.
+            appWarn("checkForUpdates: network/parse error: \(error.localizedDescription)", category: "network")
         }
     }
 

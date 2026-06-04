@@ -78,19 +78,23 @@ struct DocumentImportService {
             let srcSize = (try? manager.attributesOfItem(atPath: sourceURL.path))?[.size] as? Int
             let dstSize = (try? manager.attributesOfItem(atPath: destination.path))?[.size] as? Int
             if let srcSize, let dstSize, srcSize == dstSize {
+                appLog("importFile: already imported \(destination.lastPathComponent)", category: "library")
                 return await makeSong(for: destination)
             }
             // Sizes differ (partial or updated file) — remove and re-copy.
             do {
                 try manager.removeItem(at: destination)
             } catch {
+                appError("importFile: could not remove stale file \(destination.lastPathComponent): \(error)", category: "library")
                 throw DocumentImportError.copyFailed
             }
         }
 
         do {
             try manager.copyItem(at: sourceURL, to: destination)
+            appLog("importFile: copied \(destination.lastPathComponent)", category: "library")
         } catch {
+            appError("importFile: copy failed for \(sourceURL.lastPathComponent): \(error)", category: "library")
             throw DocumentImportError.copyFailed
         }
 

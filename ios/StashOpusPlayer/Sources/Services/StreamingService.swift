@@ -203,7 +203,7 @@ final class StreamingService: ObservableObject {
         guard isConfigured else {
             throw StreamingError.notConfigured
         }
-
+        appLog("streamURL: \"\(track.title)\" [src: \(track.source), fmt: \(preferredFormat)]", category: "network")
         isLoadingStream = true
         defer { isLoadingStream = false }
 
@@ -231,18 +231,23 @@ final class StreamingService: ObservableObject {
             case 200..<300:
                 break
             case 408:
+                appWarn("streamURL: timeout for \"\(track.title)\"", category: "network")
                 throw StreamingError.timeout
             case 404:
+                appWarn("streamURL: not found for \"\(track.title)\"", category: "network")
                 throw StreamingError.notFound(track.title)
             default:
+                appError("streamURL: HTTP \(httpResponse.statusCode) for \"\(track.title)\"", category: "network")
                 throw StreamingError.httpError(httpResponse.statusCode)
             }
         }
 
         let decoded = try JSONDecoder().decode(StreamResponse.self, from: data)
         guard let url = URL(string: decoded.url) else {
+            appError("streamURL: invalid URL in response for \"\(track.title)\"", category: "network")
             throw StreamingError.invalidURL
         }
+        appLog("streamURL: got URL for \"\(track.title)\" (expires \(decoded.expiresIn)s)", category: "network")
         return url
     }
 
@@ -275,7 +280,7 @@ final class StreamingService: ObservableObject {
             serverTracks = []
             return
         }
-
+        appLog("searchServerLibrary: \"\(query)\"", category: "network")
         isSearchingServer = true
         errorMessage = nil
         defer { isSearchingServer = false }
@@ -297,12 +302,15 @@ final class StreamingService: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse,
                !(200..<300).contains(httpResponse.statusCode) {
+                appWarn("searchServerLibrary: HTTP \(httpResponse.statusCode) for \"\(query)\"", category: "network")
                 errorMessage = "Unable to reach streaming server. Check your connection."
                 serverTracks = []
                 return
             }
             serverTracks = try JSONDecoder().decode([ServerTrack].self, from: data)
+            appLog("searchServerLibrary: \(serverTracks.count) result(s) for \"\(query)\"", category: "network")
         } catch {
+            appError("searchServerLibrary: \(error.localizedDescription)", category: "network")
             errorMessage = "Unable to reach streaming server. Check your connection."
             serverTracks = []
         }
@@ -364,7 +372,11 @@ final class StreamingService: ObservableObject {
         let ext = fileExtension(for: fmt)
 
         let importDir = downloadDirectory
-        try? FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)
+        } catch {
+            appWarn("downloadToLibrary: could not create download dir: \(error)", category: "network")
+        }
 
         // Build a filesystem-safe filename from the track title (max 100 chars).
         let safeName = String(
@@ -376,6 +388,7 @@ final class StreamingService: ObservableObject {
         let destURL = importDir.appendingPathComponent("\(safeName).\(ext)")
 
         if FileManager.default.fileExists(atPath: destURL.path) {
+            appLog("downloadToLibrary: already exists, skipping \(destURL.lastPathComponent)", category: "network")
             return destURL
         }
 
@@ -406,16 +419,24 @@ final class StreamingService: ObservableObject {
             case 200..<300:
                 break
             case 408:
+                appWarn("downloadToLibrary: timeout for \"\(track.title)\"", category: "network")
                 throw StreamingError.timeout
             case 404:
+                appWarn("downloadToLibrary: not found for \"\(track.title)\"", category: "network")
                 throw StreamingError.notFound(track.title)
             default:
+                appError("downloadToLibrary: HTTP \(httpResponse.statusCode) for \"\(track.title)\"", category: "network")
                 throw StreamingError.httpError(httpResponse.statusCode)
             }
         }
 
         try? FileManager.default.removeItem(at: destURL)
-        try FileManager.default.moveItem(at: downloadedURL, to: destURL)
+        do {
+            try FileManager.default.moveItem(at: downloadedURL, to: destURL)
+        } catch {
+            appError("downloadToLibrary: move failed for \"\(track.title)\": \(error)", category: "network")
+            throw error
+        }
         appLog("Download complete: \(destURL.lastPathComponent)", category: "network")
 
         // Pre-seed the artwork cache with the track's thumbnail so it's immediately

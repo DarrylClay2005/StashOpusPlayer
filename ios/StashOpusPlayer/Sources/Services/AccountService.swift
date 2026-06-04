@@ -210,6 +210,7 @@ final class AccountService: ObservableObject {
         email: String?,
         displayName: String?
     ) async {
+        appLog("Register attempt: \(username)", category: "account")
         errorMessage = nil
         struct Body: Encodable {
             let username: String
@@ -234,10 +235,13 @@ final class AccountService: ObservableObject {
             isLoggedIn = true
             hasDateOfBirth = response.user.dateOfBirth != nil
             saveUserLocally(response.user)
+            appLog("Register success: \(username) (id: \(response.user.id))", category: "account")
             await loadAvatar(forceRefresh: true)
         } catch let err as AccountError {
+            appError("Register failed [\(err.statusCode)]: \(err.message)", category: "account")
             errorMessage = err.message
         } catch {
+            appError("Register error: \(error.localizedDescription)", category: "account")
             errorMessage = error.localizedDescription
         }
     }
@@ -259,16 +263,19 @@ final class AccountService: ObservableObject {
             currentUser = user
             hasDateOfBirth = user.dateOfBirth != nil
             saveUserLocally(user)
+            appLog("refreshMe: updated profile for \(user.username)", category: "account")
         } catch let err as AccountError where err.statusCode == 401 {
+            appWarn("refreshMe: session expired, clearing", category: "account")
             clearSession()
         } catch {
-            // Non-fatal; keep existing cached user
+            appWarn("refreshMe: \(error.localizedDescription) — using cached user", category: "account")
         }
     }
 
     /// Update the display name on the server and locally.
     func updateDisplayName(_ newName: String) async {
         guard isLoggedIn else { return }
+        appLog("updateDisplayName: \"\(newName)\"", category: "account")
         errorMessage = nil
         struct Body: Encodable { let display_name: String }
         do {
@@ -277,9 +284,12 @@ final class AccountService: ObservableObject {
             currentUser = user
             hasDateOfBirth = user.dateOfBirth != nil
             saveUserLocally(user)
+            appLog("updateDisplayName: success", category: "account")
         } catch let err as AccountError {
+            appError("updateDisplayName failed [\(err.statusCode)]: \(err.message)", category: "account")
             errorMessage = err.message
         } catch {
+            appError("updateDisplayName error: \(error.localizedDescription)", category: "account")
             errorMessage = error.localizedDescription
         }
     }
@@ -432,14 +442,18 @@ final class AccountService: ObservableObject {
     /// Set date of birth (ISO YYYY-MM-DD). Server enforces immutability once set.
     func setDateOfBirth(_ dob: String) async {
         guard isLoggedIn else { return }
+        appLog("setDateOfBirth: setting DOB", category: "account")
         errorMessage = nil
         struct Body: Encodable { let date_of_birth: String }
         do {
             _ = try await makeRequest("/auth/me", method: "PUT", body: Body(date_of_birth: dob))
             hasDateOfBirth = true
+            appLog("setDateOfBirth: success", category: "account")
         } catch let err as AccountError {
+            appError("setDateOfBirth failed [\(err.statusCode)]: \(err.message)", category: "account")
             errorMessage = err.message
         } catch {
+            appError("setDateOfBirth error: \(error.localizedDescription)", category: "account")
             errorMessage = error.localizedDescription
         }
     }
@@ -449,11 +463,28 @@ final class AccountService: ObservableObject {
     /// Upload a profile picture as JPEG (max 1 MB enforced server-side).
     func uploadAvatar(image: UIImage) async {
         guard isLoggedIn else { return }
-        guard let jpeg = image.jpegData(compressionQuality: 0.8) else { return }
-        guard var req = makeBaseRequest("/user/avatar", method: "POST") else { return }
+        guard let jpeg = image.jpegData(compressionQuality: 0.8) else {
+            appWarn("uploadAvatar: could not encode image as JPEG", category: "account")
+            return
+        }
+        guard var req = makeBaseRequest("/user/avatar", method: "POST") else {
+            appWarn("uploadAvatar: could not build request", category: "account")
+            return
+        }
         req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
         req.httpBody = jpeg
-        _ = try? await URLSession.shared.data(for: req)
+        appLog("uploadAvatar: uploading \(jpeg.count / 1024)KB", category: "account")
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if (200..<300).contains(status) {
+                appLog("uploadAvatar: success", category: "account")
+            } else {
+                appWarn("uploadAvatar: HTTP \(status)", category: "account")
+            }
+        } catch {
+            appError("uploadAvatar: \(error.localizedDescription)", category: "account")
+        }
         avatarImage = image
         saveAvatarLocally(image)
     }
@@ -462,15 +493,24 @@ final class AccountService: ObservableObject {
     func loadAvatar(forceRefresh: Bool = false) async {
         if !forceRefresh, let cached = loadAvatarLocally() {
             avatarImage = cached
+            appLog("loadAvatar: loaded from local cache", category: "account")
             return
         }
         guard isLoggedIn, let userId = currentUser?.id else { return }
         guard let req = makeBaseRequest("/user/avatar/\(userId)", method: "GET") else { return }
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
-              let img = UIImage(data: data) else { return }
-        avatarImage = img
-        saveAvatarLocally(img)
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(status), let img = UIImage(data: data) else {
+                appWarn("loadAvatar: HTTP \(status) or invalid image data", category: "account")
+                return
+            }
+            avatarImage = img
+            saveAvatarLocally(img)
+            appLog("loadAvatar: fetched from server (\(data.count / 1024)KB)", category: "account")
+        } catch {
+            appWarn("loadAvatar: \(error.localizedDescription)", category: "account")
+        }
     }
 
     private func makeBaseRequest(_ path: String, method: String) -> URLRequest? {
@@ -505,17 +545,22 @@ final class AccountService: ObservableObject {
             let local_song_id: String?
             let listen_seconds: Int
         }
-        _ = try? await makeRequest(
-            "/user/history",
-            method: "POST",
-            body: Body(
-                title: song.title,
-                artist: song.artist.isEmpty ? nil : song.artist,
-                track_url: song.url?.absoluteString,
-                local_song_id: song.id,
-                listen_seconds: listenSeconds
+        do {
+            _ = try await makeRequest(
+                "/user/history",
+                method: "POST",
+                body: Body(
+                    title: song.title,
+                    artist: song.artist.isEmpty ? nil : song.artist,
+                    track_url: song.url?.absoluteString,
+                    local_song_id: song.id,
+                    listen_seconds: listenSeconds
+                )
             )
-        )
+            appLog("logPlay: \"\(song.title)\" \(listenSeconds)s", category: "account")
+        } catch {
+            appWarn("logPlay: failed for \"\(song.title)\": \(error.localizedDescription)", category: "account")
+        }
     }
 
     // MARK: - Private helpers

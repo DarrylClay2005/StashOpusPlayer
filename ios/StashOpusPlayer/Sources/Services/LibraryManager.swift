@@ -112,9 +112,13 @@ final class LibraryManager: ObservableObject {
     /// Scans all user-selected folders tracked by `MusicFolderService` and adds
     /// any new audio files not already in the library.
     func scanWatchedFolders(using folderService: MusicFolderService) {
+        appLog("scanWatchedFolders: starting", category: "library")
         Task {
             let urls = folderService.resolveAll()
-            guard !urls.isEmpty else { return }
+            guard !urls.isEmpty else {
+                appLog("scanWatchedFolders: no accessible watched folders", category: "library")
+                return
+            }
 
             var candidates: [URL] = []
             let fm = FileManager.default
@@ -169,6 +173,7 @@ final class LibraryManager: ObservableObject {
                 }
             }.value
 
+            appLog("scanWatchedFolders: added \(newSongs.count) new song(s) from \(urls.count) folder(s)", category: "library")
             importedSongs.append(contentsOf: newSongs)
             importedSongs = Array(Dictionary(grouping: importedSongs, by: \.id).compactMap { $0.value.first })
             rebuildAllSongs()
@@ -179,6 +184,7 @@ final class LibraryManager: ObservableObject {
     /// Designed for use with preset locations (Documents) that don't require a
     /// security-scoped bookmark — just a direct filesystem path the app can enumerate.
     func scanSpecificDirectory(_ url: URL) {
+        appLog("scanSpecificDirectory: \(url.lastPathComponent)", category: "library")
         isScanning = true
         lastScanResult = nil
         Task {
@@ -236,6 +242,7 @@ final class LibraryManager: ObservableObject {
                 }
             }.value
 
+            appLog("scanSpecificDirectory: added \(newSongs.count) new song(s) from \(url.lastPathComponent)", category: "library")
             importedSongs.append(contentsOf: newSongs)
             importedSongs = Array(Dictionary(grouping: importedSongs, by: \.id).compactMap { $0.value.first })
             rebuildAllSongs()
@@ -250,10 +257,12 @@ final class LibraryManager: ObservableObject {
     }
 
     func requestAccessAndScan() {
+        appLog("requestAccessAndScan: requesting media library authorization", category: "library")
         Task {
             let existing = MPMediaLibrary.authorizationStatus()
             // Already denied/restricted — system won't re-prompt; send user to Settings.
             if existing == .denied || existing == .restricted {
+                appWarn("requestAccessAndScan: access denied/restricted — opening Settings", category: "library")
                 await UIApplication.shared.open(
                     URL(string: UIApplication.openSettingsURLString)!,
                     options: [:],
@@ -264,9 +273,11 @@ final class LibraryManager: ObservableObject {
             }
             let status = await MPMediaLibrary.requestAuthorization()
             if status == .authorized {
+                appLog("requestAccessAndScan: authorized, scanning", category: "library")
                 errorMessage = nil
                 scanMediaLibrary()
             } else if status == .denied || status == .restricted {
+                appWarn("requestAccessAndScan: denied — opening Settings", category: "library")
                 await UIApplication.shared.open(
                     URL(string: UIApplication.openSettingsURLString)!,
                     options: [:],
@@ -274,6 +285,7 @@ final class LibraryManager: ObservableObject {
                 )
                 errorMessage = "Open Settings → Privacy → Media & Apple Music to allow access."
             } else {
+                appWarn("requestAccessAndScan: declined (status=\(status.rawValue))", category: "library")
                 errorMessage = "Media library access was declined. Imported files still work."
             }
         }
@@ -284,7 +296,7 @@ final class LibraryManager: ObservableObject {
             requestAccessAndScan()
             return
         }
-
+        appLog("scanMediaLibrary: starting", category: "library")
         isScanning = true
         errorMessage = nil
 
@@ -294,6 +306,7 @@ final class LibraryManager: ObservableObject {
                 return (query.items ?? []).compactMap(Song.init(mediaItem:))
             }.value
             // Back on MainActor — Task inherits actor context from scanMediaLibrary().
+            appLog("scanMediaLibrary: found \(scanned.count) song(s)", category: "library")
             self.mediaSongs = scanned
             self.rebuildAllSongs()
             self.isScanning = false
