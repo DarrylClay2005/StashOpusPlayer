@@ -61,8 +61,7 @@ jobs:
             -archivePath build/StashOpusPlayer.xcarchive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tail -30 || { echo "xcodebuild failed"; exit 1; }
+            CODE_SIGNING_ALLOWED=NO
           # Verify the .app was produced
           APP=$(find build/StashOpusPlayer.xcarchive -name "*.app" | head -1)
           if [ -z "$APP" ]; then

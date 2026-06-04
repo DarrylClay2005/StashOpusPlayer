@@ -104,7 +104,7 @@ final class LibraryManager: ObservableObject {
 
             appLog("Local scan complete: added \(newSongs.count) new song(s)", category: "library")
             importedSongs.append(contentsOf: newSongs)
-            importedSongs = Array(Dictionary(grouping: importedSongs, by: { $0.url?.standardizedFileURL?.absoluteString ?? $0.id }).compactMap { $0.value.first })
+            importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
             rebuildAllSongs()
         }
     }
@@ -175,7 +175,7 @@ final class LibraryManager: ObservableObject {
 
             appLog("scanWatchedFolders: added \(newSongs.count) new song(s) from \(urls.count) folder(s)", category: "library")
             importedSongs.append(contentsOf: newSongs)
-            importedSongs = Array(Dictionary(grouping: importedSongs, by: { $0.url?.standardizedFileURL?.absoluteString ?? $0.id }).compactMap { $0.value.first })
+            importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
             rebuildAllSongs()
         }
     }
@@ -244,7 +244,7 @@ final class LibraryManager: ObservableObject {
 
             appLog("scanSpecificDirectory: added \(newSongs.count) new song(s) from \(url.lastPathComponent)", category: "library")
             importedSongs.append(contentsOf: newSongs)
-            importedSongs = Array(Dictionary(grouping: importedSongs, by: { $0.url?.standardizedFileURL?.absoluteString ?? $0.id }).compactMap { $0.value.first })
+            importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
             rebuildAllSongs()
             lastScanResult = "Found \(newSongs.count) song\(newSongs.count == 1 ? "" : "s") in \(url.lastPathComponent)"
         }
@@ -325,7 +325,7 @@ final class LibraryManager: ObservableObject {
                 appLog("Import complete: \(imported.count) file(s) added", category: "library")
                 importedSongs.append(contentsOf: imported)
                 importedSongs = Array(
-                    Dictionary(grouping: importedSongs, by: { $0.url?.standardizedFileURL?.absoluteString ?? $0.id })
+                    Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id })
                         .compactMap { $0.value.first }
                 )
             } catch {
