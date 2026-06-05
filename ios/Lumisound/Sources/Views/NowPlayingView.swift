@@ -144,6 +144,9 @@ struct NowPlayingView: View {
     // Track-change animation ID
     @State private var artworkAnimationID: String = ""
 
+    // Track info slide-up/fade-in animation
+    @State private var trackInfoVisible: Bool = true
+
     // Collapsible panels
     @State private var showPlaybackControls = true
     @State private var showABRepeat = false
@@ -151,8 +154,20 @@ struct NowPlayingView: View {
     @State private var showEQ = true
     @State private var showLyrics = false
 
-    // Artwork style: vinyl disc vs plain album art
-    @State private var showVinylDisc: Bool = UserDefaults.standard.object(forKey: "nowPlaying_showVinylDisc") as? Bool ?? true
+    // Artwork style — migrates old Bool key to the new enum key on first use
+    @State private var artworkStyle: NowPlayingArtworkStyle = {
+        // 1. New key takes priority
+        if let raw = UserDefaults.standard.string(forKey: "nowPlaying_artworkStyle"),
+           let style = NowPlayingArtworkStyle(rawValue: raw) {
+            return style
+        }
+        // 2. Migrate old bool key: true → .vinylDisc, false → .albumArt
+        if let oldBool = UserDefaults.standard.object(forKey: "nowPlaying_showVinylDisc") as? Bool {
+            return oldBool ? .vinylDisc : .albumArt
+        }
+        // 3. Default
+        return .vinylDisc
+    }()
 
     // Queue preview panel
     @State private var showQueuePreview = true
@@ -199,6 +214,7 @@ struct NowPlayingView: View {
         .onChange(of: player.currentSong?.id) { newID in
             guard newID != nil else { return }
             triggerTrackChangeAnimation()
+            triggerTrackInfoAnimation()
             loadLyrics()
         }
         .onAppear {
@@ -261,55 +277,112 @@ struct NowPlayingView: View {
     // MARK: - Artwork
 
     private var artworkSection: some View {
-        VStack(spacing: 12) {
-            ZStack {
-                if showVinylDisc {
-                    VinylDiscView(song: player.currentSong, isPlaying: player.isPlaying)
-                } else {
-                    // Plain album art
-                    if let song = player.currentSong {
-                        ArtworkThumbnail(song: song, size: 300)
-                            .shadow(color: AppTheme.accent.opacity(0.3), radius: 24, x: 0, y: 12)
-                    } else {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [AppTheme.surface, AppTheme.elevatedSurface],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 300, height: 300)
-                            .overlay {
-                                Image(systemName: "music.note")
-                                    .font(.system(size: 80, weight: .semibold))
-                                    .foregroundStyle(AppTheme.accent)
+        VStack(spacing: 14) {
+            // ── Artwork display ──────────────────────────────────────────
+            artworkDisplay
+                .scaleEffect(artworkScale)
+                .opacity(artworkOpacity)
+                .animation(.spring(response: 0.4, dampingFraction: 0.65), value: artworkScale)
+                .animation(.easeInOut(duration: 0.2), value: artworkOpacity)
+                .id(artworkAnimationID)
+                .modifier(PulseModifier(isPlaying: player.isPlaying))
+
+            // ── Style picker (horizontal scroll, 8 chips) ────────────────
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(NowPlayingArtworkStyle.allCases) { style in
+                        Button {
+                            artworkStyle = style
+                            UserDefaults.standard.set(style.rawValue, forKey: "nowPlaying_artworkStyle")
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: style.iconName)
+                                    .font(.system(size: 14, weight: .medium))
+                                Text(style.displayName)
+                                    .font(.system(size: 11, weight: .medium))
                             }
-                            .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 10)
+                            .foregroundStyle(artworkStyle == style ? .white : AppTheme.textSecondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(
+                                artworkStyle == style
+                                    ? AppTheme.dynamicAccent
+                                    : AppTheme.surface,
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .animation(.easeInOut(duration: 0.18), value: artworkStyle)
                     }
                 }
-            }
-            .scaleEffect(artworkScale)
-            .opacity(artworkOpacity)
-            .animation(.spring(response: 0.4, dampingFraction: 0.65), value: artworkScale)
-            .animation(.easeInOut(duration: 0.2), value: artworkOpacity)
-            .id(artworkAnimationID)
-            // Subtle pulse when playing
-            .modifier(PulseModifier(isPlaying: player.isPlaying))
-
-            // Artwork style toggle
-            Picker("Artwork Style", selection: $showVinylDisc) {
-                Text("Vinyl Disc").tag(true)
-                Text("Album Art").tag(false)
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 220)
-            .onChange(of: showVinylDisc) { val in
-                UserDefaults.standard.set(val, forKey: "nowPlaying_showVinylDisc")
+                .padding(.horizontal, 2)
+                .padding(.vertical, 2)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
+    }
+
+    // MARK: - Artwork display (switches on style)
+
+    @ViewBuilder
+    private var artworkDisplay: some View {
+        switch artworkStyle {
+        case .vinylDisc:
+            VinylDiscView(song: player.currentSong, isPlaying: player.isPlaying)
+
+        case .albumArt:
+            Group {
+                if let song = player.currentSong {
+                    ArtworkThumbnail(song: song, size: 300)
+                        .shadow(color: AppTheme.accent.opacity(0.3), radius: 24, x: 0, y: 12)
+                } else {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [AppTheme.surface, AppTheme.elevatedSurface],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 300, height: 300)
+                        .overlay {
+                            Image(systemName: "music.note")
+                                .font(.system(size: 80, weight: .semibold))
+                                .foregroundStyle(AppTheme.accent)
+                        }
+                        .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 10)
+                }
+            }
+
+        case .polaroid:
+            PolaroidArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .floatingCards:
+            FloatingCardsArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .minimalist:
+            MinimalistArtworkView(
+                song: player.currentSong,
+                isPlaying: player.isPlaying,
+                progress: player.duration > 0 ? player.position / player.duration : 0
+            )
+            .environmentObject(library)
+
+        case .glassmorphism:
+            GlassmorphismArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .retroCRT:
+            RetroCRTArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .spectrumWaveform:
+            SpectrumWaveformArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+        }
     }
 
     // MARK: - Track Info + Favorite
@@ -342,6 +415,10 @@ struct NowPlayingView: View {
                 .animation(.spring(response: 0.3, dampingFraction: 0.6), value: library.isFavorite(songID: song.id))
             }
         }
+        // Slide-up + fade-in on track change
+        .opacity(trackInfoVisible ? 1 : 0)
+        .offset(y: trackInfoVisible ? 0 : 14)
+        .animation(.spring(response: 0.42, dampingFraction: 0.72), value: trackInfoVisible)
     }
 
     // MARK: - Timeline
@@ -1127,6 +1204,15 @@ struct NowPlayingView: View {
                 artworkOpacity = 1
                 artworkScale = 1.0
             }
+        }
+    }
+
+    private func triggerTrackInfoAnimation() {
+        // Snap the info out (invisible, shifted down), then animate back in
+        trackInfoVisible = false
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            trackInfoVisible = true
         }
     }
 

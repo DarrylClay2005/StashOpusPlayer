@@ -128,6 +128,39 @@ CREATE TABLE IF NOT EXISTS ios_user_music_uploads (
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
+-- Rich metadata for uploaded user music files (keyed by SHA-256 of file content)
+CREATE TABLE IF NOT EXISTS ios_user_music_metadata (
+  id VARCHAR(64) PRIMARY KEY,
+  user_id VARCHAR(36) NOT NULL,
+  filename VARCHAR(255) NOT NULL,
+  original_filename VARCHAR(255),
+  title VARCHAR(255),
+  artist VARCHAR(255),
+  album VARCHAR(255),
+  genre VARCHAR(100),
+  year VARCHAR(10),
+  duration_seconds FLOAT,
+  file_size_bytes BIGINT,
+  bitrate INT,
+  sample_rate INT,
+  mime_type VARCHAR(50),
+  has_artwork BOOLEAN DEFAULT FALSE,
+  uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
+  INDEX idx_user_id (user_id)
+);
+
+-- Per-user gallery images (cloud-synced)
+CREATE TABLE IF NOT EXISTS ios_user_gallery_images (
+  id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  user_id VARCHAR(36) NOT NULL,
+  filename VARCHAR(255) NOT NULL,
+  display_order INT DEFAULT 0,
+  uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
+  INDEX idx_user_id (user_id)
+);
+
 -- iOS client telemetry / background log ingestion
 CREATE TABLE IF NOT EXISTS ios_app_logs (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

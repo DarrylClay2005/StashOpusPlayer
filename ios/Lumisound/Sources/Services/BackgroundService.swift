@@ -142,7 +142,8 @@ final class BackgroundService: ObservableObject {
     private func loadImagesFromDisk() {
         let defaults = UserDefaults.standard
         guard let filenames = defaults.stringArray(forKey: Keys.imageFilenames) else {
-            appLog("loadImagesFromDisk: no saved filenames", category: "background")
+            appLog("loadImagesFromDisk: no saved filenames — scanning disk for orphaned images", category: "background")
+            rebuildManifestFromDisk()
             return
         }
         let fm = FileManager.default
@@ -160,6 +161,31 @@ final class BackgroundService: ObservableObject {
         if isEnabled && !images.isEmpty {
             startShuffling()
         }
+    }
+
+    /// Scans imageStorageDir for JPEG/PNG files and rebuilds the UserDefaults manifest.
+    /// Called after a reinstall when the manifest key is missing but image files still exist.
+    private func rebuildManifestFromDisk() {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: imageStorageDir.path) else { return }
+        let imageExts: Set<String> = ["jpg", "jpeg", "png", "heic"]
+        let files = (try? fm.contentsOfDirectory(atPath: imageStorageDir.path)) ?? []
+        let imageFiles = files
+            .filter { imageExts.contains(($0 as NSString).pathExtension.lowercased()) }
+            .sorted()
+        guard !imageFiles.isEmpty else { return }
+        var loaded: [UIImage] = []
+        for name in imageFiles {
+            let path = imageStorageDir.appendingPathComponent(name)
+            if let data = try? Data(contentsOf: path), let img = UIImage(data: data) {
+                loaded.append(img)
+            }
+        }
+        guard !loaded.isEmpty else { return }
+        images = loaded
+        UserDefaults.standard.set(imageFiles, forKey: Keys.imageFilenames)
+        appLog("rebuildManifestFromDisk: restored \(loaded.count) image(s) from disk", category: "background")
+        if isEnabled { startShuffling() }
     }
 
     private func saveImagesToDisk() {

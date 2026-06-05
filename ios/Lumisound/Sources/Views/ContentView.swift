@@ -83,6 +83,8 @@ struct ContentView: View {
                     .tag(4)
             }
             .tint(AppTheme.dynamicAccent)
+            // Subtle cross-fade between tabs
+            .animation(.easeInOut(duration: 0.18), value: selectedTab)
             // No explicit .frame() on TabView — it must size itself from its content.
             // An explicit frame here can cause stretch/overflow on certain device sizes.
 

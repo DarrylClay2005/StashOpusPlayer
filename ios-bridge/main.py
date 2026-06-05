@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -1982,11 +1982,20 @@ async def upload_user_music(
     request: Request,
     filename: str = Query(..., description="Destination filename (e.g. song.mp3)"),
     folder: str = Query("", description="Optional subfolder inside user's music dir"),
+    title: Optional[str] = Query(None, description="Track title metadata"),
+    artist: Optional[str] = Query(None, description="Track artist metadata"),
+    album: Optional[str] = Query(None, description="Track album metadata"),
+    genre: Optional[str] = Query(None, description="Track genre metadata"),
+    year: Optional[str] = Query(None, description="Track year metadata"),
+    duration: Optional[float] = Query(None, description="Duration in seconds"),
+    bitrate: Optional[int] = Query(None, description="Bitrate in kbps"),
+    sample_rate: Optional[int] = Query(None, description="Sample rate in Hz"),
     user: dict = Depends(get_current_user),
 ):
     """
     Uploads raw audio bytes to the authenticated user's personal music directory.
     Max 100 MB. The Content-Type header should match the audio format.
+    Optionally populates ios_user_music_metadata when metadata query params are provided.
     """
     user_id = user["sub"]
     music_dir = _user_music_dir(user_id)
@@ -2022,7 +2031,68 @@ async def upload_user_music(
         rel = str(dest_path.relative_to(music_dir))
     except ValueError:
         rel = safe_name
-    return {"filename": safe_name, "path": rel, "id": _stable_id(abs_path), "size": len(body)}
+
+    # Compute content SHA-256 as the metadata row ID
+    content_hash = hashlib.sha256(body).hexdigest()
+
+    # Determine MIME type from extension
+    ext_lower = pathlib.Path(safe_name).suffix.lstrip(".").lower()
+    mime_type = _audio_media_type(ext_lower)
+
+    # Populate ios_user_music_metadata when metadata is provided
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    INSERT INTO ios_user_music_metadata
+                        (id, user_id, filename, original_filename, title, artist, album,
+                         genre, year, duration_seconds, file_size_bytes, bitrate,
+                         sample_rate, mime_type, has_artwork)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        filename = VALUES(filename),
+                        title = IF(VALUES(title) IS NULL, title, VALUES(title)),
+                        artist = IF(VALUES(artist) IS NULL, artist, VALUES(artist)),
+                        album = IF(VALUES(album) IS NULL, album, VALUES(album)),
+                        genre = IF(VALUES(genre) IS NULL, genre, VALUES(genre)),
+                        year = IF(VALUES(year) IS NULL, year, VALUES(year)),
+                        duration_seconds = IF(VALUES(duration_seconds) IS NULL, duration_seconds, VALUES(duration_seconds)),
+                        file_size_bytes = VALUES(file_size_bytes),
+                        bitrate = IF(VALUES(bitrate) IS NULL, bitrate, VALUES(bitrate)),
+                        sample_rate = IF(VALUES(sample_rate) IS NULL, sample_rate, VALUES(sample_rate)),
+                        mime_type = VALUES(mime_type)
+                    """,
+                    (
+                        content_hash,
+                        user_id,
+                        safe_name,
+                        filename,
+                        title,
+                        artist,
+                        album,
+                        genre,
+                        year,
+                        duration,
+                        len(body),
+                        bitrate,
+                        sample_rate,
+                        mime_type,
+                        False,
+                    ),
+                )
+    except Exception as exc:
+        logger.warning("upload_user_music: metadata insert failed for %s: %s", safe_name, exc)
+        # Non-fatal — file was already saved successfully
+
+    return {
+        "filename": safe_name,
+        "path": rel,
+        "id": _stable_id(abs_path),
+        "metadata_id": content_hash,
+        "size": len(body),
+    }
 
 
 @app.get("/user/music/stream")
@@ -2109,6 +2179,241 @@ async def delete_user_music(
     except Exception as exc:
         logger.error("delete_user_music: failed for user %s path %s: %s", user_id, filepath, exc)
         raise HTTPException(status_code=500, detail="Failed to delete file")
+
+
+# ---------------------------------------------------------------------------
+# User Music Metadata Endpoint
+# ---------------------------------------------------------------------------
+
+_USER_MUSIC_METADATA_COLS = [
+    "id", "user_id", "filename", "original_filename", "title", "artist", "album",
+    "genre", "year", "duration_seconds", "file_size_bytes", "bitrate", "sample_rate",
+    "mime_type", "has_artwork", "uploaded_at",
+]
+
+
+@app.get("/user/music/metadata")
+async def list_user_music_metadata(
+    limit: int = Query(200, ge=1, le=500),
+    user: dict = Depends(get_current_user),
+):
+    """Returns rich metadata rows for all uploaded tracks belonging to this user."""
+    user_id = user["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, user_id, filename, original_filename, title, artist, album,
+                       genre, year, duration_seconds, file_size_bytes, bitrate, sample_rate,
+                       mime_type, has_artwork, uploaded_at
+                FROM ios_user_music_metadata
+                WHERE user_id = %s
+                ORDER BY uploaded_at DESC
+                LIMIT %s
+                """,
+                (user_id, limit),
+            )
+            rows = await cur.fetchall()
+
+    base_url = ""
+    music_dir = _user_music_dir(user_id)
+
+    result = []
+    for row in rows:
+        d = dict(zip(_USER_MUSIC_METADATA_COLS, row))
+        d["uploaded_at"] = d["uploaded_at"].isoformat() if d["uploaded_at"] else None
+        d["has_artwork"] = bool(d["has_artwork"])
+        # Add artwork URL if has_artwork and file exists on disk
+        if d["has_artwork"] and music_dir:
+            encoded = d["filename"].replace(" ", "%20")
+            d["artwork_url"] = f"/user/music/artwork?path={encoded}"
+        else:
+            d["artwork_url"] = None
+        # Remove server-internal field from public response
+        d.pop("user_id", None)
+        result.append(d)
+
+    return {"tracks": result, "total": len(result)}
+
+
+# ---------------------------------------------------------------------------
+# User Gallery Image Endpoints
+# ---------------------------------------------------------------------------
+
+_GALLERY_DIR_NAME = "gallery"
+_MAX_GALLERY_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _user_gallery_dir(user_id: str) -> Optional[pathlib.Path]:
+    base = _user_music_dir(user_id)
+    if base is None:
+        return None
+    return base / _GALLERY_DIR_NAME
+
+
+@app.get("/user/gallery/images")
+async def list_gallery_images(
+    user: dict = Depends(get_current_user),
+):
+    """Returns cloud-synced gallery images for the authenticated user."""
+    user_id = user["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, filename, display_order, uploaded_at
+                FROM ios_user_gallery_images
+                WHERE user_id = %s
+                ORDER BY display_order ASC, uploaded_at DESC
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "filename": r[1],
+            "display_order": r[2],
+            "uploaded_at": r[3].isoformat() if r[3] else None,
+            "url": f"/user/gallery/images/{r[0]}",
+        }
+        for r in rows
+    ]
+
+
+@app.post("/user/gallery/images", status_code=201)
+async def upload_gallery_image(
+    file: UploadFile = File(...),
+    display_order: int = Query(0, description="Sort order for display"),
+    user: dict = Depends(get_current_user),
+):
+    """Upload a JPEG gallery image (max 10 MB) for the authenticated user."""
+    user_id = user["sub"]
+    gallery_dir = _user_gallery_dir(user_id)
+    if gallery_dir is None:
+        raise HTTPException(status_code=503, detail="User storage not configured on server")
+
+    gallery_dir.mkdir(parents=True, exist_ok=True)
+
+    # Validate content type
+    content_type = file.content_type or ""
+    if content_type not in ("image/jpeg", "image/jpg", "image/png", "image/webp"):
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported image type. Use JPEG, PNG, or WebP."
+        )
+
+    body = await file.read()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty file body")
+    if len(body) > _MAX_GALLERY_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large (max 10 MB)")
+
+    image_id = str(uuid.uuid4())
+    # Always store as .jpg filename regardless of source type
+    ext = "jpg"
+    stored_filename = f"{image_id}.{ext}"
+    dest_path = gallery_dir / stored_filename
+
+    try:
+        dest_path.write_bytes(body)
+    except Exception as exc:
+        logger.error("upload_gallery_image: write failed for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to save image")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_user_gallery_images (id, user_id, filename, display_order)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (image_id, user_id, stored_filename, display_order),
+            )
+            await cur.execute(
+                "SELECT id, filename, display_order, uploaded_at FROM ios_user_gallery_images WHERE id = %s",
+                (image_id,),
+            )
+            row = await cur.fetchone()
+
+    logger.info("upload_gallery_image: saved %s for user %s (%d bytes)", stored_filename, user_id, len(body))
+    return {
+        "id": row[0],
+        "filename": row[1],
+        "display_order": row[2],
+        "uploaded_at": row[3].isoformat() if row[3] else None,
+        "url": f"/user/gallery/images/{row[0]}",
+    }
+
+
+@app.get("/user/gallery/images/{image_id}")
+async def get_gallery_image(
+    image_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Serves a gallery image file (authenticated)."""
+    user_id = user["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT filename FROM ios_user_gallery_images WHERE id = %s AND user_id = %s",
+                (image_id, user_id),
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    gallery_dir = _user_gallery_dir(user_id)
+    if gallery_dir is None:
+        raise HTTPException(status_code=503, detail="User storage not configured")
+
+    image_path = (gallery_dir / row[0]).resolve()
+    if not str(image_path).startswith(str(gallery_dir.resolve())):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not image_path.exists() or not image_path.is_file():
+        raise HTTPException(status_code=404, detail="Image file not found on disk")
+
+    return FileResponse(path=str(image_path), media_type="image/jpeg", filename=row[0])
+
+
+@app.delete("/user/gallery/images/{image_id}", status_code=204)
+async def delete_gallery_image(
+    image_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Deletes a gallery image (DB row + file on disk)."""
+    user_id = user["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT filename FROM ios_user_gallery_images WHERE id = %s AND user_id = %s",
+                (image_id, user_id),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Image not found")
+
+            await cur.execute(
+                "DELETE FROM ios_user_gallery_images WHERE id = %s AND user_id = %s",
+                (image_id, user_id),
+            )
+
+    gallery_dir = _user_gallery_dir(user_id)
+    if gallery_dir is not None:
+        image_path = (gallery_dir / row[0]).resolve()
+        if str(image_path).startswith(str(gallery_dir.resolve())) and image_path.exists():
+            try:
+                image_path.unlink()
+            except Exception as exc:
+                logger.warning("delete_gallery_image: could not remove file %s: %s", image_path, exc)
 
 
 # ---------------------------------------------------------------------------

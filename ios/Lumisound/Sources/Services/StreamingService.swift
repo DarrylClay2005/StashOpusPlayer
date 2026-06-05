@@ -61,6 +61,81 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - TrackMetadata  (client-provided metadata for upload)
+
+struct TrackMetadata {
+    var title: String?
+    var artist: String?
+    var album: String?
+    var genre: String?
+    var year: String?
+    var durationSeconds: Double?
+    var bitrate: Int?
+    var sampleRate: Int?
+}
+
+// MARK: - UserMusicMetadataTrack  (rich metadata from /user/music/metadata)
+
+struct UserMusicMetadataTrack: Identifiable, Codable, Hashable {
+    let id: String                     // SHA-256 of file content
+    let filename: String
+    let originalFilename: String?
+    let title: String?
+    let artist: String?
+    let album: String?
+    let genre: String?
+    let year: String?
+    let durationSeconds: Double?
+    let fileSizeBytes: Int?
+    let bitrate: Int?
+    let sampleRate: Int?
+    let mimeType: String?
+    let hasArtwork: Bool
+    let uploadedAt: String?
+    let artworkURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, filename, title, artist, album, genre, year
+        case originalFilename = "original_filename"
+        case durationSeconds  = "duration_seconds"
+        case fileSizeBytes    = "file_size_bytes"
+        case bitrate
+        case sampleRate       = "sample_rate"
+        case mimeType         = "mime_type"
+        case hasArtwork       = "has_artwork"
+        case uploadedAt       = "uploaded_at"
+        case artworkURL       = "artwork_url"
+    }
+
+    var durationText: String {
+        guard let d = durationSeconds else { return "--:--" }
+        let s = Int(d)
+        return "\(s / 60):\(String(format: "%02d", s % 60))"
+    }
+
+    var fileSizeText: String {
+        guard let bytes = fileSizeBytes else { return "" }
+        let mb = Double(bytes) / 1_048_576
+        return String(format: "%.1f MB", mb)
+    }
+}
+
+// MARK: - GalleryImageInfo  (cloud-synced gallery image)
+
+struct GalleryImageInfo: Identifiable, Codable, Hashable {
+    let id: String
+    let filename: String
+    let displayOrder: Int
+    let uploadedAt: String?
+    let url: String         // relative path on bridge, e.g. /user/gallery/images/{id}
+
+    enum CodingKeys: String, CodingKey {
+        case id, filename, url
+        case displayOrder = "display_order"
+        case uploadedAt   = "uploaded_at"
+    }
+}
+
 // MARK: - ServerTrack
 
 struct ServerTrack: Identifiable, Codable, Hashable {
@@ -153,6 +228,17 @@ final class StreamingService: ObservableObject {
     @Published var isLoadingUserMusic = false
     @Published var isUploadingUserMusic = false
     @Published var uploadProgress: Double = 0
+
+    // MARK: User Music Metadata state (rich metadata from /user/music/metadata)
+
+    @Published var userMusicMetadata: [UserMusicMetadataTrack] = []
+    @Published var isLoadingUserMusicMetadata = false
+
+    // MARK: Gallery state
+
+    @Published var galleryImages: [GalleryImageInfo] = []
+    @Published var isLoadingGallery = false
+    @Published var isUploadingGalleryImage = false
 
     // MARK: Persisted settings
 
@@ -723,6 +809,211 @@ final class StreamingService: ObservableObject {
             throw StreamingError.httpError(http.statusCode)
         }
         appLog("deleteUserMusic: deleted \(path)", category: "network")
+    }
+
+    // MARK: - Upload Track with Metadata
+
+    /// Uploads a local audio file to the user's personal music library, passing
+    /// client-supplied metadata as query parameters so the server can populate
+    /// `ios_user_music_metadata` immediately without an ffprobe pass.
+    /// Returns the `UserMusicMetadataTrack` row created on the server.
+    func uploadTrack(fileURL: URL, token: String, metadata: TrackMetadata, folder: String = "") async throws -> UserMusicMetadataTrack {
+        appLog("uploadTrack: \(fileURL.lastPathComponent)", category: "network")
+        isUploadingUserMusic = true
+        uploadProgress = 0
+        defer { isUploadingUserMusic = false; uploadProgress = 0 }
+
+        let filename = fileURL.lastPathComponent
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "filename", value: filename),
+        ]
+        if !folder.isEmpty {
+            queryItems.append(URLQueryItem(name: "folder", value: folder))
+        }
+        if let v = metadata.title,          !v.isEmpty { queryItems.append(URLQueryItem(name: "title",       value: v)) }
+        if let v = metadata.artist,         !v.isEmpty { queryItems.append(URLQueryItem(name: "artist",      value: v)) }
+        if let v = metadata.album,          !v.isEmpty { queryItems.append(URLQueryItem(name: "album",       value: v)) }
+        if let v = metadata.genre,          !v.isEmpty { queryItems.append(URLQueryItem(name: "genre",       value: v)) }
+        if let v = metadata.year,           !v.isEmpty { queryItems.append(URLQueryItem(name: "year",        value: v)) }
+        if let v = metadata.durationSeconds               { queryItems.append(URLQueryItem(name: "duration",    value: String(v))) }
+        if let v = metadata.bitrate                       { queryItems.append(URLQueryItem(name: "bitrate",     value: String(v))) }
+        if let v = metadata.sampleRate                    { queryItems.append(URLQueryItem(name: "sample_rate", value: String(v))) }
+
+        var components = URLComponents()
+        components.path = "/user/music/upload"
+        components.queryItems = queryItems
+
+        guard var request = makeRequest(components.string ?? "/user/music/upload") else {
+            throw StreamingError.invalidURL
+        }
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 300
+
+        let (_, response) = try await URLSession.shared.upload(for: request, fromFile: fileURL)
+        if let http = response as? HTTPURLResponse {
+            switch http.statusCode {
+            case 200..<300: break
+            case 413: throw StreamingError.httpError(413)
+            default:  throw StreamingError.httpError(http.statusCode)
+            }
+        }
+
+        uploadProgress = 1.0
+        appLog("uploadTrack: uploaded \(filename)", category: "network")
+
+        // Re-fetch metadata so the caller gets a fully populated object
+        let tracks = try await fetchUserMusicMetadata(token: token)
+        if let match = tracks.first(where: { $0.filename == filename }) {
+            return match
+        }
+        // Fallback: synthesise a minimal response from the query params
+        return UserMusicMetadataTrack(
+            id: "",
+            filename: filename,
+            originalFilename: filename,
+            title: metadata.title,
+            artist: metadata.artist,
+            album: metadata.album,
+            genre: metadata.genre,
+            year: metadata.year,
+            durationSeconds: metadata.durationSeconds,
+            fileSizeBytes: nil,
+            bitrate: metadata.bitrate,
+            sampleRate: metadata.sampleRate,
+            mimeType: nil,
+            hasArtwork: false,
+            uploadedAt: nil,
+            artworkURL: nil
+        )
+    }
+
+    // MARK: - Fetch User Music Metadata
+
+    /// Fetches rich metadata for all uploaded tracks from `/user/music/metadata`.
+    @discardableResult
+    func fetchUserMusicMetadata(token: String) async throws -> [UserMusicMetadataTrack] {
+        appLog("fetchUserMusicMetadata", category: "network")
+        isLoadingUserMusicMetadata = true
+        defer { isLoadingUserMusicMetadata = false }
+
+        guard var request = makeRequest("/user/music/metadata?limit=500") else {
+            throw StreamingError.invalidURL
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw StreamingError.httpError(http.statusCode)
+        }
+
+        struct MetadataResponse: Decodable {
+            let tracks: [UserMusicMetadataTrack]
+            let total: Int
+        }
+        let decoded = try JSONDecoder().decode(MetadataResponse.self, from: data)
+        userMusicMetadata = decoded.tracks
+        appLog("fetchUserMusicMetadata: \(decoded.tracks.count) tracks", category: "network")
+        return decoded.tracks
+    }
+
+    // MARK: - Gallery
+
+    /// Returns the absolute URL for a gallery image given its relative path.
+    func galleryImageURL(_ relativePath: String, token: String) -> URL? {
+        let base = bridgeURL.trimmingCharacters(in: .init(charactersIn: "/"))
+        guard let url = URL(string: base + relativePath) else { return nil }
+        return url
+    }
+
+    /// Fetches the list of cloud-synced gallery images.
+    @discardableResult
+    func fetchGalleryImages(token: String) async throws -> [GalleryImageInfo] {
+        appLog("fetchGalleryImages", category: "network")
+        isLoadingGallery = true
+        defer { isLoadingGallery = false }
+
+        guard var request = makeRequest("/user/gallery/images") else {
+            throw StreamingError.invalidURL
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw StreamingError.httpError(http.statusCode)
+        }
+
+        let images = try JSONDecoder().decode([GalleryImageInfo].self, from: data)
+        galleryImages = images
+        appLog("fetchGalleryImages: \(images.count) images", category: "network")
+        return images
+    }
+
+    /// Uploads a UIImage as JPEG to the user's cloud gallery.
+    /// Returns the image ID assigned by the server.
+    func uploadGalleryImage(_ image: UIImage, token: String, displayOrder: Int = 0) async throws -> String {
+        appLog("uploadGalleryImage", category: "network")
+        isUploadingGalleryImage = true
+        defer { isUploadingGalleryImage = false }
+
+        guard let jpeg = image.jpegData(compressionQuality: 0.85) else {
+            throw StreamingError.invalidURL   // reuse invalidURL for encode failure
+        }
+
+        let base = bridgeURL.trimmingCharacters(in: .init(charactersIn: "/"))
+        guard let url = URL(string: "\(base)/user/gallery/images?display_order=\(displayOrder)") else {
+            throw StreamingError.invalidURL
+        }
+
+        // Build multipart/form-data body
+        let boundary = UUID().uuidString
+        var body = Data()
+        let crlf = "\r\n"
+        body.append("--\(boundary)\(crlf)".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"gallery.jpg\"\(crlf)".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\(crlf)\(crlf)".data(using: .utf8)!)
+        body.append(jpeg)
+        body.append("\(crlf)--\(boundary)--\(crlf)".data(using: .utf8)!)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        request.timeoutInterval = 120
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw StreamingError.httpError(http.statusCode)
+        }
+
+        struct UploadResponse: Decodable { let id: String }
+        let decoded = try JSONDecoder().decode(UploadResponse.self, from: data)
+        appLog("uploadGalleryImage: uploaded, id=\(decoded.id)", category: "network")
+
+        // Refresh the gallery list
+        _ = try? await fetchGalleryImages(token: token)
+        return decoded.id
+    }
+
+    /// Deletes a gallery image by ID.
+    func deleteGalleryImage(id: String, token: String) async throws {
+        guard var request = makeRequest("/user/gallery/images/\(id)") else {
+            throw StreamingError.invalidURL
+        }
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw StreamingError.httpError(http.statusCode)
+        }
+        galleryImages.removeAll { $0.id == id }
+        appLog("deleteGalleryImage: deleted \(id)", category: "network")
     }
 
     // MARK: - Health Check

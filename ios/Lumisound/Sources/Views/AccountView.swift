@@ -347,6 +347,11 @@ struct AccountView: View {
         }
         .navigationTitle("Account")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: account.isLoggedIn) { loggedIn in
+            if loggedIn {
+                Task { await account.pullSync(library: library) }
+            }
+        }
         .confirmationDialog("Log Out", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
             Button("Log Out", role: .destructive) {
                 Task {

@@ -502,6 +502,8 @@ final class AudioPlayerManager: ObservableObject {
         queue = sanitisedQueue
         currentIndex = min(max(snapshot.currentIndex, 0), sanitisedQueue.count - 1)
         currentSong = queue[currentIndex]
+        // Force widget refresh on launch even if the song id hasn't changed since last run.
+        Task { await updateNowPlayingArtwork(for: currentSong) }
         position = snapshot.position
         repeatMode = snapshot.repeatMode
         shuffleEnabled = snapshot.shuffleEnabled
@@ -913,9 +915,12 @@ final class AudioPlayerManager: ObservableObject {
         advanceIndex()
         currentSong = nextSong
         audioFile = nextFile
-        fileStartFrame = 0
+        // The incoming node has been playing for ~crossfadeDuration already; reflect that
+        // so the progress bar doesn't snap back to 0:00 after the fade completes.
+        let elapsed = min(audioSettings.crossfadeDuration, nextFile.duration)
+        fileStartFrame = AVAudioFramePosition(elapsed * nextFile.processingFormat.sampleRate)
         duration = nextFile.duration
-        position = 0
+        position = elapsed
         gaplessScheduled = false
         updateNowPlaying()
     }

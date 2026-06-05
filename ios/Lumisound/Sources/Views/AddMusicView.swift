@@ -25,7 +25,7 @@ struct AddMusicView: View {
                         HStack(spacing: 14) {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Color.pink)
+                                    .fill(AppTheme.dynamicAccent)
                                     .frame(width: 44, height: 44)
                                 Image(systemName: "music.note.house.fill")
                                     .foregroundStyle(.white)
@@ -78,7 +78,7 @@ struct AddMusicView: View {
                         }
                     } label: {
                         importRow(
-                            icon: "folder.fill", color: .yellow,
+                            icon: "folder.fill", color: AppTheme.dynamicAccent.opacity(0.85),
                             title: "Scan App Storage",
                             subtitle: "Scans files you've transferred to this app"
                         )
@@ -100,7 +100,7 @@ struct AddMusicView: View {
                         showFilePicker = true
                     } label: {
                         importRow(
-                            icon: "doc.badge.plus", color: .blue,
+                            icon: "doc.badge.plus", color: AppTheme.dynamicAccent,
                             title: "Import Audio Files",
                             subtitle: "Browse Files app — select any MP3, M4A, FLAC, WAV…"
                         )
@@ -110,6 +110,29 @@ struct AddMusicView: View {
                     sectionLabel("Individual Files")
                 } footer: {
                     Text("Navigate to any folder in the Files app (Downloads, iCloud Drive, etc.) and select multiple songs to import.")
+                        .font(.caption).foregroundStyle(AppTheme.textSecondary)
+                }
+                .listRowBackground(AppTheme.surface)
+
+                // ─────────────────────────────────────────────────────────────
+                // ─────────────────────────────────────────────────────────────
+                // MARK: Cloud Backup
+                // ─────────────────────────────────────────────────────────────
+                Section {
+                    NavigationLink {
+                        UploadMusicView()
+                    } label: {
+                        importRow(
+                            icon: "icloud.and.arrow.up",
+                            color: AppTheme.dynamicAccent,
+                            title: "Cloud Backup & Upload",
+                            subtitle: "Upload tracks to your account — restore them anytime"
+                        )
+                    }
+                } header: {
+                    sectionLabel("Cloud Storage")
+                } footer: {
+                    Text("Requires a Lumisound account. Uploaded tracks can be redownloaded to any device after reinstalling.")
                         .font(.caption).foregroundStyle(AppTheme.textSecondary)
                 }
                 .listRowBackground(AppTheme.surface)

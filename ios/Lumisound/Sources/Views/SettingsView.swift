@@ -39,6 +39,7 @@ struct SettingsView: View {
                 audioSection
                 appearanceSection
                 updatesSection
+                helpSection
                 aboutSection
             }
             .scrollContentBackground(.hidden)
@@ -202,6 +203,12 @@ struct SettingsView: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
             .foregroundStyle(AppTheme.textPrimary)
+
+            // Corrupt file finder
+            NavigationLink(destination: CorruptFilesView()) {
+                Label("Corrupt File Finder", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
 
         } header: {
             sectionHeader("Library")
@@ -619,6 +626,20 @@ struct SettingsView: View {
 
         } header: {
             sectionHeader("App Updates")
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
+    // MARK: — Help Section
+
+    private var helpSection: some View {
+        Section {
+            NavigationLink(destination: SettingsHelpView()) {
+                Label("Help & Feature Guide", systemImage: "questionmark.circle")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+        } header: {
+            sectionHeader("Help")
         }
         .listRowBackground(AppTheme.surface)
     }

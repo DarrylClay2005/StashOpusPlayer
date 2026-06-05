@@ -45,6 +45,9 @@ struct LumisoundApp: App {
                     // Restore audio settings — player must be configured before any resume.
                     player.audioSettings = PersistenceService.shared.loadAudioSettings() ?? AudioSettings()
 
+                    // Auto-scan for corrupt files once per day (non-blocking).
+                    CorruptFileFinderService.shared.runDailyCheckIfNeeded()
+
                     // Scan previously added watched folders.
                     libraryManager.scanWatchedFolders(using: folderService)
 

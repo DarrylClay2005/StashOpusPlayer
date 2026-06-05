@@ -25,11 +25,15 @@ struct StreamSearchView: View {
     // My Library upload
     @State private var showUploadPicker = false
     @State private var deletingUserTrackPath: String? = nil
+    @State private var selectedInfoTrack: UserMusicTrack? = nil
 
     // Playlist batch download
     @State private var isDownloadingAll   = false
     @State private var downloadAllDone    = 0
     @State private var downloadAllTotal   = 0
+
+    // Animation: tracks results version so we can stagger the fade-in
+    @State private var resultsAnimationToken: UUID = UUID()
 
     private let sources = ["youtube", "soundcloud", "server", "my"]
 
@@ -149,6 +153,9 @@ struct StreamSearchView: View {
                 streaming.isPlaylistResult = false
             }
         }
+        .onChange(of: streaming.searchResults.count) { _ in
+            resultsAnimationToken = UUID()
+        }
         .onChange(of: selectedSource) { src in
             if src == "my" {
                 guard let token = account.token else { return }
@@ -162,6 +169,9 @@ struct StreamSearchView: View {
         }
         // fileImporter must be at this level (NavigationStack content root), NOT inside
         // a nested List or conditional branch — SwiftUI can't present the picker from deep hierarchy.
+        .sheet(item: $selectedInfoTrack) { track in
+            UserMusicInfoSheet(track: track)
+        }
         .fileImporter(
             isPresented: $showUploadPicker,
             allowedContentTypes: [.audio],
@@ -237,7 +247,7 @@ struct StreamSearchView: View {
                         .background(AppTheme.surface)
                     }
 
-                    List(streaming.searchResults) { track in
+                    List(Array(streaming.searchResults.enumerated()), id: \.element.id) { index, track in
                         StreamTrackRow(
                             track: track,
                             isLoading: loadingTrackID == track.id,
@@ -249,6 +259,8 @@ struct StreamSearchView: View {
                         )
                         .listRowBackground(AppTheme.surface)
                         .listRowSeparatorTint(AppTheme.background)
+                        // Staggered fade-in when results first appear
+                        .modifier(StaggeredFadeInModifier(index: index, token: resultsAnimationToken))
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
@@ -382,6 +394,7 @@ struct StreamSearchView: View {
                                 track: track,
                                 artworkURL: streaming.userMusicArtworkURL(for: track),
                                 onPlay: { handleUserLibraryPlay(track: track) },
+                                onInfo: { selectedInfoTrack = track },
                                 onDelete: { handleUserLibraryDelete(track: track) }
                             )
                             .listRowBackground(AppTheme.surface)
@@ -474,10 +487,12 @@ struct StreamSearchView: View {
         isDownloadingAll = true
         downloadAllDone = 0
         downloadAllTotal = tracks.count
+        var failed: [String] = []
 
-        Task {
+        // @MainActor keeps all @State mutations on the main thread — prevents race conditions
+        // on downloadAllDone when the Task yields between iterations.
+        Task { @MainActor in
             for track in tracks {
-                // Skip tracks already downloaded in this session
                 guard !downloadedTrackIDs.contains(track.id) else {
                     downloadAllDone += 1
                     continue
@@ -486,12 +501,16 @@ struct StreamSearchView: View {
                     _ = try await streaming.downloadToLibrary(track: track)
                     downloadedTrackIDs.insert(track.id)
                 } catch {
+                    failed.append(track.title)
                     appWarn("Download All: failed for \"\(track.title)\": \(error.localizedDescription)", category: "network")
                 }
                 downloadAllDone += 1
             }
             library.scanLocalDocuments()
             isDownloadingAll = false
+            if !failed.isEmpty {
+                streaming.errorMessage = "\(failed.count) track(s) failed to download."
+            }
         }
     }
 
@@ -785,6 +804,7 @@ private struct UserMusicTrackRow: View {
     let track: UserMusicTrack
     let artworkURL: URL?
     let onPlay: () -> Void
+    let onInfo: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -831,6 +851,14 @@ private struct UserMusicTrackRow: View {
                 .foregroundStyle(AppTheme.textSecondary)
                 .frame(minWidth: 36, alignment: .trailing)
 
+            Button(action: onInfo) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 16))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+
             Button(action: onPlay) {
                 Image(systemName: "play.circle.fill")
                     .font(.title2)
@@ -850,5 +878,88 @@ private struct UserMusicTrackRow: View {
         .padding(.vertical, 6)
         .contentShape(Rectangle())
         .onTapGesture(perform: onPlay)
+    }
+}
+
+// MARK: - UserMusicInfoSheet
+
+private struct UserMusicInfoSheet: View {
+    let track: UserMusicTrack
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    infoRow(label: "Title", value: track.title)
+                    infoRow(label: "Artist", value: track.artist.isEmpty ? "—" : track.artist)
+                    infoRow(label: "Album", value: track.album.isEmpty ? "—" : track.album)
+                    infoRow(label: "Duration", value: track.durationText)
+                } header: {
+                    Text("Metadata")
+                }
+                .listRowBackground(AppTheme.surface)
+
+                Section {
+                    infoRow(label: "File", value: track.filename)
+                    infoRow(label: "Format", value: track.ext.uppercased())
+                    infoRow(label: "Server Path", value: track.serverPath)
+                } header: {
+                    Text("File Info")
+                }
+                .listRowBackground(AppTheme.surface)
+            }
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.background.ignoresSafeArea())
+            .navigationTitle("File Info")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }.tint(AppTheme.accent)
+                }
+            }
+        }
+    }
+
+    private func infoRow(label: String, value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(label)
+                .font(AppTheme.bodyFont(size: 13))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: 70, alignment: .leading)
+            Text(value)
+                .font(AppTheme.bodyFont(size: 13))
+                .foregroundStyle(AppTheme.textPrimary)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+// MARK: - StaggeredFadeInModifier
+
+/// Fades each result row in with a small per-index delay whenever `token` changes.
+private struct StaggeredFadeInModifier: ViewModifier {
+    let index: Int
+    let token: UUID
+    @State private var visible: Bool = false
+
+    private var delay: Double { Double(min(index, 19)) * 0.04 }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(visible ? 1 : 0)
+            .animation(
+                .easeOut(duration: 0.25).delay(delay),
+                value: visible
+            )
+            .onAppear { visible = true }
+            .onChange(of: token) { _ in
+                visible = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                    visible = true
+                }
+            }
     }
 }

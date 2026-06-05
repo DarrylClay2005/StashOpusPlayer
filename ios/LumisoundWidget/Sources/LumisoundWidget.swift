@@ -49,8 +49,10 @@ struct LumisoundWidgetProvider: TimelineProvider {
         let artist    = ud?.string(forKey: "widget_track_artist") ?? ""
         let isPlaying = ud?.bool(forKey: "widget_is_playing") ?? false
         var artwork: UIImage? = nil
-        if let path = ud?.string(forKey: "widget_artwork_path") {
-            artwork = UIImage(contentsOfFile: path)
+        if let relPath = ud?.string(forKey: "widget_artwork_path"),
+           let container = FileManager.default.containerURL(
+               forSecurityApplicationGroupIdentifier: appGroupID) {
+            artwork = UIImage(contentsOfFile: container.appendingPathComponent(relPath).path)
         }
         return LumisoundEntry(date: Date(), title: title, artist: artist, isPlaying: isPlaying, artwork: artwork)
     }

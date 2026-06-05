@@ -28,7 +28,8 @@ final class WidgetDataService {
            ) {
             let artPath = container.appendingPathComponent("widget_artwork.jpg")
             try? data.write(to: artPath, options: .atomic)
-            ud.set(artPath.path, forKey: "widget_artwork_path")
+            // Store only the filename so the path stays valid after backup/restore.
+            ud.set("widget_artwork.jpg", forKey: "widget_artwork_path")
         } else if song == nil {
             ud.removeObject(forKey: "widget_artwork_path")
         }

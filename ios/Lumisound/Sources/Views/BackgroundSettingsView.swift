@@ -42,7 +42,7 @@ struct BackgroundSettingsView: View {
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 7)
-                                .background(bg.isEnabled && bg.isActive ? Color.red.opacity(0.8) : AppTheme.accent, in: Capsule())
+                                .background(bg.isEnabled && bg.isActive ? AppTheme.error : AppTheme.accent, in: Capsule())
                         }
                         .buttonStyle(.plain)
                         .animation(.easeInOut(duration: 0.2), value: bg.isEnabled && bg.isActive)

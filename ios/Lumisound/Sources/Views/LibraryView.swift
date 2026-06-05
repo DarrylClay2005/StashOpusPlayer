@@ -197,6 +197,8 @@ private struct SongsTab: View {
     @AppStorage("library_songs_columns") private var songColumns: Int = 1
     @State private var showSearch: Bool = false
     @FocusState private var searchFocused: Bool
+    /// Tracks whether the entrance animation has already fired for the current song list.
+    @State private var didAnimateEntrance: Bool = false
 
     private var gridColumns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: 12), count: songColumns)
@@ -247,7 +249,7 @@ private struct SongsTab: View {
                             )
                             .listRowBackground(Color.clear)
                         } else {
-                            ForEach(songs) { song in
+                            ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                                 Button {
                                     player.play(song: song, in: songs)
                                 } label: {
@@ -255,11 +257,28 @@ private struct SongsTab: View {
                                 }
                                 .buttonStyle(.plain)
                                 .listRowBackground(AppTheme.surface.opacity(0.5))
+                                // Staggered entrance: first 20 rows slide in from the left
+                                .modifier(StaggeredSlideInModifier(
+                                    index: index,
+                                    maxIndex: 19,
+                                    didAnimate: didAnimateEntrance
+                                ))
                             }
                         }
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
+                    .onAppear {
+                        guard !didAnimateEntrance else { return }
+                        didAnimateEntrance = true
+                    }
+                    .onChange(of: songs.first?.id) { _ in
+                        // Re-trigger entrance animation when the song list changes substantially
+                        didAnimateEntrance = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            didAnimateEntrance = true
+                        }
+                    }
                 } else {
                     ScrollView {
                         if songs.isEmpty {
@@ -341,20 +360,23 @@ private struct SongGridCell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ArtworkThumbnail(song: song, size: 120)
-                .frame(maxWidth: .infinity)
-                .aspectRatio(1, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(alignment: .bottomTrailing) {
-                    if isCurrent {
-                        Image(systemName: "waveform")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(4)
-                            .background(AppTheme.accent, in: Circle())
-                            .padding(4)
+            // GeometryReader ensures the artwork fills the actual column width instead of
+            // being locked to the hardcoded 120pt size, which caused clipping/spacing issues.
+            GeometryReader { geo in
+                ArtworkThumbnail(song: song, size: geo.size.width)
+                    .overlay(alignment: .bottomTrailing) {
+                        if isCurrent {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(4)
+                                .background(AppTheme.accent, in: Circle())
+                                .padding(4)
+                        }
                     }
-                }
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.displayName)
@@ -683,5 +705,31 @@ struct EmptyStateView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 52)
         .padding(.horizontal, 24)
+    }
+}
+
+// MARK: - StaggeredSlideInModifier
+
+/// Slides a view in from the left with a per-index delay, capped at `maxIndex`.
+/// Once `didAnimate` flips to true the animation fires once and the view
+/// settles in its final position.
+private struct StaggeredSlideInModifier: ViewModifier {
+    let index: Int
+    let maxIndex: Int
+    let didAnimate: Bool
+
+    private var cappedIndex: Int { min(index, maxIndex) }
+    private var delay: Double { Double(cappedIndex) * 0.03 }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(didAnimate ? 1 : 0)
+            .offset(x: didAnimate ? 0 : -30)
+            .animation(
+                didAnimate
+                    ? .spring(response: 0.38, dampingFraction: 0.78).delay(delay)
+                    : .none,
+                value: didAnimate
+            )
     }
 }
