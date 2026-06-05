@@ -26,6 +26,11 @@ struct StreamSearchView: View {
     @State private var showUploadPicker = false
     @State private var deletingUserTrackPath: String? = nil
 
+    // Playlist batch download
+    @State private var isDownloadingAll   = false
+    @State private var downloadAllDone    = 0
+    @State private var downloadAllTotal   = 0
+
     private let sources = ["youtube", "soundcloud", "server", "my"]
 
     var body: some View {
@@ -130,8 +135,8 @@ struct StreamSearchView: View {
             text: $searchText,
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: selectedSource == "server" ? "Search server library…"
-                : selectedSource == "my" ? "Search your library…"
-                : "Search YouTube, SoundCloud…"
+                : selectedSource == "my"    ? "Search your library…"
+                : "Search or paste a YouTube playlist URL…"
         )
         .onSubmit(of: .search) {
             triggerSearch()
@@ -141,6 +146,7 @@ struct StreamSearchView: View {
                 streaming.searchResults = []
                 streaming.serverTracks = []
                 streaming.errorMessage = nil
+                streaming.isPlaylistResult = false
             }
         }
         .onChange(of: selectedSource) { src in
@@ -186,9 +192,9 @@ struct StreamSearchView: View {
 
     private var streamResultsBody: some View {
         Group {
-            if streaming.isSearching {
+            if streaming.isSearching || streaming.isResolvingPlaylist {
                 Spacer()
-                ProgressView("Searching…")
+                ProgressView(streaming.isResolvingPlaylist ? "Loading playlist…" : "Searching…")
                     .tint(AppTheme.accent)
                     .foregroundStyle(AppTheme.textSecondary)
                 Spacer()
@@ -199,21 +205,54 @@ struct StreamSearchView: View {
                     .foregroundStyle(AppTheme.textSecondary)
                 Spacer()
             } else {
-                List(streaming.searchResults) { track in
-                    StreamTrackRow(
-                        track: track,
-                        isLoading: loadingTrackID == track.id,
-                        isDownloading: downloadingTrackID == track.id,
-                        isDownloaded: downloadedTrackIDs.contains(track.id),
-                        onPlay: { handlePlay(track: track) },
-                        onAddToQueue: { handleAddToQueue(track: track) },
-                        onDownload: { handleDownload(track: track) }
-                    )
-                    .listRowBackground(AppTheme.surface)
-                    .listRowSeparatorTint(AppTheme.background)
+                VStack(spacing: 0) {
+                    // Playlist banner — only shown after a successful playlist resolve
+                    if streaming.isPlaylistResult && !streaming.searchResults.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "music.note.list")
+                                .foregroundStyle(AppTheme.accent)
+                            Text("\(streaming.searchResults.count) tracks")
+                                .font(AppTheme.bodyFont(size: 14))
+                                .foregroundStyle(AppTheme.textPrimary)
+                            Spacer()
+                            if isDownloadingAll {
+                                HStack(spacing: 6) {
+                                    ProgressView()
+                                        .tint(AppTheme.accent)
+                                        .scaleEffect(0.8)
+                                    Text("\(downloadAllDone)/\(downloadAllTotal)")
+                                        .font(AppTheme.monoFont(size: 13))
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                }
+                            } else {
+                                Button("Download All") {
+                                    handleDownloadAll()
+                                }
+                                .font(AppTheme.bodyFont(size: 13).weight(.semibold))
+                                .foregroundStyle(AppTheme.accent)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(AppTheme.surface)
+                    }
+
+                    List(streaming.searchResults) { track in
+                        StreamTrackRow(
+                            track: track,
+                            isLoading: loadingTrackID == track.id,
+                            isDownloading: downloadingTrackID == track.id,
+                            isDownloaded: downloadedTrackIDs.contains(track.id),
+                            onPlay: { handlePlay(track: track) },
+                            onAddToQueue: { handleAddToQueue(track: track) },
+                            onDownload: { handleDownload(track: track) }
+                        )
+                        .listRowBackground(AppTheme.surface)
+                        .listRowSeparatorTint(AppTheme.background)
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
             }
         }
     }
@@ -374,6 +413,8 @@ struct StreamSearchView: View {
         } else if selectedSource == "my" {
             guard let token = account.token else { return }
             Task { await streaming.fetchUserMusic(token: token, search: searchText) }
+        } else if StreamingService.isPlaylistURL(searchText) {
+            Task { await streaming.resolvePlaylist(url: searchText) }
         } else {
             Task { await streaming.search(query: searchText, source: selectedSource) }
         }
@@ -423,6 +464,34 @@ struct StreamSearchView: View {
                 streaming.errorMessage = "Download failed: \(error.localizedDescription)"
             }
             downloadingTrackID = nil
+        }
+    }
+
+    private func handleDownloadAll() {
+        guard !isDownloadingAll else { return }
+        let tracks = streaming.searchResults
+        guard !tracks.isEmpty else { return }
+        isDownloadingAll = true
+        downloadAllDone = 0
+        downloadAllTotal = tracks.count
+
+        Task {
+            for track in tracks {
+                // Skip tracks already downloaded in this session
+                guard !downloadedTrackIDs.contains(track.id) else {
+                    downloadAllDone += 1
+                    continue
+                }
+                do {
+                    _ = try await streaming.downloadToLibrary(track: track)
+                    downloadedTrackIDs.insert(track.id)
+                } catch {
+                    appWarn("Download All: failed for \"\(track.title)\": \(error.localizedDescription)", category: "network")
+                }
+                downloadAllDone += 1
+            }
+            library.scanLocalDocuments()
+            isDownloadingAll = false
         }
     }
 

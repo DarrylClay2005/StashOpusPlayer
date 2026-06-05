@@ -689,6 +689,7 @@ async def track_metadata(
 async def resolve_playlist(
     request: Request,
     url: str = Query(..., description="Playlist or album URL"),
+    limit: int = Query(100, ge=1, le=200, description="Max tracks to return"),
 ):
     await check_auth(request)
 
@@ -697,7 +698,7 @@ async def resolve_playlist(
             "--dump-json",
             "--flat-playlist",
             url,
-            timeout=60.0,
+            timeout=120.0,
         )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=408, detail="Playlist resolve timed out")
@@ -706,7 +707,7 @@ async def resolve_playlist(
         raise HTTPException(status_code=404, detail="Could not resolve playlist")
 
     source = "soundcloud" if "soundcloud.com" in url else "youtube"
-    tracks = [_parse_track(e, source) for e in entries[:50]]
+    tracks = [_parse_track(e, source) for e in entries[:limit]]
     return tracks
 
 

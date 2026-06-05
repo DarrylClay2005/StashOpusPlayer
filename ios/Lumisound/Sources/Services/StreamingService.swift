@@ -131,8 +131,10 @@ final class StreamingService: ObservableObject {
     // MARK: Published state
 
     @Published var searchResults: [StreamTrack] = []
-    @Published var isSearching      = false
-    @Published var isLoadingStream  = false
+    @Published var isSearching       = false
+    @Published var isLoadingStream   = false
+    @Published var isResolvingPlaylist = false
+    @Published var isPlaylistResult  = false
     @Published var errorMessage: String?
 
     // MARK: Server Library state
@@ -185,6 +187,15 @@ final class StreamingService: ObservableObject {
 
     var isConfigured: Bool { true } // always configured via default URL
 
+    // MARK: - Playlist URL detection
+
+    static func isPlaylistURL(_ text: String) -> Bool {
+        let t = text.lowercased()
+        guard t.hasPrefix("http") else { return false }
+        let isYouTube = t.contains("youtube.com") || t.contains("youtu.be")
+        return isYouTube && (t.contains("list=") || t.contains("/playlist"))
+    }
+
     // MARK: - Search
 
     func search(query: String, source: String = "youtube") async {
@@ -198,6 +209,7 @@ final class StreamingService: ObservableObject {
         }
         appLog("Search: \"\(query)\" [source: \(source)]", category: "network")
         isSearching = true
+        isPlaylistResult = false
         errorMessage = nil
         defer { isSearching = false }
 
@@ -229,6 +241,61 @@ final class StreamingService: ObservableObject {
         } catch {
             appError("Search failed: \(error.localizedDescription)", category: "network")
             errorMessage = "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
+            searchResults = []
+        }
+    }
+
+    // MARK: - Playlist resolution
+
+    /// Resolves a YouTube (or SoundCloud) playlist URL to a list of tracks via
+    /// the bridge's `/api/resolve` endpoint. Results are published on `searchResults`
+    /// and `isPlaylistResult` is set to `true` so the UI can show the playlist banner.
+    func resolvePlaylist(url: String) async {
+        guard isConfigured else {
+            errorMessage = "Bridge server URL not configured."
+            return
+        }
+        appLog("Resolving playlist: \(url)", category: "network")
+        isResolvingPlaylist = true
+        isPlaylistResult = false
+        errorMessage = nil
+        defer { isResolvingPlaylist = false }
+
+        var components = URLComponents()
+        components.path = "/api/resolve"
+        components.queryItems = [
+            URLQueryItem(name: "url",   value: url),
+            URLQueryItem(name: "limit", value: "100"),
+        ]
+
+        guard var request = makeRequest(components.string ?? "/api/resolve") else {
+            errorMessage = "Invalid bridge URL."
+            return
+        }
+        request.timeoutInterval = 130  // slightly over server timeout
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse {
+                switch http.statusCode {
+                case 200..<300: break
+                case 408:
+                    errorMessage = "Playlist resolve timed out. Try again."
+                    searchResults = []
+                    return
+                default:
+                    errorMessage = "Could not resolve playlist (HTTP \(http.statusCode))."
+                    searchResults = []
+                    return
+                }
+            }
+            let tracks = try JSONDecoder().decode([StreamTrack].self, from: data)
+            searchResults = tracks
+            isPlaylistResult = true
+            appLog("Resolved playlist: \(tracks.count) track(s)", category: "network")
+        } catch {
+            appError("Playlist resolve failed: \(error.localizedDescription)", category: "network")
+            errorMessage = "Failed to resolve playlist: \(error.localizedDescription)"
             searchResults = []
         }
     }
