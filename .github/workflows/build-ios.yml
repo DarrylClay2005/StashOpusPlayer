@@ -61,7 +61,11 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            SKIP_INSTALL=NO 2>&1 | tail -5
+            SKIP_INSTALL=NO 2>&1 | tee /tmp/xcodebuild.log | tail -20
+          if grep -q "error:" /tmp/xcodebuild.log; then
+            echo "--- Compiler errors ---"
+            grep "error:" /tmp/xcodebuild.log | head -30
+          fi
           APP=$(find build/Lumisound.xcarchive -name "*.app" | head -1)
           if [ -z "$APP" ]; then
             echo "::error::Archive did not produce a .app bundle"

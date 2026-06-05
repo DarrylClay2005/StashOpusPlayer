@@ -2,6 +2,19 @@ import WidgetKit
 import SwiftUI
 import AppIntents
 
+// MARK: - Helpers
+
+/// Applies containerBackground on iOS 17+; no-op on iOS 16.
+struct WidgetBackgroundModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            content.containerBackground(.black, for: .widget)
+        } else {
+            content
+        }
+    }
+}
+
 // MARK: - Timeline Entry
 
 struct LumisoundEntry: TimelineEntry {
@@ -231,7 +244,7 @@ struct LumisoundWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: LumisoundWidgetProvider()) { entry in
             LumisoundWidgetEntryView(entry: entry)
-                .containerBackground(.black, for: .widget)
+                .modifier(WidgetBackgroundModifier())
         }
         .configurationDisplayName("Lumisound")
         .description("Now Playing track from Lumisound.")
