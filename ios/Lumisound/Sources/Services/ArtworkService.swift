@@ -12,6 +12,11 @@ final class ArtworkService {
     /// Thread-safe cache for MPMediaLibrary lookups keyed by persistentID.
     private let mediaQueryCache = NSCache<NSNumber, UIImage>()
 
+    /// In-memory set of cache keys for which all artwork sources failed. Prevents
+    /// repeated lookups (including remote API calls) for tracks that have no artwork.
+    /// Resets on app relaunch — that's fine; one miss per launch is acceptable.
+    private var noArtworkKeys: Set<String> = []
+
     /// Sentinel image stored in `mediaQueryCache` to signal "already checked, no artwork".
     private let noArtworkSentinel = UIImage()
 
@@ -73,6 +78,9 @@ final class ArtworkService {
             return onDisk
         }
 
+        // Negative cache: skip all network/API sources for keys we already know have no artwork.
+        if noArtworkKeys.contains(key) { return nil }
+
         // Streaming tracks store their thumbnail URL as the artworkCacheKey.
         if let cacheKeyStr = song.artworkCacheKey,
            cacheKeyStr.hasPrefix("http"),
@@ -128,6 +136,7 @@ final class ArtworkService {
             return image
         }
 
+        noArtworkKeys.insert(key)
         appWarn("Artwork: no source found for \"\(song.displayName)\"", category: "artwork")
         return nil
     }

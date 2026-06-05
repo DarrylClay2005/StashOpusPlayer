@@ -496,6 +496,8 @@ final class AudioPlayerManager: ObservableObject {
         crossfadeStartTimer?.invalidate()
         crossfadeStartTimer = nil
         cancelCrossfade()
+        // Clear before scheduling so failure can be detected below.
+        errorMessage = nil
 
         // For HTTP/HTTPS URLs the download is async — scheduleCurrent handles the full play
         // flow internally (including calling node.play() after the download completes).
@@ -510,6 +512,9 @@ final class AudioPlayerManager: ObservableObject {
 
         // Local file — synchronous path.
         scheduleCurrent(from: startTime)
+        // scheduleCurrent sets errorMessage on failure; bail out here to avoid a zombie
+        // state where isPlaying=true but no audio segment is scheduled on the node.
+        guard errorMessage == nil else { return }
         startEngineIfNeeded()
         activeNode.play()
         isPlaying = true
@@ -634,9 +639,17 @@ final class AudioPlayerManager: ObservableObject {
                 }
             }
         } catch {
-            errorMessage = error.localizedDescription
             isPlaying = false
-            appError("Playback error for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
+            // .opus / .webm / .ogg files are not supported by AVAudioFile on iOS. Downgrade
+            // to a warning so the error log isn't flooded on every restore for these files.
+            let ext = url.pathExtension.lowercased()
+            if ["opus", "webm", "ogg"].contains(ext) {
+                errorMessage = ".\(ext) files are not supported for local playback"
+                appWarn("Cannot open .\(ext) (not supported by AVAudioFile): \"\(currentSong?.displayName ?? "?")\"", category: "audio")
+            } else {
+                errorMessage = error.localizedDescription
+                appError("Playback error for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
+            }
         }
     }
 

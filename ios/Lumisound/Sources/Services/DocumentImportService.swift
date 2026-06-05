@@ -305,19 +305,21 @@ struct DocumentImportService {
 
         appLog("Enriching metadata via iTunes for \"\(song.title)\"", category: "library")
         let enriched = await MetadataFetchService.shared.enrich(song: song)
+        var entry: [String: String] = [:]
         if enriched.artist != song.artist || enriched.album != song.album ||
            enriched.genre  != song.genre  || enriched.year  != song.year {
-            var entry: [String: String] = [:]
             if !enriched.artist.isEmpty { entry["artist"] = enriched.artist }
             if !enriched.album.isEmpty  { entry["album"]  = enriched.album  }
             if !enriched.genre.isEmpty  { entry["genre"]  = enriched.genre  }
             if !enriched.year.isEmpty   { entry["year"]   = enriched.year   }
             if !entry.isEmpty {
                 appLog("iTunes enrichment applied for \"\(song.title)\": artist=\(enriched.artist), album=\(enriched.album)", category: "library")
-                cache[filename] = entry
-                defaults.set(cache, forKey: enrichCacheKey)
             }
         }
+        // Always write to UserDefaults — an empty dict marks "checked, no results found"
+        // so the lookup is not retried on every app launch for tracks with no iTunes match.
+        cache[filename] = entry
+        defaults.set(cache, forKey: enrichCacheKey)
         return enriched
     }
 
