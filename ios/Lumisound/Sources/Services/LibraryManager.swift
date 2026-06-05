@@ -33,9 +33,9 @@ final class LibraryManager: ObservableObject {
         self.artwork = artwork
         favoriteSongIDs = persistence.loadFavorites()
         playlists = persistence.loadPlaylists()
-        // Immediately scan files already sitting in the app's Documents folder
-        // (placed there via Finder/Files app or a previous import session).
-        scanLocalDocuments()
+        // Local document scan is driven by LibraryView.onAppear so it only runs
+        // once per session after the view hierarchy is ready, preventing duplicate
+        // concurrent scans that could race and add the same songs twice.
     }
 
     // MARK: - Scan Cache Helper
