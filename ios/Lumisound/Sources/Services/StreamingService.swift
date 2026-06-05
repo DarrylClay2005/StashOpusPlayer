@@ -460,6 +460,7 @@ final class StreamingService: ObservableObject {
     /// the server artwork URL as the cache key.
     func toSong(serverTrack: ServerTrack) -> Song {
         let artworkKey = serverArtworkURL(for: serverTrack)?.absoluteString
+        let headers: [String: String]? = apiKey.isEmpty ? nil : ["Authorization": "Bearer \(apiKey)"]
         return Song(
             id: serverTrack.id,
             title: serverTrack.title,
@@ -473,7 +474,8 @@ final class StreamingService: ObservableObject {
             year: "",
             genre: serverTrack.genre,
             bitrate: 0,
-            sampleRate: 0
+            sampleRate: 0,
+            httpHeaders: headers
         )
     }
 
@@ -613,7 +615,8 @@ final class StreamingService: ObservableObject {
             year: "",
             genre: userMusicTrack.genre,
             bitrate: 0,
-            sampleRate: 0
+            sampleRate: 0,
+            httpHeaders: ["Authorization": "Bearer \(token)"]
         )
     }
 

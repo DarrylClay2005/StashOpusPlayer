@@ -746,6 +746,10 @@ final class AudioPlayerManager: ObservableObject {
                 var req = URLRequest(url: url)
                 req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", forHTTPHeaderField: "User-Agent")
                 req.timeoutInterval = 60
+                // Apply any per-song headers (e.g. Authorization for user music / server tracks).
+                if let headers = currentSong?.httpHeaders {
+                    for (field, value) in headers { req.setValue(value, forHTTPHeaderField: field) }
+                }
                 let (downloaded, response) = try await URLSession.shared.download(for: req)
                 // Detect extension from Content-Type if URL path was inconclusive
                 if ext == "m4a", let ct = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") {

@@ -15,6 +15,9 @@ struct Song: Identifiable, Hashable, Codable {
     var genre: String
     var bitrate: Int
     var sampleRate: Int
+    /// HTTP headers to include when fetching this song's URL (e.g. Authorization for user music).
+    /// Not persisted across launches — tokens expire and are re-acquired on next login.
+    var httpHeaders: [String: String]?
 
     init(
         id: String = UUID().uuidString,
@@ -29,7 +32,8 @@ struct Song: Identifiable, Hashable, Codable {
         year: String = "",
         genre: String = "",
         bitrate: Int = 0,
-        sampleRate: Int = 0
+        sampleRate: Int = 0,
+        httpHeaders: [String: String]? = nil
     ) {
         self.id = id
         self.title = title
@@ -44,6 +48,7 @@ struct Song: Identifiable, Hashable, Codable {
         self.genre = genre
         self.bitrate = bitrate
         self.sampleRate = sampleRate
+        self.httpHeaders = httpHeaders
     }
 
     var displayName: String {
