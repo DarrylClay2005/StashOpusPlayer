@@ -128,6 +128,11 @@ final class StreamingService: ObservableObject {
         ("Best Quality",  "best"),
     ]
 
+    // MARK: Private — Stream URL Cache
+
+    private var streamURLCache: [String: (url: URL, expiry: Date)] = [:]
+    private static let streamURLCacheTTL: TimeInterval = 5 * 60 * 60  // 5 hours
+
     // MARK: Published state
 
     @Published var searchResults: [StreamTrack] = []
@@ -306,6 +311,13 @@ final class StreamingService: ObservableObject {
         guard isConfigured else {
             throw StreamingError.notConfigured
         }
+
+        let cacheKey = "\(track.id)_\(preferredFormat)_\(track.source)"
+        if let hit = streamURLCache[cacheKey], hit.expiry > Date() {
+            appLog("streamURL: cache hit for \"\(track.title)\"", category: "network")
+            return hit.url
+        }
+
         appLog("streamURL: \"\(track.title)\" [src: \(track.source), fmt: \(preferredFormat)]", category: "network")
         isLoadingStream = true
         defer { isLoadingStream = false }
@@ -350,6 +362,7 @@ final class StreamingService: ObservableObject {
             appError("streamURL: invalid URL in response for \"\(track.title)\"", category: "network")
             throw StreamingError.invalidURL
         }
+        streamURLCache[cacheKey] = (url: url, expiry: Date().addingTimeInterval(Self.streamURLCacheTTL))
         appLog("streamURL: got URL for \"\(track.title)\" (expires \(decoded.expiresIn)s)", category: "network")
         return url
     }
@@ -516,7 +529,11 @@ final class StreamingService: ObservableObject {
         // Downloads can take longer than stream URL fetches.
         request.timeoutInterval = 120
 
-        let (downloadedURL, response) = try await URLSession.shared.download(for: request)
+        let (downloadedURL, response) = try await BackgroundDownloadManager.run(
+            named: "lumisound.download.\(safeName)"
+        ) {
+            try await URLSession.shared.download(for: request)
+        }
         if let httpResponse = response as? HTTPURLResponse {
             switch httpResponse.statusCode {
             case 200..<300:

@@ -220,6 +220,7 @@ struct NowPlayingView: View {
                 timelineSection
                 transportSection
                 sleepTimerPill
+                autoRadioToggle
                 volumeSection
                 playbackControlsSection
                 queuePreviewSection
@@ -504,6 +505,37 @@ struct NowPlayingView: View {
             .transition(.scale.combined(with: .opacity))
             .animation(.spring(response: 0.35, dampingFraction: 0.75), value: sleepTimer.isActive)
         }
+    }
+
+    // MARK: - Auto-Radio Toggle
+
+    private var autoRadioToggle: some View {
+        Button {
+            player.autoRadioEnabled.toggle()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Auto-Radio")
+                    .font(.system(size: 13, weight: .medium))
+                Spacer()
+                Image(systemName: player.autoRadioEnabled ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16))
+            }
+            .foregroundStyle(player.autoRadioEnabled ? AppTheme.accent : AppTheme.textSecondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(AppTheme.surface, in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(
+                        player.autoRadioEnabled ? AppTheme.accent.opacity(0.4) : Color.clear,
+                        lineWidth: 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: player.autoRadioEnabled)
     }
 
     // MARK: - Volume

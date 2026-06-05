@@ -38,6 +38,62 @@ final class LibraryManager: ObservableObject {
         scanLocalDocuments()
     }
 
+    // MARK: - Scan Cache Helper
+
+    /// Resolves a list of file URLs to Songs, using `ScanCacheService` for unchanged files
+    /// and `DocumentImportService.makeSong` only for new or modified ones.
+    private func resolveSongs(for urls: [URL]) async -> [Song] {
+        var cachedSongs: [Song] = []
+        var uncachedURLs: [URL] = []
+
+        for url in urls {
+            if let cached = ScanCacheService.shared.cachedSong(for: url) {
+                cachedSongs.append(cached)
+            } else {
+                uncachedURLs.append(url)
+            }
+        }
+
+        guard !uncachedURLs.isEmpty else { return cachedSongs }
+
+        let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
+            await withTaskGroup(of: Song?.self) { group in
+                var results: [Song] = []
+                var pending = 0
+                let maxConcurrent = 8
+                var iterator = uncachedURLs.makeIterator()
+
+                while pending < maxConcurrent, let url = iterator.next() {
+                    let s = DocumentImportService()
+                    group.addTask { await s.makeSong(for: url) }
+                    pending += 1
+                }
+
+                for await song in group {
+                    if let song { results.append(song) }
+                    pending -= 1
+                    if let url = iterator.next() {
+                        let s = DocumentImportService()
+                        group.addTask { await s.makeSong(for: url) }
+                        pending += 1
+                    }
+                }
+                return results
+            }
+        }.value
+
+        for song in newSongs {
+            if let url = song.url {
+                ScanCacheService.shared.store(song: song, for: url)
+            }
+        }
+        ScanCacheService.shared.persist()
+
+        return cachedSongs + newSongs
+    }
+
+    // MARK: - Local Documents Scan
+
     /// Scans the app's Documents directory (root + Imported Music subfolder) for audio
     /// files and adds any that aren't already tracked. Called automatically on init and
     /// can be triggered manually after the user drops files via the Files app.
@@ -74,35 +130,9 @@ final class LibraryManager: ObservableObject {
             let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
             guard !newURLs.isEmpty else { return }
 
-            let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
-                await withTaskGroup(of: Song?.self) { group in
-                    var results: [Song] = []
-                    var pending = 0
-                    let maxConcurrent = 8
-                    var iterator = newURLs.makeIterator()
+            let newSongs = await resolveSongs(for: newURLs)
 
-                    // Seed initial tasks
-                    while pending < maxConcurrent, let url = iterator.next() {
-                        let s = DocumentImportService()
-                        group.addTask { await s.makeSong(for: url) }
-                        pending += 1
-                    }
-
-                    // Process results and add more tasks
-                    for await song in group {
-                        if let song { results.append(song) }
-                        pending -= 1
-                        if let url = iterator.next() {
-                            let s = DocumentImportService()
-                            group.addTask { await s.makeSong(for: url) }
-                            pending += 1
-                        }
-                    }
-                    return results
-                }
-            }.value
-
-            appLog("Local scan complete: added \(newSongs.count) new song(s)", category: "library")
+            appLog("Local scan complete: \(newSongs.count) song(s)", category: "library")
             importedSongs.append(contentsOf: newSongs)
             importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
             rebuildAllSongs()
@@ -145,35 +175,9 @@ final class LibraryManager: ObservableObject {
             let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
             guard !newURLs.isEmpty else { return }
 
-            let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
-                await withTaskGroup(of: Song?.self) { group in
-                    var results: [Song] = []
-                    var pending = 0
-                    let maxConcurrent = 8
-                    var iterator = newURLs.makeIterator()
+            let newSongs = await resolveSongs(for: newURLs)
 
-                    // Seed initial tasks
-                    while pending < maxConcurrent, let url = iterator.next() {
-                        let s = DocumentImportService()
-                        group.addTask { await s.makeSong(for: url) }
-                        pending += 1
-                    }
-
-                    // Process results and add more tasks
-                    for await song in group {
-                        if let song { results.append(song) }
-                        pending -= 1
-                        if let url = iterator.next() {
-                            let s = DocumentImportService()
-                            group.addTask { await s.makeSong(for: url) }
-                            pending += 1
-                        }
-                    }
-                    return results
-                }
-            }.value
-
-            appLog("scanWatchedFolders: added \(newSongs.count) new song(s) from \(urls.count) folder(s)", category: "library")
+            appLog("scanWatchedFolders: \(newSongs.count) song(s) from \(urls.count) folder(s)", category: "library")
             importedSongs.append(contentsOf: newSongs)
             importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
             rebuildAllSongs()
@@ -214,35 +218,9 @@ final class LibraryManager: ObservableObject {
             // All files already in library — return silently.
             guard !newURLs.isEmpty else { return }
 
-            let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
-                await withTaskGroup(of: Song?.self) { group in
-                    var results: [Song] = []
-                    var pending = 0
-                    let maxConcurrent = 8
-                    var iterator = newURLs.makeIterator()
+            let newSongs = await resolveSongs(for: newURLs)
 
-                    // Seed initial tasks
-                    while pending < maxConcurrent, let fileURL = iterator.next() {
-                        let s = DocumentImportService()
-                        group.addTask { await s.makeSong(for: fileURL) }
-                        pending += 1
-                    }
-
-                    // Process results and add more tasks
-                    for await song in group {
-                        if let song { results.append(song) }
-                        pending -= 1
-                        if let fileURL = iterator.next() {
-                            let s = DocumentImportService()
-                            group.addTask { await s.makeSong(for: fileURL) }
-                            pending += 1
-                        }
-                    }
-                    return results
-                }
-            }.value
-
-            appLog("scanSpecificDirectory: added \(newSongs.count) new song(s) from \(url.lastPathComponent)", category: "library")
+            appLog("scanSpecificDirectory: \(newSongs.count) song(s) from \(url.lastPathComponent)", category: "library")
             importedSongs.append(contentsOf: newSongs)
             importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
             rebuildAllSongs()

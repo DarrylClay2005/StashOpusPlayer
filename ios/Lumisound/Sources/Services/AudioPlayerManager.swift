@@ -19,7 +19,12 @@ final class AudioPlayerManager: ObservableObject {
     }
     @Published private(set) var queue: [Song] = []
     @Published private(set) var currentIndex = 0
-    @Published private(set) var isPlaying = false
+    @Published private(set) var isPlaying = false {
+        didSet {
+            guard isPlaying != oldValue else { return }
+            WidgetDataService.shared.updatePlayState(isPlaying: isPlaying)
+        }
+    }
     @Published var position: TimeInterval = 0
     @Published var duration: TimeInterval = 0
     @Published var repeatMode: RepeatMode = .off
@@ -28,6 +33,12 @@ final class AudioPlayerManager: ObservableObject {
         didSet { applyAudioSettings() }
     }
     @Published var errorMessage: String?
+
+    // Auto-Radio
+    @Published var autoRadioEnabled: Bool = UserDefaults.standard.bool(forKey: "autoRadio_enabled") {
+        didSet { UserDefaults.standard.set(autoRadioEnabled, forKey: "autoRadio_enabled") }
+    }
+    @Published private(set) var autoRadioSeed: Song? = nil
 
     // AB Repeat
     @Published var abRepeatEnabled: Bool = false
@@ -133,6 +144,14 @@ final class AudioPlayerManager: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.savePlaybackState() }
+        }
+
+        // Receive playback control commands posted from the WidgetKit extension.
+        DarwinWidgetBridge.shared.addObserver(name: DarwinWidgetBridge.togglePlayback) { [weak self] in
+            Task { @MainActor [weak self] in self?.togglePlayPause() }
+        }
+        DarwinWidgetBridge.shared.addObserver(name: DarwinWidgetBridge.skipNext) { [weak self] in
+            Task { @MainActor [weak self] in self?.skipToNext() }
         }
     }
 
@@ -273,6 +292,9 @@ final class AudioPlayerManager: ObservableObject {
             playCurrent(from: 0)
             savePlaybackState()
         } else {
+            if autoRadioEnabled {
+                autoRadioSeed = currentSong
+            }
             stop()
         }
     }
@@ -347,6 +369,11 @@ final class AudioPlayerManager: ObservableObject {
     /// Append a song to the end of the queue without affecting current playback.
     func appendToQueue(song: Song) {
         queue.append(song)
+    }
+
+    /// Clears the auto-radio seed after the LumisoundApp observer has handled it.
+    func clearAutoRadioSeed() {
+        autoRadioSeed = nil
     }
 
     // MARK: - AB Repeat
@@ -607,10 +634,11 @@ final class AudioPlayerManager: ObservableObject {
                 }
             }
 
-            // Metadata-based ReplayGain: attempt to read REPLAYGAIN_TRACK_GAIN from the
-            // file's AVAsset metadata. Runs off the main thread to avoid blocking playback.
+            // ReplayGain: read embedded REPLAYGAIN_TRACK_GAIN tag; fall back to RMS analysis
+            // for files without a tag. Runs off the main thread to avoid blocking playback.
             if audioSettings.replayGainEnabled {
                 let asset = AVURLAsset(url: url)
+                let capturedURL = url
                 Task.detached(priority: .utility) { [weak self] in
                     let metadata = (try? await asset.load(.metadata)) ?? []
                     var gainDB: Float? = nil
@@ -628,12 +656,17 @@ final class AudioPlayerManager: ObservableObject {
                             }
                         }
                     }
+                    // No embedded tag: compute RMS gain (returns 0 for unsupported formats).
+                    if gainDB == nil {
+                        let rms = await NormalizationService.shared.gain(for: capturedURL)
+                        if rms != 0 { gainDB = rms }
+                    }
                     if let gain = gainDB {
                         await MainActor.run { [weak self] in
                             guard let self else { return }
-                            // Convert dB to linear and scale by user volume, clamped to [0, 1].
                             let linear = pow(10.0, gain / 20.0)
-                            self.crossfadeMixer.outputVolume = min(linear * self.audioSettings.volume, 1.0)
+                            // Allow a modest boost above 1.0 when normalising a quiet track.
+                            self.crossfadeMixer.outputVolume = min(linear * self.audioSettings.volume, 1.5)
                         }
                     }
                 }
@@ -1417,14 +1450,21 @@ final class AudioPlayerManager: ObservableObject {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
-    /// Fetches artwork asynchronously and injects it into the Now Playing info center.
+    /// Fetches artwork asynchronously and injects it into the Now Playing info center
+    /// and the WidgetKit shared container.
     private func updateNowPlayingArtwork(for song: Song?) async {
-        guard let song else { return }
-        guard let image = await ArtworkService.shared.loadArtwork(for: song) else { return }
-        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-        info[MPMediaItemPropertyArtwork] = artwork
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        guard let song else {
+            WidgetDataService.shared.update(song: nil, isPlaying: false, artwork: nil)
+            return
+        }
+        let image = await ArtworkService.shared.loadArtwork(for: song)
+        if let image {
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+            info[MPMediaItemPropertyArtwork] = artwork
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        }
+        WidgetDataService.shared.update(song: song, isPlaying: isPlaying, artwork: image)
     }
 
     private func configureRemoteCommands() {

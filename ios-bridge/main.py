@@ -55,6 +55,85 @@ SUPPORTED_AUDIO_EXTS: frozenset[str] = frozenset({
 VERSION = "1.0.0"
 
 # ---------------------------------------------------------------------------
+# ffprobe result cache
+# ---------------------------------------------------------------------------
+
+class _FfprobeCache:
+    """
+    Disk-backed cache for ffprobe results, keyed by ``path|mtime|size``.
+    Thread-safe for concurrent async callers via an asyncio Lock on flush.
+    """
+
+    def __init__(self, cache_path: str) -> None:
+        self._path = cache_path
+        self._flush_lock = asyncio.Lock()
+        self._data: dict = {}
+        self._dirty: bool = False
+        self._load()
+
+    def _load(self) -> None:
+        try:
+            with open(self._path) as fh:
+                self._data = json.load(fh)
+            logger.info("ffprobe cache loaded: %d entries from %s", len(self._data), self._path)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            self._data = {}
+
+    def _file_key(self, abs_path: str) -> str | None:
+        try:
+            st = os.stat(abs_path)
+            return f"{abs_path}|{st.st_mtime}|{st.st_size}"
+        except OSError:
+            return None
+
+    def get(self, abs_path: str) -> dict | None:
+        key = self._file_key(abs_path)
+        return self._data.get(key) if key else None
+
+    def put(self, abs_path: str, tags: dict) -> None:
+        key = self._file_key(abs_path)
+        if key:
+            self._data[key] = tags
+            self._dirty = True
+
+    async def flush(self) -> None:
+        """Persist to disk if dirty. Safe to call after every scan batch."""
+        if not self._dirty:
+            return
+        async with self._flush_lock:
+            if not self._dirty:
+                return
+            try:
+                tmp = self._path + ".tmp"
+                with open(tmp, "w") as fh:
+                    json.dump(self._data, fh)
+                os.replace(tmp, self._path)
+                self._dirty = False
+            except OSError as exc:
+                logger.warning("ffprobe cache flush failed: %s", exc)
+
+    def evict_missing(self) -> None:
+        """Prune entries whose source file no longer exists."""
+        before = len(self._data)
+        self._data = {
+            k: v for k, v in self._data.items()
+            if os.path.exists(k.split("|")[0])
+        }
+        removed = before - len(self._data)
+        if removed:
+            self._dirty = True
+            logger.info("ffprobe cache: evicted %d stale entries", removed)
+
+
+_ffprobe_cache_path: str = (
+    os.path.join(SERVER_MUSIC_DIR, ".lumisound_ffprobe_cache.json")
+    if SERVER_MUSIC_DIR
+    else os.path.join(tempfile.gettempdir(), "lumisound_ffprobe_cache.json")
+)
+_FFPROBE_CACHE = _FfprobeCache(_ffprobe_cache_path)
+
+
+# ---------------------------------------------------------------------------
 # yt-dlp concurrency limit (Fix 3)
 # ---------------------------------------------------------------------------
 
@@ -1558,8 +1637,14 @@ _FFPROBE_SEMAPHORE = asyncio.Semaphore(8)  # max 8 concurrent ffprobe processes
 async def _ffprobe_tags(path: str) -> dict:
     """
     Run ffprobe on *path* and return a normalised track metadata dict.
+    Results are cached by (path, mtime, size) to avoid redundant subprocess calls.
     Returns a dict with all fields set to sensible defaults on any failure.
     """
+    abs_path = os.path.abspath(path)
+    cached = _FFPROBE_CACHE.get(abs_path)
+    if cached is not None:
+        return cached
+
     cmd = [
         "ffprobe",
         "-v", "quiet",
@@ -1613,7 +1698,7 @@ async def _ffprobe_tags(path: str) -> dict:
         except (ValueError, TypeError):
             duration = 0.0
 
-    return {
+    result = {
         "title": tags_lower.get("title") or tags_lower.get("name") or "",
         "artist": tags_lower.get("artist") or tags_lower.get("album_artist") or "",
         "album": tags_lower.get("album") or "",
@@ -1622,6 +1707,8 @@ async def _ffprobe_tags(path: str) -> dict:
         "duration": duration,
         "has_artwork": has_artwork,
     }
+    _FFPROBE_CACHE.put(abs_path, result)
+    return result
 
 
 def _stable_id(abs_path: str) -> str:
@@ -1678,6 +1765,7 @@ async def server_library(
     # Run all ffprobe calls concurrently (bounded by _FFPROBE_SEMAPHORE)
     abs_paths = [str(f.resolve()) for f in audio_files]
     tag_results = await asyncio.gather(*(_ffprobe_tags(p) for p in abs_paths))
+    await _FFPROBE_CACHE.flush()
 
     tracks: list[dict] = []
     for fpath, meta in zip(audio_files, tag_results):
@@ -1846,6 +1934,7 @@ async def get_user_music(
 
     abs_paths = [str(f.resolve()) for f in audio_files]
     tag_results = await asyncio.gather(*(_ffprobe_tags(p) for p in abs_paths))
+    await _FFPROBE_CACHE.flush()
 
     tracks: list[dict] = []
     for fpath, meta in zip(audio_files, tag_results):

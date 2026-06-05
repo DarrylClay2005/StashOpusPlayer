@@ -92,6 +92,30 @@ struct LumisoundApp: App {
                 .onReceive(sleepTimer.$didExpire) { expired in
                     if expired { player.pause() }
                 }
+                // Auto-Radio: when the queue ends and autoRadioEnabled is on, search YouTube
+                // for tracks similar to the last-played song and append them to the queue.
+                .onReceive(player.$autoRadioSeed.compactMap { $0 }) { seed in
+                    player.clearAutoRadioSeed()
+                    guard player.autoRadioEnabled else { return }
+                    Task {
+                        appLog("Auto-radio: seeding from \"\(seed.displayName)\" by \(seed.artistName)", category: "audio")
+                        await streaming.search(
+                            query: "\(seed.artistName) \(seed.displayName)",
+                            source: "youtube"
+                        )
+                        let tracks = Array(streaming.searchResults.prefix(5))
+                        guard !tracks.isEmpty else {
+                            appLog("Auto-radio: no results", category: "audio")
+                            return
+                        }
+                        for track in tracks {
+                            guard let url = try? await streaming.streamURL(for: track) else { continue }
+                            player.appendToQueue(song: streaming.toSong(track: track, streamURL: url))
+                        }
+                        if !player.isPlaying { player.skipToNext() }
+                        appLog("Auto-radio: appended \(tracks.count) track(s)", category: "audio")
+                    }
+                }
                 // When the user logs in after launch, start the auto-push timer and load avatar.
                 .onReceive(account.$isLoggedIn) { loggedIn in
                     guard loggedIn else {
