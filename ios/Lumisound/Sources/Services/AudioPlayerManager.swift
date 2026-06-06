@@ -121,6 +121,12 @@ final class AudioPlayerManager: ObservableObject {
     // stale value from the AVAudioPlayerNode before it has actually started.
     private var isSchedulingAsync = false
 
+    // AVPlayer fallback for containers (e.g. .opus) that AVAssetReader cannot decode.
+    // When active, this player owns audio output instead of the AVAudioEngine nodes.
+    private var opusPlayer: AVPlayer?
+    private var opusTimeObserver: Any?
+    private var isUsingOpusPlayer: Bool { opusPlayer != nil }
+
     // Schedule generation counter — incremented before every node stop/reschedule.
     // Completion blocks capture the generation at registration time and bail out if it
     // has changed, preventing ghost completions from firing after a seek or skip.
@@ -228,6 +234,13 @@ final class AudioPlayerManager: ObservableObject {
     }
 
     func pause() {
+        if isUsingOpusPlayer {
+            opusPlayer?.pause()
+            isPlaying = false
+            updateNowPlaying()
+            savePlaybackState()
+            return
+        }
         updatePositionFromPlayer()
         primaryNode.pause()
         secondaryNode.pause()
@@ -239,6 +252,12 @@ final class AudioPlayerManager: ObservableObject {
     }
 
     func resume() {
+        if isUsingOpusPlayer {
+            opusPlayer?.play()
+            isPlaying = true
+            updateNowPlaying()
+            return
+        }
         guard currentSong != nil else {
             if !queue.isEmpty { playCurrent(from: position) }
             return
@@ -255,6 +274,7 @@ final class AudioPlayerManager: ObservableObject {
     }
 
     func stop() {
+        tearDownOpusPlayer()
         appLog("Stopped — \(currentSong?.displayName ?? "nothing playing")", category: "audio")
         primaryNode.stop()
         secondaryNode.stop()
@@ -278,6 +298,11 @@ final class AudioPlayerManager: ObservableObject {
     func seek(to newPosition: TimeInterval) {
         let target = max(0, min(newPosition, duration))
         position = target
+        if isUsingOpusPlayer {
+            opusPlayer?.seek(to: CMTime(seconds: target, preferredTimescale: 600))
+            updateNowPlaying()
+            return
+        }
         gaplessScheduled = false
         crossfadeStartTimer?.invalidate()
         crossfadeStartTimer = nil
@@ -624,7 +649,8 @@ final class AudioPlayerManager: ObservableObject {
             return
         }
 
-        // Local file — schedule directly.
+        // Local file — schedule directly (native format, no transcoding needed).
+        tearDownOpusPlayer()
         do {
             let node = activeNode
             // Increment generation before stopping so the old completion is invalidated.
@@ -735,9 +761,10 @@ final class AudioPlayerManager: ObservableObject {
         errorMessage = nil
 
         guard let transcodedURL = await AudioEncoderService.shared.transcodeForPlayback(url) else {
-            errorMessage = "Could not decode \(url.pathExtension.uppercased()) file — transcoding failed"
-            isPlaying = false
-            appError("Transcoding failed for \"\(currentSong?.displayName ?? "?")\"", category: "audio")
+            // AVAssetReader/AVAssetExportSession cannot decode this container (e.g. Ogg/Opus).
+            // Fall back to AVPlayer which has access to iOS's full codec pipeline.
+            appLog("Transcoding unavailable for .\(url.pathExtension), falling back to AVPlayer — \"\(currentSong?.displayName ?? "?")\"", category: "audio")
+            scheduleWithOpusPlayer(url: url, startTime: startTime)
             return
         }
 
@@ -844,6 +871,7 @@ final class AudioPlayerManager: ObservableObject {
 
     @MainActor
     private func downloadAndSchedule(url: URL, startTime: TimeInterval) async {
+        tearDownOpusPlayer()
         cleanOldStreamCache()
         isSchedulingAsync = true
         defer { isSchedulingAsync = false }
@@ -981,6 +1009,78 @@ final class AudioPlayerManager: ObservableObject {
         } else {
             skipToNext()
         }
+    }
+
+    // MARK: - AVPlayer fallback (Opus / WebM / OGG)
+
+    /// Used when AVAssetReader/AVAssetExportSession cannot decode the file (e.g. Ogg/Opus container).
+    /// AVPlayer has access to iOS's full codec pipeline and can always play .opus files.
+    /// Basic play/pause/seek/volume work. EQ, ReplayGain, 8D, crossfade, and gapless do not apply.
+    private func scheduleWithOpusPlayer(url: URL, startTime: TimeInterval) {
+        tearDownOpusPlayer()
+
+        // Stop any engine nodes that were started optimistically in playCurrent().
+        primaryNode.stop()
+        secondaryNode.stop()
+
+        let item   = AVPlayerItem(url: url)
+        let player = AVPlayer(playerItem: item)
+        player.volume = audioSettings.volume
+        opusPlayer = player
+
+        // Load duration asynchronously (AVPlayerItem duration may be unknown at creation).
+        Task { [weak self] in
+            guard let self else { return }
+            let asset = item.asset
+            if let dur = try? await asset.load(.duration), !dur.seconds.isNaN, dur.seconds > 0 {
+                self.duration = dur.seconds
+                self.updateNowPlaying()
+            }
+        }
+
+        // Position tracking — replaces the AVAudioEngine timer path.
+        opusTimeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] time in
+            guard let self else { return }
+            self.position = time.seconds
+            // AB Repeat
+            if self.abRepeatEnabled,
+               let start = self.abRepeatStart,
+               let end   = self.abRepeatEnd,
+               time.seconds >= end {
+                self.opusPlayer?.seek(to: CMTime(seconds: start, preferredTimescale: 600))
+                self.position = start
+            }
+        }
+
+        // Track completion → advances to next song normally.
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleTrackEnded() }
+        }
+
+        if startTime > 0 {
+            player.seek(to: CMTime(seconds: startTime, preferredTimescale: 600))
+        }
+
+        if isPlaying { player.play() }
+
+        updateNowPlaying()
+        appLog("Playing via AVPlayer: \(url.lastPathComponent)", category: "audio")
+    }
+
+    private func tearDownOpusPlayer() {
+        if let obs = opusTimeObserver {
+            opusPlayer?.removeTimeObserver(obs)
+            opusTimeObserver = nil
+        }
+        opusPlayer?.pause()
+        opusPlayer = nil
     }
 
     // MARK: - Crossfade
@@ -1523,6 +1623,9 @@ final class AudioPlayerManager: ObservableObject {
             crossfadeMixer.outputVolume = 1.0
         }
 
+        // Sync volume to AVPlayer fallback path (no EQ/effects, but volume still applies).
+        opusPlayer?.volume = audioSettings.volume
+
         // Do NOT call updateNowPlaying() here — this runs on every EQ slider drag.
     }
 
@@ -1555,6 +1658,7 @@ final class AudioPlayerManager: ObservableObject {
     }
 
     private func updatePositionFromPlayer() {
+        guard !isUsingOpusPlayer else { return }
         // Do not overwrite `position` while an async download is in progress.
         // The position was already set to the seek target in seek()/downloadAndSchedule();
         // letting the timer fire here would clobber it with a stale node time.
