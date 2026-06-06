@@ -11,7 +11,7 @@ configs:
 
 packages:
   FFmpegKit:
-    url: https://github.com/arthenica/ffmpeg-kit
+    url: https://github.com/tylerjonesio/ffmpeg-kit-spm
     branch: main
 
 settings:
@@ -57,7 +57,7 @@ targets:
     dependencies:
       - target: LumisoundWidget
       - package: FFmpegKit
-        product: ffmpeg-kit-ios-audio-gpl
+        product: FFmpeg-Kit
     scheme:
       buildAction:
         targets:
