@@ -1,6 +1,8 @@
 import SwiftUI
 
-struct ToastView: View {
+// MARK: - LumiToast (app-internal toast notification)
+
+private struct LumiToastView: View {
     let text: String
     var icon: String = "checkmark.circle.fill"
     var isError: Bool = false
@@ -29,11 +31,16 @@ struct ToastView: View {
     }
 }
 
+// MARK: - View extension
+
 extension View {
-    func toast(message: Binding<String?>, icon: String = "checkmark.circle.fill", isError: Bool = false) -> some View {
+    /// Overlays a brief toast notification at the top of the view.
+    /// Pass a `Binding<String?>` — set it to a non-nil string to show the toast,
+    /// it auto-clears after 2.5 seconds.
+    func lumiToast(message: Binding<String?>, icon: String = "checkmark.circle.fill", isError: Bool = false) -> some View {
         self.overlay(alignment: .top) {
             if let text = message.wrappedValue {
-                ToastView(text: text, icon: icon, isError: isError)
+                LumiToastView(text: text, icon: icon, isError: isError)
                     .padding(.top, 16)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(9999)
