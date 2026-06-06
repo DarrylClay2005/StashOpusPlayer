@@ -450,7 +450,7 @@ class SyncPushRequest(BaseModel):
 
 
 class SharePlaylistRequest(BaseModel):
-    playlist_id: str
+    playlist_id: str = ""
     playlist_name: str
     tracks: list
 
@@ -1716,6 +1716,7 @@ async def get_shared_playlist(share_token: str):
     owner = display_name or username
 
     return {
+        "share_token": share_token,
         "name": name,
         "owner": owner,
         "tracks": tracks,
@@ -1780,6 +1781,7 @@ async def _ffprobe_tags(path: str) -> dict:
         "-v", "quiet",
         "-print_format", "json",
         "-show_streams",
+        "-show_format",
         path,
     ]
     async with _FFPROBE_SEMAPHORE:
@@ -1955,6 +1957,8 @@ async def server_stream(
     path: str = Query(..., description="Relative path within SERVER_MUSIC_DIR"),
 ):
     """Streams an audio file from the server music directory."""
+    if not SERVER_MUSIC_DIR:
+        raise HTTPException(status_code=404, detail="Server music library not configured")
     music_root = pathlib.Path(SERVER_MUSIC_DIR).resolve()
     full_path = (music_root / path).resolve()
 
@@ -1980,6 +1984,8 @@ async def server_artwork(
     path: str = Query(..., description="Relative path within SERVER_MUSIC_DIR"),
 ):
     """Extracts embedded album art from a server file and returns it as JPEG."""
+    if not SERVER_MUSIC_DIR:
+        raise HTTPException(status_code=404, detail="Server music library not configured")
     music_root = pathlib.Path(SERVER_MUSIC_DIR).resolve()
     full_path = (music_root / path).resolve()
 

@@ -88,7 +88,7 @@ final class ArtworkService {
            cacheKeyStr.hasPrefix("http"),
            let thumbnailURL = URL(string: cacheKeyStr) {
             appLog("Artwork: fetching remote thumbnail for \"\(song.displayName)\"", category: "artwork")
-            if let image = await fetchRemoteImage(url: thumbnailURL) {
+            if let image = await fetchRemoteImage(url: thumbnailURL, headers: song.httpHeaders) {
                 setMemoryCache(image, forKey: key)
                 let resized = resizedImage(image, maxDimension: 600)
                 saveToDisk(image: resized, key: key)
@@ -240,8 +240,10 @@ final class ArtworkService {
         return image
     }
 
-    func fetchRemoteImage(url: URL) async -> UIImage? {
-        guard let (data, response) = try? await URLSession.shared.data(from: url),
+    func fetchRemoteImage(url: URL, headers: [String: String]? = nil) async -> UIImage? {
+        var req = URLRequest(url: url)
+        headers?.forEach { req.setValue($1, forHTTPHeaderField: $0) }
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return UIImage(data: data)
     }

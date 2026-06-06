@@ -5,9 +5,12 @@ struct PlaylistDetailView: View {
 
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
+    @EnvironmentObject private var account: AccountService
+    @EnvironmentObject private var streaming: StreamingService
 
     @State private var isEditing = false
     @State private var showingAddSongs = false
+    @State private var showShareSheet = false
 
     // Always look up the live playlist so mutations (add/remove/reorder) are reflected immediately.
     private var currentPlaylist: Playlist {
@@ -86,6 +89,13 @@ struct PlaylistDetailView: View {
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 Button {
+                    showShareSheet = true
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .tint(AppTheme.accent)
+
+                Button {
                     showingAddSongs = true
                 } label: {
                     Image(systemName: "plus")
@@ -105,6 +115,13 @@ struct PlaylistDetailView: View {
             AddSongsSheet(playlist: playlist)
                 .environmentObject(library)
                 .environmentObject(player) // SongRow context menu (SongContextMenuContent) needs it
+        }
+        .sheet(isPresented: $showShareSheet) {
+            CollaborativePlaylistView(playlist: playlist)
+                .environmentObject(player)
+                .environmentObject(account)
+                .environmentObject(streaming)
+                .environmentObject(library)
         }
     }
 

@@ -161,6 +161,9 @@ CREATE TABLE IF NOT EXISTS ios_user_gallery_images (
   INDEX idx_user_id (user_id)
 );
 
+-- Fix playlist_id column type in ios_shared_playlists (was INT, must be VARCHAR for UUID strings)
+ALTER TABLE ios_shared_playlists MODIFY COLUMN playlist_id VARCHAR(36) NOT NULL DEFAULT '';
+
 -- iOS client telemetry / background log ingestion
 CREATE TABLE IF NOT EXISTS ios_app_logs (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -179,7 +182,7 @@ CREATE TABLE IF NOT EXISTS ios_app_logs (
 -- Collaborative playlist sharing (snapshot-based, bridge side)
 CREATE TABLE IF NOT EXISTS ios_shared_playlists (
   id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
-  playlist_id INT NOT NULL,
+  playlist_id VARCHAR(36) NOT NULL,
   owner_user_id VARCHAR(36) NOT NULL,
   share_token VARCHAR(36) UNIQUE NOT NULL,
   playlist_data JSON NOT NULL DEFAULT ('{}'),

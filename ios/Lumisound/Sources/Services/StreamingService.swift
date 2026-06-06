@@ -510,7 +510,14 @@ final class StreamingService: ObservableObject {
                 serverTracks = []
                 return
             }
-            serverTracks = try JSONDecoder().decode([ServerTrack].self, from: data)
+            struct ServerLibraryResponse: Decodable {
+                let tracks: [ServerTrack]
+                let total: Int
+                let dir: String?
+                let configured: Bool?
+            }
+            let decoded = try JSONDecoder().decode(ServerLibraryResponse.self, from: data)
+            serverTracks = decoded.tracks
             appLog("searchServerLibrary: \(serverTracks.count) result(s) for \"\(query)\"", category: "network")
         } catch {
             appError("searchServerLibrary: \(error.localizedDescription)", category: "network")

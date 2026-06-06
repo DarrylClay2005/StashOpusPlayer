@@ -20,11 +20,14 @@ struct LibraryView: View {
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var folderService: MusicFolderService
     @EnvironmentObject private var moodService: MoodPlaylistService
+    @EnvironmentObject private var account: AccountService
+    @EnvironmentObject private var streaming: StreamingService
 
     @State private var selectedTab: LibraryTab = .songs
     @State private var searchText: String = ""
     @State private var debouncedSearch: String = ""
     @State private var showAddMusic = false
+    @State private var showOpenSharedPlaylist = false
 
     // MARK: Filtered songs for Songs tab (uses debounced search)
 
@@ -77,6 +80,13 @@ struct LibraryView: View {
                 AddMusicView()
                     .environmentObject(library)
                     .environmentObject(folderService)
+            }
+            .sheet(isPresented: $showOpenSharedPlaylist) {
+                CollaborativePlaylistView(playlist: nil)
+                    .environmentObject(player)
+                    .environmentObject(account)
+                    .environmentObject(streaming)
+                    .environmentObject(library)
             }
             .onAppear {
                 let scanSource = UserDefaults.standard.string(forKey: "default_scan_source") ?? "apple_music"
@@ -134,6 +144,13 @@ struct LibraryView: View {
     @ToolbarContentBuilder
     private var toolbarItems: some ToolbarContent {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
+            Button {
+                showOpenSharedPlaylist = true
+            } label: {
+                Image(systemName: "link.badge.plus")
+            }
+            .tint(AppTheme.accent)
+
             if library.isScanning {
                 ProgressView()
                     .tint(AppTheme.accent)
