@@ -160,20 +160,15 @@ private struct FolderTrackRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
+                ArtworkThumbnail(song: song, size: 40)
+
                 if isCurrent {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(AppTheme.accent)
-                    Image(systemName: "waveform")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.textPrimary)
-                } else {
-                    Text(song.trackNumber > 0 ? "\(song.trackNumber)" : "–")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .monospacedDigit()
+                    RoundedRectangle(cornerRadius: max(4, 40 * 0.1), style: .continuous)
+                        .fill(AppTheme.accent.opacity(0.78))
+                    FolderWaveformIcon()
                 }
             }
-            .frame(width: 32, height: 32)
+            .frame(width: 40, height: 40)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(song.displayName)
@@ -198,5 +193,32 @@ private struct FolderTrackRow: View {
         }
         .contentShape(Rectangle())
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Animated waveform indicator (current track)
+
+private struct FolderWaveformIcon: View {
+    @State private var animating = false
+
+    private let heights: [CGFloat] = [0.45, 0.85, 0.60, 0.80, 0.50]
+    private let delays: [Double]   = [0.0,  0.15, 0.30, 0.10, 0.25]
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(0..<5) { i in
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(AppTheme.textPrimary)
+                    .frame(width: 2.5, height: animating ? 12 * heights[i] : 3)
+                    .animation(
+                        .easeInOut(duration: 0.55)
+                            .repeatForever(autoreverses: true)
+                            .delay(delays[i]),
+                        value: animating
+                    )
+            }
+        }
+        .onAppear { animating = true }
+        .onDisappear { animating = false }
     }
 }

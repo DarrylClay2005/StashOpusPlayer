@@ -78,11 +78,20 @@ extension View {
     }
 
     /// Applies the standard rounded panel surface style.
+    /// Panel opacity is controlled by the "panel_opacity" UserDefaults key (set in AppearanceView).
     func panelStyle() -> some View {
-        self
+        modifier(PanelStyleModifier())
+    }
+}
+
+private struct PanelStyleModifier: ViewModifier {
+    @AppStorage("panel_opacity") private var opacity: Double = 1.0
+
+    func body(content: Content) -> some View {
+        content
             .padding(14)
             .background(
-                AppTheme.surface,
+                AppTheme.surface.opacity(opacity),
                 in: RoundedRectangle(cornerRadius: 8, style: .continuous)
             )
     }

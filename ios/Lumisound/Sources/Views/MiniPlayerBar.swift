@@ -7,6 +7,10 @@ struct MiniPlayerBar: View {
     @EnvironmentObject private var sleepTimer: SleepTimerService
     @State private var showingNowPlaying = false
 
+    private let playHaptic  = UIImpactFeedbackGenerator(style: .light)
+    private let skipHaptic  = UIImpactFeedbackGenerator(style: .medium)
+    private let heartHaptic = UIImpactFeedbackGenerator(style: .soft)
+
     var body: some View {
         if player.currentSong != nil {
             barContent
@@ -92,6 +96,7 @@ struct MiniPlayerBar: View {
             // Heart / Favorite button
             if let song = player.currentSong {
                 Button {
+                    heartHaptic.impactOccurred()
                     library.toggleFavorite(songID: song.id)
                 } label: {
                     Image(systemName: library.isFavorite(songID: song.id) ? "heart.fill" : "heart")
@@ -99,11 +104,12 @@ struct MiniPlayerBar: View {
                         .foregroundStyle(library.isFavorite(songID: song.id) ? AppTheme.accent : AppTheme.textSecondary)
                 }
                 .buttonStyle(.plain)
-                .animation(.spring(response: 0.3), value: library.isFavorite(songID: song.id))
+                .animation(.spring(response: 0.3, dampingFraction: 0.55), value: library.isFavorite(songID: song.id))
             }
 
             // Play / Pause
             Button {
+                playHaptic.impactOccurred()
                 player.togglePlayPause()
             } label: {
                 ZStack {
@@ -120,6 +126,7 @@ struct MiniPlayerBar: View {
 
             // Skip Next
             Button {
+                skipHaptic.impactOccurred()
                 player.skipToNext()
             } label: {
                 Image(systemName: "forward.fill")
@@ -131,5 +138,10 @@ struct MiniPlayerBar: View {
         // Prevent taps on controls from bubbling up to the sheet trigger
         .simultaneousGesture(TapGesture().onEnded { })
         .onTapGesture { }
+        .onAppear {
+            playHaptic.prepare()
+            skipHaptic.prepare()
+            heartHaptic.prepare()
+        }
     }
 }

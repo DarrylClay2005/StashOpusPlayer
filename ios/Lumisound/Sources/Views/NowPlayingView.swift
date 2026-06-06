@@ -170,6 +170,15 @@ struct NowPlayingView: View {
         return .vinylDisc
     }()
 
+    // Seeker style
+    @State private var seekerStyle: SeekerStyle = {
+        if let raw = UserDefaults.standard.string(forKey: "nowPlaying_seekerStyle"),
+           let style = SeekerStyle(rawValue: raw) {
+            return style
+        }
+        return .waveform
+    }()
+
     // Queue preview panel
     @State private var showQueuePreview = true
 
@@ -383,6 +392,14 @@ struct NowPlayingView: View {
         case .spectrumWaveform:
             SpectrumWaveformArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
+
+        case .cassetteTape:
+            CassetteTapeArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .neonGlow:
+            NeonGlowArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
         }
     }
 
@@ -426,47 +443,75 @@ struct NowPlayingView: View {
 
     @ViewBuilder
     private var timelineSection: some View {
-        if let url = player.currentSong?.url, url.isFileURL, player.duration > 0 {
-            WaveformScrubberView(
-                url: url,
-                position: player.position,
-                duration: player.duration,
-                onSeek: { player.seek(to: $0) }
-            )
-        } else {
-            fallbackTimeline
+        VStack(spacing: 10) {
+            switch seekerStyle {
+            case .waveform:
+                if let url = player.currentSong?.url, url.isFileURL, player.duration > 0 {
+                    WaveformScrubberView(
+                        url: url,
+                        position: player.position,
+                        duration: player.duration,
+                        onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
+                    )
+                } else {
+                    ClassicScrubberView(
+                        position: player.position,
+                        duration: player.duration,
+                        onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
+                    )
+                }
+            case .classic:
+                ClassicScrubberView(
+                    position: player.position,
+                    duration: player.duration,
+                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
+                )
+            case .ring:
+                RingScrubberView(
+                    position: player.position,
+                    duration: player.duration,
+                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
+                )
+            case .bars:
+                BarsScrubberView(
+                    position: player.position,
+                    duration: player.duration,
+                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
+                )
+            }
+
+            seekerStylePicker
         }
     }
 
-    private var fallbackTimeline: some View {
-        VStack(spacing: 6) {
-            Slider(
-                value: Binding(
-                    get: { isSeeking ? draftPosition : player.position },
-                    set: { draftPosition = $0 }
-                ),
-                in: 0...max(player.duration, 0.001),
-                onEditingChanged: { editing in
-                    isSeeking = editing
-                    if editing {
-                        seekHaptic.impactOccurred()
-                    } else {
-                        player.seek(to: draftPosition)
+    private var seekerStylePicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) {
+                ForEach(SeekerStyle.allCases) { style in
+                    Button {
+                        selectHaptic.selectionChanged()
+                        seekerStyle = style
+                        UserDefaults.standard.set(style.rawValue, forKey: "nowPlaying_seekerStyle")
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: style.iconName)
+                                .font(.system(size: 11, weight: .medium))
+                            Text(style.displayName)
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundStyle(seekerStyle == style ? .white : AppTheme.textSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            seekerStyle == style ? AppTheme.dynamicAccent : AppTheme.surface,
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        )
                     }
+                    .buttonStyle(.plain)
+                    .animation(.easeInOut(duration: 0.18), value: seekerStyle)
                 }
-            )
-            .tint(AppTheme.accent)
-            .disabled(player.duration <= 0)
-
-            HStack {
-                Text(formatTime(isSeeking ? draftPosition : player.position))
-                    .monospacedDigit()
-                Spacer()
-                Text("-" + formatTime(max(0, player.duration - (isSeeking ? draftPosition : player.position))))
-                    .monospacedDigit()
             }
-            .font(.caption)
-            .foregroundStyle(AppTheme.textSecondary)
+            .padding(.horizontal, 2)
         }
     }
 
