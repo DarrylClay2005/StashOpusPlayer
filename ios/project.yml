@@ -12,7 +12,7 @@ configs:
 packages:
   FFmpegKit:
     url: https://github.com/arthenica/ffmpeg-kit
-    exactVersion: "6.0"
+    branch: main
 
 settings:
   base:
