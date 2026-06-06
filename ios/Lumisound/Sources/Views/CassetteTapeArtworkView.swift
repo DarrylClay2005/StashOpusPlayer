@@ -6,6 +6,10 @@ struct CassetteTapeArtworkView: View {
     @EnvironmentObject private var library: LibraryManager
 
     @State private var spoolRotation: Double = 0
+    @State private var floating = false
+    @State private var vuWidth: CGFloat = 60
+    @State private var vuTimer: Timer? = nil
+    @State private var tapeShimmer: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -13,7 +17,8 @@ struct CassetteTapeArtworkView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(
                     LinearGradient(
-                        colors: [Color(red: 0.13, green: 0.13, blue: 0.17), Color(red: 0.20, green: 0.20, blue: 0.25)],
+                        colors: [Color(red: 0.13, green: 0.13, blue: 0.17),
+                                 Color(red: 0.20, green: 0.20, blue: 0.25)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
@@ -23,7 +28,12 @@ struct CassetteTapeArtworkView: View {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .strokeBorder(Color(white: 0.32).opacity(0.45), lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
+                .shadow(
+                    color: AppTheme.dynamicAccent.opacity(floating ? 0.25 : 0.08),
+                    radius: floating ? 28 : 16,
+                    x: 0, y: 10
+                )
+                .animation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true), value: floating)
 
             // Label
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -59,28 +69,53 @@ struct CassetteTapeArtworkView: View {
             spoolView
                 .offset(x: 72, y: 54)
 
-            // Tape window
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(Color(red: 0.06, green: 0.06, blue: 0.08))
-                .frame(width: 150, height: 24)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .strokeBorder(Color(white: 0.2), lineWidth: 1)
-                )
-                .offset(y: 54)
+            // Tape window with moving tape highlight
+            ZStack {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color(red: 0.06, green: 0.06, blue: 0.08))
+                    .frame(width: 150, height: 24)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .strokeBorder(Color(white: 0.2), lineWidth: 1)
+                    )
 
-            // Accent stripe at bottom edge of housing
+                // Tape movement shimmer — a soft horizontal sweep
+                if isPlaying {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [.clear, Color(white: 0.35).opacity(0.5), .clear],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: 40, height: 14)
+                        .offset(x: tapeShimmer)
+                        .clipped()
+                }
+            }
+            .frame(width: 150, height: 24)
+            .clipped()
+            .offset(y: 54)
+
+            // VU meter accent stripe — width pulses while playing
             RoundedRectangle(cornerRadius: 3, style: .continuous)
                 .fill(AppTheme.dynamicAccent)
-                .frame(width: 60, height: 3)
+                .frame(width: vuWidth, height: 3)
+                .animation(.easeInOut(duration: 0.08), value: vuWidth)
                 .offset(y: 82)
         }
         .frame(width: 300, height: 200)
+        .offset(y: floating ? -6 : 0)
+        .animation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true), value: floating)
         .onChange(of: isPlaying) { playing in
-            if playing { startSpools() } else { stopSpools() }
+            if playing { startAnimations() } else { stopAnimations() }
         }
         .onAppear {
-            if isPlaying { startSpools() }
+            if isPlaying { startAnimations() }
+        }
+        .onDisappear {
+            stopAnimations()
         }
     }
 
@@ -109,13 +144,47 @@ struct CassetteTapeArtworkView: View {
         .rotationEffect(.degrees(spoolRotation))
     }
 
-    private func startSpools() {
+    private func startAnimations() {
+        // Spool rotation
         withAnimation(.linear(duration: 1.8).repeatForever(autoreverses: false)) {
             spoolRotation = 360
         }
+        // Housing float
+        floating = true
+        // Tape shimmer sweep
+        startTapeShimmer()
+        // VU meter
+        startVU()
     }
 
-    private func stopSpools() {
-        withAnimation(.easeOut(duration: 0.5)) { }
+    private func stopAnimations() {
+        withAnimation(.easeOut(duration: 0.5)) {
+            floating = false
+        }
+        withAnimation(.easeOut(duration: 0.3)) {
+            vuWidth = 60
+            tapeShimmer = 0
+        }
+        vuTimer?.invalidate()
+        vuTimer = nil
+    }
+
+    private func startTapeShimmer() {
+        tapeShimmer = -80
+        withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+            tapeShimmer = 80
+        }
+    }
+
+    private func startVU() {
+        vuTimer?.invalidate()
+        let t = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { _ in
+            let now = Date().timeIntervalSince1970
+            let base = 40.0 + 26.0 * abs(sin(now * 4.2))
+            let jitter = Double.random(in: -6...6)
+            vuWidth = CGFloat(max(20, min(80, base + jitter)))
+        }
+        RunLoop.main.add(t, forMode: .common)
+        vuTimer = t
     }
 }

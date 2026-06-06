@@ -1,12 +1,5 @@
 import SwiftUI
 
-// MARK: - FloatingCardsArtworkView
-//
-// Two overlapping album art cards at different rotation angles.
-// The "back" card is slightly larger and rotated more. Both float
-// with independent animation phases. If there is no previous song
-// art available, the same artwork is shown at a different tint/tilt.
-
 struct FloatingCardsArtworkView: View {
     let song: Song?
     let isPlaying: Bool
@@ -15,25 +8,36 @@ struct FloatingCardsArtworkView: View {
 
     private let cardSize: CGFloat = 240
 
-    @State private var frontFloat  = false
-    @State private var backFloat   = false
+    @State private var frontFloat    = false
+    @State private var backFloat     = false
+    @State private var frontRock     = false
+    @State private var backRock      = false
+    @State private var deepFloat     = false
 
     var body: some View {
         ZStack {
-            // Back card — current artwork, more tilt, slightly offset
-            cardView(song: song, size: cardSize, cornerRadius: 14)
-                .rotationEffect(.degrees(8))
-                .offset(x: 18, y: backFloat ? -6 : 6)
+            // Deep card — partially visible, heavy tilt, far behind
+            cardView(song: song, size: cardSize * 0.88, cornerRadius: 12)
+                .rotationEffect(.degrees(backRock ? 15 : 11))
+                .offset(x: 30, y: deepFloat ? 4 : 12)
+                .opacity(0.55)
                 .zIndex(0)
 
-            // Front card — same artwork, straighter, main focus
+            // Back card — current artwork, rotated, offset
             cardView(song: song, size: cardSize, cornerRadius: 14)
-                .rotationEffect(.degrees(-4))
-                .offset(x: -6, y: frontFloat ? -8 : 4)
-                .shadow(color: .black.opacity(0.50), radius: 20, x: 0, y: 10)
+                .rotationEffect(.degrees(backRock ? 10 : 6))
+                .offset(x: 18, y: backFloat ? -7 : 5)
+                .shadow(color: .black.opacity(0.35), radius: 14, x: 0, y: 6)
                 .zIndex(1)
+
+            // Front card — main focus, subtle tilt, slightly left
+            cardView(song: song, size: cardSize, cornerRadius: 14)
+                .rotationEffect(.degrees(frontRock ? -2 : -6))
+                .offset(x: -8, y: frontFloat ? -10 : 4)
+                .shadow(color: .black.opacity(0.55), radius: 24, x: 0, y: 12)
+                .zIndex(2)
         }
-        .frame(width: cardSize + 60, height: cardSize + 40)
+        .frame(width: cardSize + 80, height: cardSize + 60)
         .onChange(of: isPlaying) { playing in
             updateAnimations(playing: playing)
         }
@@ -48,7 +52,7 @@ struct FloatingCardsArtworkView: View {
             ArtworkThumbnail(song: song, size: size)
                 .environmentObject(library)
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .shadow(color: AppTheme.accent.opacity(0.25), radius: 12, x: 0, y: 6)
+                .shadow(color: AppTheme.accent.opacity(0.2), radius: 10, x: 0, y: 4)
         } else {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(
@@ -72,14 +76,22 @@ struct FloatingCardsArtworkView: View {
         if playing {
             withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) {
                 frontFloat = true
+                frontRock  = true
             }
             withAnimation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true).delay(0.4)) {
                 backFloat = true
+                backRock  = true
+            }
+            withAnimation(.easeInOut(duration: 3.4).repeatForever(autoreverses: true).delay(0.8)) {
+                deepFloat = true
             }
         } else {
             withAnimation(.easeOut(duration: 0.5)) {
                 frontFloat = false
+                frontRock  = false
                 backFloat  = false
+                backRock   = false
+                deepFloat  = false
             }
         }
     }

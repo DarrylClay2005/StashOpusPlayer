@@ -32,90 +32,113 @@ private struct VinylDiscView: View {
     let isPlaying: Bool
     @EnvironmentObject private var library: LibraryManager
 
-    @State private var rotation: Double = 0
-    @State private var animating = false
+    @State private var rotation: Double     = 0
+    @State private var sheenRotation: Double = 0
+    @State private var grooveGlow           = false
 
     var body: some View {
         ZStack {
-            // Outer vinyl: dark circle with radial gradient texture
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [Color(white: 0.08), Color(white: 0.12), Color(white: 0.06)],
-                        center: .center,
-                        startRadius: 50,
-                        endRadius: 150
-                    )
-                )
-                .overlay(vinylGrooves)
-
-            // Center label: album artwork or accent color circle
-            if let song {
-                ArtworkThumbnail(song: song, size: 130)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(Color(white: 0.15), lineWidth: 2))
-            } else {
+            // ── Spinning disc (art + grooves rotate together) ──
+            ZStack {
                 Circle()
-                    .fill(AppTheme.accent.opacity(0.8))
-                    .frame(width: 130, height: 130)
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .font(.system(size: 40, weight: .semibold))
-                            .foregroundStyle(.white)
+                    .fill(
+                        RadialGradient(
+                            colors: [Color(white: 0.08), Color(white: 0.13), Color(white: 0.06)],
+                            center: .center,
+                            startRadius: 50,
+                            endRadius: 150
+                        )
                     )
-            }
+                    .overlay(vinylGrooves)
 
-            // Center hole
+                if let song {
+                    ArtworkThumbnail(song: song, size: 130)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Color(white: 0.15), lineWidth: 2))
+                } else {
+                    Circle()
+                        .fill(AppTheme.accent.opacity(0.8))
+                        .frame(width: 130, height: 130)
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .font(.system(size: 40, weight: .semibold))
+                                .foregroundStyle(.white)
+                        )
+                }
+
+                Circle()
+                    .fill(Color(white: 0.04))
+                    .frame(width: 18, height: 18)
+            }
+            .rotationEffect(.degrees(rotation))
+
+            // ── Static light sheen — simulates a fixed overhead light source ──
+            // Does NOT rotate with disc, so it feels like real reflected light.
             Circle()
-                .fill(Color(white: 0.04))
-                .frame(width: 18, height: 18)
+                .trim(from: 0.05, to: 0.28)
+                .stroke(
+                    LinearGradient(
+                        colors: [.white.opacity(0.20), .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ),
+                    lineWidth: 52
+                )
+                .frame(width: 236, height: 236)
+                .rotationEffect(.degrees(sheenRotation))
+                .blendMode(.screen)
+                .allowsHitTesting(false)
+
+            // ── Groove glow ring — accent halo while playing ──
+            Circle()
+                .stroke(
+                    AppTheme.dynamicAccent.opacity(grooveGlow ? 0.18 : 0.0),
+                    lineWidth: 32
+                )
+                .frame(width: 224, height: 224)
+                .blur(radius: 8)
+                .animation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true), value: grooveGlow)
+                .allowsHitTesting(false)
         }
         .frame(width: 300, height: 300)
-        .rotationEffect(.degrees(rotation))
-        .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
+        .shadow(
+            color: AppTheme.dynamicAccent.opacity(grooveGlow ? 0.35 : 0.08),
+            radius: grooveGlow ? 32 : 16,
+            x: 0, y: 10
+        )
+        .animation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true), value: grooveGlow)
         .onChange(of: isPlaying) { playing in
-            if playing { startSpinning() } else { pauseSpinning() }
+            if playing { startAnimations() } else { pauseAnimations() }
         }
         .onAppear {
-            if isPlaying { startSpinning() }
+            if isPlaying { startAnimations() }
         }
     }
 
     private var vinylGrooves: some View {
         ZStack {
-            // Concentric semi-transparent rings simulating grooves
-            ForEach([0.78, 0.71, 0.64, 0.57, 0.50], id: \.self) { ratio in
+            ForEach([0.80, 0.73, 0.66, 0.59, 0.52], id: \.self) { ratio in
                 Circle()
-                    .stroke(Color(white: 0.18).opacity(0.6), lineWidth: 1)
+                    .stroke(Color(white: 0.18).opacity(0.55), lineWidth: 1)
                     .frame(width: 300 * ratio, height: 300 * ratio)
             }
-            // Highlight arc
-            Circle()
-                .trim(from: 0.1, to: 0.35)
-                .stroke(
-                    LinearGradient(
-                        colors: [.white.opacity(0.15), .clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ),
-                    lineWidth: 40
-                )
-                .frame(width: 260, height: 260)
         }
     }
 
-    private func startSpinning() {
-        withAnimation(.linear(duration: 3).repeatForever(autoreverses: false)) {
+    private func startAnimations() {
+        withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
             rotation = 360
         }
-        animating = true
+        withAnimation(.linear(duration: 10.0).repeatForever(autoreverses: false)) {
+            sheenRotation = 360
+        }
+        grooveGlow = true
     }
 
-    private func pauseSpinning() {
-        withAnimation(.easeOut(duration: 0.5)) {
-            // SwiftUI stops the repeating animation at the current value on next tick
-        }
-        animating = false
+    private func pauseAnimations() {
+        withAnimation(.easeOut(duration: 0.5)) { }
+        sheenRotation = 0
+        grooveGlow = false
     }
 }
 

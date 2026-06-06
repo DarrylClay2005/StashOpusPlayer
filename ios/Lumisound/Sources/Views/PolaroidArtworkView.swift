@@ -1,29 +1,43 @@
 import SwiftUI
 
-// MARK: - PolaroidArtworkView
-//
-// Album art displayed in a white-bordered polaroid frame, slightly rotated,
-// with the song title at the bottom in a serif/handwriting-style font.
-
 struct PolaroidArtworkView: View {
     let song: Song?
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
 
-    private let frameWidth: CGFloat  = 260
-    private let photoSize:  CGFloat  = 220
-    private let bottomPad:  CGFloat  = 52
+    private let frameWidth: CGFloat = 260
+    private let photoSize:  CGFloat = 220
+    private let bottomPad:  CGFloat = 52
+
+    @State private var floating   = false
+    @State private var rocking    = false
+    @State private var glareOffset: CGFloat = -280
 
     var body: some View {
         VStack(spacing: 0) {
-            // Photo area
-            if let song {
-                ArtworkThumbnail(song: song, size: photoSize)
-                    .environmentObject(library)
-            } else {
-                placeholderPhoto
+            // Photo area with glare sweep overlay
+            ZStack {
+                photoContent
+
+                // Glare sweep — diagonal highlight that sweeps across the photo while playing
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .white.opacity(0.12), location: 0.45),
+                        .init(color: .white.opacity(0.22), location: 0.5),
+                        .init(color: .white.opacity(0.12), location: 0.55),
+                        .init(color: .clear, location: 1),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .frame(width: photoSize * 1.4)
+                .offset(x: glareOffset)
+                .allowsHitTesting(false)
             }
+            .frame(width: photoSize, height: photoSize)
+            .clipped()
 
             // Polaroid bottom strip with title
             ZStack {
@@ -38,26 +52,69 @@ struct PolaroidArtworkView: View {
             .frame(width: frameWidth, height: bottomPad)
         }
         .frame(width: frameWidth, height: photoSize + bottomPad)
-        // White polaroid border
         .background(Color.white)
         .padding(10)
         .background(Color.white)
-        // Slight tilt
-        .rotationEffect(.degrees(-3))
-        .shadow(color: .black.opacity(0.40), radius: 18, x: 0, y: 10)
-        // Gentle float animation while playing
-        .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 2.4))
+        // Rocking rotation — oscillates between -5° and -1° while playing, static -3° when paused
+        .rotationEffect(.degrees(rocking ? -1.2 : -4.8))
+        .animation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true), value: rocking)
+        // Dynamic shadow — shifts as the card floats and rocks
+        .shadow(
+            color: .black.opacity(0.45),
+            radius: floating ? 28 : 14,
+            x: floating ? 5 : 0,
+            y: floating ? 16 : 8
+        )
+        .animation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true), value: floating)
+        // Vertical float
+        .offset(y: floating ? -8 : 0)
+        .animation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true), value: floating)
+        .onChange(of: isPlaying) { playing in
+            updateAnimations(playing: playing)
+        }
+        .onAppear {
+            updateAnimations(playing: isPlaying)
+        }
     }
 
-    private var placeholderPhoto: some View {
-        RoundedRectangle(cornerRadius: 4, style: .continuous)
-            .fill(AppTheme.surface)
-            .frame(width: photoSize, height: photoSize)
-            .overlay {
-                Image(systemName: "music.note")
-                    .font(.system(size: 64, weight: .semibold))
-                    .foregroundStyle(AppTheme.accent)
+    @ViewBuilder
+    private var photoContent: some View {
+        if let song {
+            ArtworkThumbnail(song: song, size: photoSize)
+                .environmentObject(library)
+        } else {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(AppTheme.surface)
+                .frame(width: photoSize, height: photoSize)
+                .overlay {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 64, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+        }
+    }
+
+    private func updateAnimations(playing: Bool) {
+        if playing {
+            floating = true
+            rocking = true
+            startGlare()
+        } else {
+            withAnimation(.easeOut(duration: 0.5)) {
+                floating = false
+                rocking = false
             }
+            withAnimation(.easeOut(duration: 0.3)) {
+                glareOffset = -280
+            }
+        }
+    }
+
+    private func startGlare() {
+        glareOffset = -280
+        withAnimation(.linear(duration: 3.5).repeatForever(autoreverses: false)) {
+            glareOffset = 320
+        }
     }
 }
 

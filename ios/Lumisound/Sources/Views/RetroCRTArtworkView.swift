@@ -1,75 +1,94 @@
 import SwiftUI
 
-// MARK: - RetroCRTArtworkView
-//
-// Album art displayed inside a simulated CRT TV border.
-// Features: rounded CRT bezel, scanline overlay, phosphor tint option,
-// and an LED-style "NOW PLAYING" ticker that scrolls while playing.
-
 struct RetroCRTArtworkView: View {
     let song: Song?
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
 
-    // Scanline animation
     @State private var scanlineOffset: CGFloat = 0
-    // Ticker offset for the scrolling text
     @State private var tickerOffset: CGFloat = 0
+    @State private var screenOpacity: Double = 1.0
+    @State private var bezelGlow = false
+    @State private var flickerTimer: Timer? = nil
 
-    private let screenSize:  CGFloat = 250
-    private let bezelPad:    CGFloat = 20
-    private let tickerHeight: CGFloat = 22
-
-    // The phosphor-tinted screen overlay uses a subtle green-tinted scanline
+    private let screenSize:   CGFloat = 250
+    private let bezelPad:     CGFloat = 20
+    private let tickerHeight:  CGFloat = 22
     private let phosphorColor = Color(red: 0.0, green: 1.0, blue: 0.4).opacity(0.06)
 
     var body: some View {
         VStack(spacing: 0) {
-            // ── CRT screen area ──────────────────────────────────────────
+            // CRT screen area
             ZStack {
-                // Album art (screen content)
                 screenContent
+                    .opacity(screenOpacity)
 
-                // Scanlines overlay
                 scanlineOverlay
 
-                // Phosphor tint
                 phosphorColor
                     .allowsHitTesting(false)
+
+                // Vignette — darkens corners like a real CRT
+                RadialGradient(
+                    colors: [.clear, .black.opacity(0.45)],
+                    center: .center,
+                    startRadius: 80,
+                    endRadius: 160
+                )
+                .allowsHitTesting(false)
             }
             .frame(width: screenSize, height: screenSize)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            // Slight CRT screen bulge simulation via scale on X
             .scaleEffect(x: 1.0, y: 0.96)
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(Color.black.opacity(0.8), lineWidth: 2)
             )
-
-            // ── CRT Bezel ───────────────────────────────────────────────
             .padding(bezelPad)
             .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(white: 0.22),
-                                Color(white: 0.14)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
+                ZStack {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(white: 0.22), Color(white: 0.14)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
                         )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .strokeBorder(Color(white: 0.35).opacity(0.6), lineWidth: 1)
-                    )
-                    .shadow(color: .black.opacity(0.6), radius: 16, x: 0, y: 8)
+
+                    // Bezel glow when playing
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(
+                            Color(red: 0.0, green: 1.0, blue: 0.4)
+                                .opacity(bezelGlow ? 0.40 : 0.08),
+                            lineWidth: 2
+                        )
+                        .animation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true), value: bezelGlow)
+
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(Color(white: 0.35).opacity(0.6), lineWidth: 1)
+                }
+                .shadow(
+                    color: Color(red: 0.0, green: 0.8, blue: 0.3)
+                        .opacity(bezelGlow ? 0.35 : 0.05),
+                    radius: bezelGlow ? 20 : 6, x: 0, y: 4
+                )
+                .animation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true), value: bezelGlow)
             )
 
-            // ── LED Ticker ───────────────────────────────────────────────
             ledTicker
+        }
+        .onChange(of: isPlaying) { playing in
+            updateAnimations(playing: playing)
+        }
+        .onAppear {
+            startScanlineAnimation()
+            updateAnimations(playing: isPlaying)
+        }
+        .onDisappear {
+            flickerTimer?.invalidate()
+            flickerTimer = nil
         }
     }
 
@@ -107,8 +126,6 @@ struct RetroCRTArtworkView: View {
             .offset(y: scanlineOffset)
         }
         .allowsHitTesting(false)
-        .onAppear { startScanlineAnimation() }
-        .onChange(of: isPlaying) { _ in startScanlineAnimation() }
     }
 
     private func startScanlineAnimation() {
@@ -125,7 +142,6 @@ struct RetroCRTArtworkView: View {
             : "  ■  PAUSED  "
 
         return ZStack {
-            // Ticker background
             Capsule()
                 .fill(Color.black)
                 .overlay(
@@ -133,7 +149,6 @@ struct RetroCRTArtworkView: View {
                         .strokeBorder(Color(red: 0.0, green: 0.8, blue: 0.3).opacity(0.5), lineWidth: 1)
                 )
 
-            // Scrolling text
             GeometryReader { geo in
                 Text(label)
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
@@ -151,11 +166,56 @@ struct RetroCRTArtworkView: View {
     }
 
     private func animateTicker(width: CGFloat, label: String) {
-        // Estimate text width (monospaced: ~7.5 pts per char at size 11)
         let estimatedTextWidth = CGFloat(label.count) * 7.5
         tickerOffset = width
         withAnimation(.linear(duration: Double(label.count) * 0.12).repeatForever(autoreverses: false)) {
             tickerOffset = -estimatedTextWidth
+        }
+    }
+
+    // MARK: Animations
+
+    private func updateAnimations(playing: Bool) {
+        bezelGlow = playing
+        if playing {
+            startFlicker()
+        } else {
+            flickerTimer?.invalidate()
+            flickerTimer = nil
+            withAnimation(.easeOut(duration: 0.3)) { screenOpacity = 1.0 }
+        }
+    }
+
+    private func startFlicker() {
+        flickerTimer?.invalidate()
+        let t = Timer.scheduledTimer(withTimeInterval: Double.random(in: 3.0...7.0), repeats: false) { _ in
+            guard isPlaying else { return }
+            performFlicker()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        flickerTimer = t
+    }
+
+    private func performFlicker() {
+        // Brief screen brightness drop — authentic CRT behaviour
+        let steps = Int.random(in: 1...3)
+        var delay = 0.0
+        for _ in 0..<steps {
+            let dropDelay = delay
+            let dropDuration = Double.random(in: 0.04...0.10)
+            DispatchQueue.main.asyncAfter(deadline: .now() + dropDelay) {
+                withAnimation(.easeInOut(duration: dropDuration)) {
+                    screenOpacity = Double.random(in: 0.55...0.80)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + dropDuration + 0.05) {
+                    withAnimation(.easeIn(duration: 0.06)) { screenOpacity = 1.0 }
+                }
+            }
+            delay += dropDuration + 0.12
+        }
+        // Schedule next flicker
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.1) {
+            startFlicker()
         }
     }
 }
