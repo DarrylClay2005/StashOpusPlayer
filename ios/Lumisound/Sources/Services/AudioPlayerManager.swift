@@ -2,6 +2,7 @@
 import Foundation
 import MediaPlayer
 import UIKit
+import ffmpegkit
 
 // MARK: - AudioPlayerManager
 
@@ -616,6 +617,14 @@ final class AudioPlayerManager: ObservableObject {
             return
         }
 
+        // Opus/WebM/OGG are not natively supported by AVAudioFile on iOS.
+        // Transcode to a lossless ALAC M4A temp file via FFmpegKit, then schedule that.
+        let fileExt = url.pathExtension.lowercased()
+        if ["opus", "webm", "ogg"].contains(fileExt) {
+            Task { await transcodeAndSchedule(url: url, startTime: startTime) }
+            return
+        }
+
         // Local file — schedule directly.
         do {
             let node = activeNode
@@ -712,25 +721,114 @@ final class AudioPlayerManager: ObservableObject {
             }
         } catch {
             isPlaying = false
-            // .opus / .webm / .ogg files are not supported by AVAudioFile on iOS. Downgrade
-            // to a warning so the error log isn't flooded on every restore for these files.
-            let ext = url.pathExtension.lowercased()
-            if ["opus", "webm", "ogg"].contains(ext) {
-                errorMessage = ".\(ext) files are not supported for local playback"
-                appWarn("Cannot open .\(ext) (not supported by AVAudioFile): \"\(currentSong?.displayName ?? "?")\"", category: "audio")
-            } else {
-                errorMessage = error.localizedDescription
-                appError("Playback error for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
-            }
+            errorMessage = error.localizedDescription
+            appError("Playback error for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
         }
     }
 
-    /// Downloads an HTTP/HTTPS audio URL to a named temp file (using a simple hash as the cache
-    /// key), then schedules it for playback via the existing AVAudioFile pipeline.
-    ///
-    /// Called from `scheduleCurrent` when the song URL has an http/https scheme.
-    /// This method is responsible for starting the engine and calling `node.play()` because
-    /// `playCurrent` returns early before doing so when it detects an HTTP URL.
+    /// Transcodes an Opus/WebM/OGG file to a lossless ALAC M4A via FFmpegKit, then schedules
+    /// the result for playback using the standard AVAudioFile pipeline.
+    /// Called from `scheduleCurrent` when it detects an unsupported container extension.
+    @MainActor
+    private func transcodeAndSchedule(url: URL, startTime: TimeInterval) async {
+        isSchedulingAsync = true
+        defer { isSchedulingAsync = false }
+        errorMessage = nil
+
+        guard let transcodedURL = await AudioEncoderService.shared.transcodeForPlayback(url) else {
+            errorMessage = "Could not decode \(url.pathExtension.uppercased()) file — transcoding failed"
+            isPlaying = false
+            appError("FFmpegKit transcoding failed for \"\(currentSong?.displayName ?? "?")\"", category: "audio")
+            return
+        }
+
+        do {
+            let node = activeNode
+            let gen  = scheduleGeneration &+ 1
+            scheduleGeneration = gen
+            node.stop()
+
+            let file        = try AVAudioFile(forReading: transcodedURL)
+            audioFile       = file
+            duration        = file.duration
+            let sampleRate  = file.processingFormat.sampleRate
+            let startFrame  = max(0, AVAudioFramePosition(startTime * sampleRate))
+            let framesLeft  = max(0, AVAudioFrameCount(file.length - startFrame))
+            fileStartFrame  = startFrame
+            position        = startTime
+            gaplessScheduled = false
+
+            node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.scheduleGeneration == gen else { return }
+                    self.handleTrackEnded()
+                }
+            }
+
+            // Crossfade timer — same logic as scheduleCurrent.
+            if audioSettings.crossfadeEnabled && audioSettings.crossfadeDuration > 0 {
+                let trackLength     = Double(framesLeft) / sampleRate
+                let crossfadeOffset = max(0, trackLength - audioSettings.crossfadeDuration)
+                if crossfadeOffset > 0 {
+                    crossfadeStartTimer?.invalidate()
+                    crossfadeStartTimer = Timer.scheduledTimer(
+                        withTimeInterval: crossfadeOffset, repeats: false
+                    ) { [weak self] _ in
+                        Task { @MainActor in
+                            guard let self, self.isPlaying, !self.isCrossfading else { return }
+                            self.beginCrossfade()
+                        }
+                    }
+                }
+            }
+
+            if isPlaying {
+                startEngineIfNeeded()
+                node.play()
+                startTimer()
+                reapplyActiveEffect()
+            }
+            updateNowPlaying()
+
+            // ReplayGain from original file's metadata.
+            if audioSettings.replayGainEnabled {
+                let asset       = AVURLAsset(url: url)
+                let capturedURL = url
+                Task.detached(priority: .utility) { [weak self] in
+                    let metadata = (try? await asset.load(.metadata)) ?? []
+                    var gainDB: Float?
+                    for item in metadata {
+                        let id = item.identifier?.rawValue.lowercased() ?? ""
+                        if id.contains("replaygain_track_gain") || id.contains("replaygain") {
+                            if let str = item.stringValue {
+                                let numeric = str.components(
+                                    separatedBy: CharacterSet(charactersIn: "-+0123456789.").inverted
+                                ).joined()
+                                gainDB = Float(numeric)
+                            }
+                        }
+                    }
+                    if gainDB == nil {
+                        let rms = await NormalizationService.shared.gain(for: capturedURL)
+                        if rms != 0 { gainDB = rms }
+                    }
+                    if let gain = gainDB {
+                        await MainActor.run { [weak self] in
+                            guard let self else { return }
+                            let linear = pow(10.0, gain / 20.0)
+                            self.crossfadeMixer.outputVolume = min(linear * self.audioSettings.volume, 1.5)
+                        }
+                    }
+                }
+            }
+
+        } catch {
+            errorMessage = "Playback error: \(error.localizedDescription)"
+            isPlaying = false
+            appError("Transcoded-file scheduling failed for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
+        }
+    }
+
     /// Removes stream cache temp files older than 1 hour to prevent unbounded disk growth.
     private func cleanOldStreamCache() {
         let tempDir = FileManager.default.temporaryDirectory
@@ -1047,6 +1145,9 @@ final class AudioPlayerManager: ObservableObject {
         if (try? session.setCategory(.playback, mode: .default, options: fullOptions)) == nil {
             try? session.setCategory(.playback, mode: .default, options: fallbackOptions)
         }
+        // Request 48 kHz — the native rate for Opus and most modern audio.
+        // iOS honours this when hardware supports it; silently ignores it otherwise.
+        try? session.setPreferredSampleRate(48000)
         try? session.setActive(true)
 
         NotificationCenter.default.addObserver(
