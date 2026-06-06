@@ -158,9 +158,16 @@ jobs:
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
           git add ios/altstore-source.json
-          git diff --cached --quiet && echo "No changes to commit" || \
-            git commit -m "chore(ios): update altstore-source.json to v${{ steps.version.outputs.version }} [skip ci]"
-          git push origin HEAD:main
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "chore(ios): update altstore-source.json to v${{ steps.version.outputs.version }} [skip ci]"
+          for i in 1 2 3; do
+            git push origin HEAD:main && break
+            git fetch origin main
+            git rebase origin/main
+          done
 
       - name: Create GitHub Release
         env:
