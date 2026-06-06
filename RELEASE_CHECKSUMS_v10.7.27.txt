@@ -1,2 +1,0 @@
-75a6094367dc7da82586ab61c6cfa90235970c41bcc6895333dea15a84c84ffc  /mnt/nobara-root/@home/desmond/Documents/StashOpusPlayer/releases/v10.7.27/StashOpusPlayer-v10.7.27-release.aab
-1a7d7c7d3c826b704139763f44d0342cc7cd53f13bede6d4a1214ac25adf14dc  /mnt/nobara-root/@home/desmond/Documents/StashOpusPlayer/releases/v10.7.27/StashOpusPlayer-v10.7.27-release.apk

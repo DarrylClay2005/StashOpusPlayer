@@ -1,1 +1,0 @@
-Modern music player with pitch & speed control, 10‑band EQ, and smart art.
