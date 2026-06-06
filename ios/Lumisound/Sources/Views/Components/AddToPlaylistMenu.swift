@@ -69,26 +69,8 @@ struct SongContextMenuContent: View {
             Label("New Playlist with Song", systemImage: "folder.badge.plus")
         }
 
-        // MARK: Convert Format — only for local files
-        if let url = song.url, url.isFileURL {
-            Divider()
-
-            Menu {
-                ForEach(AudioEncoderService.OutputFormat.allCases) { fmt in
-                    Button {
-                        Task {
-                            _ = try? await AudioEncoderService.shared.convert(song: song, to: fmt)
-                            library.scanLocalDocuments()
-                        }
-                    } label: {
-                        Label(fmt.rawValue, systemImage: fmt.systemImage)
-                    }
-                }
-            } label: {
-                Label("Convert Format", systemImage: "waveform.badge.plus")
-            }
-        }
     }
+
 }
 
 // MARK: - ViewModifier

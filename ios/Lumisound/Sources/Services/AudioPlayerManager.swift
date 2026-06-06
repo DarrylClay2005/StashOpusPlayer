@@ -616,8 +616,8 @@ final class AudioPlayerManager: ObservableObject {
             return
         }
 
-        // Opus/WebM/OGG are not natively supported by AVAudioFile on iOS.
-        // Transcode to a lossless ALAC M4A temp file via FFmpegKit, then schedule that.
+        // Opus/WebM/OGG containers may not be natively supported by AVAudioFile.
+        // Route through AudioEncoderService which tries native open first, then exports to M4A.
         let fileExt = url.pathExtension.lowercased()
         if ["opus", "webm", "ogg"].contains(fileExt) {
             Task { await transcodeAndSchedule(url: url, startTime: startTime) }
@@ -725,8 +725,8 @@ final class AudioPlayerManager: ObservableObject {
         }
     }
 
-    /// Transcodes an Opus/WebM/OGG file to a lossless ALAC M4A via FFmpegKit, then schedules
-    /// the result for playback using the standard AVAudioFile pipeline.
+    /// Converts an Opus/WebM/OGG file to a playable format via AudioEncoderService,
+    /// then schedules the result for playback using the standard AVAudioFile pipeline.
     /// Called from `scheduleCurrent` when it detects an unsupported container extension.
     @MainActor
     private func transcodeAndSchedule(url: URL, startTime: TimeInterval) async {
@@ -737,7 +737,7 @@ final class AudioPlayerManager: ObservableObject {
         guard let transcodedURL = await AudioEncoderService.shared.transcodeForPlayback(url) else {
             errorMessage = "Could not decode \(url.pathExtension.uppercased()) file — transcoding failed"
             isPlaying = false
-            appError("FFmpegKit transcoding failed for \"\(currentSong?.displayName ?? "?")\"", category: "audio")
+            appError("Transcoding failed for \"\(currentSong?.displayName ?? "?")\"", category: "audio")
             return
         }
 
