@@ -1,11 +1,9 @@
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y ffmpeg curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
-# Install yt-dlp from official binary (always latest)
-RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-        -o /usr/local/bin/yt-dlp \
-    && chmod +x /usr/local/bin/yt-dlp
+# Install yt-dlp pinned version via pip
+RUN pip install --no-cache-dir yt-dlp==2025.1.26
 
 WORKDIR /app
 

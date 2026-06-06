@@ -13,6 +13,12 @@ final class BridgeHealthService: ObservableObject {
 
     private var checkTimer: Timer?
 
+    /// Timestamp of the last completed bridge health check.
+    /// Used to enforce a 30-second cooldown so rapid app-foreground events
+    /// don't trigger redundant network calls. Reset to `.distantPast` when
+    /// the last check returned a failure so the next foreground always retries.
+    private var lastCheckTime: Date = .distantPast
+
     func startPeriodicChecks(streaming: StreamingService) {
         stopPeriodicChecks()
         appLog("startPeriodicChecks: bridge=\(streaming.bridgeURL)", category: "network")
@@ -31,7 +37,20 @@ final class BridgeHealthService: ObservableObject {
 
     func check(streaming: StreamingService) async {
         let prevHealthy = isHealthy
+
+        // Cooldown: skip the network round-trip if the last check succeeded
+        // within the past 30 seconds. Always re-check after a failure so the
+        // UI recovers promptly once the bridge comes back online.
+        let lastCheckSucceeded = prevHealthy == true
+        if lastCheckSucceeded && Date().timeIntervalSince(lastCheckTime) < 30.0 {
+            appLog("BridgeHealth: skipping check (cooldown active)", category: "network")
+            return
+        }
+
         let healthy = await streaming.checkHealth()
+        // Record timestamp regardless of outcome; failures reset it to distantPast
+        // so the next call is never suppressed after a failure.
+        lastCheckTime = healthy ? Date() : .distantPast
         isHealthy = healthy
 
         if healthy && !streaming.apiKey.isEmpty {

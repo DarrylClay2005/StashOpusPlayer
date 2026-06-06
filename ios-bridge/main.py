@@ -19,6 +19,8 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
+import yt_dlp
+
 from auth import (
     create_token,
     decode_token,
@@ -173,20 +175,17 @@ def _get_client_ip(request: Request) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def cleanup_old_temp_dirs() -> None:
-    """Remove download temp dirs (prefix 'dl_') older than 10 minutes."""
-    tmp = pathlib.Path(tempfile.gettempdir())
-    cutoff = time.time() - 600
-    cleaned = 0
-    for item in tmp.iterdir():
-        try:
-            if item.is_dir() and item.name.startswith("dl_") and item.stat().st_mtime < cutoff:
-                shutil.rmtree(item, ignore_errors=True)
-                cleaned += 1
-        except Exception:
-            pass
-    if cleaned:
-        logger.info("Startup cleanup: removed %d stale temp download dirs", cleaned)
+async def cleanup_orphan_temp_dirs() -> None:
+    """Remove download temp dirs (prefix 'dl_') older than 1 hour."""
+    tmp_dir = pathlib.Path(tempfile.gettempdir())
+    cutoff = time.time() - 3600
+    for dl_dir in tmp_dir.glob("dl_*"):
+        if dl_dir.is_dir() and dl_dir.stat().st_mtime < cutoff:
+            try:
+                shutil.rmtree(dl_dir, ignore_errors=True)
+                logger.info(f"Cleaned orphan temp dir: {dl_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to clean {dl_dir}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +196,7 @@ async def cleanup_old_temp_dirs() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    await cleanup_old_temp_dirs()
+    await cleanup_orphan_temp_dirs()
     yield
     # Shutdown: close the DB connection pool (Fix 8)
     import db as _db_module
@@ -450,6 +449,12 @@ class SyncPushRequest(BaseModel):
     theme_color: Optional[str] = None
 
 
+class SharePlaylistRequest(BaseModel):
+    playlist_id: str
+    playlist_name: str
+    tracks: list
+
+
 # ---------------------------------------------------------------------------
 # Helper: build user dict from DB row
 # ---------------------------------------------------------------------------
@@ -476,7 +481,11 @@ def _user_dict(row: tuple) -> dict:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": VERSION}
+    return {
+        "status": "ok",
+        "version": VERSION,
+        "yt_dlp_version": yt_dlp.version.__version__,
+    }
 
 
 @app.get("/api/search")
@@ -1625,6 +1634,127 @@ async def sync_push(
     return {"status": "synced"}
 
 
+# ---------------------------------------------------------------------------
+# Collaborative Playlist Endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/user/playlists/share", status_code=201)
+async def share_playlist(
+    body: SharePlaylistRequest,
+    payload: dict = Depends(get_current_user),
+):
+    """Create a shareable snapshot of a playlist. Returns a share token and deep-link URL."""
+    user_id = payload["sub"]
+    share_id = str(uuid.uuid4())
+    share_token = str(uuid.uuid4())
+
+    playlist_data = json.dumps({
+        "name": body.playlist_name,
+        "tracks": body.tracks,
+    })
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            # Fetch display name for the owner
+            await cur.execute(
+                "SELECT display_name, username FROM ios_users WHERE id = %s",
+                (user_id,),
+            )
+            user_row = await cur.fetchone()
+            if not user_row:
+                raise HTTPException(status_code=401, detail="User not found")
+
+            await cur.execute(
+                """
+                INSERT INTO ios_shared_playlists
+                    (id, playlist_id, owner_user_id, share_token, playlist_data)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (share_id, body.playlist_id, user_id, share_token, playlist_data),
+            )
+
+    share_url = f"lumisound://shared/{share_token}"
+    logger.info("share_playlist: user %s shared playlist %s as token %s", user_id, body.playlist_id, share_token)
+    return {"share_token": share_token, "share_url": share_url}
+
+
+@app.get("/shared/{share_token}")
+async def get_shared_playlist(share_token: str):
+    """Public endpoint — returns a shared playlist snapshot by its token."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT sp.playlist_data, sp.created_at, sp.is_active,
+                       u.display_name, u.username
+                FROM ios_shared_playlists sp
+                JOIN ios_users u ON u.id = sp.owner_user_id
+                WHERE sp.share_token = %s
+                """,
+                (share_token,),
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Shared playlist not found")
+
+    playlist_data_raw, created_at, is_active, display_name, username = row
+
+    if not is_active:
+        raise HTTPException(status_code=404, detail="Shared playlist has been revoked")
+
+    try:
+        data = json.loads(playlist_data_raw) if isinstance(playlist_data_raw, str) else playlist_data_raw
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+
+    tracks = data.get("tracks", [])
+    name = data.get("name", "Shared Playlist")
+    owner = display_name or username
+
+    return {
+        "name": name,
+        "owner": owner,
+        "tracks": tracks,
+        "track_count": len(tracks),
+        "created_at": created_at.isoformat() if created_at else None,
+    }
+
+
+@app.delete("/user/playlists/share/{share_token}", status_code=204)
+async def revoke_shared_playlist(
+    share_token: str,
+    payload: dict = Depends(get_current_user),
+):
+    """Revoke a share token — only the owner can revoke."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT owner_user_id, is_active FROM ios_shared_playlists WHERE share_token = %s",
+                (share_token,),
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Shared playlist not found")
+
+    owner_user_id, is_active = row
+    if owner_user_id != user_id:
+        raise HTTPException(status_code=403, detail="You are not the owner of this shared playlist")
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_shared_playlists SET is_active = FALSE WHERE share_token = %s",
+                (share_token,),
+            )
+
+    logger.info("revoke_shared_playlist: user %s revoked share token %s", user_id, share_token)
 
 
 # ---------------------------------------------------------------------------

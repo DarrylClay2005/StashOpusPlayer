@@ -153,6 +153,34 @@ final class AudioPlayerManager: ObservableObject {
         DarwinWidgetBridge.shared.addObserver(name: DarwinWidgetBridge.skipNext) { [weak self] in
             Task { @MainActor [weak self] in self?.skipToNext() }
         }
+
+        setupRouteChangeObserver()
+    }
+
+    // MARK: - Route Change Recovery
+
+    private func setupRouteChangeObserver() {
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                  AVAudioSession.RouteChangeReason(rawValue: reason) == .oldDeviceUnavailable
+            else { return }
+            Task { @MainActor in
+                // Give AVAudioSession 0.5s to settle before restarting engine
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard self.isPlaying else { return }
+                do {
+                    try self.engine.start()
+                    appLog("AudioEngine restarted after route change", category: "audio")
+                } catch {
+                    appError("AudioEngine restart failed: \(error.localizedDescription)", category: "audio")
+                }
+            }
+        }
     }
 
     deinit {
@@ -467,6 +495,7 @@ final class AudioPlayerManager: ObservableObject {
 
     func savePlaybackState() {
         let snapshot = PlaybackSnapshot(
+            version: PlaybackSnapshot.currentVersion,
             currentSongID: currentSong?.id,
             queue: queue,
             currentIndex: currentIndex,
@@ -485,6 +514,14 @@ final class AudioPlayerManager: ObservableObject {
             let snapshot = try? JSONDecoder().decode(PlaybackSnapshot.self, from: data),
             !snapshot.queue.isEmpty
         else { return }
+
+        // Discard snapshots written by an older schema version to prevent crashes or
+        // unexpected state from stale / incompatible data.
+        if snapshot.version != PlaybackSnapshot.currentVersion {
+            UserDefaults.standard.removeObject(forKey: playbackStateKey)
+            appLog("PlaybackSnapshot version mismatch (\(snapshot.version) vs \(PlaybackSnapshot.currentVersion)) — cleared stale snapshot", category: "general")
+            return
+        }
 
         // Sanitise URLs before restoring.
         // ipod-library:// asset URLs are session-scoped and expire across app launches.
@@ -871,10 +908,10 @@ final class AudioPlayerManager: ObservableObject {
         scheduleGeneration = gen
         incoming.scheduleFile(nextFile, at: nil) { [weak self] in
             Task { @MainActor in
-                // Incoming finished its full file — crossfade is complete; swap active node.
+                // Incoming finished its full file — drive normal track-end logic.
+                // isCrossfading and usingPrimaryNode are already updated by finishCrossfade()
+                // when the volume ramp completed; only guard on generation for stale callbacks.
                 guard let self, self.scheduleGeneration == gen else { return }
-                self.isCrossfading = false
-                self.usingPrimaryNode.toggle()
                 self.handleTrackEnded()
             }
         }
@@ -905,13 +942,16 @@ final class AudioPlayerManager: ObservableObject {
     }
 
     /// Called when the volume-ramp timer completes.
-    /// The incoming node is still mid-playback — only stop the outgoing one.
+    /// The incoming node is still mid-playback — stop the outgoing node, reset crossfade
+    /// state, and flip the active-node flag so subsequent calls use the correct node.
     private func finishCrossfade(nextSong: Song, nextFile: AVAudioFile) {
         let outgoing = usingPrimaryNode ? primaryNode : secondaryNode
         outgoing.stop()
         outgoing.volume = audioSettings.volume
-        // Incoming keeps playing; isCrossfading stays true so activeNode and
-        // updatePositionFromPlayer keep using the incoming node until it finishes.
+        // Mark crossfade complete and swap the active-node pointer now that the
+        // volume ramp has finished and the incoming node owns full-volume playback.
+        isCrossfading = false
+        usingPrimaryNode.toggle()
         advanceIndex()
         currentSong = nextSong
         audioFile = nextFile

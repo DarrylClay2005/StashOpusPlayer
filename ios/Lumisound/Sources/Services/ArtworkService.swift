@@ -29,7 +29,9 @@ final class ArtworkService {
         diskCacheURL = caches.appendingPathComponent("Artwork", isDirectory: true)
         try? FileManager.default.createDirectory(at: diskCacheURL, withIntermediateDirectories: true)
 
-        memoryCache.countLimit = 300
+        // LRU eviction: cap at 200 images. NSCache evicts least-recently-used entries
+        // automatically under memory pressure and when countLimit is exceeded.
+        memoryCache.countLimit = 200
         memoryCache.totalCostLimit = 100 * 1024 * 1024   // 100 MB (was 50; video frames are large)
     }
 
@@ -139,6 +141,28 @@ final class ArtworkService {
         noArtworkKeys.insert(key)
         appWarn("Artwork: no source found for \"\(song.displayName)\"", category: "artwork")
         return nil
+    }
+
+    // MARK: - Cache Management
+
+    /// Evicts all in-memory artwork entries immediately.
+    /// The disk cache is left intact so artwork can be reloaded on next access.
+    func clearCache() {
+        memoryCache.removeAllObjects()
+        mediaQueryCache.removeAllObjects()
+        noArtworkKeys.removeAll()
+    }
+
+    /// Warms the memory cache for the given songs at background priority.
+    /// Skips any song whose artwork is already cached; does not force-store entries
+    /// when the cache is at capacity — NSCache will evict as needed.
+    func prefetch(songs: [Song]) {
+        Task(priority: .background) {
+            for song in songs {
+                guard artwork(for: song) == nil else { continue }
+                _ = await loadArtwork(for: song)
+            }
+        }
     }
 
     // MARK: - Private Helpers

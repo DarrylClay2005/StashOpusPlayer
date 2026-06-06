@@ -153,6 +153,7 @@ struct NowPlayingView: View {
     @State private var showEffects = false
     @State private var showEQ = true
     @State private var showLyrics = false
+    @State private var showLyricsSyncEditor = false
 
     // Artwork style — migrates old Bool key to the new enum key on first use
     @State private var artworkStyle: NowPlayingArtworkStyle = {
@@ -1142,6 +1143,17 @@ struct NowPlayingView: View {
                     }
                 }
                 .padding(.top, 8)
+
+                if !lyricsLines.isEmpty, player.currentSong != nil {
+                    Button {
+                        showLyricsSyncEditor = true
+                    } label: {
+                        Label("Sync Editor", systemImage: "waveform.and.mic")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                    .padding(.top, 4)
+                }
             },
             label: {
                 Text("Lyrics")
@@ -1151,6 +1163,10 @@ struct NowPlayingView: View {
         )
         .tint(AppTheme.accent)
         .panelStyle()
+        .sheet(isPresented: $showLyricsSyncEditor) {
+            LyricsSyncEditorView()
+                .environmentObject(player)
+        }
     }
 
     // MARK: - Helpers

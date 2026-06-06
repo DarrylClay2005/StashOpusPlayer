@@ -12,6 +12,8 @@ struct LumisoundApp: App {
     @StateObject private var bgService = BackgroundService()
     @StateObject private var account = AccountService()
     @StateObject private var bridgeHealth = BridgeHealthService()
+    @StateObject private var moodService = MoodPlaylistService()
+    @StateObject private var cacheManager = CacheManagerService()
 
     @State private var showLaunch = true
 
@@ -28,6 +30,8 @@ struct LumisoundApp: App {
                     .environmentObject(bgService)
                     .environmentObject(account)
                     .environmentObject(bridgeHealth)
+                    .environmentObject(moodService)
+                    .environmentObject(cacheManager)
                     .opacity(showLaunch ? 0 : 1)
 
                 if showLaunch {
@@ -44,6 +48,14 @@ struct LumisoundApp: App {
 
                     // Restore audio settings — player must be configured before any resume.
                     player.audioSettings = PersistenceService.shared.loadAudioSettings() ?? AudioSettings()
+
+                    // Wire the sleep-timer fade to the player's volume control.
+                    sleepTimer.getVolume = { player.audioSettings.volume }
+                    sleepTimer.setVolume = { player.audioSettings.volume = $0 }
+                    sleepTimer.onExpire  = { player.pause() }
+
+                    // Wire mood service to library so it can access songs.
+                    moodService.libraryManager = libraryManager
 
                     // Auto-scan for corrupt files once per day (non-blocking).
                     CorruptFileFinderService.shared.runDailyCheckIfNeeded()

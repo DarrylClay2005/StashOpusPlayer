@@ -13,6 +13,7 @@ struct SettingsView: View {
     @EnvironmentObject private var updater: UpdateService
     @EnvironmentObject private var streaming: StreamingService
     @EnvironmentObject private var account: AccountService
+    @EnvironmentObject private var cacheManager: CacheManagerService
 
     @State private var showLogin = false
 
@@ -207,6 +208,12 @@ struct SettingsView: View {
             // Corrupt file finder
             NavigationLink(destination: CorruptFilesView()) {
                 Label("Corrupt File Finder", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+
+            // Storage & cache manager
+            NavigationLink(destination: CacheManagerView().environmentObject(cacheManager)) {
+                Label("Storage & Cache", systemImage: "internaldrive")
                     .foregroundStyle(AppTheme.textPrimary)
             }
 

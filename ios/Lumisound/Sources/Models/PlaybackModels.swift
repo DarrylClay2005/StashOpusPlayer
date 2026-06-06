@@ -17,12 +17,49 @@ enum RepeatMode: String, CaseIterable, Codable, Identifiable {
 }
 
 struct PlaybackSnapshot: Codable, Equatable {
+    static let currentVersion = 2
+
+    var version: Int
     var currentSongID: Song.ID?
     var queue: [Song]
     var currentIndex: Int
     var position: TimeInterval
     var repeatMode: RepeatMode
     var shuffleEnabled: Bool
+
+    init(
+        version: Int = PlaybackSnapshot.currentVersion,
+        currentSongID: Song.ID? = nil,
+        queue: [Song],
+        currentIndex: Int,
+        position: TimeInterval,
+        repeatMode: RepeatMode,
+        shuffleEnabled: Bool
+    ) {
+        self.version = version
+        self.currentSongID = currentSongID
+        self.queue = queue
+        self.currentIndex = currentIndex
+        self.position = position
+        self.repeatMode = repeatMode
+        self.shuffleEnabled = shuffleEnabled
+    }
+
+    // CodingKeys to support missing `version` in older snapshots (default to 1).
+    enum CodingKeys: String, CodingKey {
+        case version, currentSongID, queue, currentIndex, position, repeatMode, shuffleEnabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = (try? container.decode(Int.self, forKey: .version)) ?? 1
+        currentSongID = try? container.decode(Song.ID.self, forKey: .currentSongID)
+        queue = try container.decode([Song].self, forKey: .queue)
+        currentIndex = try container.decode(Int.self, forKey: .currentIndex)
+        position = try container.decode(TimeInterval.self, forKey: .position)
+        repeatMode = try container.decode(RepeatMode.self, forKey: .repeatMode)
+        shuffleEnabled = try container.decode(Bool.self, forKey: .shuffleEnabled)
+    }
 }
 
 struct AudioSettings: Codable, Equatable {

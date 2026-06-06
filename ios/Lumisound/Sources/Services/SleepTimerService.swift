@@ -8,6 +8,8 @@ final class SleepTimerService: ObservableObject {
     @Published var selectedDuration: TimeInterval = 30 * 60
     /// Set to `true` for one tick when the timer expires; AudioPlayerManager observes this.
     @Published private(set) var didExpire = false
+    /// `true` while the 60-second volume fade-out is in progress.
+    @Published private(set) var isFading = false
 
     static let presets: [(label: String, seconds: TimeInterval)] = [
         ("5 min",  5  * 60),
@@ -19,6 +21,14 @@ final class SleepTimerService: ObservableObject {
     ]
 
     private var timer: Timer?
+    private var fadeTimer: Timer?
+
+    // Closure called to read/write the player's current volume so the service
+    // stays decoupled from AudioPlayerManager's concrete type.
+    var getVolume: (() -> Float)?
+    var setVolume: ((Float) -> Void)?
+    /// Called after the fade reaches zero — should pause/stop playback.
+    var onExpire: (() -> Void)?
 
     func start(duration: TimeInterval? = nil) {
         let d = duration ?? selectedDuration
@@ -36,6 +46,7 @@ final class SleepTimerService: ObservableObject {
     func cancel() {
         timer?.invalidate()
         timer = nil
+        stopFade(restoreVolume: true)
         isActive = false
         remainingSeconds = 0
         didExpire = false
@@ -60,13 +71,73 @@ final class SleepTimerService: ObservableObject {
             timer?.invalidate()
             timer = nil
             isActive = false
+            appLog("SleepTimer: expired — beginning fade", category: "general")
+            beginFade()
+        }
+    }
+
+    // MARK: - Volume Fade
+
+    private static let fadeDurationSeconds: Double = 60.0
+    private static let fadeStepInterval: Double = 0.5
+    private static let fadeStepCount: Int = Int(fadeDurationSeconds / fadeStepInterval) // 120 steps
+
+    /// Volume level captured just before the fade starts so it can be restored on cancel.
+    private var volumeBeforeFade: Float = 1.0
+    /// Counts how many fade steps have fired.
+    private var fadeStep: Int = 0
+
+    private func beginFade() {
+        guard !isFading else { return }
+        volumeBeforeFade = getVolume?() ?? 1.0
+        fadeStep = 0
+        isFading = true
+
+        fadeTimer?.invalidate()
+        fadeTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.fadeStepInterval,
+            repeats: true
+        ) { [weak self] t in
+            Task { @MainActor [weak self] in
+                guard let self else { t.invalidate(); return }
+                self.applyFadeStep(timer: t)
+            }
+        }
+    }
+
+    private func applyFadeStep(timer t: Timer) {
+        fadeStep += 1
+        let progress = Float(fadeStep) / Float(Self.fadeStepCount)
+        let clipped = min(max(progress, 0), 1)
+        let newVolume = volumeBeforeFade * (1.0 - clipped)
+        setVolume?(newVolume)
+
+        if fadeStep >= Self.fadeStepCount {
+            t.invalidate()
+            fadeTimer = nil
+            isFading = false
+            setVolume?(0)
+            onExpire?()
+            // Restore volume so it isn't stuck at 0 when the user presses Play again.
+            setVolume?(volumeBeforeFade)
             didExpire = true
-            appLog("SleepTimer: expired — pausing playback", category: "general")
+            appLog("SleepTimer: fade complete — playback stopped", category: "general")
             // Reset the flag after one run loop so observers don't re-trigger.
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 self.didExpire = false
             }
+        }
+    }
+
+    /// Stops an in-progress fade. If `restoreVolume` is true, returns volume to pre-fade level.
+    private func stopFade(restoreVolume: Bool) {
+        guard isFading else { return }
+        fadeTimer?.invalidate()
+        fadeTimer = nil
+        isFading = false
+        if restoreVolume {
+            setVolume?(volumeBeforeFade)
         }
     }
 }

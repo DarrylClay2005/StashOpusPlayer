@@ -174,4 +174,16 @@ CREATE TABLE IF NOT EXISTS ios_app_logs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_level (level),
     INDEX idx_created (created_at)
-)
+);
+
+-- Collaborative playlist sharing (snapshot-based, bridge side)
+CREATE TABLE IF NOT EXISTS ios_shared_playlists (
+  id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  playlist_id INT NOT NULL,
+  owner_user_id VARCHAR(36) NOT NULL,
+  share_token VARCHAR(36) UNIQUE NOT NULL,
+  playlist_data JSON NOT NULL DEFAULT ('{}'),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  is_active BOOLEAN DEFAULT TRUE,
+  FOREIGN KEY (owner_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);

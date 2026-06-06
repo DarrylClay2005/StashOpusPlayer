@@ -11,6 +11,11 @@ final class WidgetDataService {
     private let appGroupID = "group.com.lumisound.ios"
     private var defaults: UserDefaults? { UserDefaults(suiteName: appGroupID) }
 
+    /// Tracks the last time `reloadAllTimelines()` was fired.
+    /// Throttles reloads to at most once every 2 seconds to avoid redundant
+    /// WidgetKit refreshes when track changes and play-state changes overlap.
+    private var lastReloadTime: Date = .distantPast
+
     private init() {}
 
     /// Full update: writes track metadata, play state, and artwork (if available).
@@ -34,13 +39,22 @@ final class WidgetDataService {
             ud.removeObject(forKey: "widget_artwork_path")
         }
 
-        WidgetCenter.shared.reloadAllTimelines()
+        reloadTimelinesThrottled()
     }
 
     /// Lightweight update: only writes the play/pause state and reloads timelines.
     /// Called when the user taps play/pause without changing tracks.
     func updatePlayState(isPlaying: Bool) {
         defaults?.set(isPlaying, forKey: "widget_is_playing")
+        reloadTimelinesThrottled()
+    }
+
+    // MARK: - Private Helpers
+
+    /// Calls `WidgetCenter.shared.reloadAllTimelines()` at most once every 2 seconds.
+    private func reloadTimelinesThrottled() {
+        guard Date().timeIntervalSince(lastReloadTime) >= 2.0 else { return }
+        lastReloadTime = Date()
         WidgetCenter.shared.reloadAllTimelines()
     }
 }

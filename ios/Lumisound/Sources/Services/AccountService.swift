@@ -578,6 +578,16 @@ final class AccountService: ObservableObject {
         }
     }
 
+    private func handleUnauthorized() {
+        appWarn("JWT expired or invalid — clearing session", category: "account")
+        UserDefaults.standard.removeObject(forKey: Self.tokenKey)
+        UserDefaults.standard.removeObject(forKey: Self.userKey)
+        token = nil
+        currentUser = nil
+        isLoggedIn = false
+        errorMessage = "Your session expired. Please sign in again."
+    }
+
     private func clearSession() {
         token = nil
         currentUser = nil
@@ -620,7 +630,11 @@ final class AccountService: ObservableObject {
 
         if let http = response as? HTTPURLResponse {
             if http.statusCode == 401 {
-                clearSession()
+                // Only auto-logout on 401 when the user was already logged in.
+                // A 401 on /auth/login means wrong password — not an expired token.
+                if isLoggedIn && path != "/auth/login" {
+                    handleUnauthorized()
+                }
                 throw AccountError(statusCode: 401, message: "Session expired. Please sign in again.")
             }
             if !(200..<300).contains(http.statusCode) {

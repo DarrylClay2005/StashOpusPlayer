@@ -1,0 +1,458 @@
+import SwiftUI
+
+// MARK: - CollaborativePlaylistView
+//
+// Mode A (playlist != nil): Share a local playlist — generate a link, copy it, revoke it.
+// Mode B (playlist == nil): Open a shared playlist by token — fetch metadata and play all.
+
+struct CollaborativePlaylistView: View {
+    let playlist: Playlist?
+
+    @EnvironmentObject private var player: AudioPlayerManager
+    @EnvironmentObject private var account: AccountService
+    @EnvironmentObject private var streaming: StreamingService
+    @EnvironmentObject private var library: LibraryManager
+
+    @StateObject private var collaborativeService = CollaborativeService()
+
+    @Environment(\.dismiss) private var dismiss
+
+    /// Live song list for the playlist, resolved from LibraryManager so mutations are reflected.
+    private var songs: [Song] {
+        guard let pl = playlist else { return [] }
+        return library.songs(for: pl)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let pl = playlist {
+                    ShareModeView(
+                        playlist: pl,
+                        songs: songs,
+                        collaborativeService: collaborativeService,
+                        account: account,
+                        streaming: streaming
+                    )
+                } else {
+                    OpenModeView(
+                        collaborativeService: collaborativeService,
+                        player: player,
+                        streaming: streaming
+                    )
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                        .tint(AppTheme.textSecondary)
+                }
+            }
+        }
+        .onDisappear { collaborativeService.reset() }
+    }
+}
+
+// MARK: - Mode A: Share a Playlist
+
+private struct ShareModeView: View {
+    let playlist: Playlist
+    let songs: [Song]
+    let collaborativeService: CollaborativeService
+
+    let account: AccountService
+    let streaming: StreamingService
+
+    @State private var didCopy = false
+
+    private var shareLink: String? {
+        guard let token = collaborativeService.shareToken else { return nil }
+        return "lumisound://shared/\(token)"
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+
+                // Playlist header
+                VStack(spacing: 6) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(AppTheme.elevatedSurface)
+                            .frame(width: 80, height: 80)
+                        Image(systemName: "music.note.list")
+                            .font(.system(size: 34))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+
+                    Text(playlist.name)
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    let count = playlist.songCount
+                    Text("\(count) \(count == 1 ? "song" : "songs")")
+                        .font(.subheadline)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .padding(.top, 12)
+
+                // Error banner
+                if let error = collaborativeService.errorMessage {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(AppTheme.error)
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.error)
+                        Spacer()
+                        Button {
+                            collaborativeService.errorMessage = nil
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.footnote)
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                    }
+                    .padding(12)
+                    .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(.horizontal)
+                }
+
+                // Share link area
+                if let link = shareLink {
+                    VStack(spacing: 12) {
+                        Text("Share Link")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        // Copyable token
+                        HStack(spacing: 8) {
+                            Text(link)
+                                .font(.system(.footnote, design: .monospaced))
+                                .foregroundStyle(AppTheme.textPrimary)
+                                .lineLimit(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(12)
+                        .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        HStack(spacing: 12) {
+                            // Copy Link
+                            Button {
+                                UIPasteboard.general.string = link
+                                withAnimation { didCopy = true }
+                                Task {
+                                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                    withAnimation { didCopy = false }
+                                }
+                            } label: {
+                                Label(
+                                    didCopy ? "Copied!" : "Copy Link",
+                                    systemImage: didCopy ? "checkmark" : "doc.on.doc"
+                                )
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(didCopy ? AppTheme.success : AppTheme.accent)
+
+                            // Revoke Link
+                            Button {
+                                guard let token = collaborativeService.shareToken,
+                                      let authToken = account.token else { return }
+                                Task {
+                                    await collaborativeService.revokeShare(
+                                        shareToken: token,
+                                        bridgeURL: streaming.bridgeURL,
+                                        authToken: authToken
+                                    )
+                                }
+                            } label: {
+                                Label("Revoke", systemImage: "link.badge.minus")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(AppTheme.error)
+                            .disabled(collaborativeService.isLoading)
+                        }
+                    }
+                    .padding(.horizontal)
+                } else {
+                    // Generate Share Link button
+                    Button {
+                        guard let authToken = account.token else {
+                            collaborativeService.errorMessage = "You must be logged in to share a playlist."
+                            return
+                        }
+                        Task {
+                            await collaborativeService.sharePlaylist(
+                                playlistName: playlist.name,
+                                tracks: songs,
+                                bridgeURL: streaming.bridgeURL,
+                                authToken: authToken
+                            )
+                        }
+                    } label: {
+                        if collaborativeService.isLoading {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .tint(.white)
+                                Text("Generating Link…")
+                                    .font(.headline)
+                            }
+                            .frame(maxWidth: .infinity)
+                        } else {
+                            Label("Generate Share Link", systemImage: "link.badge.plus")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.accent)
+                    .disabled(collaborativeService.isLoading || account.token == nil)
+                    .padding(.horizontal)
+
+                    if !account.isLoggedIn {
+                        Text("Sign in to share playlists with others.")
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                }
+
+                Spacer(minLength: 40)
+            }
+            .padding(.vertical, 8)
+        }
+        .scrollContentBackground(.hidden)
+        .background(GalleryBackgroundView().ignoresSafeArea())
+        .navigationTitle("Share Playlist")
+    }
+}
+
+// MARK: - Mode B: Open a Shared Playlist
+
+private struct OpenModeView: View {
+    let collaborativeService: CollaborativeService
+    let player: AudioPlayerManager
+    let streaming: StreamingService
+
+    @State private var tokenInput: String = ""
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+
+                // Token entry
+                VStack(spacing: 12) {
+                    Text("Enter Share Token")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack(spacing: 12) {
+                        TextField("e.g. abc123…", text: $tokenInput)
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .padding(12)
+                            .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        Button {
+                            let trimmed = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !trimmed.isEmpty else { return }
+                            Task {
+                                await collaborativeService.fetchSharedPlaylist(
+                                    shareToken: trimmed,
+                                    bridgeURL: streaming.bridgeURL
+                                )
+                            }
+                        } label: {
+                            if collaborativeService.isLoading {
+                                ProgressView()
+                                    .tint(.white)
+                                    .frame(width: 60, height: 44)
+                            } else {
+                                Text("Open")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(width: 60, height: 44)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.accent)
+                        .disabled(
+                            collaborativeService.isLoading
+                            || tokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 12)
+
+                // Error banner
+                if let error = collaborativeService.errorMessage {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(AppTheme.error)
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.error)
+                        Spacer()
+                        Button {
+                            collaborativeService.errorMessage = nil
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.footnote)
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                    }
+                    .padding(12)
+                    .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(.horizontal)
+                }
+
+                // Shared playlist result
+                if let shared = collaborativeService.importedPlaylist {
+                    SharedPlaylistResultView(
+                        shared: shared,
+                        player: player
+                    )
+                }
+
+                Spacer(minLength: 40)
+            }
+            .padding(.vertical, 8)
+        }
+        .scrollContentBackground(.hidden)
+        .background(GalleryBackgroundView().ignoresSafeArea())
+        .navigationTitle("Open Shared Playlist")
+    }
+}
+
+// MARK: - Shared Playlist Result
+
+private struct SharedPlaylistResultView: View {
+    let shared: SharedPlaylist
+    let player: AudioPlayerManager
+
+    private var durationText: String {
+        let total = Int(shared.tracks.reduce(0) { $0 + $1.duration }.rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        return "\(minutes)m"
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+
+            // Header card
+            VStack(spacing: 6) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(AppTheme.elevatedSurface)
+                        .frame(width: 72, height: 72)
+                    Image(systemName: "music.note.list")
+                        .font(.system(size: 30))
+                        .foregroundStyle(AppTheme.accent)
+                }
+
+                Text(shared.name)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Text("by \(shared.owner)")
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.textSecondary)
+
+                let count = shared.tracks.count
+                Text("\(count) \(count == 1 ? "song" : "songs") · \(durationText)")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            // Play All
+            Button {
+                let songs = shared.tracks.map { track in
+                    Song(
+                        id: track.id,
+                        title: track.title,
+                        artist: track.artist,
+                        album: track.album ?? "",
+                        duration: track.duration,
+                        url: nil
+                    )
+                }
+                player.setQueue(songs, startIndex: 0, autoplay: true)
+            } label: {
+                Label("Play All", systemImage: "play.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(AppTheme.accent)
+            .padding(.horizontal)
+
+            // Track list
+            VStack(spacing: 0) {
+                ForEach(Array(shared.tracks.enumerated()), id: \.element.id) { index, track in
+                    SharedTrackRow(track: track, index: index + 1)
+
+                    if index < shared.tracks.count - 1 {
+                        Divider()
+                            .background(AppTheme.surface)
+                            .padding(.leading, 56)
+                    }
+                }
+            }
+            .background(AppTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(.horizontal)
+        }
+    }
+}
+
+// MARK: - Shared Track Row
+
+private struct SharedTrackRow: View {
+    let track: SharedTrack
+    let index: Int
+
+    private var durationText: String {
+        let s = Int(track.duration.rounded())
+        guard s > 0 else { return "--:--" }
+        return "\(s / 60):\(String(format: "%02d", s % 60))"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("\(index)")
+                .font(.system(.footnote, design: .monospaced))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: 28, alignment: .trailing)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(track.title)
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .lineLimit(1)
+                Text(track.artist)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Text(durationText)
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+}

@@ -10,6 +10,7 @@ private enum LibraryTab: String, CaseIterable {
     case genres    = "Genres"
     case playlists = "Playlists"
     case favorites = "Favorites"
+    case moods     = "Moods"
 }
 
 // MARK: - LibraryView
@@ -18,6 +19,7 @@ struct LibraryView: View {
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var folderService: MusicFolderService
+    @EnvironmentObject private var moodService: MoodPlaylistService
 
     @State private var selectedTab: LibraryTab = .songs
     @State private var searchText: String = ""
@@ -121,6 +123,9 @@ struct LibraryView: View {
             PlaylistsView()
         case .favorites:
             FavoritesView()
+        case .moods:
+            MoodPlaylistsView()
+                .environmentObject(moodService)
         }
     }
 
@@ -306,6 +311,15 @@ private struct SongsTab: View {
                     .background(Color.clear.ignoresSafeArea())
                 }
             }
+        }
+        .onAppear {
+            // Warm the first 30 songs' artwork at background priority so grid
+            // cells have images ready before the user scrolls to them.
+            ArtworkService.shared.prefetch(songs: Array(songs.prefix(30)))
+        }
+        .onChange(of: songs.count) { _ in
+            // Re-trigger prefetch when the song list grows (e.g. after a scan).
+            ArtworkService.shared.prefetch(songs: Array(songs.prefix(30)))
         }
         .animation(.easeInOut(duration: 0.2), value: showSearch)
         .toolbar {
