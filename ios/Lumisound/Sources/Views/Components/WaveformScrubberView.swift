@@ -14,9 +14,11 @@ struct WaveformScrubberView: View {
     let url: URL
     let position: TimeInterval
     let duration: TimeInterval
+    let isPlaying: Bool
     let onSeek: (TimeInterval) -> Void
 
     @State private var dragFraction: Double? = nil
+    @State private var playheadPulse = false
 
     private var progress: Double {
         guard duration > 0 else { return 0 }
@@ -62,11 +64,21 @@ struct WaveformScrubberView: View {
                             .frame(maxHeight: .infinity)
                     }
 
-                    // Playhead line
-                    Rectangle()
-                        .fill(Color.white.opacity(0.75))
-                        .frame(width: 2)
-                        .offset(x: max(0, geo.size.width * progress - 1))
+                    // Animated playhead line
+                    ZStack {
+                        // Glow halo behind the line
+                        Rectangle()
+                            .fill(AppTheme.dynamicAccent.opacity(playheadPulse ? 0.35 : 0.0))
+                            .frame(width: 8)
+                            .blur(radius: 4)
+                        // Main line
+                        Rectangle()
+                            .fill(Color.white.opacity(playheadPulse ? 1.0 : 0.75))
+                            .frame(width: 2)
+                    }
+                    .frame(maxHeight: .infinity)
+                    .offset(x: max(0, geo.size.width * progress - 1))
+                    .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: playheadPulse)
                 }
                 .contentShape(Rectangle())
                 .gesture(
@@ -92,6 +104,12 @@ struct WaveformScrubberView: View {
             }
             .font(.caption)
             .foregroundStyle(AppTheme.textSecondary)
+        }
+        .onChange(of: isPlaying) { playing in
+            playheadPulse = playing
+        }
+        .onAppear {
+            playheadPulse = isPlaying
         }
     }
 

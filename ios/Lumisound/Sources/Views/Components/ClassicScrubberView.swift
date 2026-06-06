@@ -3,9 +3,11 @@ import SwiftUI
 struct ClassicScrubberView: View {
     let position: TimeInterval
     let duration: TimeInterval
+    let isPlaying: Bool
     let onSeek: (TimeInterval) -> Void
 
     @State private var dragFraction: Double? = nil
+    @State private var thumbPulse = false
 
     private var progress: Double {
         guard duration > 0 else { return 0 }
@@ -33,12 +35,19 @@ struct ClassicScrubberView: View {
                             )
                         )
                         .frame(width: geo.size.width * CGFloat(progress), height: 4)
+                        .animation(.easeOut(duration: 0.15), value: progress)
 
+                    // Glowing thumb
                     Circle()
                         .fill(AppTheme.dynamicAccent)
                         .frame(width: 16, height: 16)
-                        .shadow(color: AppTheme.dynamicAccent.opacity(0.5), radius: 6)
+                        .shadow(
+                            color: AppTheme.dynamicAccent.opacity(thumbPulse ? 0.85 : 0.4),
+                            radius: thumbPulse ? 12 : 5
+                        )
+                        .scaleEffect(thumbPulse ? 1.18 : 1.0)
                         .offset(x: max(0, geo.size.width * CGFloat(progress) - 8))
+                        .animation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true), value: thumbPulse)
                 }
                 .frame(height: 16)
                 .contentShape(Rectangle().inset(by: -16))
@@ -65,6 +74,12 @@ struct ClassicScrubberView: View {
             }
             .font(.caption)
             .foregroundStyle(AppTheme.textSecondary)
+        }
+        .onChange(of: isPlaying) { playing in
+            thumbPulse = playing
+        }
+        .onAppear {
+            thumbPulse = isPlaying
         }
     }
 

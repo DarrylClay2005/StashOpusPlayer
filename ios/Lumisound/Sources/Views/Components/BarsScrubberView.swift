@@ -3,9 +3,12 @@ import SwiftUI
 struct BarsScrubberView: View {
     let position: TimeInterval
     let duration: TimeInterval
+    let isPlaying: Bool
     let onSeek: (TimeInterval) -> Void
 
     @State private var dragFraction: Double? = nil
+    @State private var liveMultipliers: [CGFloat] = Array(repeating: 1.0, count: 36)
+    @State private var animTimer: Timer? = nil
 
     private var progress: Double {
         guard duration > 0 else { return 0 }
@@ -25,6 +28,7 @@ struct BarsScrubberView: View {
                     ForEach(0..<barCount, id: \.self) { i in
                         let threshold = Double(i) / Double(barCount)
                         let isActive = threshold < progress
+                        let h = barHeight(index: i, totalHeight: geo.size.height) * liveMultipliers[i]
                         RoundedRectangle(cornerRadius: 2, style: .continuous)
                             .fill(
                                 isActive
@@ -35,8 +39,9 @@ struct BarsScrubberView: View {
                                       ))
                                     : AnyShapeStyle(AppTheme.surface)
                             )
-                            .frame(maxWidth: .infinity, maxHeight: barHeight(index: i, totalHeight: geo.size.height))
-                            .animation(.easeInOut(duration: 0.06).delay(Double(i) * 0.003), value: isActive)
+                            .frame(maxWidth: .infinity, maxHeight: h)
+                            .animation(.easeInOut(duration: 0.12), value: h)
+                            .animation(.easeInOut(duration: 0.06).delay(Double(i) * 0.002), value: isActive)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -64,6 +69,37 @@ struct BarsScrubberView: View {
             }
             .font(.caption)
             .foregroundStyle(AppTheme.textSecondary)
+        }
+        .onChange(of: isPlaying) { playing in
+            if playing { startLiveAnimation() } else { stopLiveAnimation() }
+        }
+        .onAppear {
+            if isPlaying { startLiveAnimation() }
+        }
+        .onDisappear {
+            stopLiveAnimation()
+        }
+    }
+
+    private func startLiveAnimation() {
+        stopLiveAnimation()
+        let t = Timer.scheduledTimer(withTimeInterval: 0.10, repeats: true) { _ in
+            let now = Date().timeIntervalSince1970
+            for i in 0..<barCount {
+                let phase = Double(i) / Double(barCount) * 2 * .pi
+                let wave = 0.9 + 0.12 * sin(now * 2.8 + phase)
+                liveMultipliers[i] = CGFloat(wave)
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        animTimer = t
+    }
+
+    private func stopLiveAnimation() {
+        animTimer?.invalidate()
+        animTimer = nil
+        withAnimation(.easeOut(duration: 0.4)) {
+            liveMultipliers = Array(repeating: 1.0, count: barCount)
         }
     }
 

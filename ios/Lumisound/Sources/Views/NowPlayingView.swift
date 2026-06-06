@@ -345,6 +345,7 @@ struct NowPlayingView: View {
             Group {
                 if let song = player.currentSong {
                     ArtworkThumbnail(song: song, size: 300)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .shadow(color: AppTheme.accent.opacity(0.3), radius: 24, x: 0, y: 12)
                 } else {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -364,6 +365,7 @@ struct NowPlayingView: View {
                         .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 10)
                 }
             }
+            .modifier(FloatModifier(isPlaying: player.isPlaying, amount: 6, speed: 2.8))
 
         case .polaroid:
             PolaroidArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
@@ -451,12 +453,14 @@ struct NowPlayingView: View {
                         url: url,
                         position: player.position,
                         duration: player.duration,
+                        isPlaying: player.isPlaying,
                         onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
                     )
                 } else {
                     ClassicScrubberView(
                         position: player.position,
                         duration: player.duration,
+                        isPlaying: player.isPlaying,
                         onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
                     )
                 }
@@ -464,18 +468,21 @@ struct NowPlayingView: View {
                 ClassicScrubberView(
                     position: player.position,
                     duration: player.duration,
+                    isPlaying: player.isPlaying,
                     onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
                 )
             case .ring:
                 RingScrubberView(
                     position: player.position,
                     duration: player.duration,
+                    isPlaying: player.isPlaying,
                     onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
                 )
             case .bars:
                 BarsScrubberView(
                     position: player.position,
                     duration: player.duration,
+                    isPlaying: player.isPlaying,
                     onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
                 )
             }
