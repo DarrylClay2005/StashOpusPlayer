@@ -649,7 +649,7 @@ private struct FoldersTab: View {
                 EmptyStateView(
                     icon: "folder",
                     title: "No folders",
-                    message: "Create subfolders inside "Imported Music" in the Files app to organise your tracks."
+                    message: "Create subfolders inside \"Imported Music\" in the Files app to organise your tracks."
                 )
                 .padding(.top, 60)
             } else {

@@ -85,7 +85,7 @@ struct LocalFolderDetailView: View {
             // Track list
             Section {
                 if songs.isEmpty {
-                    EmptyStateView(icon: "folder", title: "Empty folder", message: "No audio files found inside "\(folderName)".")
+                    EmptyStateView(icon: "folder", title: "Empty folder", message: "No audio files found inside \"\(folderName)\".")
                         .listRowBackground(Color.clear)
                 } else {
                     ForEach(songs) { song in
