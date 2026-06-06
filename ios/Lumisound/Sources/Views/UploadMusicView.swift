@@ -13,6 +13,8 @@ struct UploadMusicView: View {
     @EnvironmentObject private var streaming: StreamingService
     @EnvironmentObject private var account: AccountService
 
+    @AppStorage("autoCloudBackup") private var autoCloudBackup: Bool = false
+
     // MARK: State
 
     @State private var showFilePicker        = false
@@ -137,6 +139,9 @@ struct UploadMusicView: View {
                     errorBanner(err)
                 }
 
+                // MARK: Auto-backup toggle
+                autoBackupToggle
+
                 // MARK: Upload button (prominent shortcut)
                 uploadButton
 
@@ -150,6 +155,35 @@ struct UploadMusicView: View {
             .padding(.top, 12)
             .padding(.bottom, 32)
         }
+    }
+
+    // MARK: — Auto-backup toggle
+
+    private var autoBackupToggle: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "icloud.and.arrow.up")
+                .font(.title3)
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 32)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Auto-Backup Downloads")
+                    .font(AppTheme.bodyFont(size: 15).weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Text("Automatically upload each song after it's downloaded")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Spacer()
+
+            Toggle("", isOn: $autoCloudBackup)
+                .labelsHidden()
+                .tint(AppTheme.accent)
+        }
+        .padding(14)
+        .background(AppTheme.surface.opacity(0.7))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: — Upload progress banner

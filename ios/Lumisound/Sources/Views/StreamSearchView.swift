@@ -22,6 +22,8 @@ struct StreamSearchView: View {
     @State private var downloadingServerTrackID: String? = nil
     @State private var downloadedServerTrackIDs: Set<String> = []
 
+    @AppStorage("autoCloudBackup") private var autoCloudBackup: Bool = false
+
     // My Library upload
     @State private var showUploadPicker = false
     @State private var deletingUserTrackPath: String? = nil
@@ -470,9 +472,17 @@ struct StreamSearchView: View {
         downloadingTrackID = track.id
         Task {
             do {
-                _ = try await streaming.downloadToLibrary(track: track)
+                let localURL = try await streaming.downloadToLibrary(track: track)
                 library.scanLocalDocuments()
                 downloadedTrackIDs.insert(track.id)
+                if autoCloudBackup, account.isLoggedIn, let token = account.token {
+                    Task {
+                        try? await streaming.uploadTrack(
+                            fileURL: localURL, token: token,
+                            metadata: TrackMetadata(title: track.title, artist: track.artist, durationSeconds: track.duration)
+                        )
+                    }
+                }
             } catch {
                 streaming.errorMessage = "Download failed: \(error.localizedDescription)"
             }
@@ -498,8 +508,16 @@ struct StreamSearchView: View {
                     continue
                 }
                 do {
-                    _ = try await streaming.downloadToLibrary(track: track)
+                    let localURL = try await streaming.downloadToLibrary(track: track)
                     downloadedTrackIDs.insert(track.id)
+                    if autoCloudBackup, account.isLoggedIn, let token = account.token {
+                        Task {
+                            try? await streaming.uploadTrack(
+                                fileURL: localURL, token: token,
+                                metadata: TrackMetadata(title: track.title, artist: track.artist, durationSeconds: track.duration)
+                            )
+                        }
+                    }
                 } catch {
                     failed.append(track.title)
                     appWarn("Download All: failed for \"\(track.title)\": \(error.localizedDescription)", category: "network")

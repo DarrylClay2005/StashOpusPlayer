@@ -2,7 +2,6 @@
 import Foundation
 import MediaPlayer
 import UIKit
-import ffmpegkit
 
 // MARK: - AudioPlayerManager
 
