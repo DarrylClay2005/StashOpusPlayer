@@ -425,6 +425,24 @@ struct NowPlayingView: View {
     // MARK: - Timeline
 
     private var timelineSection: some View {
+        // Use the real audio waveform scrubber for local files; fall back to a plain
+        // slider for HTTP streams or when no track is loaded (waveform analysis needs a
+        // local file path — it cannot read from an HTTP URL).
+        if let url = player.currentSong?.url, url.isFileURL, player.duration > 0 {
+            AnyView(
+                WaveformScrubberView(
+                    url: url,
+                    position: player.position,
+                    duration: player.duration,
+                    onSeek: { player.seek(to: $0) }
+                )
+            )
+        } else {
+            AnyView(fallbackTimeline)
+        }
+    }
+
+    private var fallbackTimeline: some View {
         VStack(spacing: 6) {
             Slider(
                 value: Binding(
