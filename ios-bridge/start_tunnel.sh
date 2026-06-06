@@ -4,7 +4,8 @@ set -euo pipefail
 export PATH="${HOME}/.local/bin:${HOME}/.nix-profile/bin:/etc/profiles/per-user/${USER}/bin:/run/current-system/sw/bin:${PATH:-}"
 
 PORT="${1:-8002}"
-DOMAIN="germinate-props-motive.ngrok-free.dev"
+DOMAIN="unexpired-swung-magical.ngrok-free.dev"
+CONFIG="$(dirname "$0")/.ngrok.yml"
 HEALTH_URL="http://127.0.0.1:${PORT}/health"
 
 echo "Waiting for iOS bridge on ${HEALTH_URL} (up to 300s)..."
@@ -21,4 +22,4 @@ for i in $(seq 1 150); do
 done
 
 echo "Starting ngrok tunnel: ${DOMAIN} -> localhost:${PORT}"
-exec ngrok http "--domain=${DOMAIN}" --log=stdout --log-format=json "${PORT}"
+exec ngrok http "--config=${CONFIG}" "--domain=${DOMAIN}" --log=stdout --log-format=json "${PORT}"

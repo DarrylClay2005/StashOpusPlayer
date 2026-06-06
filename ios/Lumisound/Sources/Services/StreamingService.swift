@@ -192,7 +192,7 @@ final class StreamingService: ObservableObject {
 
     /// Public URL baked into the app — routed via SwarmPanel ngrok proxy so
     /// it works anywhere without home WiFi. Users can override in Settings.
-    static let defaultBridgeURL = "https://germinate-props-motive.ngrok-free.dev"
+    static let defaultBridgeURL = "https://unexpired-swung-magical.ngrok-free.dev"
 
     // MARK: Available formats
 
