@@ -622,8 +622,8 @@ final class StreamingService: ObservableObject {
         guard var request = makeRequest(components.string ?? "/api/download") else {
             throw StreamingError.invalidURL
         }
-        // Downloads can take longer than stream URL fetches.
-        request.timeoutInterval = 120
+        // Give the bridge 5 min to run yt-dlp before iOS cancels the request.
+        request.timeoutInterval = 360
 
         let (downloadedURL, response) = try await BackgroundDownloadManager.run(
             named: "lumisound.download.\(safeName)"

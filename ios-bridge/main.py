@@ -672,7 +672,7 @@ async def download_track(
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+            _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=300.0)
         except asyncio.TimeoutError:
             proc.kill()
             await proc.communicate()  # reap the zombie (Fix 7)

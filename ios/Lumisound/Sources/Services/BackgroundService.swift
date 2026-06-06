@@ -256,8 +256,11 @@ final class BackgroundService: ObservableObject {
 
     private func advance() {
         guard !images.isEmpty else { return }
-        currentIndex = (currentIndex + 1) % images.count
-        appLog("advance: index → \(currentIndex)/\(images.count)", category: "background")
+        let next = (currentIndex + 1) % images.count
+        appLog("advance: index → \(next)/\(images.count)", category: "background")
+        withAnimation(.easeInOut(duration: 0.6)) {
+            currentIndex = next
+        }
     }
 
     // MARK: Persistence

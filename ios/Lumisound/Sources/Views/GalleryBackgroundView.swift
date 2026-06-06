@@ -29,7 +29,6 @@ struct GalleryBackgroundView: View {
                         .opacity(bg.opacity)
                         .id(bg.currentIndex)
                         .transition(transitionForAnimation(bg.animation))
-                        .animation(.easeInOut(duration: 0.6), value: bg.currentIndex)
                 }
             }
         }

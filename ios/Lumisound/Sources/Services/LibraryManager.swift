@@ -33,9 +33,16 @@ final class LibraryManager: ObservableObject {
         self.artwork = artwork
         favoriteSongIDs = persistence.loadFavorites()
         playlists = persistence.loadPlaylists()
-        // Local document scan is driven by LibraryView.onAppear so it only runs
-        // once per session after the view hierarchy is ready, preventing duplicate
-        // concurrent scans that could race and add the same songs twice.
+        // Re-scan local documents whenever the app returns to the foreground so
+        // that files the user added via the Files app while Lumisound was
+        // backgrounded are picked up without requiring a manual refresh.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.scanLocalDocuments() }
+        }
     }
 
     // MARK: - Scan Cache Helper
@@ -124,6 +131,15 @@ final class LibraryManager: ObservableObject {
             }
 
             guard !candidates.isEmpty else { return }
+
+            // Evict songs whose backing files no longer exist (e.g. moved by the user
+            // via Files app into an organised subfolder). Without this, the old path
+            // stays in existingURLs and the new path is never picked up as "new".
+            let fm2 = FileManager.default
+            importedSongs = importedSongs.filter { song in
+                guard let url = song.url else { return false }
+                return fm2.fileExists(atPath: url.path)
+            }
 
             // Only process files we haven't seen before.
             let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
