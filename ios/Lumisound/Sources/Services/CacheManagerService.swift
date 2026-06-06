@@ -112,7 +112,7 @@ final class CacheManagerService: ObservableObject {
 
     /// Returns (fileCount, totalByteSize) for a directory (recursive).
     /// Returns (0, 0) if the directory does not exist.
-    private static func directoryStats(at url: URL?) -> (Int, Int64) {
+    nonisolated static func directoryStats(at url: URL?) -> (Int, Int64) {
         guard let url else { return (0, 0) }
         let fm = FileManager.default
         var count = 0
@@ -134,7 +134,7 @@ final class CacheManagerService: ObservableObject {
     }
 
     /// Removes all contents inside `url` without removing the directory itself.
-    private func removeContents(of url: URL) {
+    nonisolated func removeContents(of url: URL) {
         let fm = FileManager.default
         guard let contents = try? fm.contentsOfDirectory(
             at: url,

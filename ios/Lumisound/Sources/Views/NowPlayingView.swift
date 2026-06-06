@@ -1164,7 +1164,7 @@ struct NowPlayingView: View {
         .tint(AppTheme.accent)
         .panelStyle()
         .sheet(isPresented: $showLyricsSyncEditor) {
-            LyricsSyncEditorView()
+            LyricsSyncEditorView(initialLines: lyricsLines)
                 .environmentObject(player)
         }
     }

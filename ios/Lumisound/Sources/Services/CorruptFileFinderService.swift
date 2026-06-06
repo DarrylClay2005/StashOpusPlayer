@@ -80,7 +80,7 @@ final class CorruptFileFinderService: ObservableObject {
         "ogg", "opus", "wma", "caf", "alac", "mp4"
     ]
 
-    private static func scanDirectory(_ directory: URL) -> [CorruptFileEntry] {
+    nonisolated static func scanDirectory(_ directory: URL) -> [CorruptFileEntry] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: directory,

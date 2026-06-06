@@ -111,7 +111,7 @@ struct MoodPlaylistsView: View {
         && moodService.sleepSongs.isEmpty
     }
 
-    private struct MoodInfo: Identifiable {
+    fileprivate struct MoodInfo: Identifiable {
         let bucket: MoodBucket
         let songs: [Song]
 

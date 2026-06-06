@@ -82,12 +82,14 @@ struct CarModeView: View {
 
     private var artworkBackground: some View {
         GeometryReader { geo in
-            ArtworkThumbnail(song: player.currentSong, size: max(geo.size.width, geo.size.height))
-                .scaledToFill()
-                .frame(width: geo.size.width, height: geo.size.height)
-                .clipped()
-                .blur(radius: 28, opaque: true)
-                .opacity(0.35)
+            if let song = player.currentSong {
+                ArtworkThumbnail(song: song, size: max(geo.size.width, geo.size.height))
+                    .scaledToFill()
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                    .blur(radius: 28, opaque: true)
+                    .opacity(0.35)
+            }
         }
         .ignoresSafeArea()
     }
