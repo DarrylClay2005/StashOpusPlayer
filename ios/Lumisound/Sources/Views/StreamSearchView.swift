@@ -52,6 +52,14 @@ struct StreamSearchView: View {
             .navigationBarTitleDisplayMode(.large)
             .background(GalleryBackgroundView().ignoresSafeArea())
             .toolbarBackground(.hidden, for: .navigationBar)
+            // Every other tab (Library, Queue, etc.) shows MiniPlayerBar so tapping a
+            // track gives instant visual confirmation that playback started. This tab
+            // was missing it — tapping ▶ on a search result appeared to do nothing
+            // because the only feedback (the mini player appearing/updating) happened
+            // off-screen on a different tab, making "play" feel like a no-op.
+            .safeAreaInset(edge: .bottom) {
+                MiniPlayerBar()
+            }
         }
     }
 
@@ -153,10 +161,34 @@ struct StreamSearchView: View {
                 streaming.serverTracks = []
                 streaming.errorMessage = nil
                 streaming.isPlaylistResult = false
+                return
+            }
+            // Debounced auto-search — mirrors LibraryView's 300ms pattern (the only
+            // existing trigger here was `.onSubmit(of: .search)`, which fires solely
+            // on the keyboard's Search/Return key). Most users type a query and expect
+            // results to appear, never realizing they need to explicitly submit —
+            // which is exactly what made this "search" look broken/unresponsive.
+            // 400ms (vs Library's 300ms) gives the network round-trip to the bridge
+            // a beat of slack so fast typists don't fire a search per keystroke.
+            Task {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                if searchText == newValue {
+                    triggerSearch()
+                }
             }
         }
         .onChange(of: streaming.searchResults.count) { _ in
             resultsAnimationToken = UUID()
+        }
+        // Playback failures (expired CDN URL, YouTube bot-detection, network errors, etc.)
+        // surface only on `player.errorMessage`, which previously had no visible home
+        // outside Settings → Audio. Mirroring it into the banner here means tapping ▶
+        // and having the stream fail to load shows *something* instead of looking like
+        // the tap did nothing.
+        .onChange(of: player.errorMessage) { newValue in
+            if let message = newValue {
+                streaming.errorMessage = message
+            }
         }
         .onChange(of: selectedSource) { src in
             if src == "my" {

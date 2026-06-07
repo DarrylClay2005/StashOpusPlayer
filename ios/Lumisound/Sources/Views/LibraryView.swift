@@ -220,8 +220,6 @@ private struct SongsTab: View {
     @EnvironmentObject private var library: LibraryManager
 
     @AppStorage("library_songs_columns") private var songColumns: Int = 1
-    @State private var showSearch: Bool = false
-    @FocusState private var searchFocused: Bool
     /// Tracks whether the entrance animation has already fired for the current song list.
     @State private var didAnimateEntrance: Bool = false
 
@@ -231,37 +229,6 @@ private struct SongsTab: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Inline search bar — shown when search icon is tapped
-            if showSearch {
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 15))
-                        .foregroundStyle(AppTheme.textSecondary)
-                    TextField("Search songs, artists, albums…", text: $searchText)
-                        .foregroundStyle(AppTheme.textPrimary)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .focused($searchFocused)
-                        .submitLabel(.search)
-                    if !searchText.isEmpty {
-                        Button {
-                            searchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .onAppear { searchFocused = true }
-            }
-
             // Content — list or grid
             Group {
                 if songColumns == 1 {
@@ -341,7 +308,15 @@ private struct SongsTab: View {
             // Re-trigger prefetch when the song list grows (e.g. after a scan).
             ArtworkService.shared.prefetch(songs: Array(songs.prefix(30)))
         }
-        .animation(.easeInOut(duration: 0.2), value: showSearch)
+        // Native search field — replaces a custom inline bar toggled from the
+        // toolbar. That approach competed for space with 6 other trailing nav-bar
+        // buttons (3 from LibraryView + 3 layout toggles here), and the search
+        // icon — last in line — ended up clipped/unreachable on most screens,
+        // which is why "library search" appeared broken: users could never
+        // actually open the search field. `.searchable` integrates with the
+        // large-title nav bar instead of competing for toolbar space, matching
+        // the proven pattern already used in PlaylistDetailView/StreamSearchView.
+        .searchable(text: $searchText, prompt: "Search songs, artists, albums…")
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 // Layout toggles
@@ -366,18 +341,6 @@ private struct SongsTab: View {
                 } label: {
                     Image(systemName: "square.grid.3x3")
                         .foregroundStyle(songColumns == 3 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
-                }
-                .buttonStyle(.plain)
-
-                // Search toggle
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showSearch.toggle()
-                        if !showSearch { searchText = "" }
-                    }
-                } label: {
-                    Image(systemName: showSearch ? "magnifyingglass.circle.fill" : "magnifyingglass")
-                        .foregroundStyle(showSearch ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                 }
                 .buttonStyle(.plain)
             }
