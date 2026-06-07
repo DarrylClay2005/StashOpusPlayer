@@ -25,7 +25,11 @@ final class ScanCacheService {
 
     private init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        cacheURL = caches.appendingPathComponent("library_scan_cache_v3.json")
+        // v4: keys switched from absolute paths (which embed the sandbox container
+        // UUID and change on every reinstall) to Documents-relative paths. Bumping
+        // the filename starts from a clean slate instead of accumulating dead v3
+        // entries keyed on paths that can never match again.
+        cacheURL = caches.appendingPathComponent("library_scan_cache_v4.json")
         load()
     }
 
@@ -42,14 +46,42 @@ final class ScanCacheService {
         return FileStamp(mtime: mdate.timeIntervalSince1970, size: size)
     }
 
+    /// Path relative to the app's Documents directory, if `url` lies within it.
+    ///
+    /// Sideloaded installs (e.g. via AltStore) get a brand-new sandbox container
+    /// UUID on every update/reinstall, so the absolute path
+    /// `.../Containers/Data/Application/<UUID>/Documents/...` changes completely
+    /// even though the file itself didn't move. Keying on the absolute path made
+    /// every cache entry miss on every update — forcing a full re-scan (and
+    /// re-extraction of metadata) of the entire library, which is the dominant
+    /// cause of the "freakout"/huge performance hit users see right after
+    /// installing an update. The portion of the path *after* "Documents" is
+    /// stable across reinstalls and is what we key on instead.
+    nonisolated static func documentsRelativePath(for url: URL) -> String? {
+        guard url.isFileURL,
+              let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        else { return nil }
+        let docsPath = docs.standardizedFileURL.path
+        let filePath = url.standardizedFileURL.path
+        guard filePath.hasPrefix(docsPath) else { return nil }
+        return String(filePath.dropFirst(docsPath.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
     /// Returns the cached `Song` for `url` if `stamp` matches the stored entry.
     /// Pure in-memory dictionary lookup — no I/O, safe to call on the main actor.
+    ///
+    /// The returned song's `url` is re-anchored to `url` (the freshly-enumerated,
+    /// guaranteed-current path) rather than whatever absolute path was stored at
+    /// cache-write time — that stored path may belong to a previous app install's
+    /// sandbox container and no longer resolve to a real file.
     func cachedSong(for url: URL, stamp: FileStamp) -> Song? {
         guard let entry = entries[stableKey(for: url)],
               entry.mtime == stamp.mtime,
               entry.fileSize == stamp.size
         else { return nil }
-        return entry.song
+        var song = entry.song
+        song.url = url
+        return song
     }
 
     /// Stores a `Song` for `url` keyed on the given `(mtime, size)` stamp.
@@ -71,12 +103,24 @@ final class ScanCacheService {
     }
 
     /// Removes cache entries for paths that no longer exist on disk.
+    /// Keys are now Documents-relative (see `documentsRelativePath`), so they
+    /// must be re-anchored to the current sandbox before checking existence —
+    /// `fileExists(atPath:)` on a bare relative key would resolve against the
+    /// process's working directory and incorrectly evict everything.
     func evictMissing() {
-        entries = entries.filter { FileManager.default.fileExists(atPath: $0.key) }
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        entries = entries.filter { key, _ in
+            let candidate = key.hasPrefix("/") ? key : docs.appendingPathComponent(key).path
+            return FileManager.default.fileExists(atPath: candidate)
+        }
     }
 
     private func stableKey(for url: URL) -> String {
-        url.standardizedFileURL.path
+        // Prefer the sandbox-relative path (survives reinstalls); fall back to
+        // the absolute path for files outside Documents (e.g. external folders
+        // accessed via security-scoped bookmarks, which have their own
+        // per-install staleness handled at the bookmark layer).
+        Self.documentsRelativePath(for: url) ?? url.standardizedFileURL.path
     }
 
     private func load() {

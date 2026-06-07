@@ -2614,6 +2614,20 @@ async def delete_gallery_image(
 # ---------------------------------------------------------------------------
 
 
+def _parse_log_timestamp(value) -> Optional[str]:
+    """Normalizes the iOS client's ISO-8601 timestamp (e.g. "2026-06-07T00:43:24Z",
+    from Swift's `Date().formatted(.iso8601)`) into MySQL's native
+    "YYYY-MM-DD HH:MM:SS" format. Passing the raw string through made MySQL log a
+    "Data truncated for column 'timestamp'" warning on every single insert, since
+    its TIMESTAMP parser doesn't understand the "T" separator / "Z" UTC suffix."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
 @app.post("/internal/logs", status_code=204)
 async def ingest_logs(request: Request):
     """Receives batched log entries from iOS clients. No auth required for
@@ -2629,7 +2643,7 @@ async def ingest_logs(request: Request):
                 str(e.get("message", ""))[:500],
                 str(e.get("file", ""))[:100],
                 int(e.get("line", 0)),
-                e.get("timestamp"),
+                _parse_log_timestamp(e.get("timestamp")),
                 json.dumps(e.get("extra", {})),
             )
             for e in entries[:100]

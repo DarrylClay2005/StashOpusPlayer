@@ -52,18 +52,31 @@ final class ArtworkService {
     /// Wipes previously-cached artwork files once per `cacheFormatVersion` bump,
     /// so stale low-resolution/low-quality images don't linger on disk and keep
     /// being served instead of freshly (re)generated ones.
+    ///
+    /// Runs entirely off the main thread: `ArtworkService.shared` is first
+    /// touched from `LibraryManager.init` during app launch, and synchronously
+    /// deleting hundreds/thousands of cache files there would stall startup —
+    /// exactly the kind of "update install freakout" users were already hitting
+    /// from an unrelated full-library-rescan bug. The version-file write happens
+    /// last so a process kill mid-purge re-triggers the purge next launch instead
+    /// of leaving the cache in a mixed old/new state.
     private func purgeStaleArtworkCacheIfNeeded() {
         let versionFile = diskCacheURL.appendingPathComponent(Self.cacheVersionFileName)
         let storedVersion = (try? String(contentsOf: versionFile, encoding: .utf8))
             .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
         guard storedVersion != Self.cacheFormatVersion else { return }
 
-        if let contents = try? FileManager.default.contentsOfDirectory(
-            at: diskCacheURL, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
-        ) {
-            for url in contents { try? FileManager.default.removeItem(at: url) }
+        let cacheURL = diskCacheURL
+        let newVersion = Self.cacheFormatVersion
+        Task.detached(priority: .utility) {
+            let fm = FileManager.default
+            if let contents = try? fm.contentsOfDirectory(
+                at: cacheURL, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
+            ) {
+                for url in contents { try? fm.removeItem(at: url) }
+            }
+            try? "\(newVersion)".write(to: versionFile, atomically: true, encoding: .utf8)
         }
-        try? "\(Self.cacheFormatVersion)".write(to: versionFile, atomically: true, encoding: .utf8)
     }
 
     func artwork(for song: Song) -> UIImage? {

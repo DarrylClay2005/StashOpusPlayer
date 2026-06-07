@@ -300,7 +300,16 @@ struct DocumentImportService {
             }
         }
 
+        // Derive a stable ID from the file's path relative to Documents rather than
+        // a fresh random UUID. A random ID meant every re-import (cache miss after
+        // an app reinstall changed the sandbox container UUID, or simply a modified
+        // file) minted a brand-new identity — silently orphaning any favorite or
+        // playlist entry that referenced the old ID. Keying on the relative path
+        // keeps the same song's identity stable across rescans and reinstalls.
+        let stableID = ScanCacheService.documentsRelativePath(for: url).map { "local:\($0)" }
+
         var song = Song(
+            id: stableID ?? UUID().uuidString,
             title: title,
             artist: artist,
             album: album,

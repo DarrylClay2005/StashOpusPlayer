@@ -544,13 +544,25 @@ final class AudioPlayerManager: ObservableObject {
         // ipod-library:// asset URLs are session-scoped and expire across app launches.
         // Clear them so scheduleCurrent() fails gracefully instead of crashing on a
         // stale MPMediaItem URL. Song metadata (title/artist) is preserved for display.
+        //
+        // Local file:// URLs are absolute paths through the sandbox container, e.g.
+        // .../Containers/Data/Application/<UUID>/Documents/Imported Music/song.mp3 —
+        // and sideloaded installs (AltStore) get a brand-new <UUID> on every update,
+        // so every entry in a restored queue pointed at a path that no longer
+        // existed (silently failing to schedule, or throwing "file not found").
+        // Re-anchor the Documents-relative portion of the path onto the *current*
+        // sandbox's Documents directory so playback resumes correctly post-update.
+        let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         let sanitisedQueue = snapshot.queue.map { song -> Song in
-            if let url = song.url, url.scheme == "ipod-library" {
-                var cleaned = song
+            guard let url = song.url else { return song }
+            var cleaned = song
+            if url.scheme == "ipod-library" {
                 cleaned.url = nil
-                return cleaned
+            } else if url.isFileURL, let docsDir,
+                      let relative = ScanCacheService.documentsRelativePath(for: url) {
+                cleaned.url = docsDir.appendingPathComponent(relative)
             }
-            return song
+            return cleaned
         }
 
         queue = sanitisedQueue

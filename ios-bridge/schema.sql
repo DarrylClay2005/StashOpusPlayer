@@ -161,9 +161,6 @@ CREATE TABLE IF NOT EXISTS ios_user_gallery_images (
   INDEX idx_user_id (user_id)
 );
 
--- Fix playlist_id column type in ios_shared_playlists (was INT, must be VARCHAR for UUID strings)
-ALTER TABLE ios_shared_playlists MODIFY COLUMN playlist_id VARCHAR(36) NOT NULL DEFAULT '';
-
 -- iOS client telemetry / background log ingestion
 CREATE TABLE IF NOT EXISTS ios_app_logs (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -190,3 +187,10 @@ CREATE TABLE IF NOT EXISTS ios_shared_playlists (
   is_active BOOLEAN DEFAULT TRUE,
   FOREIGN KEY (owner_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+
+-- Fix playlist_id column type in ios_shared_playlists (was INT, must be VARCHAR for UUID strings).
+-- Must run after the CREATE TABLE above — on a fresh database this ALTER previously executed
+-- before the table existed, causing init_db() to throw "table doesn't exist", roll back
+-- (a no-op since DDL auto-commits in MySQL), and crash the bridge on startup before
+-- ios_app_logs/ios_shared_playlists were ever created.
+ALTER TABLE ios_shared_playlists MODIFY COLUMN playlist_id VARCHAR(36) NOT NULL DEFAULT '';
