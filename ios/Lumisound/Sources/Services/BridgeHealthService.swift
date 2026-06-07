@@ -13,11 +13,18 @@ final class BridgeHealthService: ObservableObject {
 
     private var checkTimer: Timer?
 
-    /// Timestamp of the last completed bridge health check.
-    /// Used to enforce a 30-second cooldown so rapid app-foreground events
-    /// don't trigger redundant network calls. Reset to `.distantPast` when
-    /// the last check returned a failure so the next foreground always retries.
+    /// Timestamp of the last *completed* bridge health check (success or failure).
+    /// Paired with `consecutiveFailures` to gate both the healthy-state cooldown
+    /// and the failure backoff below.
     private var lastCheckTime: Date = .distantPast
+
+    /// Consecutive failed checks. Drives an exponential backoff (60s, 120s,
+    /// 240s... capped at 10 minutes) so a genuinely-offline bridge doesn't get
+    /// hit by the 60-second timer on every single tick — a watchdog that just
+    /// keeps re-triggering the same failure wastes battery/network for no
+    /// benefit and was indistinguishable from a hang to the user. Resets to 0
+    /// the moment a check succeeds, so recovery is detected within one minute.
+    private var consecutiveFailures = 0
 
     func startPeriodicChecks(streaming: StreamingService) {
         stopPeriodicChecks()
@@ -37,20 +44,27 @@ final class BridgeHealthService: ObservableObject {
 
     func check(streaming: StreamingService) async {
         let prevHealthy = isHealthy
+        let now = Date()
 
-        // Cooldown: skip the network round-trip if the last check succeeded
-        // within the past 30 seconds. Always re-check after a failure so the
-        // UI recovers promptly once the bridge comes back online.
-        let lastCheckSucceeded = prevHealthy == true
-        if lastCheckSucceeded && Date().timeIntervalSince(lastCheckTime) < 30.0 {
-            appLog("BridgeHealth: skipping check (cooldown active)", category: "network")
-            return
+        if prevHealthy == true {
+            // Healthy cooldown — skip the round-trip if we checked within 30s.
+            if now.timeIntervalSince(lastCheckTime) < 30.0 {
+                appLog("BridgeHealth: skipping check (cooldown active)", category: "network")
+                return
+            }
+        } else if consecutiveFailures > 0 {
+            // Failure backoff — space consecutive retries out exponentially
+            // instead of hammering a dead server every 60s indefinitely.
+            let backoff = min(60.0 * pow(2.0, Double(consecutiveFailures - 1)), 600.0)
+            if now.timeIntervalSince(lastCheckTime) < backoff {
+                appLog("BridgeHealth: skipping check (backoff \(Int(backoff))s after \(consecutiveFailures) failure(s))", category: "network")
+                return
+            }
         }
 
         let healthy = await streaming.checkHealth()
-        // Record timestamp regardless of outcome; failures reset it to distantPast
-        // so the next call is never suppressed after a failure.
-        lastCheckTime = healthy ? Date() : .distantPast
+        lastCheckTime = now
+        consecutiveFailures = healthy ? 0 : consecutiveFailures + 1
         isHealthy = healthy
 
         if healthy && !streaming.apiKey.isEmpty {

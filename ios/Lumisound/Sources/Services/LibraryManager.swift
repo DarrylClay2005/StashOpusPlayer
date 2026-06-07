@@ -2,6 +2,14 @@ import Foundation
 import MediaPlayer
 import UIKit
 
+/// Progress snapshot for an in-flight `scanMediaLibrary` run — lets the launch
+/// screen show "Scanning 340 of 1,100 songs…" instead of a generic spinner for
+/// users with big libraries, where the scan can take many seconds.
+struct LibraryScanProgress: Equatable {
+    let current: Int
+    let total: Int
+}
+
 @MainActor
 final class LibraryManager: ObservableObject {
     @Published private(set) var allSongs: [Song] = []
@@ -11,6 +19,11 @@ final class LibraryManager: ObservableObject {
     @Published private(set) var playlists: [Playlist] = []
     @Published private(set) var favoriteSongIDs: Set<String> = []
     @Published private(set) var isScanning: Bool = false
+    @Published private(set) var scanProgress: LibraryScanProgress? = nil
+    /// Set when `scanMediaLibrary` has bailed out after repeated incomplete
+    /// attempts (see the crash-loop guard in `scanMediaLibrary`). Lets the UI
+    /// explain *why* the media library never loaded instead of just spinning.
+    @Published private(set) var scanCrashGuardActive: Bool = false
     @Published var errorMessage: String?
     @Published var lastScanResult: String? = nil
 
@@ -33,6 +46,11 @@ final class LibraryManager: ObservableObject {
         self.artwork = artwork
         favoriteSongIDs = persistence.loadFavorites()
         playlists = persistence.loadPlaylists()
+        // Show last session's library immediately — see `loadPersistedSnapshot`.
+        // The real scans below always run afterward and overwrite this with
+        // fresh data; this just removes the "empty list for several seconds"
+        // window for users with big libraries (1000+ songs).
+        loadPersistedSnapshot()
         // Re-scan local documents whenever the app returns to the foreground so
         // that files the user added via the Files app while Lumisound was
         // backgrounded are picked up without requiring a manual refresh.
@@ -42,6 +60,56 @@ final class LibraryManager: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.scanLocalDocuments() }
+        }
+    }
+
+    // MARK: - Library Snapshot (instant-on-launch cache)
+
+    private struct LibrarySnapshot: Codable {
+        let songs: [Song]
+        let artists: [String]
+        let albums: [String]
+        let genres: [String]
+    }
+
+    private static let snapshotURL: URL = {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        return caches.appendingPathComponent("library_snapshot_v1.json")
+    }()
+
+    /// Reads the last-persisted library state synchronously so `allSongs` (and
+    /// the derived facet lists) are populated the instant `LibraryManager` is
+    /// constructed — before any scan has run. For a 1,100-song library the
+    /// real scan can take many seconds; without this, the launch/library
+    /// screens sit empty that whole time even though the user had a perfectly
+    /// good library a moment ago. `scanMediaLibrary`/`scanLocalDocuments`/etc.
+    /// always run after `init` and silently replace these values with fresh
+    /// results once they complete (see `persistSnapshotIfSettled`).
+    private func loadPersistedSnapshot() {
+        guard let data = try? Data(contentsOf: Self.snapshotURL),
+              let snapshot = try? JSONDecoder().decode(LibrarySnapshot.self, from: data),
+              !snapshot.songs.isEmpty
+        else { return }
+        allSongs = snapshot.songs
+        artists = snapshot.artists
+        albums = snapshot.albums
+        genres = snapshot.genres
+        appLog("Loaded cached library snapshot: \(snapshot.songs.count) song(s)", category: "library")
+    }
+
+    /// Writes the current library state to disk so the next launch can show it
+    /// instantly via `loadPersistedSnapshot`. Only called once a scan has
+    /// fully settled (`!isScanning`) so we never persist a half-populated
+    /// mid-scan state as if it were the real library. Encoding/writing
+    /// thousands of `Song` structs is real work — offloaded to a background
+    /// task exactly like `ScanCacheService.persist()`.
+    private func persistSnapshotIfSettled() {
+        guard !isScanning else { return }
+        let snapshot = LibrarySnapshot(songs: allSongs, artists: artists, albums: albums, genres: genres)
+        let destination = Self.snapshotURL
+        Task.detached(priority: .utility) {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: destination, options: .atomic)
         }
     }
 
@@ -73,44 +141,66 @@ final class LibraryManager: ObservableObject {
         }
 
         guard !uncached.isEmpty else { return cachedSongs }
-        let uncachedURLs = uncached.map(\.url)
-
-        let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
-            await withTaskGroup(of: Song?.self) { group in
-                var results: [Song] = []
-                var pending = 0
-                let maxConcurrent = 8
-                var iterator = uncachedURLs.makeIterator()
-
-                while pending < maxConcurrent, let url = iterator.next() {
-                    let s = DocumentImportService()
-                    group.addTask { await s.makeSong(for: url) }
-                    pending += 1
-                }
-
-                for await song in group {
-                    if let song { results.append(song) }
-                    pending -= 1
-                    if let url = iterator.next() {
-                        let s = DocumentImportService()
-                        group.addTask { await s.makeSong(for: url) }
-                        pending += 1
-                    }
-                }
-                return results
-            }
-        }.value
 
         let stampByURL = Dictionary(
             uncached.map { ($0.url.standardizedFileURL, $0.stamp) },
             uniquingKeysWith: { first, _ in first }
         )
-        for song in newSongs {
-            if let url = song.url, let stamp = stampByURL[url.standardizedFileURL] {
-                ScanCacheService.shared.store(song: song, for: url, stamp: stamp)
+
+        // Process uncached files in checkpointed batches, storing+persisting the
+        // scan cache after each one completes. Previously the cache was only
+        // written once at the very end — so a scan interrupted by a crash, force
+        // quit, or the OS killing a backgrounded app lost ALL of its metadata
+        // extraction work and started completely from zero next launch (the
+        // dominant cause of "it rescans my whole library again" reports for big
+        // libraries). Now an interrupted scan resumes from the last completed
+        // batch — at most ~100 files of repeated work instead of thousands.
+        // Concurrency within each batch is unchanged (maxConcurrent = 8).
+        let checkpointSize = 100
+        var newSongs: [Song] = []
+        newSongs.reserveCapacity(uncached.count)
+        var batchStart = 0
+        while batchStart < uncached.count {
+            let batchEnd = min(batchStart + checkpointSize, uncached.count)
+            let batchURLs = uncached[batchStart..<batchEnd].map(\.url)
+
+            let batchSongs: [Song] = await Task.detached(priority: .userInitiated) {
+                await withTaskGroup(of: Song?.self) { group in
+                    var results: [Song] = []
+                    var pending = 0
+                    let maxConcurrent = 8
+                    var iterator = batchURLs.makeIterator()
+
+                    while pending < maxConcurrent, let url = iterator.next() {
+                        let s = DocumentImportService()
+                        group.addTask { await s.makeSong(for: url) }
+                        pending += 1
+                    }
+
+                    for await song in group {
+                        if let song { results.append(song) }
+                        pending -= 1
+                        if let url = iterator.next() {
+                            let s = DocumentImportService()
+                            group.addTask { await s.makeSong(for: url) }
+                            pending += 1
+                        }
+                    }
+                    return results
+                }
+            }.value
+
+            for song in batchSongs {
+                if let url = song.url, let stamp = stampByURL[url.standardizedFileURL] {
+                    ScanCacheService.shared.store(song: song, for: url, stamp: stamp)
+                }
             }
+            ScanCacheService.shared.persist()
+
+            newSongs.append(contentsOf: batchSongs)
+            batchStart = batchEnd
         }
-        ScanCacheService.shared.persist()
+
         await EnrichmentCacheStore.shared.persist()
 
         return cachedSongs + newSongs
@@ -302,26 +392,97 @@ final class LibraryManager: ObservableObject {
         }
     }
 
+    /// Persists how many `scanMediaLibrary` runs in a row never reached completion.
+    /// Survives process termination (unlike an in-memory flag), which is exactly
+    /// what's needed to detect a crash loop: the counter is bumped *before* the
+    /// scan starts and only cleared on success, so an app that crashes mid-scan
+    /// comes back up, sees a non-zero count, and knows the previous attempt died.
+    private static let scanAttemptCounterKey = "media_scan_incomplete_attempts"
+
     func scanMediaLibrary() {
         guard MPMediaLibrary.authorizationStatus() == .authorized else {
             requestAccessAndScan()
             return
         }
-        appLog("scanMediaLibrary: starting", category: "library")
+
+        // Crash-loop guard — `MPMediaQuery.songs().items` has been observed to
+        // crash mid-read on some very large Apple Music libraries. Without this,
+        // a crash here restarts the app straight back into the same scan: an
+        // unrecoverable boot loop the user can only escape by deleting the app.
+        // After 2 incomplete attempts in a row we stop trying automatically and
+        // let the user fall back to imported/local files (still fully usable),
+        // or switch scan sources from Settings.
+        let defaults = UserDefaults.standard
+        let priorAttempts = defaults.integer(forKey: Self.scanAttemptCounterKey)
+        if priorAttempts >= 2 {
+            appWarn("scanMediaLibrary: \(priorAttempts) consecutive incomplete attempts — refusing to retry automatically", category: "library")
+            scanCrashGuardActive = true
+            errorMessage = "The media library scan has been crashing repeatedly. Imported/local files still work — switch \"Default Scan Source\" to App Storage in Settings, or tap Retry to try again."
+            return
+        }
+        defaults.set(priorAttempts + 1, forKey: Self.scanAttemptCounterKey)
+
+        appLog("scanMediaLibrary: starting (attempt \(priorAttempts + 1))", category: "library")
+        appBreadcrumb("Started media library scan (attempt \(priorAttempts + 1))")
         isScanning = true
         errorMessage = nil
+        scanCrashGuardActive = false
+        scanProgress = nil
 
         Task {
-            let scanned: [Song] = await Task.detached(priority: .userInitiated) {
-                let query = MPMediaQuery.songs()
-                return (query.items ?? []).compactMap(Song.init(mediaItem:))
+            // The query itself is the slow, blocking part — keep it off the main actor.
+            let items: [MPMediaItem] = await Task.detached(priority: .userInitiated) {
+                MPMediaQuery.songs().items ?? []
             }.value
-            // Back on MainActor — Task inherits actor context from scanMediaLibrary().
+            appLog("scanMediaLibrary: found \(items.count) item(s), converting", category: "library")
+
+            // Convert in small chunks with a yield in between. `Song.init(mediaItem:)`
+            // is cheap per item (just reads cached MPMediaItem properties), but doing
+            // all 1,000+ at once back-to-back is enough synchronous main-actor work to
+            // visibly stall scrolling/animation — the "freakout" users see on big
+            // libraries. Yielding between chunks lets the UI (and artwork prefetch)
+            // get scheduling slices throughout, and doubles as the source for the
+            // live "Scanning N of M" progress shown on the launch screen.
+            var scanned: [Song] = []
+            scanned.reserveCapacity(items.count)
+            let chunkSize = 200
+            var index = 0
+            while index < items.count {
+                guard !Task.isCancelled else { return }
+                let end = min(index + chunkSize, items.count)
+                scanned.append(contentsOf: items[index..<end].compactMap(Song.init(mediaItem:)))
+                index = end
+                scanProgress = LibraryScanProgress(current: index, total: items.count)
+                await Task.yield()
+            }
+
             appLog("scanMediaLibrary: found \(scanned.count) song(s)", category: "library")
             self.mediaSongs = scanned
             self.rebuildAllSongs()
             self.isScanning = false
+            self.scanProgress = nil
+            // Completed cleanly — reset the crash-loop counter so future launches
+            // get the normal 2-attempt grace again rather than accumulating forever.
+            defaults.set(0, forKey: Self.scanAttemptCounterKey)
+            appBreadcrumb("Media library scan completed: \(scanned.count) song(s)")
         }
+    }
+
+    /// User-initiated escape hatch from the crash-loop guard above. The guard's
+    /// banner tells the user to "tap Retry" — this is that action. Deliberately
+    /// NOT wired into any automatic path (onAppear, app launch, etc.): resetting
+    /// the counter there would silently recreate the exact boot loop the guard
+    /// exists to break. Only reachable by an explicit tap, so a genuinely broken
+    /// library can't trap the user in endless automatic retries, while a
+    /// transient run of bad luck is just one button away from a fresh attempt.
+    func retryMediaLibraryScanAfterCrashGuard() {
+        guard scanCrashGuardActive else { return }
+        appLog("retryMediaLibraryScanAfterCrashGuard: user-initiated retry — resetting attempt counter", category: "library")
+        appBreadcrumb("User retried media library scan after crash-loop guard")
+        UserDefaults.standard.set(0, forKey: Self.scanAttemptCounterKey)
+        scanCrashGuardActive = false
+        errorMessage = nil
+        scanMediaLibrary()
     }
 
     func importFiles(urls: [URL]) {
@@ -449,6 +610,7 @@ final class LibraryManager: ObservableObject {
             self.artists = artists
             self.albums  = albums
             self.genres  = genres
+            self.persistSnapshotIfSettled()
         }
     }
 }

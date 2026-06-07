@@ -210,6 +210,7 @@ final class AudioPlayerManager: ObservableObject {
         let source = songs.isEmpty ? [song] : songs
         let index = source.firstIndex(where: { $0.id == song.id }) ?? 0
         appLog("Play: \"\(song.displayName)\" by \(song.artistName) (\(source.count) in queue)", category: "audio")
+        appBreadcrumb("Playing \"\(song.displayName)\"")
         setQueue(source, startIndex: index, autoplay: true)
     }
 
@@ -593,6 +594,11 @@ final class AudioPlayerManager: ObservableObject {
         cancelCrossfade()
         // Clear before scheduling so failure can be detected below.
         errorMessage = nil
+
+        // Best-effort: get the upcoming streamed track's audio onto disk while
+        // this one plays, so its turn doesn't open with a multi-second download
+        // stall (the audible "gap" streamed sources have that local files don't).
+        prefetchUpcomingStreamIfNeeded()
 
         // For HTTP/HTTPS URLs the download is async — scheduleCurrent handles the full play
         // flow internally (including calling node.play() after the download completes).
@@ -1282,6 +1288,76 @@ final class AudioPlayerManager: ObservableObject {
         }
         pendingNextIndex = nextIndex
         return queue[nextIndex]
+    }
+
+    /// Best-effort background download of the *upcoming* queue item's stream
+    /// into the exact temp-cache path `downloadAndSchedule` checks before
+    /// downloading — so by the time playback reaches it, the file is already
+    /// local and starts instantly instead of opening with a fresh multi-second
+    /// network download (the audible "gap" streamed YouTube/SoundCloud tracks
+    /// have that local files don't, and the dominant remaining playback-feel
+    /// issue once gapless/crossfade are handled for local files).
+    ///
+    /// Deliberately a self-contained duplicate of `downloadAndSchedule`'s
+    /// cache-key/extension logic rather than a refactor of it: this is purely
+    /// additive and best-effort (wrapped in `try?`, every failure silently
+    /// no-ops), so it can never regress the existing, carefully-tuned download
+    /// path — at worst a mismatch just means the upcoming track downloads
+    /// normally when its turn comes, exactly as it does today.
+    private func prefetchUpcomingStreamIfNeeded() {
+        guard let nextIndex = resolveNextIndex(), queue.indices.contains(nextIndex) else { return }
+        let nextSong = queue[nextIndex]
+        guard nextSong.id != currentSong?.id,
+              let url = nextSong.url,
+              ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+        else { return }
+
+        let headers = nextSong.httpHeaders
+        Task.detached(priority: .utility) {
+            let cacheKey: String = url.absoluteString.data(using: .utf8).map { bytes in
+                var hash: UInt64 = 5381
+                for byte in bytes { hash = hash &* 31 &+ UInt64(byte) }
+                return String(hash, radix: 16)
+            } ?? UUID().uuidString
+
+            let urlPath = url.path.lowercased()
+            var ext: String
+            if urlPath.contains("audio/webm") || urlPath.hasSuffix(".webm") || urlPath.contains("mime=audio%2fwebm") {
+                ext = "webm"
+            } else if urlPath.hasSuffix(".opus") || urlPath.contains("mime=audio%2fogg") {
+                ext = "opus"
+            } else if urlPath.hasSuffix(".mp3") {
+                ext = "mp3"
+            } else {
+                ext = "m4a"
+            }
+
+            let tempDir = FileManager.default.temporaryDirectory
+            var tempURL = tempDir.appendingPathComponent("stream_\(cacheKey).\(ext)")
+            guard !FileManager.default.fileExists(atPath: tempURL.path) else { return }
+
+            var req = URLRequest(url: url)
+            req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", forHTTPHeaderField: "User-Agent")
+            req.timeoutInterval = 60
+            if let headers {
+                for (field, value) in headers { req.setValue(value, forHTTPHeaderField: field) }
+            }
+
+            guard let (downloaded, response) = try? await URLSession.shared.download(for: req) else { return }
+
+            if ext == "m4a", let ct = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") {
+                if ct.contains("webm") { ext = "webm" }
+                else if ct.contains("ogg") || ct.contains("opus") { ext = "opus" }
+                else if ct.contains("mpeg") { ext = "mp3" }
+                tempURL = tempDir.appendingPathComponent("stream_\(cacheKey).\(ext)")
+            }
+
+            guard !FileManager.default.fileExists(atPath: tempURL.path) else {
+                try? FileManager.default.removeItem(at: downloaded)
+                return
+            }
+            try? FileManager.default.moveItem(at: downloaded, to: tempURL)
+        }
     }
 
     private func advanceIndex() {

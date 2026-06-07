@@ -105,6 +105,13 @@ struct ContentView: View {
             .tint(AppTheme.dynamicAccent)
             // Subtle cross-fade between tabs
             .animation(.easeInOut(duration: 0.18), value: selectedTab)
+            // Crash-context breadcrumb — "what was the user doing right before
+            // the crash" is the single most useful fact for diagnosing reports
+            // like "it just freezes/crashes sometimes". See AppLogger.breadcrumb.
+            .onChange(of: selectedTab) { newValue in
+                let names = ["Library", "Playing", "Queue", "Search", "Settings"]
+                appBreadcrumb("Switched to \(names.indices.contains(newValue) ? names[newValue] : "tab \(newValue)") tab")
+            }
             // No explicit .frame() on TabView — it must size itself from its content.
             // An explicit frame here can cause stretch/overflow on certain device sizes.
 

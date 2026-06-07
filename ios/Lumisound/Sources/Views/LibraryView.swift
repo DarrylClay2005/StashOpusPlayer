@@ -53,15 +53,29 @@ struct LibraryView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 4)
 
-                // Error banner
+                // Error banner — gains a real "Retry" button when the crash-loop
+                // guard is active, since its message explicitly tells the user
+                // to tap one (see LibraryManager.retryMediaLibraryScanAfterCrashGuard).
                 if let error = library.errorMessage {
-                    HStack {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(AppTheme.warning)
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.warning)
-                        Spacer()
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(AppTheme.warning)
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.warning)
+                            Spacer()
+                        }
+                        if library.scanCrashGuardActive {
+                            Button {
+                                library.retryMediaLibraryScanAfterCrashGuard()
+                            } label: {
+                                Label("Retry", systemImage: "arrow.clockwise")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(AppTheme.warning)
+                        }
                     }
                     .padding(.horizontal)
                     .padding(.vertical, 8)
@@ -255,6 +269,19 @@ private struct SongsTab: View {
                                     maxIndex: 19,
                                     didAnimate: didAnimateEntrance
                                 ))
+                                // Windowed artwork prefetch: the initial onAppear below
+                                // only warms the first 30 — fine at the top of a 1,100-song
+                                // library, useless once the user scrolls past row 200.
+                                // `List` only calls onAppear for rows that actually become
+                                // visible, so this stays cheap (and `prefetch` itself skips
+                                // anything already cached) while keeping artwork ready a
+                                // little ahead of and behind wherever the user is scrolling.
+                                .onAppear {
+                                    let lower = max(0, index - 8)
+                                    let upper = min(songs.count, index + 24)
+                                    guard lower < upper else { return }
+                                    ArtworkService.shared.prefetch(songs: Array(songs[lower..<upper]))
+                                }
                             }
                         }
                     }

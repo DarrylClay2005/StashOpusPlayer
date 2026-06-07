@@ -89,11 +89,27 @@ struct LaunchView: View {
                 Spacer()
 
                 VStack(spacing: 8) {
-                    ProgressView()
-                        .tint(AppTheme.dynamicAccent)
-                    Text("Loading library\u{2026}")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.textSecondary)
+                    // Determinate progress while `scanMediaLibrary` is actively
+                    // converting items — turns "is this stuck?" into visible,
+                    // ticking proof that the scan is moving, which matters most
+                    // for big libraries where the indeterminate spinner used to
+                    // sit there for many seconds with zero feedback.
+                    if let progress = library.scanProgress, progress.total > 0 {
+                        ProgressView(value: Double(progress.current), total: Double(progress.total))
+                            .tint(AppTheme.dynamicAccent)
+                            .frame(maxWidth: 180)
+                        Text("Scanning \(progress.current) of \(progress.total) songs\u{2026}")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .contentTransition(.numericText())
+                            .animation(.easeOut(duration: 0.2), value: progress.current)
+                    } else {
+                        ProgressView()
+                            .tint(AppTheme.dynamicAccent)
+                        Text("Loading library\u{2026}")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
                 }
                 .opacity(contentOpacity)
                 .padding(.bottom, 40)

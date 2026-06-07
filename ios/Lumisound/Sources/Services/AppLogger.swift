@@ -33,6 +33,12 @@ final class AppLogger: ObservableObject {
     private var bridgeURL: String = ""
     private var isConfigured = false
 
+    // MARK: - Breadcrumbs (crash context)
+
+    private static let breadcrumbsKey = "crash_breadcrumbs_v1"
+    private let maxBreadcrumbs = 12
+    private var breadcrumbs: [String] = []
+
     private init() {}
 
     // MARK: - Configuration
@@ -42,10 +48,49 @@ final class AppLogger: ObservableObject {
         guard !isConfigured else { return }
         isConfigured = true
         self.bridgeURL = bridgeURL
+        reportPriorSessionBreadcrumbsIfAny()
         _append(LogEntry(level: "info", category: "app", message: "App launched",
                          file: "LumisoundApp.swift", line: 0,
                          timestamp: Date().formatted(.iso8601), extra: [:]))
         startFlushTimer()
+    }
+
+    // MARK: - Breadcrumbs (nonisolated — callable from any context)
+
+    /// Records a short description of a significant action (scan started, song
+    /// changed, tab switched...) and persists the trail to UserDefaults
+    /// immediately. If the app crashes before the next graceful shutdown, the
+    /// *next* launch finds this trail still on disk and reports it as a single
+    /// consolidated log entry — turning "it just crashed" into "it crashed
+    /// right after switching to Search while the library was still scanning."
+    /// Deliberately NOT for high-frequency events (position ticks, scroll) —
+    /// only discrete, meaningful ones; each call performs a UserDefaults write.
+    nonisolated func breadcrumb(_ event: String) {
+        Task { @MainActor [weak self] in self?._recordBreadcrumb(event) }
+    }
+
+    private func _recordBreadcrumb(_ event: String) {
+        breadcrumbs.append("\(Date().formatted(.iso8601)) — \(event)")
+        if breadcrumbs.count > maxBreadcrumbs {
+            breadcrumbs.removeFirst(breadcrumbs.count - maxBreadcrumbs)
+        }
+        UserDefaults.standard.set(breadcrumbs, forKey: Self.breadcrumbsKey)
+    }
+
+    /// If a breadcrumb trail survived from a previous run, that session never
+    /// reached a clean shutdown path (crash, force-quit, OS termination) — log
+    /// what it was doing right before, then clear the trail so a normal
+    /// background/terminate afterward doesn't re-report the same stale data.
+    private func reportPriorSessionBreadcrumbsIfAny() {
+        guard let prior = UserDefaults.standard.stringArray(forKey: Self.breadcrumbsKey),
+              !prior.isEmpty
+        else { return }
+        let summary = prior.joined(separator: "  →  ")
+        _append(LogEntry(level: "warning", category: "app",
+                         message: "Possible unclean shutdown — last actions before previous session ended: \(summary)",
+                         file: "AppLogger.swift", line: 0,
+                         timestamp: Date().formatted(.iso8601), extra: [:]))
+        UserDefaults.standard.removeObject(forKey: Self.breadcrumbsKey)
     }
 
     // MARK: - Public log methods (nonisolated — callable from any context)
@@ -151,4 +196,10 @@ func appError(_ message: String, category: String = "general",
               file: String = #file, line: Int = #line,
               extra: [String: String] = [:]) {
     AppLogger.shared.error(message, category: category, file: file, line: line, extra: extra)
+}
+
+/// Records a short breadcrumb of a significant action for crash-context
+/// reporting on the next launch. See `AppLogger.breadcrumb`.
+func appBreadcrumb(_ event: String) {
+    AppLogger.shared.breadcrumb(event)
 }
