@@ -125,6 +125,7 @@ final class AudioPlayerManager: ObservableObject {
     // When active, this player owns audio output instead of the AVAudioEngine nodes.
     private var opusPlayer: AVPlayer?
     private var opusTimeObserver: Any?
+    private var opusStatusObserver: NSKeyValueObservation?
     private var isUsingOpusPlayer: Bool { opusPlayer != nil }
 
     // Schedule generation counter — incremented before every node stop/reschedule.
@@ -1068,6 +1069,39 @@ final class AudioPlayerManager: ObservableObject {
             player.seek(to: CMTime(seconds: startTime, preferredTimescale: 600))
         }
 
+        // Detect AVPlayer item failures (e.g. expired stream URL, unsupported format).
+        opusStatusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            guard let self else { return }
+            if item.status == .failed {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    let detail = item.error?.localizedDescription ?? "unknown error"
+                    appError("AVPlayer failed to load track — skipping. \(detail)", category: "audio")
+                    self.tearDownOpusPlayer()
+                    self.isPlaying = false
+                    self.errorMessage = "Could not play this track."
+                    self.skipToNext()
+                }
+            }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self else { return }
+            let err = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+            appError("AVPlayer playback failed — skipping. \(err?.localizedDescription ?? "unknown")", category: "audio")
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.tearDownOpusPlayer()
+                self.isPlaying = false
+                self.errorMessage = "Playback error."
+                self.skipToNext()
+            }
+        }
+
         if isPlaying { player.play() }
 
         updateNowPlaying()
@@ -1075,9 +1109,14 @@ final class AudioPlayerManager: ObservableObject {
     }
 
     private func tearDownOpusPlayer() {
+        opusStatusObserver?.invalidate()
+        opusStatusObserver = nil
         if let obs = opusTimeObserver {
             opusPlayer?.removeTimeObserver(obs)
             opusTimeObserver = nil
+        }
+        if let item = opusPlayer?.currentItem {
+            NotificationCenter.default.removeObserver(self, name: .AVPlayerItemFailedToPlayToEndTime, object: item)
         }
         opusPlayer?.pause()
         opusPlayer = nil

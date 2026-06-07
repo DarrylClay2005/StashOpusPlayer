@@ -193,11 +193,28 @@ async def cleanup_orphan_temp_dirs() -> None:
 # ---------------------------------------------------------------------------
 
 
+async def _auth_attempts_janitor() -> None:
+    """Periodically evict stale IP entries from _auth_attempts so it never grows unbounded."""
+    while True:
+        await asyncio.sleep(300)  # every 5 minutes
+        now = time.time()
+        stale = [
+            ip for ip, times in list(_auth_attempts.items())
+            if not any(now - t < _AUTH_WINDOW for t in times)
+        ]
+        for ip in stale:
+            _auth_attempts.pop(ip, None)
+        if stale:
+            logger.debug("auth janitor: evicted %d stale IP entries", len(stale))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     await cleanup_orphan_temp_dirs()
+    janitor = asyncio.create_task(_auth_attempts_janitor())
     yield
+    janitor.cancel()
     # Shutdown: close the DB connection pool (Fix 8)
     import db as _db_module
     pool = _db_module._pool
@@ -225,7 +242,8 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 _search_cache: dict[str, tuple[float, list[dict]]] = {}
-_CACHE_TTL = 300  # seconds
+_CACHE_TTL = 300       # seconds
+_CACHE_MAX  = 500      # max entries before eviction
 
 
 def _cache_get(key: str) -> Optional[list[dict]]:
@@ -240,6 +258,11 @@ def _cache_get(key: str) -> Optional[list[dict]]:
 
 
 def _cache_set(key: str, data: list[dict]) -> None:
+    if len(_search_cache) >= _CACHE_MAX:
+        # Evict oldest 25%
+        oldest = sorted(_search_cache.items(), key=lambda x: x[1][0])
+        for k, _ in oldest[: _CACHE_MAX // 4]:
+            _search_cache.pop(k, None)
     _search_cache[key] = (time.monotonic(), data)
 
 
@@ -713,7 +736,7 @@ async def download_track(
         await asyncio.sleep(5)
         shutil.rmtree(path, ignore_errors=True)
 
-    asyncio.ensure_future(_cleanup_later(tmp_dir))
+    asyncio.create_task(_cleanup_later(tmp_dir))
 
     return FileResponse(
         path=str(output_file),
@@ -1111,56 +1134,49 @@ async def get_playlists(payload: dict = Depends(get_current_user)):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            # Single JOIN fetches all playlists + tracks in one round-trip (no N+1).
             await cur.execute(
                 """
-                SELECT id, name, description, created_at, updated_at
-                FROM ios_user_playlists
-                WHERE user_id = %s
-                ORDER BY updated_at DESC
+                SELECT p.id, p.name, p.description, p.created_at, p.updated_at,
+                       t.id, t.track_url, t.local_song_id, t.title, t.artist, t.album,
+                       t.duration_seconds, t.position
+                FROM ios_user_playlists p
+                LEFT JOIN ios_playlist_tracks t ON t.playlist_id = p.id
+                WHERE p.user_id = %s
+                ORDER BY p.updated_at DESC, t.position ASC
                 """,
                 (user_id,),
             )
-            playlist_rows = await cur.fetchall()
+            rows = await cur.fetchall()
 
-            playlists = []
-            for pl_row in playlist_rows:
-                pl_id, name, description, created_at, updated_at = pl_row
-                await cur.execute(
-                    """
-                    SELECT id, track_url, local_song_id, title, artist, album,
-                           duration_seconds, position
-                    FROM ios_playlist_tracks
-                    WHERE playlist_id = %s
-                    ORDER BY position ASC
-                    """,
-                    (pl_id,),
-                )
-                track_rows = await cur.fetchall()
-                tracks = [
-                    {
-                        "id": t[0],
-                        "track_url": t[1],
-                        "local_song_id": t[2],
-                        "title": t[3],
-                        "artist": t[4],
-                        "album": t[5],
-                        "duration_seconds": t[6],
-                        "position": t[7],
-                    }
-                    for t in track_rows
-                ]
-                playlists.append(
-                    {
-                        "id": pl_id,
-                        "name": name,
-                        "description": description,
-                        "created_at": created_at.isoformat() if created_at else None,
-                        "updated_at": updated_at.isoformat() if updated_at else None,
-                        "tracks": tracks,
-                    }
-                )
+    playlists: dict[str, dict] = {}
+    order: list[str] = []
+    for row in rows:
+        (pl_id, name, description, created_at, updated_at,
+         t_id, t_url, t_local, t_title, t_artist, t_album, t_dur, t_pos) = row
+        if pl_id not in playlists:
+            playlists[pl_id] = {
+                "id": pl_id,
+                "name": name,
+                "description": description,
+                "created_at": created_at.isoformat() if created_at else None,
+                "updated_at": updated_at.isoformat() if updated_at else None,
+                "tracks": [],
+            }
+            order.append(pl_id)
+        if t_id is not None:
+            playlists[pl_id]["tracks"].append({
+                "id": t_id,
+                "track_url": t_url,
+                "local_song_id": t_local,
+                "title": t_title,
+                "artist": t_artist,
+                "album": t_album,
+                "duration_seconds": t_dur,
+                "position": t_pos,
+            })
 
-    return playlists
+    return [playlists[pid] for pid in order]
 
 
 @app.post("/user/playlists", status_code=201)
@@ -1503,39 +1519,39 @@ async def sync_pull(payload: dict = Depends(get_current_user)):
                 for r in fav_rows
             ]
 
-            # Playlists with tracks
+            # Playlists with tracks — single JOIN, no N+1
             await cur.execute(
-                "SELECT id, name, description FROM ios_user_playlists WHERE user_id = %s ORDER BY updated_at DESC",
+                """
+                SELECT p.id, p.name, p.description,
+                       t.track_url, t.local_song_id, t.title, t.artist, t.album,
+                       t.duration_seconds, t.position
+                FROM ios_user_playlists p
+                LEFT JOIN ios_playlist_tracks t ON t.playlist_id = p.id
+                WHERE p.user_id = %s
+                ORDER BY p.updated_at DESC, t.position ASC
+                """,
                 (user_id,),
             )
-            pl_rows = await cur.fetchall()
-            playlists = []
-            for pl_id, name, description in pl_rows:
-                await cur.execute(
-                    """
-                    SELECT track_url, local_song_id, title, artist, album,
-                           duration_seconds, position
-                    FROM ios_playlist_tracks
-                    WHERE playlist_id = %s ORDER BY position ASC
-                    """,
-                    (pl_id,),
-                )
-                track_rows = await cur.fetchall()
-                tracks = [
-                    {
-                        "track_url": t[0],
-                        "local_song_id": t[1],
-                        "title": t[2],
-                        "artist": t[3],
-                        "album": t[4],
-                        "duration_seconds": t[5],
-                        "position": t[6],
-                    }
-                    for t in track_rows
-                ]
-                playlists.append(
-                    {"id": pl_id, "name": name, "description": description, "tracks": tracks}
-                )
+            pl_join_rows = await cur.fetchall()
+            pl_dict: dict[str, dict] = {}
+            pl_order: list[str] = []
+            for row in pl_join_rows:
+                (pl_id, name, description,
+                 t_url, t_local, t_title, t_artist, t_album, t_dur, t_pos) = row
+                if pl_id not in pl_dict:
+                    pl_dict[pl_id] = {"id": pl_id, "name": name, "description": description, "tracks": []}
+                    pl_order.append(pl_id)
+                if t_url is not None or t_title is not None:
+                    pl_dict[pl_id]["tracks"].append({
+                        "track_url": t_url,
+                        "local_song_id": t_local,
+                        "title": t_title,
+                        "artist": t_artist,
+                        "album": t_album,
+                        "duration_seconds": t_dur,
+                        "position": t_pos,
+                    })
+            playlists = [pl_dict[pid] for pid in pl_order]
 
             # Settings
             await cur.execute(
@@ -1563,43 +1579,44 @@ async def sync_push(
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            # Replace favorites
+            # Replace favorites — batch upsert
             await cur.execute(
                 "DELETE FROM ios_user_favorites WHERE user_id = %s", (user_id,)
             )
-            for fav in body.favorites:
-                await cur.execute(
+            if body.favorites:
+                await cur.executemany(
                     """
                     INSERT INTO ios_user_favorites (user_id, song_id, title, artist, album)
                     VALUES (%s, %s, %s, %s, %s)
                     """,
-                    (user_id, fav.song_id, fav.title, fav.artist, fav.album),
+                    [
+                        (user_id, fav.song_id, fav.title, fav.artist, fav.album)
+                        for fav in body.favorites
+                    ],
                 )
 
-            # Replace playlists
+            # Replace playlists — batch insert playlists then all tracks in one shot
             await cur.execute(
                 "DELETE FROM ios_user_playlists WHERE user_id = %s", (user_id,)
             )
-            for pl in body.playlists:
-                pl_id = pl.id or str(uuid.uuid4())
-                await cur.execute(
+            if body.playlists:
+                await cur.executemany(
                     """
                     INSERT INTO ios_user_playlists (id, user_id, name, description)
                     VALUES (%s, %s, %s, %s)
                     """,
-                    (pl_id, user_id, pl.name, pl.description),
+                    [
+                        (pl.id or str(uuid.uuid4()), user_id, pl.name, pl.description)
+                        for pl in body.playlists
+                    ],
                 )
-                for idx, track in enumerate(pl.tracks):
-                    track_id = str(uuid.uuid4())
-                    await cur.execute(
-                        """
-                        INSERT INTO ios_playlist_tracks
-                            (id, playlist_id, track_url, local_song_id, title, artist, album,
-                             duration_seconds, position)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            track_id,
+                # Collect all track rows across all playlists for a single executemany
+                all_track_rows = []
+                for pl in body.playlists:
+                    pl_id = pl.id or str(uuid.uuid4())
+                    for idx, track in enumerate(pl.tracks):
+                        all_track_rows.append((
+                            str(uuid.uuid4()),
                             pl_id,
                             track.track_url,
                             track.local_song_id,
@@ -1608,7 +1625,16 @@ async def sync_push(
                             track.album,
                             track.duration_seconds or 0,
                             track.position if track.position is not None else idx,
-                        ),
+                        ))
+                if all_track_rows:
+                    await cur.executemany(
+                        """
+                        INSERT INTO ios_playlist_tracks
+                            (id, playlist_id, track_url, local_song_id, title, artist, album,
+                             duration_seconds, position)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        all_track_rows,
                     )
 
             # Update settings
@@ -2565,25 +2591,28 @@ async def ingest_logs(request: Request):
         entries = await request.json()
         if not isinstance(entries, list):
             return
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                for e in entries[:100]:  # cap at 100 entries per batch
-                    if not isinstance(e, dict):
-                        continue
-                    await cur.execute(
+        rows = [
+            (
+                str(e.get("level", "info"))[:10],
+                str(e.get("category", "general"))[:30],
+                str(e.get("message", ""))[:500],
+                str(e.get("file", ""))[:100],
+                int(e.get("line", 0)),
+                e.get("timestamp"),
+                json.dumps(e.get("extra", {})),
+            )
+            for e in entries[:100]
+            if isinstance(e, dict)
+        ]
+        if rows:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.executemany(
                         "INSERT IGNORE INTO ios_app_logs "
                         "(level, category, message, file, line, timestamp, extra) "
                         "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                        (
-                            str(e.get("level", "info"))[:10],
-                            str(e.get("category", "general"))[:30],
-                            str(e.get("message", ""))[:500],
-                            str(e.get("file", ""))[:100],
-                            int(e.get("line", 0)),
-                            e.get("timestamp"),
-                            json.dumps(e.get("extra", {})),
-                        ),
+                        rows,
                     )
     except Exception:
         pass  # Logging must never fail the app
