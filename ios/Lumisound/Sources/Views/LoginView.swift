@@ -31,8 +31,8 @@ struct LoginView: View {
                         VStack(spacing: 8) {
                             Image(systemName: "waveform.circle.fill")
                                 .font(.system(size: 60))
-                                .foregroundStyle(AppTheme.accent)
-                                .shadow(color: AppTheme.accent.opacity(0.4), radius: 12, x: 0, y: 6)
+                                .foregroundStyle(AppTheme.dynamicAccent)
+                                .shadow(color: AppTheme.dynamicAccent.opacity(0.4), radius: 12, x: 0, y: 6)
 
                             Text("Lumisound")
                                 .font(.title2.bold())
@@ -87,7 +87,7 @@ struct LoginView: View {
                                 .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 10)
-                                        .stroke(AppTheme.accent.opacity(0.3), lineWidth: 1)
+                                        .stroke(AppTheme.dynamicAccent.opacity(0.3), lineWidth: 1)
                                 )
                             }
 
@@ -106,7 +106,7 @@ struct LoginView: View {
                                     .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 10)
-                                            .stroke(AppTheme.accent.opacity(0.3), lineWidth: 1)
+                                            .stroke(AppTheme.dynamicAccent.opacity(0.3), lineWidth: 1)
                                     )
                             }
 
@@ -127,7 +127,7 @@ struct LoginView: View {
                                         .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 10)
-                                                .stroke(AppTheme.accent.opacity(0.3), lineWidth: 1)
+                                                .stroke(AppTheme.dynamicAccent.opacity(0.3), lineWidth: 1)
                                         )
                                 }
 
@@ -146,7 +146,7 @@ struct LoginView: View {
                                         .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 10)
-                                                .stroke(AppTheme.accent.opacity(0.3), lineWidth: 1)
+                                                .stroke(AppTheme.dynamicAccent.opacity(0.3), lineWidth: 1)
                                         )
                                 }
 
@@ -168,7 +168,7 @@ struct LoginView: View {
                                         .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 10)
-                                                .stroke(AppTheme.accent.opacity(0.3), lineWidth: 1)
+                                                .stroke(AppTheme.dynamicAccent.opacity(0.3), lineWidth: 1)
                                         )
                                 }
                             }
@@ -195,7 +195,7 @@ struct LoginView: View {
                         } label: {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 12)
-                                    .fill(AppTheme.accent)
+                                    .fill(AppTheme.dynamicAccent)
                                     .frame(height: 50)
                                 if isLoading {
                                     ProgressView()
@@ -219,7 +219,7 @@ struct LoginView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                 }
             }
             .onChange(of: account.isLoggedIn) { loggedIn in

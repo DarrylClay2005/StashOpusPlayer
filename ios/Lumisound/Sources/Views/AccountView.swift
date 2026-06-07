@@ -41,7 +41,7 @@ struct AccountView: View {
                                 Circle()
                                     .fill(
                                         LinearGradient(
-                                            colors: [AppTheme.accent, AppTheme.accentSoft],
+                                            colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
                                         )
@@ -61,7 +61,7 @@ struct AccountView: View {
                                     .tint(.white)
                             }
                         }
-                        .shadow(color: AppTheme.accent.opacity(0.4), radius: 8, x: 0, y: 4)
+                        .shadow(color: AppTheme.dynamicAccent.opacity(0.4), radius: 8, x: 0, y: 4)
 
                         VStack(alignment: .leading, spacing: 4) {
                             if let displayName = account.currentUser?.displayName,
@@ -96,7 +96,7 @@ struct AccountView: View {
                             account.avatarImage == nil ? "Upload Profile Photo" : "Change Profile Photo",
                             systemImage: "camera.circle"
                         )
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                     }
                     .onChange(of: photosPickerItem) { item in
                         guard let item else { return }
@@ -143,11 +143,11 @@ struct AccountView: View {
                     } label: {
                         HStack {
                             Label("Push to Server", systemImage: "icloud.and.arrow.up")
-                                .foregroundStyle(AppTheme.accent)
+                                .foregroundStyle(AppTheme.dynamicAccent)
                             Spacer()
                             if account.isSyncing {
                                 ProgressView()
-                                    .tint(AppTheme.accent)
+                                    .tint(AppTheme.dynamicAccent)
                             }
                         }
                     }
@@ -159,11 +159,11 @@ struct AccountView: View {
                     } label: {
                         HStack {
                             Label("Pull from Server", systemImage: "icloud.and.arrow.down")
-                                .foregroundStyle(AppTheme.accent)
+                                .foregroundStyle(AppTheme.dynamicAccent)
                             Spacer()
                             if account.isSyncing {
                                 ProgressView()
-                                    .tint(AppTheme.accent)
+                                    .tint(AppTheme.dynamicAccent)
                             }
                         }
                     }
@@ -241,10 +241,10 @@ struct AccountView: View {
                             .foregroundStyle(AppTheme.textPrimary)
                             HStack {
                                 if isSavingDOB {
-                                    ProgressView().tint(AppTheme.accent)
+                                    ProgressView().tint(AppTheme.dynamicAccent)
                                 } else {
                                     Button("Save") { saveDOB() }
-                                        .foregroundStyle(AppTheme.accent)
+                                        .foregroundStyle(AppTheme.dynamicAccent)
                                         .font(.subheadline.bold())
                                     Button("Cancel") { isPickingDOB = false }
                                         .foregroundStyle(AppTheme.textSecondary)
@@ -266,7 +266,7 @@ struct AccountView: View {
                                     .foregroundStyle(AppTheme.textSecondary)
                                 Image(systemName: "pencil")
                                     .font(.system(size: 12))
-                                    .foregroundStyle(AppTheme.accent)
+                                    .foregroundStyle(AppTheme.dynamicAccent)
                                     .padding(.leading, 4)
                             }
                         }
@@ -283,11 +283,11 @@ struct AccountView: View {
                                 .onSubmit { saveDisplayName() }
                             if isSavingDisplayName {
                                 ProgressView()
-                                    .tint(AppTheme.accent)
+                                    .tint(AppTheme.dynamicAccent)
                                     .padding(.leading, 6)
                             } else {
                                 Button("Save") { saveDisplayName() }
-                                    .foregroundStyle(AppTheme.accent)
+                                    .foregroundStyle(AppTheme.dynamicAccent)
                                     .font(.subheadline.bold())
                                 Button("Cancel") {
                                     isEditingDisplayName = false
@@ -316,7 +316,7 @@ struct AccountView: View {
                                 .foregroundStyle(AppTheme.textSecondary)
                                 Image(systemName: "pencil")
                                     .font(.system(size: 12))
-                                    .foregroundStyle(AppTheme.accent)
+                                    .foregroundStyle(AppTheme.dynamicAccent)
                                     .padding(.leading, 4)
                             }
                         }

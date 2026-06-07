@@ -64,7 +64,7 @@ struct PlaylistsView: View {
                 } label: {
                     Image(systemName: "plus")
                 }
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
             }
         }
         .sheet(isPresented: $showingCreateSheet) {
@@ -132,7 +132,7 @@ private struct PlaylistRow: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(AppTheme.elevatedSurface)
                 Image(systemName: "music.note.list")
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                     .font(.system(size: 18))
             }
             .frame(width: 44, height: 44)
@@ -189,7 +189,7 @@ private struct CreatePlaylistSheet: View {
                         onCreate(trimmed)
                     }
                     .disabled(!isValid)
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                 }
             }
             .onAppear { isFocused = true }

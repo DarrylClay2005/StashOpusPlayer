@@ -41,7 +41,7 @@ struct PlaylistDetailView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                     .listRowBackground(Color.clear)
                 }
                 .listSectionSeparator(.hidden)
@@ -93,14 +93,14 @@ struct PlaylistDetailView: View {
                 } label: {
                     Image(systemName: "square.and.arrow.up")
                 }
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
 
                 Button {
                     showingAddSongs = true
                 } label: {
                     Image(systemName: "plus")
                 }
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
 
                 Button {
                     withAnimation { isEditing.toggle() }
@@ -108,7 +108,7 @@ struct PlaylistDetailView: View {
                     Text(isEditing ? "Done" : "Edit")
                         .fontWeight(isEditing ? .semibold : .regular)
                 }
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
             }
         }
         .sheet(isPresented: $showingAddSongs) {
@@ -173,7 +173,7 @@ private struct AddSongsSheet: View {
                             )
                             Spacer(minLength: 8)
                             Image(systemName: isInPlaylist(song) ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(isInPlaylist(song) ? AppTheme.accent : AppTheme.textSecondary)
+                                .foregroundStyle(isInPlaylist(song) ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                                 .font(.system(size: 22))
                                 .animation(.easeInOut(duration: 0.15), value: isInPlaylist(song))
                         }
@@ -191,7 +191,7 @@ private struct AddSongsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
                 }
             }
         }

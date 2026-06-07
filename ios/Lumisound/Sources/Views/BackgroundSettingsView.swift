@@ -17,7 +17,7 @@ struct BackgroundSettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(bg.isEnabled && bg.isActive ? "Gallery Running" : bg.images.isEmpty ? "No images added" : "Gallery Paused")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(bg.isEnabled && bg.isActive ? AppTheme.accent : AppTheme.textPrimary)
+                            .foregroundStyle(bg.isEnabled && bg.isActive ? AppTheme.dynamicAccent : AppTheme.textPrimary)
                         if !bg.images.isEmpty {
                             Text("\(bg.images.count) image\(bg.images.count == 1 ? "" : "s") loaded")
                                 .font(.caption)
@@ -42,7 +42,7 @@ struct BackgroundSettingsView: View {
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 7)
-                                .background(bg.isEnabled && bg.isActive ? AppTheme.error : AppTheme.accent, in: Capsule())
+                                .background(bg.isEnabled && bg.isActive ? AppTheme.error : AppTheme.dynamicAccent, in: Capsule())
                         }
                         .buttonStyle(.plain)
                         .animation(.easeInOut(duration: 0.2), value: bg.isEnabled && bg.isActive)
@@ -63,7 +63,7 @@ struct BackgroundSettingsView: View {
                         .opacity(bg.opacity)
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
-                                .stroke(AppTheme.accent.opacity(0.4), lineWidth: 1)
+                                .stroke(AppTheme.dynamicAccent.opacity(0.4), lineWidth: 1)
                         )
                 }
             }
@@ -77,11 +77,11 @@ struct BackgroundSettingsView: View {
                 ) {
                     HStack {
                         Label("Add from Photo Library", systemImage: "photo.on.rectangle.angled")
-                            .foregroundStyle(AppTheme.accent)
+                            .foregroundStyle(AppTheme.dynamicAccent)
                         Spacer()
                         if isLoadingPhotos {
                             ProgressView()
-                                .tint(AppTheme.accent)
+                                .tint(AppTheme.dynamicAccent)
                         }
                     }
                 }
@@ -134,7 +134,7 @@ struct BackgroundSettingsView: View {
                                     .overlay(alignment: .bottomLeading) {
                                         if i == bg.currentIndex && bg.isEnabled {
                                             Image(systemName: "checkmark.circle.fill")
-                                                .foregroundStyle(AppTheme.accent)
+                                                .foregroundStyle(AppTheme.dynamicAccent)
                                                 .background(Color.black.opacity(0.5), in: Circle())
                                                 .font(.caption)
                                                 .padding(3)
@@ -158,7 +158,7 @@ struct BackgroundSettingsView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                     .onChange(of: bg.shuffleIntervalSeconds) { _ in
                         bg.saveSettings()
                         bg.startShuffling()
@@ -177,7 +177,7 @@ struct BackgroundSettingsView: View {
                                     .font(.title2)
                                     .frame(width: 44, height: 44)
                                     .background(
-                                        bg.animation == anim ? AppTheme.accent : AppTheme.surface,
+                                        bg.animation == anim ? AppTheme.dynamicAccent : AppTheme.surface,
                                         in: RoundedRectangle(cornerRadius: 8)
                                     )
                                     .foregroundStyle(
@@ -202,7 +202,7 @@ struct BackgroundSettingsView: View {
                         bg.nextImage()
                     } label: {
                         Label("Preview Next Image", systemImage: "photo.on.rectangle")
-                            .foregroundStyle(AppTheme.accent)
+                            .foregroundStyle(AppTheme.dynamicAccent)
                     }
                     .disabled(bg.images.count < 2)
                 }
@@ -217,12 +217,12 @@ struct BackgroundSettingsView: View {
                                 .foregroundStyle(AppTheme.textSecondary)
                         }
                         Slider(value: $bg.opacity, in: 0.05...0.8)
-                            .tint(AppTheme.accent)
+                            .tint(AppTheme.dynamicAccent)
                             .onChange(of: bg.opacity) { _ in bg.saveSettings() }
                     }
 
                     Toggle("Blur Background", isOn: $bg.isBlurred)
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
                         .onChange(of: bg.isBlurred) { _ in bg.saveSettings() }
                 }
             }

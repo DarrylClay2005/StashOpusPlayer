@@ -101,7 +101,7 @@ struct AppearanceView: View {
                         Text("Reset to Default")
                     }
                 }
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(AppTheme.dynamicAccent)
                 .listRowBackground(AppTheme.surface)
             }
         }
@@ -297,7 +297,7 @@ struct AppearanceView: View {
             HStack(spacing: 10) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 16))
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                 Text("Panel preview")
                     .font(AppTheme.bodyFont(size: 13))
                     .foregroundStyle(AppTheme.textPrimary)

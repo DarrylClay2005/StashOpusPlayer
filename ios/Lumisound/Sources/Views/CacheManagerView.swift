@@ -123,14 +123,14 @@ struct CacheManagerView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 if cacheManager.isScanning {
-                    ProgressView().tint(AppTheme.accent)
+                    ProgressView().tint(AppTheme.dynamicAccent)
                 } else {
                     Button {
                         Task { await cacheManager.scan() }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                 }
             }
         }

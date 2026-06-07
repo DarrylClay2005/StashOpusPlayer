@@ -20,7 +20,7 @@ struct SongRow: View {
                     .overlay {
                         if isCurrent {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(AppTheme.accent.opacity(0.7))
+                                .fill(AppTheme.dynamicAccent.opacity(0.7))
                             WaveformIcon()
                         }
                     }
@@ -28,7 +28,7 @@ struct SongRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(song.displayName)
-                    .foregroundStyle(isCurrent ? AppTheme.accent : AppTheme.textPrimary)
+                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
                     .font(.body)
                     .fontWeight(isCurrent ? .semibold : .regular)
                     .lineLimit(1)

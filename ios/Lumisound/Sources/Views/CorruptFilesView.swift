@@ -60,11 +60,11 @@ struct CorruptFilesView: View {
                 } label: {
                     HStack {
                         Label("Scan Now", systemImage: "arrow.clockwise")
-                            .foregroundStyle(AppTheme.accent)
+                            .foregroundStyle(AppTheme.dynamicAccent)
                         Spacer()
                         if service.isScanning {
                             ProgressView()
-                                .tint(AppTheme.accent)
+                                .tint(AppTheme.dynamicAccent)
                         }
                     }
                 }

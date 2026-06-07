@@ -83,7 +83,7 @@ private struct ShareModeView: View {
                             .frame(width: 80, height: 80)
                         Image(systemName: "music.note.list")
                             .font(.system(size: 34))
-                            .foregroundStyle(AppTheme.accent)
+                            .foregroundStyle(AppTheme.dynamicAccent)
                     }
 
                     Text(playlist.name)
@@ -156,7 +156,7 @@ private struct ShareModeView: View {
                                 .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderedProminent)
-                            .tint(didCopy ? AppTheme.success : AppTheme.accent)
+                            .tint(didCopy ? AppTheme.success : AppTheme.dynamicAccent)
 
                             // Revoke Link
                             Button {
@@ -211,7 +211,7 @@ private struct ShareModeView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                     .disabled(collaborativeService.isLoading || account.token == nil)
                     .padding(.horizontal)
 
@@ -283,7 +283,7 @@ private struct OpenModeView: View {
                             }
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
                         .disabled(
                             collaborativeService.isLoading
                             || tokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -358,7 +358,7 @@ private struct SharedPlaylistResultView: View {
                         .frame(width: 72, height: 72)
                     Image(systemName: "music.note.list")
                         .font(.system(size: 30))
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                 }
 
                 Text(shared.name)
@@ -394,7 +394,7 @@ private struct SharedPlaylistResultView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
             .padding(.horizontal)
 
             // Track list

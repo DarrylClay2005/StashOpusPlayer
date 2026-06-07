@@ -59,7 +59,7 @@ struct GlassmorphismArtworkView: View {
                 .overlay(shimmerOverlay)
         } else {
             LinearGradient(
-                colors: [AppTheme.surface, AppTheme.elevatedSurface, AppTheme.accent.opacity(0.4)],
+                colors: [AppTheme.surface, AppTheme.elevatedSurface, AppTheme.dynamicAccent.opacity(0.4)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -67,7 +67,7 @@ struct GlassmorphismArtworkView: View {
             .overlay {
                 Image(systemName: "music.note")
                     .font(.system(size: 80, weight: .semibold))
-                    .foregroundStyle(AppTheme.accent.opacity(0.6))
+                    .foregroundStyle(AppTheme.dynamicAccent.opacity(0.6))
             }
             .overlay(shimmerOverlay)
         }

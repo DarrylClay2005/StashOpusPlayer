@@ -29,7 +29,7 @@ struct SleepTimerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                 }
             }
         }
@@ -43,7 +43,7 @@ struct SleepTimerSheet: View {
             VStack(spacing: 8) {
                 Image(systemName: "moon.zzz.fill")
                     .font(.system(size: 48, weight: .light))
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                     .padding(.bottom, 4)
 
                 Text(sleepTimer.formattedRemaining)
@@ -61,7 +61,7 @@ struct SleepTimerSheet: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 32)
             .background(
-                AppTheme.accent.opacity(0.08),
+                AppTheme.dynamicAccent.opacity(0.08),
                 in: RoundedRectangle(cornerRadius: 20, style: .continuous)
             )
 
@@ -118,8 +118,8 @@ struct SleepTimerSheet: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
-                    .background(AppTheme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .shadow(color: AppTheme.accent.opacity(0.35), radius: 10, x: 0, y: 5)
+                    .background(AppTheme.dynamicAccent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .shadow(color: AppTheme.dynamicAccent.opacity(0.35), radius: 10, x: 0, y: 5)
             }
             .buttonStyle(.plain)
         }
@@ -136,11 +136,11 @@ struct SleepTimerSheet: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .background(
-                    isSelected ? AppTheme.accent : AppTheme.surface,
+                    isSelected ? AppTheme.dynamicAccent : AppTheme.surface,
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
                 .shadow(
-                    color: isSelected ? AppTheme.accent.opacity(0.3) : .clear,
+                    color: isSelected ? AppTheme.dynamicAccent.opacity(0.3) : .clear,
                     radius: 8, x: 0, y: 4
                 )
         }
@@ -162,10 +162,10 @@ struct SleepTimerSheet: View {
                 let minutes = Int(sleepTimer.selectedDuration) / 60
                 Text("\(minutes) min")
                     .font(.system(.subheadline, design: .monospaced))
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                     .monospacedDigit()
             }
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
         }
         .padding(14)
         .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

@@ -52,7 +52,7 @@ struct FloatingCardsArtworkView: View {
             ArtworkThumbnail(song: song, size: size)
                 .environmentObject(library)
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .shadow(color: AppTheme.accent.opacity(0.2), radius: 10, x: 0, y: 4)
+                .shadow(color: AppTheme.dynamicAccent.opacity(0.2), radius: 10, x: 0, y: 4)
         } else {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(
@@ -66,7 +66,7 @@ struct FloatingCardsArtworkView: View {
                 .overlay {
                     Image(systemName: "music.note")
                         .font(.system(size: size * 0.3, weight: .semibold))
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                 }
                 .shadow(color: .black.opacity(0.4), radius: 12, x: 0, y: 6)
         }

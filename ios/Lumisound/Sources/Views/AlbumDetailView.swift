@@ -64,7 +64,7 @@ struct AlbumDetailView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
                 .listRowBackground(Color.clear)
             }
             .listSectionSeparator(.hidden)
@@ -118,7 +118,7 @@ private struct AlbumHeaderView: View {
                         .overlay {
                             Image(systemName: "square.stack.fill")
                                 .font(.system(size: 64))
-                                .foregroundStyle(AppTheme.accent)
+                                .foregroundStyle(AppTheme.dynamicAccent)
                         }
                 }
             }
@@ -134,7 +134,7 @@ private struct AlbumHeaderView: View {
 
                 Text(artistName)
                     .font(.subheadline)
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
 
                 Text("\(songCount) \(songCount == 1 ? "song" : "songs") · \(totalDurationText)")
                     .font(.caption)
@@ -158,7 +158,7 @@ private struct AlbumTrackRow: View {
             ZStack {
                 if isCurrent {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(AppTheme.accent)
+                        .fill(AppTheme.dynamicAccent)
                     Image(systemName: "waveform")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(AppTheme.textPrimary)
@@ -173,7 +173,7 @@ private struct AlbumTrackRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(song.displayName)
-                    .foregroundStyle(isCurrent ? AppTheme.accent : AppTheme.textPrimary)
+                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
                     .fontWeight(isCurrent ? .semibold : .regular)
                     .lineLimit(1)
 

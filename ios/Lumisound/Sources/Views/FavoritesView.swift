@@ -58,7 +58,7 @@ struct FavoritesView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
 
                         Button {
                             let shuffled = favorites.shuffled()
@@ -69,7 +69,7 @@ struct FavoritesView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
                     }
                     .listRowBackground(Color.clear)
 
@@ -125,7 +125,7 @@ struct FavoritesView: View {
                 } label: {
                     Image(systemName: "arrow.up.arrow.down")
                 }
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
             }
         }
     }
@@ -147,7 +147,7 @@ private struct FavoriteRow: View {
                 library.toggleFavorite(songID: song.id)
             } label: {
                 Image(systemName: "heart.fill")
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                     .font(.system(size: 18))
                     .padding(.leading, 12)
             }

@@ -168,7 +168,7 @@ struct AddMusicView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }.tint(AppTheme.accent)
+                    Button("Done") { dismiss() }.tint(AppTheme.dynamicAccent)
                 }
             }
             .sheet(isPresented: $showFilePicker) {

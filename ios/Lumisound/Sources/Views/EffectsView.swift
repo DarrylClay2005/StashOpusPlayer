@@ -20,7 +20,7 @@ struct EffectsView: View {
                 let activeName = AudioEffectsService.effect(id: player.audioSettings.activeEffectID)?.name ?? "None"
                 Text(activeName)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -69,7 +69,7 @@ private struct EightDSpeedControl: View {
             HStack {
                 Image(systemName: "rotate.3d")
                     .font(.caption)
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                 Text("8D Rotation Speed")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppTheme.textPrimary)
@@ -95,7 +95,7 @@ private struct EightDSpeedControl: View {
                                 .padding(.vertical, 5)
                                 .background(
                                     abs(player.rotationHz - preset.hz) < 0.01
-                                        ? AnyShapeStyle(AppTheme.accent)
+                                        ? AnyShapeStyle(AppTheme.dynamicAccent)
                                         : AnyShapeStyle(AppTheme.elevatedSurface),
                                     in: Capsule()
                                 )
@@ -114,7 +114,7 @@ private struct EightDSpeedControl: View {
                 ),
                 in: 0.02...2.0
             )
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
         }
         .padding(.top, 4)
     }
@@ -147,7 +147,7 @@ private struct EffectCell: View {
             .frame(maxWidth: .infinity)
             .background(
                 isActive
-                    ? AnyShapeStyle(AppTheme.accent)
+                    ? AnyShapeStyle(AppTheme.dynamicAccent)
                     : AnyShapeStyle(AppTheme.elevatedSurface),
                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)
             )

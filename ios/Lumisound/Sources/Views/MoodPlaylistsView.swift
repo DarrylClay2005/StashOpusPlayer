@@ -34,7 +34,7 @@ struct MoodPlaylistsView: View {
                         HStack(spacing: 6) {
                             if moodService.isAnalyzing {
                                 ProgressView()
-                                    .tint(AppTheme.accent)
+                                    .tint(AppTheme.dynamicAccent)
                                     .scaleEffect(0.8)
                             } else {
                                 Image(systemName: "arrow.clockwise")
@@ -42,7 +42,7 @@ struct MoodPlaylistsView: View {
                             Text(moodService.isAnalyzing ? "Analyzing…" : "Re-analyze")
                                 .font(.subheadline.weight(.medium))
                         }
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .background(AppTheme.surface, in: Capsule())
@@ -166,7 +166,7 @@ struct MoodPlaylistsView: View {
         VStack(spacing: 16) {
             Image(systemName: "waveform.path.ecg")
                 .font(.system(size: 52, weight: .medium))
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(AppTheme.dynamicAccent)
             Text("No Moods Yet")
                 .font(.title3.weight(.bold))
                 .foregroundStyle(AppTheme.textPrimary)

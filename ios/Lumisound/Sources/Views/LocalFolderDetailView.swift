@@ -65,7 +65,7 @@ struct LocalFolderDetailView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
 
                     Button {
                         let shuffled = songs.shuffled()
@@ -76,7 +76,7 @@ struct LocalFolderDetailView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                 }
                 .listRowBackground(Color.clear)
             }
@@ -130,7 +130,7 @@ private struct FolderDetailHeaderView: View {
                 } else {
                     Image(systemName: "folder.fill")
                         .font(.system(size: 64))
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                 }
             }
             .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
@@ -164,7 +164,7 @@ private struct FolderTrackRow: View {
 
                 if isCurrent {
                     RoundedRectangle(cornerRadius: max(4, 40 * 0.1), style: .continuous)
-                        .fill(AppTheme.accent.opacity(0.78))
+                        .fill(AppTheme.dynamicAccent.opacity(0.78))
                     FolderWaveformIcon()
                 }
             }
@@ -172,7 +172,7 @@ private struct FolderTrackRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(song.displayName)
-                    .foregroundStyle(isCurrent ? AppTheme.accent : AppTheme.textPrimary)
+                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
                     .fontWeight(isCurrent ? .semibold : .regular)
                     .lineLimit(1)
 

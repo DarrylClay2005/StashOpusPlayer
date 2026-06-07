@@ -152,18 +152,18 @@ struct LibraryView: View {
             } label: {
                 Image(systemName: "link.badge.plus")
             }
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
 
             if library.isScanning {
                 ProgressView()
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
             } else {
                 Button {
                     library.scanAll(folderService: folderService)
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
             }
 
             Button {
@@ -171,7 +171,7 @@ struct LibraryView: View {
             } label: {
                 Image(systemName: "plus")
             }
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
         }
     }
 }
@@ -199,7 +199,7 @@ private struct LibraryTabBar: View {
                             )
                             .background {
                                 Capsule(style: .continuous)
-                                    .fill(selectedTab == tab ? AppTheme.accent : AppTheme.surface)
+                                    .fill(selectedTab == tab ? AppTheme.dynamicAccent : AppTheme.surface)
                             }
                     }
                     .buttonStyle(.plain)
@@ -349,7 +349,7 @@ private struct SongsTab: View {
                     UserDefaults.standard.set(1, forKey: "library_songs_columns")
                 } label: {
                     Image(systemName: "list.bullet")
-                        .foregroundStyle(songColumns == 1 ? AppTheme.accent : AppTheme.textSecondary)
+                        .foregroundStyle(songColumns == 1 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                 }
                 .buttonStyle(.plain)
 
@@ -357,7 +357,7 @@ private struct SongsTab: View {
                     UserDefaults.standard.set(2, forKey: "library_songs_columns")
                 } label: {
                     Image(systemName: "square.grid.2x2")
-                        .foregroundStyle(songColumns == 2 ? AppTheme.accent : AppTheme.textSecondary)
+                        .foregroundStyle(songColumns == 2 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                 }
                 .buttonStyle(.plain)
 
@@ -365,7 +365,7 @@ private struct SongsTab: View {
                     UserDefaults.standard.set(3, forKey: "library_songs_columns")
                 } label: {
                     Image(systemName: "square.grid.3x3")
-                        .foregroundStyle(songColumns == 3 ? AppTheme.accent : AppTheme.textSecondary)
+                        .foregroundStyle(songColumns == 3 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                 }
                 .buttonStyle(.plain)
 
@@ -377,7 +377,7 @@ private struct SongsTab: View {
                     }
                 } label: {
                     Image(systemName: showSearch ? "magnifyingglass.circle.fill" : "magnifyingglass")
-                        .foregroundStyle(showSearch ? AppTheme.accent : AppTheme.textSecondary)
+                        .foregroundStyle(showSearch ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                 }
                 .buttonStyle(.plain)
             }
@@ -404,7 +404,7 @@ private struct SongGridCell: View {
                                 .font(.system(size: 12, weight: .bold))
                                 .foregroundStyle(.white)
                                 .padding(4)
-                                .background(AppTheme.accent, in: Circle())
+                                .background(AppTheme.dynamicAccent, in: Circle())
                                 .padding(4)
                         }
                     }
@@ -415,7 +415,7 @@ private struct SongGridCell: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.displayName)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(isCurrent ? AppTheme.accent : AppTheme.textPrimary)
+                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
                     .lineLimit(2)
                 Text(song.artistName)
                     .font(.caption2)
@@ -469,7 +469,7 @@ private struct ArtistRow: View {
                 Circle()
                     .fill(AppTheme.elevatedSurface)
                 Image(systemName: "person.fill")
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                     .font(.system(size: 18))
             }
             .frame(width: 40, height: 40)
@@ -539,7 +539,7 @@ private struct AlbumsTab: View {
                     }
                 } label: {
                     Image(systemName: albumColumns == 1 ? "rectangle.grid.1x2" : albumColumns == 2 ? "square.grid.2x2" : "square.grid.3x3")
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
                 }
             }
         }
@@ -569,7 +569,7 @@ private struct AlbumGridCell: View {
                         .overlay {
                             Image(systemName: "square.stack.fill")
                                 .font(.system(size: 40))
-                                .foregroundStyle(AppTheme.accent)
+                                .foregroundStyle(AppTheme.dynamicAccent)
                         }
                         .frame(width: 160, height: 160)
                 }
@@ -676,7 +676,7 @@ private struct FoldersTab: View {
                     Button { columns = 3 } label: { Label("3 Columns", systemImage: "square.grid.3x3") }
                 } label: {
                     Image(systemName: columns == 1 ? "rectangle.grid.1x2" : columns == 2 ? "square.grid.2x2" : "square.grid.3x3")
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
                 }
             }
         }
@@ -701,7 +701,7 @@ private struct FolderGridCell: View {
                 } else {
                     Image(systemName: "folder.fill")
                         .font(.system(size: 40))
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                 }
 
                 // Folder badge overlay
@@ -778,7 +778,7 @@ private struct GenreRow: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(AppTheme.elevatedSurface)
                 Image(systemName: "music.note.list")
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                     .font(.system(size: 16))
             }
             .frame(width: 40, height: 40)
@@ -796,7 +796,7 @@ private struct GenreRow: View {
 
             Image(systemName: "play.circle.fill")
                 .font(.system(size: 22))
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(AppTheme.dynamicAccent)
         }
         .padding(.vertical, 4)
     }
@@ -813,7 +813,7 @@ private struct EmptyLibraryView: View {
         VStack(spacing: 20) {
             Image(systemName: isScanning ? "waveform" : "music.note.list")
                 .font(.system(size: 56, weight: .medium))
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(AppTheme.dynamicAccent)
 
             Text(isScanning ? "Scanning…" : "No music yet")
                 .font(.title2.weight(.bold))
@@ -835,7 +835,7 @@ private struct EmptyLibraryView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
 
                     Button {
                         onScan()
@@ -845,7 +845,7 @@ private struct EmptyLibraryView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                 }
                 .padding(.horizontal, 32)
             }
@@ -866,7 +866,7 @@ struct EmptyStateView: View {
         VStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 44, weight: .semibold))
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(AppTheme.dynamicAccent)
 
             Text(title)
                 .font(.headline)

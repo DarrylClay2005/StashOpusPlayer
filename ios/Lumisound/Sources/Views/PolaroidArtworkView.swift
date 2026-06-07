@@ -89,7 +89,7 @@ struct PolaroidArtworkView: View {
                 .overlay {
                     Image(systemName: "music.note")
                         .font(.system(size: 64, weight: .semibold))
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                 }
         }
     }

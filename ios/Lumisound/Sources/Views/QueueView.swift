@@ -39,7 +39,7 @@ struct QueueView: View {
                         player.toggleShuffle()
                     } label: {
                         Image(systemName: "shuffle")
-                            .foregroundStyle(player.shuffleEnabled ? AppTheme.accent : AppTheme.textSecondary)
+                            .foregroundStyle(player.shuffleEnabled ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                             .fontWeight(player.shuffleEnabled ? .bold : .regular)
                     }
                     // Repeat cycle button
@@ -47,7 +47,7 @@ struct QueueView: View {
                         player.cycleRepeatMode()
                     } label: {
                         Image(systemName: repeatIcon)
-                            .foregroundStyle(player.repeatMode != .off ? AppTheme.accent : AppTheme.textSecondary)
+                            .foregroundStyle(player.repeatMode != .off ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                             .fontWeight(player.repeatMode != .off ? .bold : .regular)
                     }
                 }
@@ -59,7 +59,7 @@ struct QueueView: View {
                             }
                         } label: {
                             Text(editMode == .active ? "Done" : "Edit")
-                                .foregroundStyle(AppTheme.accent)
+                                .foregroundStyle(AppTheme.dynamicAccent)
                         }
 
                         Button(role: .destructive) {
@@ -128,7 +128,7 @@ struct QueueView: View {
             .buttonStyle(.plain)
             .listRowBackground(
                 index == player.currentIndex
-                    ? AppTheme.accent.opacity(0.12)
+                    ? AppTheme.dynamicAccent.opacity(0.12)
                     : Color.clear
             )
             .listRowSeparatorTint(AppTheme.surface)
@@ -147,7 +147,7 @@ struct QueueView: View {
             ZStack {
                 if index == player.currentIndex {
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(AppTheme.accent)
+                        .fill(AppTheme.dynamicAccent)
                         .frame(width: 52, height: 22)
                     Text("Playing")
                         .font(.system(size: 10, weight: .bold))

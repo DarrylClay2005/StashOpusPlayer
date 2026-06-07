@@ -58,7 +58,7 @@ struct UploadMusicView: View {
                         } label: {
                             Label("Upload", systemImage: "icloud.and.arrow.up")
                                 .font(AppTheme.bodyFont(size: 14).weight(.semibold))
-                                .foregroundStyle(AppTheme.accent)
+                                .foregroundStyle(AppTheme.dynamicAccent)
                         }
                         .disabled(isUploading)
                     }
@@ -117,7 +117,7 @@ struct UploadMusicView: View {
                     .foregroundStyle(AppTheme.background)
                     .padding(.horizontal, 28)
                     .padding(.vertical, 13)
-                    .background(AppTheme.accent, in: RoundedRectangle(cornerRadius: 12))
+                    .background(AppTheme.dynamicAccent, in: RoundedRectangle(cornerRadius: 12))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -163,7 +163,7 @@ struct UploadMusicView: View {
         HStack(spacing: 14) {
             Image(systemName: "icloud.and.arrow.up")
                 .font(.title3)
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(AppTheme.dynamicAccent)
                 .frame(width: 32)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -179,7 +179,7 @@ struct UploadMusicView: View {
 
             Toggle("", isOn: $autoCloudBackup)
                 .labelsHidden()
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
         }
         .padding(14)
         .background(AppTheme.surface.opacity(0.7))
@@ -191,7 +191,7 @@ struct UploadMusicView: View {
     private var uploadProgressBanner: some View {
         HStack(spacing: 12) {
             ProgressView()
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(uploadMessage.isEmpty ? "Uploading…" : uploadMessage)
@@ -212,7 +212,7 @@ struct UploadMusicView: View {
                 // Show a simple progress indicator
                 Text("\(Int(Double(uploadIndex) / Double(max(uploadQueue.count, 1)) * 100))%")
                     .font(AppTheme.monoFont(size: 13))
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
             }
         }
         .padding(14)
@@ -264,7 +264,7 @@ struct UploadMusicView: View {
             .foregroundStyle(AppTheme.background)
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
-            .background(AppTheme.accent, in: RoundedRectangle(cornerRadius: 14))
+            .background(AppTheme.dynamicAccent, in: RoundedRectangle(cornerRadius: 14))
         }
         .disabled(isUploading)
         .opacity(isUploading ? 0.5 : 1)
@@ -284,7 +284,7 @@ struct UploadMusicView: View {
 
                 if streaming.isLoadingUserMusicMetadata {
                     ProgressView()
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
                         .scaleEffect(0.8)
                 } else {
                     Button {
@@ -292,7 +292,7 @@ struct UploadMusicView: View {
                         Task { try? await streaming.fetchUserMusicMetadata(token: tok) }
                     } label: {
                         Image(systemName: "arrow.clockwise")
-                            .foregroundStyle(AppTheme.accent)
+                            .foregroundStyle(AppTheme.dynamicAccent)
                     }
                 }
 
@@ -335,7 +335,7 @@ struct UploadMusicView: View {
                     .frame(width: 40, height: 40)
                 Image(systemName: "music.note")
                     .font(.system(size: 16))
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
             }
 
             // Metadata
@@ -448,7 +448,7 @@ struct UploadMusicView: View {
 
             if restoringFilename == track.filename {
                 ProgressView()
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                     .scaleEffect(0.8)
             } else {
                 Button {
@@ -456,7 +456,7 @@ struct UploadMusicView: View {
                 } label: {
                     Image(systemName: "arrow.down.circle")
                         .font(.system(size: 20))
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                 }
                 .buttonStyle(.plain)
             }

@@ -57,7 +57,7 @@ struct LyricsView: View {
     private func lyricLine(line: LrcLine, isCurrent: Bool) -> some View {
         Text(line.text.isEmpty ? "·" : line.text)
             .font(isCurrent ? .body.weight(.semibold) : .body)
-            .foregroundStyle(isCurrent ? AppTheme.accent : AppTheme.textSecondary)
+            .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textSecondary)
             .multilineTextAlignment(.center)
             .scaleEffect(isCurrent ? 1.06 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isCurrent)

@@ -82,7 +82,7 @@ struct SpectrumWaveformArtworkView: View {
 
     private func barCapsule(height: CGFloat, index: Int) -> some View {
         let fraction = Double(index) / Double(barCount)
-        let startColor = AppTheme.accent.opacity(0.9)
+        let startColor = AppTheme.dynamicAccent.opacity(0.9)
         let midColor   = AppTheme.dynamicAccent
         let endColor   = AppTheme.accentSoft.opacity(0.7)
         let barColor: Color = fraction < 0.5
@@ -115,7 +115,7 @@ struct SpectrumWaveformArtworkView: View {
                     .overlay {
                         Image(systemName: "music.note")
                             .font(.system(size: 60, weight: .semibold))
-                            .foregroundStyle(AppTheme.accent)
+                            .foregroundStyle(AppTheme.dynamicAccent)
                     }
             }
         }

@@ -301,7 +301,7 @@ struct SettingsHelpView: View {
             HStack(spacing: 10) {
                 Image(systemName: icon)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                     .frame(width: 26, alignment: .center)
                 Text(title)
                     .font(AppTheme.headlineFont(size: 15))

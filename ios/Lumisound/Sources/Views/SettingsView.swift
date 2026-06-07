@@ -77,7 +77,7 @@ struct SettingsView: View {
                                 Circle()
                                     .fill(
                                         LinearGradient(
-                                            colors: [AppTheme.accent, AppTheme.accentSoft],
+                                            colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
                                         )
@@ -88,7 +88,7 @@ struct SettingsView: View {
                                     .foregroundStyle(.white)
                             }
                         }
-                        .shadow(color: AppTheme.accent.opacity(0.3), radius: 4, x: 0, y: 2)
+                        .shadow(color: AppTheme.dynamicAccent.opacity(0.3), radius: 4, x: 0, y: 2)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(user.displayName ?? user.username)
                                 .fontWeight(.medium)
@@ -102,7 +102,7 @@ struct SettingsView: View {
             } else {
                 Button { showLogin = true } label: {
                     Label("Sign In / Create Account", systemImage: "person.badge.plus")
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                 }
             }
         } header: {
@@ -128,7 +128,7 @@ struct SettingsView: View {
                     .foregroundStyle(AppTheme.textPrimary)
             }
             .pickerStyle(.menu)
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
 
             // Access status row
             HStack {
@@ -149,7 +149,7 @@ struct SettingsView: View {
                     library.requestAccessAndScan()
                 } label: {
                     Label("Grant Access", systemImage: "checkmark.shield")
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                 }
             } else {
                 Button {
@@ -157,11 +157,11 @@ struct SettingsView: View {
                 } label: {
                     HStack {
                         Label("Scan Library", systemImage: "arrow.clockwise")
-                            .foregroundStyle(AppTheme.accent)
+                            .foregroundStyle(AppTheme.dynamicAccent)
                         Spacer()
                         if library.isScanning {
                             ProgressView()
-                                .tint(AppTheme.accent)
+                                .tint(AppTheme.dynamicAccent)
                         }
                     }
                 }
@@ -232,7 +232,7 @@ struct SettingsView: View {
                 Label("Crossfade", systemImage: "waveform.path.ecg")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
 
             if player.audioSettings.crossfadeEnabled {
                 Text("Songs will fade into each other over \(Int(player.audioSettings.crossfadeDuration))s. A smooth, uninterrupted listening experience.")
@@ -267,7 +267,7 @@ struct SettingsView: View {
                 Label("Gapless Playback", systemImage: "infinity")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
 
             if player.audioSettings.gaplessEnabled {
                 Text("Tracks play back-to-back with no silence between them. Ideal for live albums and DJ mixes.")
@@ -282,7 +282,7 @@ struct SettingsView: View {
                 Label("ReplayGain", systemImage: "speaker.wave.3")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
 
             if player.audioSettings.replayGainEnabled {
                 Text("Normalises loudness across tracks so volume stays consistent. Reads REPLAYGAIN_TRACK_GAIN metadata when available.")
@@ -303,7 +303,7 @@ struct SettingsView: View {
                         .foregroundStyle(AppTheme.textSecondary)
                 }
                 Slider(value: $player.audioSettings.speed, in: 0.5...2.0, step: 0.05)
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                 HStack {
                     Text("0.5×").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
                     Spacer()
@@ -322,7 +322,7 @@ struct SettingsView: View {
                         .foregroundStyle(AppTheme.textSecondary)
                 }
                 Slider(value: $player.audioSettings.pitchSemitones, in: -12...12, step: 0.5)
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                 HStack {
                     Text("−12 st").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
                     Spacer()
@@ -403,7 +403,7 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
             }
 
             // Test connection
@@ -416,7 +416,7 @@ struct SettingsView: View {
             } label: {
                 HStack {
                     Label("Test Connection", systemImage: "antenna.radiowaves.left.and.right")
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                     Spacer()
                     if showHealthResult {
                         Image(systemName: healthOK ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -453,14 +453,14 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
                 .foregroundStyle(AppTheme.textPrimary)
 
                 Button {
                     sleepTimer.start()
                 } label: {
                     Label("Start Sleep Timer", systemImage: "moon.zzz")
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                 }
             }
         } header: {
@@ -478,7 +478,7 @@ struct SettingsView: View {
                 Label("Equalizer", systemImage: "slider.vertical.3")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
 
             // EQ Preset picker
             if player.audioSettings.equalizerEnabled {
@@ -493,7 +493,7 @@ struct SettingsView: View {
                         }
                     }
                     .pickerStyle(.menu)
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                     .onChange(of: player.audioSettings.eqPreset) { newPreset in
                         player.applyEQPreset(newPreset)
                     }
@@ -505,7 +505,7 @@ struct SettingsView: View {
                 Label("Bass Boost", systemImage: "waveform.path")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
 
             if player.audioSettings.bassBoostEnabled {
                 Text("Boosts the 32 Hz and 64 Hz bands for deeper, punchier bass. Adjust the gain below to taste.")
@@ -528,7 +528,7 @@ struct SettingsView: View {
                             .foregroundStyle(AppTheme.textSecondary)
                     }
                     Slider(value: $player.audioSettings.bassBoostGain, in: 0...15, step: 0.5)
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
                     HStack {
                         Text("0 dB").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
                         Spacer()
@@ -611,7 +611,7 @@ struct SettingsView: View {
                             : "Download Update",
                         systemImage: "arrow.down.circle"
                     )
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                 }
             }
 
@@ -621,11 +621,11 @@ struct SettingsView: View {
             } label: {
                 HStack {
                     Label("Check for Updates", systemImage: "arrow.clockwise")
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                     Spacer()
                     if updater.isChecking {
                         ProgressView()
-                            .tint(AppTheme.accent)
+                            .tint(AppTheme.dynamicAccent)
                     }
                 }
             }
@@ -680,11 +680,11 @@ struct SettingsView: View {
             } label: {
                 HStack {
                     Label("Check Now", systemImage: "arrow.clockwise")
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                     Spacer()
                     if updater.isChecking {
                         ProgressView()
-                            .tint(AppTheme.accent)
+                            .tint(AppTheme.dynamicAccent)
                     }
                 }
             }

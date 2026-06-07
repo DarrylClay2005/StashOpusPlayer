@@ -37,7 +37,7 @@ struct UpdateBannerView: View {
             } label: {
                 Text("Download")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(.white, in: Capsule())
@@ -61,7 +61,7 @@ struct UpdateBannerView: View {
         .frame(minHeight: 56)
         .background(
             LinearGradient(
-                colors: [AppTheme.accent, AppTheme.accent.opacity(0.8)],
+                colors: [AppTheme.dynamicAccent, AppTheme.dynamicAccent.opacity(0.8)],
                 startPoint: .leading,
                 endPoint: .trailing
             ),

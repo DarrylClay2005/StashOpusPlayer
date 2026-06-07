@@ -60,7 +60,7 @@ struct MiniPlayerBar: View {
                     .fill(AppTheme.surface)
                     .frame(height: 2)
                 Rectangle()
-                    .fill(AppTheme.accent)
+                    .fill(AppTheme.dynamicAccent)
                     .frame(width: geo.size.width * CGFloat(progress), height: 2)
                     .animation(.linear(duration: 0.25), value: player.position)
             }
@@ -101,7 +101,7 @@ struct MiniPlayerBar: View {
                 } label: {
                     Image(systemName: library.isFavorite(songID: song.id) ? "heart.fill" : "heart")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(library.isFavorite(songID: song.id) ? AppTheme.accent : AppTheme.textSecondary)
+                        .foregroundStyle(library.isFavorite(songID: song.id) ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                 }
                 .buttonStyle(.plain)
                 .animation(.spring(response: 0.3, dampingFraction: 0.55), value: library.isFavorite(songID: song.id))
@@ -114,7 +114,7 @@ struct MiniPlayerBar: View {
             } label: {
                 ZStack {
                     Circle()
-                        .fill(AppTheme.accent)
+                        .fill(AppTheme.dynamicAccent)
                         .frame(width: 36, height: 36)
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 14, weight: .semibold))

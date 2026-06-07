@@ -33,7 +33,7 @@ struct ArtworkThumbnail: View {
                     .overlay {
                         Image(systemName: "music.note")
                             .font(.system(size: size * 0.35, weight: .medium))
-                            .foregroundStyle(AppTheme.accent)
+                            .foregroundStyle(AppTheme.dynamicAccent)
                     }
                     .frame(width: size, height: size)
             }

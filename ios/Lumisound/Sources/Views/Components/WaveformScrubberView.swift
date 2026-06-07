@@ -51,7 +51,7 @@ struct WaveformScrubberView: View {
                         audioURL: url,
                         configuration: Waveform.Configuration(
                             style: .striped(.init(
-                                color: UIColor(AppTheme.accent),
+                                color: UIColor(AppTheme.dynamicAccent),
                                 width: 2,
                                 spacing: 1
                             )),

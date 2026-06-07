@@ -88,7 +88,7 @@ struct ArtistDetailView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
 
             Button {
                 let shuffled = songs.shuffled()
@@ -99,7 +99,7 @@ struct ArtistDetailView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
         }
         .padding(.vertical, 4)
     }
@@ -124,7 +124,7 @@ private struct AlbumSectionHeader: View {
                     .frame(width: 40, height: 40)
                     .overlay {
                         Image(systemName: "square.stack")
-                            .foregroundStyle(AppTheme.accent)
+                            .foregroundStyle(AppTheme.dynamicAccent)
                     }
             }
 

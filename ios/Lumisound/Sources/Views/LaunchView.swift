@@ -28,7 +28,7 @@ struct LaunchView: View {
                     .scaledToFit()
                     .frame(width: 110, height: 110)
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .shadow(color: AppTheme.accent.opacity(0.5), radius: 24, x: 0, y: 8)
+                    .shadow(color: AppTheme.dynamicAccent.opacity(0.5), radius: 24, x: 0, y: 8)
                     .scaleEffect(logoScale)
                     .opacity(logoOpacity)
 
@@ -45,7 +45,7 @@ struct LaunchView: View {
                                 Circle()
                                     .fill(
                                         LinearGradient(
-                                            colors: [AppTheme.accent, AppTheme.accentSoft],
+                                            colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
                                         )
@@ -56,7 +56,7 @@ struct LaunchView: View {
                                     .foregroundStyle(.white)
                             }
                         }
-                        .shadow(color: AppTheme.accent.opacity(0.4), radius: 8, x: 0, y: 4)
+                        .shadow(color: AppTheme.dynamicAccent.opacity(0.4), radius: 8, x: 0, y: 4)
                         Text("Hello! @\(user.username)")
                             .font(.title2.bold())
                             .foregroundStyle(AppTheme.textPrimary)
@@ -83,7 +83,7 @@ struct LaunchView: View {
 
                 VStack(spacing: 8) {
                     ProgressView()
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
                     Text("Loading library\u{2026}")
                         .font(.caption)
                         .foregroundStyle(AppTheme.textSecondary)
@@ -121,7 +121,7 @@ struct LaunchView: View {
                                 .font(.headline)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
-                                .background(AppTheme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .background(AppTheme.dynamicAccent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 .foregroundStyle(.white)
                         }
                         .buttonStyle(.plain)

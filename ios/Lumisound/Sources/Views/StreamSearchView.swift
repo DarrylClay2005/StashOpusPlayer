@@ -79,7 +79,7 @@ struct StreamSearchView: View {
                     .foregroundStyle(AppTheme.background)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 12)
-                    .background(AppTheme.accent, in: RoundedRectangle(cornerRadius: 10))
+                    .background(AppTheme.dynamicAccent, in: RoundedRectangle(cornerRadius: 10))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -120,7 +120,7 @@ struct StreamSearchView: View {
                             triggerSearch()
                         }
                         .font(AppTheme.bodyFont(size: 13).weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -207,7 +207,7 @@ struct StreamSearchView: View {
             if streaming.isSearching || streaming.isResolvingPlaylist {
                 Spacer()
                 ProgressView(streaming.isResolvingPlaylist ? "Loading playlist…" : "Searching…")
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                     .foregroundStyle(AppTheme.textSecondary)
                 Spacer()
             } else if streaming.searchResults.isEmpty && !searchText.isEmpty {
@@ -222,7 +222,7 @@ struct StreamSearchView: View {
                     if streaming.isPlaylistResult && !streaming.searchResults.isEmpty {
                         HStack(spacing: 8) {
                             Image(systemName: "music.note.list")
-                                .foregroundStyle(AppTheme.accent)
+                                .foregroundStyle(AppTheme.dynamicAccent)
                             Text("\(streaming.searchResults.count) tracks")
                                 .font(AppTheme.bodyFont(size: 14))
                                 .foregroundStyle(AppTheme.textPrimary)
@@ -230,7 +230,7 @@ struct StreamSearchView: View {
                             if isDownloadingAll {
                                 HStack(spacing: 6) {
                                     ProgressView()
-                                        .tint(AppTheme.accent)
+                                        .tint(AppTheme.dynamicAccent)
                                         .scaleEffect(0.8)
                                     Text("\(downloadAllDone)/\(downloadAllTotal)")
                                         .font(AppTheme.monoFont(size: 13))
@@ -241,7 +241,7 @@ struct StreamSearchView: View {
                                     handleDownloadAll()
                                 }
                                 .font(AppTheme.bodyFont(size: 13).weight(.semibold))
-                                .foregroundStyle(AppTheme.accent)
+                                .foregroundStyle(AppTheme.dynamicAccent)
                             }
                         }
                         .padding(.horizontal, 16)
@@ -278,7 +278,7 @@ struct StreamSearchView: View {
             if streaming.isSearchingServer {
                 Spacer()
                 ProgressView("Searching server library…")
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                     .foregroundStyle(AppTheme.textSecondary)
                 Spacer()
             } else if streaming.serverTracks.isEmpty && !searchText.isEmpty {
@@ -345,7 +345,7 @@ struct StreamSearchView: View {
                 VStack {
                     Spacer()
                     ProgressView("Loading your library…")
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
                         .foregroundStyle(AppTheme.textSecondary)
                     Spacer()
                 }
@@ -358,11 +358,11 @@ struct StreamSearchView: View {
                         } label: {
                             HStack {
                                 Label("Upload Music to Server", systemImage: "icloud.and.arrow.up")
-                                    .foregroundStyle(AppTheme.accent)
+                                    .foregroundStyle(AppTheme.dynamicAccent)
                                 Spacer()
                                 if streaming.isUploadingUserMusic {
                                     ProgressView()
-                                        .tint(AppTheme.accent)
+                                        .tint(AppTheme.dynamicAccent)
                                 }
                             }
                         }
@@ -667,13 +667,13 @@ private struct StreamTrackRow: View {
             // Play / spinner
             if isLoading {
                 ProgressView()
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                     .frame(width: 32, height: 32)
             } else {
                 Button(action: onPlay) {
                     Image(systemName: "play.circle.fill")
                         .font(.title2)
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(AppTheme.dynamicAccent)
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
@@ -683,7 +683,7 @@ private struct StreamTrackRow: View {
             Button(action: onDownload) {
                 if isDownloading {
                     ProgressView()
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
                         .frame(width: 32, height: 32)
                 } else if isDownloaded {
                     Image(systemName: "checkmark.circle.fill")
@@ -784,7 +784,7 @@ private struct ServerTrackRow: View {
             Button(action: onPlay) {
                 Image(systemName: "play.circle.fill")
                     .font(.title2)
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                     .frame(width: 32, height: 32)
             }
             .buttonStyle(.plain)
@@ -793,7 +793,7 @@ private struct ServerTrackRow: View {
             Button(action: onDownload) {
                 if isDownloading {
                     ProgressView()
-                        .tint(AppTheme.accent)
+                        .tint(AppTheme.dynamicAccent)
                         .frame(width: 32, height: 32)
                 } else if isDownloaded {
                     Image(systemName: "checkmark.circle.fill")
@@ -880,7 +880,7 @@ private struct UserMusicTrackRow: View {
             Button(action: onPlay) {
                 Image(systemName: "play.circle.fill")
                     .font(.title2)
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.dynamicAccent)
                     .frame(width: 32, height: 32)
             }
             .buttonStyle(.plain)
@@ -933,7 +933,7 @@ private struct UserMusicInfoSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }.tint(AppTheme.accent)
+                    Button("Done") { dismiss() }.tint(AppTheme.dynamicAccent)
                 }
             }
         }
