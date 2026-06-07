@@ -50,18 +50,30 @@ final class LibraryManager: ObservableObject {
     /// Resolves a list of file URLs to Songs, using `ScanCacheService` for unchanged files
     /// and `DocumentImportService.makeSong` only for new or modified ones.
     private func resolveSongs(for urls: [URL]) async -> [Song] {
-        var cachedSongs: [Song] = []
-        var uncachedURLs: [URL] = []
+        // Stat every candidate file off the main actor first. `stat()` is a blocking
+        // syscall — running it serially on the main thread for thousands of files
+        // (as a naive cache check would) is the dominant cause of UI hitches/hangs
+        // when scanning or importing a large library.
+        let stamps: [(url: URL, stamp: ScanCacheService.FileStamp)] = await Task.detached(priority: .userInitiated) {
+            urls.compactMap { url in
+                ScanCacheService.fileStamp(for: url).map { (url, $0) }
+            }
+        }.value
 
-        for url in urls {
-            if let cached = ScanCacheService.shared.cachedSong(for: url) {
+        var cachedSongs: [Song] = []
+        var uncached: [(url: URL, stamp: ScanCacheService.FileStamp)] = []
+
+        // Pure in-memory dictionary lookups — cheap enough to stay on the main actor.
+        for entry in stamps {
+            if let cached = ScanCacheService.shared.cachedSong(for: entry.url, stamp: entry.stamp) {
                 cachedSongs.append(cached)
             } else {
-                uncachedURLs.append(url)
+                uncached.append(entry)
             }
         }
 
-        guard !uncachedURLs.isEmpty else { return cachedSongs }
+        guard !uncached.isEmpty else { return cachedSongs }
+        let uncachedURLs = uncached.map(\.url)
 
         let newSongs: [Song] = await Task.detached(priority: .userInitiated) {
             await withTaskGroup(of: Song?.self) { group in
@@ -89,12 +101,17 @@ final class LibraryManager: ObservableObject {
             }
         }.value
 
+        let stampByURL = Dictionary(
+            uncached.map { ($0.url.standardizedFileURL, $0.stamp) },
+            uniquingKeysWith: { first, _ in first }
+        )
         for song in newSongs {
-            if let url = song.url {
-                ScanCacheService.shared.store(song: song, for: url)
+            if let url = song.url, let stamp = stampByURL[url.standardizedFileURL] {
+                ScanCacheService.shared.store(song: song, for: url, stamp: stamp)
             }
         }
         ScanCacheService.shared.persist()
+        await EnrichmentCacheStore.shared.persist()
 
         return cachedSongs + newSongs
     }
@@ -403,18 +420,35 @@ final class LibraryManager: ObservableObject {
 
     /// Debounced rebuild — cancels any pending task and schedules a new one after 0.1 s.
     /// This prevents runaway work when rapid successive mutations occur (e.g. bulk imports).
+    ///
+    /// The locale-aware sort plus the three set/sort passes for filter facets are
+    /// O(n log n) over the *entire* library on every mutation. For large libraries
+    /// (thousands of tracks) that's enough synchronous work to visibly stall the UI
+    /// if run on the main actor, so it's computed off-actor and only the final
+    /// `@Published` assignment happens on the main actor.
     private func rebuildAllSongs() {
         pendingRebuildTask?.cancel()
         pendingRebuildTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 s
             guard let self, !Task.isCancelled else { return }
-            let combined = (self.mediaSongs + self.importedSongs).sorted {
-                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-            }
+            let media = self.mediaSongs
+            let imported = self.importedSongs
+
+            let (combined, artists, albums, genres) = await Task.detached(priority: .userInitiated) {
+                let combined = (media + imported).sorted {
+                    $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+                }
+                let artists = Array(Set(combined.map(\.artistName))).sorted()
+                let albums  = Array(Set(combined.map(\.albumName))).sorted()
+                let genres  = Array(Set(combined.compactMap { $0.genre.isEmpty ? nil : $0.genre })).sorted()
+                return (combined, artists, albums, genres)
+            }.value
+
+            guard !Task.isCancelled else { return }
             self.allSongs = combined
-            self.artists = Array(Set(combined.map(\.artistName))).sorted()
-            self.albums  = Array(Set(combined.map(\.albumName))).sorted()
-            self.genres  = Array(Set(combined.compactMap { $0.genre.isEmpty ? nil : $0.genre })).sorted()
+            self.artists = artists
+            self.albums  = albums
+            self.genres  = genres
         }
     }
 }

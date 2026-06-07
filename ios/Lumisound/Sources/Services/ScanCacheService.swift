@@ -7,10 +7,17 @@ import Foundation
 final class ScanCacheService {
     static let shared = ScanCacheService()
 
-    private struct CacheEntry: Codable {
+    struct CacheEntry: Codable {
         let mtime: TimeInterval
         let fileSize: Int64
         let song: Song
+    }
+
+    /// File `(mtime, size)` — the cheap, hashable identity used to detect changed files
+    /// without re-running expensive `AVURLAsset` metadata extraction.
+    struct FileStamp: Hashable {
+        let mtime: TimeInterval
+        let size: Int64
     }
 
     private var entries: [String: CacheEntry] = [:]
@@ -22,35 +29,45 @@ final class ScanCacheService {
         load()
     }
 
-    /// Returns the cached `Song` for `url` if file attributes match the stored entry.
-    func cachedSong(for url: URL) -> Song? {
-        guard let entry = entries[stableKey(for: url)] else { return nil }
+    /// Reads `(mtime, size)` for `url` directly from the filesystem.
+    ///
+    /// This performs a blocking `stat()` syscall — callers scanning many files
+    /// MUST run this off the main actor (e.g. inside `Task.detached`) so a large
+    /// library scan doesn't stall the UI with thousands of serial syscalls.
+    nonisolated static func fileStamp(for url: URL) -> FileStamp? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = attrs[.size] as? Int64,
-              let mdate = attrs[.modificationDate] as? Date,
-              entry.mtime == mdate.timeIntervalSince1970,
-              entry.fileSize == size
+              let mdate = attrs[.modificationDate] as? Date
+        else { return nil }
+        return FileStamp(mtime: mdate.timeIntervalSince1970, size: size)
+    }
+
+    /// Returns the cached `Song` for `url` if `stamp` matches the stored entry.
+    /// Pure in-memory dictionary lookup — no I/O, safe to call on the main actor.
+    func cachedSong(for url: URL, stamp: FileStamp) -> Song? {
+        guard let entry = entries[stableKey(for: url)],
+              entry.mtime == stamp.mtime,
+              entry.fileSize == stamp.size
         else { return nil }
         return entry.song
     }
 
-    /// Stores a `Song` for `url` keyed on the current file `(mtime, size)`.
-    func store(song: Song, for url: URL) {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attrs[.size] as? Int64,
-              let mdate = attrs[.modificationDate] as? Date
-        else { return }
-        entries[stableKey(for: url)] = CacheEntry(
-            mtime: mdate.timeIntervalSince1970,
-            fileSize: size,
-            song: song
-        )
+    /// Stores a `Song` for `url` keyed on the given `(mtime, size)` stamp.
+    /// Pure in-memory dictionary write — no I/O, safe to call on the main actor.
+    func store(song: Song, for url: URL, stamp: FileStamp) {
+        entries[stableKey(for: url)] = CacheEntry(mtime: stamp.mtime, fileSize: stamp.size, song: song)
     }
 
     /// Writes the in-memory cache to disk atomically. Call once after a bulk scan completes.
+    /// Encoding/writing thousands of entries is offloaded to a background task so it
+    /// never blocks the main thread.
     func persist() {
-        guard let data = try? JSONEncoder().encode(entries) else { return }
-        try? data.write(to: cacheURL, options: .atomic)
+        let snapshot = entries
+        let destination = cacheURL
+        Task.detached(priority: .utility) {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: destination, options: .atomic)
+        }
     }
 
     /// Removes cache entries for paths that no longer exist on disk.

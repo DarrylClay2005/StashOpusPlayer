@@ -611,32 +611,63 @@ async def _get_raw_url(
     target_url: str,
     format_flag: str = "bestaudio[ext=m4a]/bestaudio/best",
 ) -> Optional[str]:
-    """Runs yt-dlp --get-url and returns the first HTTP(S) line from stdout."""
-    cmd = [
-        "yt-dlp",
-        "-f", format_flag,
-        "--get-url",
-        "--no-playlist",
-        target_url,
-    ]
-    logger.info("Running (raw): %s", " ".join(cmd))
-    async with _YTDLP_SEMAPHORE:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=15.0)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.communicate()  # reap the zombie (Fix 7)
-            raise HTTPException(status_code=408, detail="Stream URL fetch timed out")
+    """
+    Runs yt-dlp --get-url and returns the first HTTP(S) line from stdout.
 
-    for raw_line in stdout_bytes.splitlines():
-        line = raw_line.strip().decode(errors="replace")
-        if line.startswith("http"):
-            return line
+    Some videos don't expose the requested container/codec combination (the
+    preferred format simply isn't in the available formats list), which makes
+    yt-dlp print nothing and surfaces to users as "Unable to find stream URL".
+    Rather than failing outright, retry with progressively more permissive
+    format selectors before giving up.
+    """
+    attempts: list[str] = []
+    for flag in (format_flag, "bestaudio/best", "best"):
+        if flag not in attempts:
+            attempts.append(flag)
+
+    last_stderr = b""
+    for attempt_flag in attempts:
+        cmd = [
+            "yt-dlp",
+            "-f", attempt_flag,
+            "--get-url",
+            "--no-playlist",
+            target_url,
+        ]
+        logger.info("Running (raw): %s", " ".join(cmd))
+        async with _YTDLP_SEMAPHORE:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.communicate()  # reap the zombie (Fix 7)
+                raise HTTPException(status_code=408, detail="Stream URL fetch timed out")
+
+        last_stderr = stderr_bytes
+        for raw_line in stdout_bytes.splitlines():
+            line = raw_line.strip().decode(errors="replace")
+            if line.startswith("http"):
+                if attempt_flag != format_flag:
+                    logger.info(
+                        "Stream URL resolved via fallback format %r (preferred %r unavailable) for %s",
+                        attempt_flag, format_flag, target_url,
+                    )
+                return line
+
+        logger.warning(
+            "yt-dlp returned no stream URL for %s with format %r — trying next fallback",
+            target_url, attempt_flag,
+        )
+
+    logger.error(
+        "yt-dlp exhausted all format fallbacks for %s — stderr: %s",
+        target_url, last_stderr.decode(errors="replace")[-500:],
+    )
     return None
 
 

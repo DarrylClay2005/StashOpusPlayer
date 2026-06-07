@@ -2,6 +2,45 @@ import AVFoundation
 import Foundation
 import UIKit
 
+/// Persists per-file iTunes/MusicBrainz/Deezer enrichment results.
+///
+/// Previously each `enrichFromCache` call read the *entire* `[String: [String: String]]`
+/// dictionary from `UserDefaults`, mutated one entry, and wrote the whole thing back —
+/// an O(n) plist (de)serialization on every single song. Importing a few thousand
+/// tracks meant a few thousand full-dictionary read/encode/write cycles (effectively
+/// O(n²)), which is exactly the kind of work that stalls the UI and can trip the
+/// watchdog during a big import. This actor loads once, keeps the cache in memory,
+/// and writes back at most once per batch via `persist()`.
+actor EnrichmentCacheStore {
+    static let shared = EnrichmentCacheStore()
+
+    private static let cacheKey = "doc_import_enrich_v1"
+
+    private var cache: [String: [String: String]]
+    private var dirty = false
+
+    private init() {
+        cache = (UserDefaults.standard.dictionary(forKey: Self.cacheKey) as? [String: [String: String]]) ?? [:]
+    }
+
+    func lookup(_ filename: String) -> [String: String]? {
+        cache[filename]
+    }
+
+    func store(_ filename: String, entry: [String: String]) {
+        cache[filename] = entry
+        dirty = true
+    }
+
+    /// Flushes pending writes to `UserDefaults` in a single pass. Call once after
+    /// a batch of imports/scans completes — not per song.
+    func persist() {
+        guard dirty else { return }
+        UserDefaults.standard.set(cache, forKey: Self.cacheKey)
+        dirty = false
+    }
+}
+
 enum DocumentImportError: LocalizedError {
     case unreadableFile
     case copyFailed
@@ -52,6 +91,10 @@ struct DocumentImportService {
                 if let song { songs.append(song) }
             }
         }
+
+        // Flush any enrichment-cache writes accumulated during this batch in one shot
+        // rather than once per song (see EnrichmentCacheStore).
+        await EnrichmentCacheStore.shared.persist()
 
         return songs
     }
@@ -286,15 +329,11 @@ struct DocumentImportService {
 
     // MARK: - Online Metadata Enrichment
 
-    private static let enrichCacheKey = "doc_import_enrich_v1"
-
-    /// Returns a song with missing fields filled from UserDefaults cache or the iTunes API.
+    /// Returns a song with missing fields filled from the enrichment cache or the iTunes/MusicBrainz/Deezer chain.
     private static func enrichFromCache(song: Song) async -> Song {
         let filename = song.url?.lastPathComponent ?? song.title
-        let defaults = UserDefaults.standard
-        var cache = (defaults.dictionary(forKey: enrichCacheKey) as? [String: [String: String]]) ?? [:]
 
-        if let saved = cache[filename] {
+        if let saved = await EnrichmentCacheStore.shared.lookup(filename) {
             var s = song
             if s.artist.isEmpty,      let v = saved["artist"], !v.isEmpty { s.artist = v }
             if s.album.isEmpty,       let v = saved["album"],  !v.isEmpty { s.album  = v }
@@ -316,10 +355,9 @@ struct DocumentImportService {
                 appLog("iTunes enrichment applied for \"\(song.title)\": artist=\(enriched.artist), album=\(enriched.album)", category: "library")
             }
         }
-        // Always write to UserDefaults — an empty dict marks "checked, no results found"
-        // so the lookup is not retried on every app launch for tracks with no iTunes match.
-        cache[filename] = entry
-        defaults.set(cache, forKey: enrichCacheKey)
+        // Always record — an empty dict marks "checked, no results found" so the
+        // lookup isn't retried on every app launch for tracks with no API match.
+        await EnrichmentCacheStore.shared.store(filename, entry: entry)
         return enriched
     }
 

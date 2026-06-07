@@ -2,8 +2,10 @@ FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y ffmpeg curl && rm -rf /var/lib/apt/lists/*
 
-# Install yt-dlp pinned version via pip
-RUN pip install --no-cache-dir yt-dlp==2025.1.26
+# Install yt-dlp pinned version via pip — kept current; YouTube changes its
+# player/signature internals often enough that a stale yt-dlp is the #1 cause
+# of "Unable to find stream URL" extraction failures.
+RUN pip install --no-cache-dir yt-dlp==2026.3.17
 
 WORKDIR /app
 
