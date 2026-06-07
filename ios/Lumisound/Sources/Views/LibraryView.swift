@@ -669,15 +669,32 @@ private struct FoldersTab: View {
         }
         .background(Color.clear.ignoresSafeArea())
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    Button { columns = 1 } label: { Label("1 Column",  systemImage: "rectangle.grid.1x2") }
-                    Button { columns = 2 } label: { Label("2 Columns", systemImage: "square.grid.2x2") }
-                    Button { columns = 3 } label: { Label("3 Columns", systemImage: "square.grid.3x3") }
+            // Mirrors SongsTab's column-toggle buttons (rather than a Menu) so
+            // switching the Folders layout works the same, directly-tappable way.
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                Button {
+                    columns = 1
                 } label: {
-                    Image(systemName: columns == 1 ? "rectangle.grid.1x2" : columns == 2 ? "square.grid.2x2" : "square.grid.3x3")
-                        .tint(AppTheme.dynamicAccent)
+                    Image(systemName: "rectangle.grid.1x2")
+                        .foregroundStyle(columns == 1 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                 }
+                .buttonStyle(.plain)
+
+                Button {
+                    columns = 2
+                } label: {
+                    Image(systemName: "square.grid.2x2")
+                        .foregroundStyle(columns == 2 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    columns = 3
+                } label: {
+                    Image(systemName: "square.grid.3x3")
+                        .foregroundStyle(columns == 3 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -691,31 +708,36 @@ private struct FolderGridCell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(AppTheme.surface)
+            // GeometryReader sizes the artwork to the actual column width — like
+            // SongGridCell, a hardcoded size here clips (3-column) or under-fills
+            // (1-column) the cell depending on how many columns are selected.
+            GeometryReader { geo in
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(AppTheme.surface)
 
-                if let song = representativeSong {
-                    ArtworkThumbnail(song: song, size: 160)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                } else {
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 40))
-                        .foregroundStyle(AppTheme.dynamicAccent)
-                }
-
-                // Folder badge overlay
-                VStack {
-                    Spacer()
-                    HStack {
+                    if let song = representativeSong {
+                        ArtworkThumbnail(song: song, size: geo.size.width)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    } else {
                         Image(systemName: "folder.fill")
-                            .font(.caption2)
-                        Spacer()
+                            .font(.system(size: geo.size.width * 0.25))
+                            .foregroundStyle(AppTheme.dynamicAccent)
                     }
-                    .padding(6)
-                    .background(.ultraThinMaterial)
+
+                    // Folder badge overlay
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Image(systemName: "folder.fill")
+                                .font(.caption2)
+                            Spacer()
+                        }
+                        .padding(6)
+                        .background(.ultraThinMaterial)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .frame(maxWidth: .infinity)
             .aspectRatio(1, contentMode: .fit)
