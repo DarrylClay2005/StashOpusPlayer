@@ -91,13 +91,12 @@ final class AudioPlayerManager: ObservableObject {
     // Flips after each crossfade so the two nodes alternate roles.
     private var usingPrimaryNode = true
 
-    // The node playing (or scheduled for) the current song.
+    // The node playing (or scheduled for) the current song. `usingPrimaryNode` flips
+    // to the incoming node the instant a crossfade begins (see beginCrossfade) — at
+    // the same moment currentSong/duration/audioFile switch — so this can resolve
+    // the same way regardless of crossfade state and never disagrees with "now playing".
     private var activeNode: AVAudioPlayerNode {
-        if isCrossfading {
-            // During a crossfade the *incoming* node (opposite side) has the new track.
-            return usingPrimaryNode ? secondaryNode : primaryNode
-        }
-        return usingPrimaryNode ? primaryNode : secondaryNode
+        usingPrimaryNode ? primaryNode : secondaryNode
     }
 
     // MARK: Private — Playback Bookkeeping
@@ -1157,6 +1156,9 @@ final class AudioPlayerManager: ObservableObject {
         let fadeDuration = audioSettings.crossfadeDuration
 
         // The outgoing node is the one currently playing; incoming is the opposite.
+        // Captured as `let` — the upcoming `usingPrimaryNode` flip changes what
+        // `activeNode` resolves to, but these bindings keep pointing at the
+        // correct physical nodes for the rest of this function and the timer below.
         let outgoing = usingPrimaryNode ? primaryNode : secondaryNode
         let incoming = usingPrimaryNode ? secondaryNode : primaryNode
 
@@ -1166,14 +1168,35 @@ final class AudioPlayerManager: ObservableObject {
         incoming.scheduleFile(nextFile, at: nil) { [weak self] in
             Task { @MainActor in
                 // Incoming finished its full file — drive normal track-end logic.
-                // isCrossfading and usingPrimaryNode are already updated by finishCrossfade()
-                // when the volume ramp completed; only guard on generation for stale callbacks.
                 guard let self, self.scheduleGeneration == gen else { return }
                 self.handleTrackEnded()
             }
         }
         startEngineIfNeeded()
         incoming.play()
+
+        // Switch every "what's playing" property to the incoming track THE INSTANT
+        // it starts audibly — not after the multi-second fade finishes. `activeNode`
+        // is a plain `usingPrimaryNode` lookup that we flip right here, so position
+        // tracking immediately reads frames from `incoming`. Previously these stayed
+        // pointed at the outgoing track for the whole fade: `updatePositionFromPlayer`
+        // combined the OLD track's fileStartFrame/duration with the NEW node's
+        // elapsed time (the position briefly snapping toward zero against the old
+        // track's duration), while Now Playing, the miniplayer, and "Up Next" kept
+        // showing the outgoing track's title/artwork/queue position until the fade
+        // ended — exactly the "miniplayer freaks out, Now Playing/Up Next don't
+        // live-update" glitch reported during crossfades. Flipping here keeps every
+        // published property in lockstep with the audio from the first frame.
+        usingPrimaryNode.toggle()
+        advanceIndex()
+        currentSong = nextSong
+        audioFile = nextFile
+        fileStartFrame = 0
+        position = 0
+        duration = nextFile.duration
+        gaplessScheduled = false
+        pendingNextIndex = nil
+        updateNowPlaying()
 
         // When crossfadeDuration == 0, steps clamps to 1 (instantaneous swap). Intentional.
         let steps = max(1, Int(fadeDuration * 30))
@@ -1192,35 +1215,19 @@ final class AudioPlayerManager: ObservableObject {
                 if step >= steps {
                     t.invalidate()
                     self.crossfadeTimer = nil
-                    self.finishCrossfade(nextSong: nextSong, nextFile: nextFile)
+                    self.finishCrossfade(outgoing: outgoing)
                 }
             }
         }
     }
 
-    /// Called when the volume-ramp timer completes.
-    /// The incoming node is still mid-playback — stop the outgoing node, reset crossfade
-    /// state, and flip the active-node flag so subsequent calls use the correct node.
-    private func finishCrossfade(nextSong: Song, nextFile: AVAudioFile) {
-        let outgoing = usingPrimaryNode ? primaryNode : secondaryNode
+    /// Called when the volume-ramp timer completes. All "now playing" state already
+    /// switched to the incoming track at the moment the fade began (see
+    /// beginCrossfade) — this just silences and stops the now-abandoned outgoing node.
+    private func finishCrossfade(outgoing: AVAudioPlayerNode) {
         outgoing.stop()
         outgoing.volume = audioSettings.volume
-        // Mark crossfade complete and swap the active-node pointer now that the
-        // volume ramp has finished and the incoming node owns full-volume playback.
         isCrossfading = false
-        usingPrimaryNode.toggle()
-        advanceIndex()
-        currentSong = nextSong
-        audioFile = nextFile
-        // The incoming node has been playing for ~crossfadeDuration already; reflect that
-        // so the progress bar doesn't snap back to 0:00 after the fade completes.
-        let elapsed = min(audioSettings.crossfadeDuration, nextFile.duration)
-        fileStartFrame = AVAudioFramePosition(elapsed * nextFile.processingFormat.sampleRate)
-        duration = nextFile.duration
-        position = elapsed
-        gaplessScheduled = false
-        pendingNextIndex = nil
-        updateNowPlaying()
     }
 
     private func cancelCrossfade() {
@@ -1229,12 +1236,15 @@ final class AudioPlayerManager: ObservableObject {
         crossfadeStartTimer?.invalidate()
         crossfadeStartTimer = nil
         if isCrossfading {
-            // Stop the incoming node and restore both volumes.
-            let incoming = usingPrimaryNode ? secondaryNode : primaryNode
-            incoming.stop()
-            incoming.volume = audioSettings.volume
-            let outgoing = usingPrimaryNode ? primaryNode : secondaryNode
-            outgoing.volume = audioSettings.volume
+            // `usingPrimaryNode`/`activeNode` already point at the track that's
+            // becoming current (flipped at the start of the fade — see
+            // beginCrossfade) — that node keeps playing and gets reused/
+            // rescheduled by the caller. The other node is the abandoned
+            // fade-out track: silence and stop it so it doesn't keep sounding.
+            let abandoned = usingPrimaryNode ? secondaryNode : primaryNode
+            abandoned.stop()
+            abandoned.volume = audioSettings.volume
+            activeNode.volume = audioSettings.volume
             isCrossfading = false
         }
     }

@@ -35,8 +35,25 @@ struct MiniPlayerBar: View {
 
             // Main content
             HStack(spacing: 12) {
-                artworkThumbnail
-                songInfo
+                // Tap target for opening Now Playing — scoped to JUST the artwork
+                // and text (not the whole bar). Attaching it to the full bar and
+                // then trying to "absorb" taps on `controls` with empty
+                // .simultaneousGesture/.onTapGesture handlers (the previous
+                // approach) pits SwiftUI's gesture recognizers against the
+                // Buttons below: taps on Play/Pause, Skip, and the heart could
+                // intermittently fail to register OR also pop open the Now
+                // Playing sheet — the "miniplayer freaks out" behavior reported.
+                // Scoping the gesture to a non-interactive region sidesteps the
+                // competition entirely; button taps now always go to the buttons.
+                HStack(spacing: 12) {
+                    artworkThumbnail
+                    songInfo
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    showingNowPlaying = true
+                }
+
                 Spacer(minLength: 0)
                 controls
             }
@@ -46,10 +63,6 @@ struct MiniPlayerBar: View {
             .frame(height: 80)
         }
         .background(.ultraThinMaterial)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            showingNowPlaying = true
-        }
     }
 
     private var progressBar: some View {
@@ -135,9 +148,6 @@ struct MiniPlayerBar: View {
             }
             .buttonStyle(.plain)
         }
-        // Prevent taps on controls from bubbling up to the sheet trigger
-        .simultaneousGesture(TapGesture().onEnded { })
-        .onTapGesture { }
         .onAppear {
             playHaptic.prepare()
             skipHaptic.prepare()
