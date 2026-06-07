@@ -335,7 +335,8 @@ enum AudioEffectsService {
         pitchSemitones: -6.1
     )
 
-    /// 8D Audio — rotates the listener's spatial orientation at 0.18 Hz using AVAudioEnvironmentNode.
+    /// 8D Audio — oscillates stereo pan left/right at 0.18 Hz to simulate a rotating sound source
+    /// (audible on any stereo output; see AudioPlayerManager.update8DRotation).
     static let eightD = AudioEffect(
         id: "8d",
         name: "8D Audio",

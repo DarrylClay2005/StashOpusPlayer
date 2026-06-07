@@ -59,9 +59,6 @@ final class AudioPlayerManager: ObservableObject {
 
     // MARK: Private — Spatial / Special-Effect Nodes
 
-    // 8D: environment + a spatial source mixer
-    private let environmentNode = AVAudioEnvironmentNode()
-    private let spatialSourceMixer = AVAudioMixerNode()
     private var rotationAngle: Double = 0
     /// The 8D rotation speed in Hz. Persisted across sessions. Published so EffectsView can bind to it.
     @Published var rotationHz: Double = UserDefaults.standard.double(forKey: "8d_rotation_hz") > 0
@@ -105,6 +102,16 @@ final class AudioPlayerManager: ObservableObject {
     private var fileStartFrame: AVAudioFramePosition = 0
     private var timer: Timer?
     private var isEngineConfigured = false
+
+    // ReplayGain: linear gain factor derived from the current track's metadata/RMS analysis
+    // (see the `replayGainEnabled` block in scheduleCurrent/transcodeAndSchedule). Reset to
+    // neutral (1.0) whenever a new track is scheduled, then refined once analysis completes.
+    // `applyAudioSettings` reads this — rather than applying its own separate formula — so a
+    // mid-track volume/EQ/speed tweak (which re-invokes applyAudioSettings via the
+    // `audioSettings` didSet) recombines the SAME per-track gain with the new volume instead
+    // of clobbering it with an unrelated flat value, which previously made ReplayGain's
+    // effective loudness depend on the race between the analysis Task and settings changes.
+    private var replayGainLinearGain: Float = 1.0
 
     // Crossfade state
     private var isCrossfading = false
@@ -623,6 +630,16 @@ final class AudioPlayerManager: ObservableObject {
         reapplyActiveEffect()
     }
 
+    /// Resets ReplayGain to neutral at the start of a new track — before that track's own
+    /// analysis (the `replayGainEnabled` block further down each scheduling path) computes
+    /// its per-track gain — so the previous track's gain can't briefly bleed into this one.
+    private func resetReplayGainForNewTrack() {
+        replayGainLinearGain = 1.0
+        if audioSettings.replayGainEnabled {
+            crossfadeMixer.outputVolume = min(audioSettings.volume, 1.5)
+        }
+    }
+
     /// Core scheduler — loads the audio file, seeks to `startTime`, and arms the completion handler
     /// that drives crossfade / gapless / normal track-end logic.
     ///
@@ -677,6 +694,7 @@ final class AudioPlayerManager: ObservableObject {
             position = startTime
             gaplessScheduled = false
             pendingNextIndex = nil
+            resetReplayGainForNewTrack()
 
             node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
                 Task { @MainActor in
@@ -748,6 +766,7 @@ final class AudioPlayerManager: ObservableObject {
                         await MainActor.run { [weak self] in
                             guard let self else { return }
                             let linear = pow(10.0, gain / 20.0)
+                            self.replayGainLinearGain = linear
                             // Allow a modest boost above 1.0 when normalising a quiet track.
                             self.crossfadeMixer.outputVolume = min(linear * self.audioSettings.volume, 1.5)
                         }
@@ -794,6 +813,7 @@ final class AudioPlayerManager: ObservableObject {
             position        = startTime
             gaplessScheduled = false
             pendingNextIndex = nil
+            resetReplayGainForNewTrack()
 
             node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
                 Task { @MainActor in
@@ -853,6 +873,7 @@ final class AudioPlayerManager: ObservableObject {
                         await MainActor.run { [weak self] in
                             guard let self else { return }
                             let linear = pow(10.0, gain / 20.0)
+                            self.replayGainLinearGain = linear
                             self.crossfadeMixer.outputVolume = min(linear * self.audioSettings.volume, 1.5)
                         }
                     }
@@ -948,6 +969,7 @@ final class AudioPlayerManager: ObservableObject {
                     let sf = max(0, AVAudioFramePosition(startTime * sr))
                     let fl = max(0, AVAudioFrameCount(file2.length - sf))
                     fileStartFrame = sf; position = startTime; gaplessScheduled = false; pendingNextIndex = nil
+                    resetReplayGainForNewTrack()
                     node.scheduleSegment(file2, startingFrame: sf, frameCount: fl, at: nil) { [weak self] in
                         Task { @MainActor in guard let self, self.scheduleGeneration == gen else { return }; self.handleTrackEnded() }
                     }
@@ -975,6 +997,7 @@ final class AudioPlayerManager: ObservableObject {
             position = startTime
             gaplessScheduled = false
             pendingNextIndex = nil
+            resetReplayGainForNewTrack()
 
             node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
                 Task { @MainActor in
@@ -1196,7 +1219,34 @@ final class AudioPlayerManager: ObservableObject {
         duration = nextFile.duration
         gaplessScheduled = false
         pendingNextIndex = nil
+        // Crossfade schedules `nextFile` directly rather than through scheduleCurrent,
+        // so no fresh ReplayGain analysis runs for it — fall back to neutral rather than
+        // carrying over the outgoing track's (likely mismatched) computed gain.
+        resetReplayGainForNewTrack()
         updateNowPlaying()
+
+        // Arm the crossfade-start timer for the track that just became current —
+        // mirroring the setup `scheduleCurrent` does for the very first track.
+        // Without this, `handleTrackEnded` only ever calls `beginCrossfade` again
+        // at the natural end of `nextFile`'s full playback (zero seconds of
+        // overlap), so every transition after the first one in a session degrades
+        // from an actual crossfade into the new track simply fading in from
+        // silence once the old one has already finished. Re-arming here keeps
+        // the whole queue crossfading with consistent overlap.
+        let nextTrackLength = nextFile.duration
+        let nextCrossfadeOffset = max(0, nextTrackLength - fadeDuration)
+        crossfadeStartTimer?.invalidate()
+        crossfadeStartTimer = nil
+        if fadeDuration > 0 && nextCrossfadeOffset > 0 {
+            crossfadeStartTimer = Timer.scheduledTimer(
+                withTimeInterval: nextCrossfadeOffset, repeats: false
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.isPlaying, !self.isCrossfading else { return }
+                    self.beginCrossfade()
+                }
+            }
+        }
 
         // When crossfadeDuration == 0, steps clamps to 1 (instantaneous swap). Intentional.
         let steps = max(1, Int(fadeDuration * 30))
@@ -1473,43 +1523,15 @@ final class AudioPlayerManager: ObservableObject {
         engine.attach(timePitch)
         engine.attach(equalizer)
 
-        // Spatial chain: spatialSourceMixer feeds into environmentNode which
-        // enables HRTF-based 3D spatialisation for the 8D-rotation effect.
-        engine.attach(spatialSourceMixer)
-        engine.attach(environmentNode)
-
         // Both player nodes connect to separate mixer inputs so their volumes
         // can be ramped independently during a crossfade.
         engine.connect(primaryNode,   to: crossfadeMixer, fromBus: 0, toBus: 0, format: nil)
         engine.connect(secondaryNode, to: crossfadeMixer, fromBus: 0, toBus: 1, format: nil)
         engine.connect(crossfadeMixer, to: timePitch, format: nil)
         engine.connect(timePitch, to: equalizer, format: nil)
+        engine.connect(equalizer, to: engine.mainMixerNode, format: nil)
 
-        // equalizer → spatialSourceMixer → environmentNode → mainMixerNode
-        // The environmentNode is always in the chain; when 8D is inactive the
-        // listener orientation is neutral, so it acts as a transparent passthrough.
-        engine.connect(equalizer, to: spatialSourceMixer, format: nil)
-        engine.connect(spatialSourceMixer, to: environmentNode, format: nil)
-        engine.connect(environmentNode, to: engine.mainMixerNode, format: nil)
-
-        configureEnvironmentNode()
         isEngineConfigured = true
-    }
-
-    private func configureEnvironmentNode() {
-        // Place the listener at the origin looking forward along -Z.
-        environmentNode.listenerPosition = AVAudio3DPoint(x: 0, y: 0, z: 0)
-        environmentNode.listenerVectorOrientation = AVAudio3DVectorOrientation(
-            forward: AVAudio3DVector(x: 0, y: 0, z: -1),
-            up: AVAudio3DVector(x: 0, y: 1, z: 0)
-        )
-        // Use the platform's best HRTF algorithm.
-        environmentNode.renderingAlgorithm = .auto
-
-        // Park the spatial source at a fixed position to the right of the listener (radius 2 m).
-        // The 8D effect rotates the listener's yaw so this fixed source appears to orbit.
-        // When 8D is off the orientation is reset to neutral (yaw=0) so no coloration occurs.
-        spatialSourceMixer.position = AVAudio3DPoint(x: 2, y: 0, z: 0)
     }
 
     private func configureEqualizer() {
@@ -1582,10 +1604,6 @@ final class AudioPlayerManager: ObservableObject {
         is8DActive = false
         // Reset pan to center so no stereo imbalance remains after 8D effect stops.
         crossfadeMixer.pan = 0.0
-        // Also reset environment node orientation to neutral.
-        environmentNode.listenerAngularOrientation = AVAudio3DAngularOrientation(
-            yaw: 0, pitch: 0, roll: 0
-        )
     }
 
     /// Updates the 8D rotation speed while the effect is running. Persists to UserDefaults.
@@ -1779,13 +1797,15 @@ final class AudioPlayerManager: ObservableObject {
             }
         }
 
-        // ReplayGain: apply a gain offset via the crossfade mixer's output volume.
-        // When enabled, output is limited to 75 % of the user-chosen volume to guard against
-        // clipping on loud masters (equivalent to a -2.5 dB protective ceiling).
-        // A full implementation would read REPLAYGAIN_TRACK_GAIN from file metadata and
-        // compute a per-track linear gain; see scheduleCurrent for the metadata path.
+        // ReplayGain: re-combine the current track's analysed gain (replayGainLinearGain,
+        // computed asynchronously in scheduleCurrent/transcodeAndSchedule from embedded
+        // REPLAYGAIN_TRACK_GAIN metadata or RMS analysis) with the live volume. Using the
+        // SAME formula here as the analysis callback — rather than a separate flat-cap
+        // value — means a mid-track volume/EQ/speed tweak (which re-invokes this via the
+        // `audioSettings` didSet) refreshes the output level without clobbering the
+        // per-track gain the analysis already computed.
         if audioSettings.replayGainEnabled {
-            crossfadeMixer.outputVolume = min(audioSettings.volume, 0.75)
+            crossfadeMixer.outputVolume = min(replayGainLinearGain * audioSettings.volume, 1.5)
         } else {
             crossfadeMixer.outputVolume = 1.0
         }

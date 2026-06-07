@@ -154,7 +154,7 @@ struct SettingsHelpView: View {
             helpRow(
                 icon: "sparkle",
                 title: "Animation Types",
-                body: "The gallery supports three animation styles: Ken Burns slowly zooms and pans the image to create the documentary film effect; Fade cross-fades between images without motion; Static displays each image without any transition. Ken Burns is the default and works well with landscape photography. Choose Fade or Static if you prefer a calmer, less distracting background."
+                body: "Pick how the gallery transitions between images in Settings → Appearance → Gallery Background: Fade cross-fades smoothly; Slide Left and Slide Up pan the next image in from the side or bottom; Zoom In and Zoom Out scale the incoming image while it fades in; Flip rotates between images with a 3D-style effect; Blur In brings the next image into focus; and Cut switches instantly with no animation. Choose a calmer style like Fade or Cut if you prefer a less distracting background."
             )
             helpRow(
                 icon: "slider.horizontal.3",
@@ -219,7 +219,7 @@ struct SettingsHelpView: View {
             helpRow(
                 icon: "arrow.down.from.cloud",
                 title: "Pull Sync",
-                body: "A pull sync downloads the latest saved state from the server and applies it locally. Pull happens automatically when you log in and on every app launch while you are signed in. You can also trigger a manual pull from the Account screen. If your local favourites differ from the server, the server version wins — so make sure to push before uninstalling if you want to preserve recent changes."
+                body: "A pull sync downloads your saved state from the server and merges it into what's already on the device — favourites and playlists missing locally are added, but nothing local is ever removed or overwritten by an older server copy, so the two sides simply converge. Pull happens automatically when you log in and on every app launch while you are signed in. You can also trigger a manual pull from the Account screen."
             )
             helpRow(
                 icon: "arrow.counterclockwise",

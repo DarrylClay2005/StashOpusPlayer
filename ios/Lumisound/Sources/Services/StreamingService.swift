@@ -337,6 +337,40 @@ final class StreamingService: ObservableObject {
         }
     }
 
+    /// One-off lookup that finds the best streamable match for a title/artist pair
+    /// without touching the published `searchResults`/`isSearching` state (which the
+    /// Search tab UI is bound to). Used to resolve playable sources for tracks that
+    /// arrived as metadata-only snapshots — e.g. shared/collaborative playlist tracks,
+    /// which carry no stream URL by design. Returns `nil` on no match or any failure;
+    /// callers should treat that as "skip this track" rather than a fatal error.
+    func bestMatch(forTitle title: String, artist: String, source: String = "youtube") async -> StreamTrack? {
+        guard isConfigured else { return nil }
+        let query = "\(title) \(artist)".trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return nil }
+
+        var components = URLComponents()
+        components.path = "/api/search"
+        components.queryItems = [
+            URLQueryItem(name: "q",      value: query),
+            URLQueryItem(name: "limit",  value: "1"),
+            URLQueryItem(name: "source", value: source),
+        ]
+        guard var request = makeRequest(components.string ?? "/api/search") else { return nil }
+        request.timeoutInterval = 20
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse,
+               !(200..<300).contains(httpResponse.statusCode) {
+                return nil
+            }
+            let tracks = try JSONDecoder().decode([StreamTrack].self, from: data)
+            return tracks.first
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - Playlist resolution
 
     /// Resolves a YouTube (or SoundCloud) playlist URL to a list of tracks via

@@ -15,7 +15,33 @@ final class ArtworkService {
     /// In-memory set of cache keys for which all artwork sources failed. Prevents
     /// repeated lookups (including remote API calls) for tracks that have no artwork.
     /// Resets on app relaunch — that's fine; one miss per launch is acceptable.
+    ///
+    /// `loadArtwork` is a plain (non-actor-isolated) async function invoked
+    /// concurrently from many `ArtworkThumbnail.task` instances while scrolling
+    /// plus the background `prefetch` loop, so it can run on different threads of
+    /// the cooperative pool at the same time. A bare `Set<String>` mutated from
+    /// concurrent reads/inserts is a data race (unlike `memoryCache`/`mediaQueryCache`,
+    /// which are `NSCache` and already thread-safe) — guard it with a lock.
     private var noArtworkKeys: Set<String> = []
+    private let noArtworkLock = NSLock()
+
+    private func isKnownNoArtwork(_ key: String) -> Bool {
+        noArtworkLock.lock()
+        defer { noArtworkLock.unlock() }
+        return noArtworkKeys.contains(key)
+    }
+
+    private func markNoArtwork(_ key: String) {
+        noArtworkLock.lock()
+        defer { noArtworkLock.unlock() }
+        noArtworkKeys.insert(key)
+    }
+
+    private func clearNoArtworkKeys() {
+        noArtworkLock.lock()
+        defer { noArtworkLock.unlock() }
+        noArtworkKeys.removeAll()
+    }
 
     /// Sentinel image stored in `mediaQueryCache` to signal "already checked, no artwork".
     private let noArtworkSentinel = UIImage()
@@ -125,7 +151,7 @@ final class ArtworkService {
         }
 
         // Negative cache: skip all network/API sources for keys we already know have no artwork.
-        if noArtworkKeys.contains(key) { return nil }
+        if isKnownNoArtwork(key) { return nil }
 
         // Streaming tracks store their thumbnail URL as the artworkCacheKey.
         if let cacheKeyStr = song.artworkCacheKey,
@@ -182,7 +208,7 @@ final class ArtworkService {
             return image
         }
 
-        noArtworkKeys.insert(key)
+        markNoArtwork(key)
         appWarn("Artwork: no source found for \"\(song.displayName)\"", category: "artwork")
         return nil
     }
@@ -194,7 +220,7 @@ final class ArtworkService {
     func clearCache() {
         memoryCache.removeAllObjects()
         mediaQueryCache.removeAllObjects()
-        noArtworkKeys.removeAll()
+        clearNoArtworkKeys()
     }
 
     /// Warms the memory cache for the given songs at background priority.

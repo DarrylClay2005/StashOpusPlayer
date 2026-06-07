@@ -319,7 +319,8 @@ private struct OpenModeView: View {
                 if let shared = collaborativeService.importedPlaylist {
                     SharedPlaylistResultView(
                         shared: shared,
-                        player: player
+                        player: player,
+                        streaming: streaming
                     )
                 }
 
@@ -338,6 +339,17 @@ private struct OpenModeView: View {
 private struct SharedPlaylistResultView: View {
     let shared: SharedPlaylist
     let player: AudioPlayerManager
+    let streaming: StreamingService
+
+    // Shared-playlist tracks are metadata-only snapshots (title/artist/album/duration,
+    // no stream URL — see SharedTrack). "Play All" has to resolve each one to a
+    // playable source via the bridge's search before it can queue anything; otherwise
+    // the player would be handed Songs with url == nil, silently "play" silence, and
+    // never advance (AudioPlayerManager.scheduleCurrent skips nil-URL songs without
+    // setting an error). isResolving drives the button's loading state while that
+    // per-track lookup runs.
+    @State private var isResolving = false
+    @State private var resolveError: String?
 
     private var durationText: String {
         let total = Int(shared.tracks.reduce(0) { $0 + $1.duration }.rounded())
@@ -375,26 +387,65 @@ private struct SharedPlaylistResultView: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
-            // Play All
-            Button {
-                let songs = shared.tracks.map { track in
-                    Song(
-                        id: track.id,
-                        title: track.title,
-                        artist: track.artist,
-                        album: track.album ?? "",
-                        duration: track.duration,
-                        url: nil
-                    )
+            // Resolve error banner
+            if let resolveError {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(AppTheme.error)
+                    Text(resolveError)
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.error)
+                    Spacer()
+                    Button {
+                        self.resolveError = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
                 }
-                player.setQueue(songs, startIndex: 0, autoplay: true)
+                .padding(12)
+                .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.horizontal)
+            }
+
+            // Play All — shared tracks carry no stream URL, so resolve each one to a
+            // playable match via the bridge's search before queuing (see isResolving doc).
+            Button {
+                guard !isResolving else { return }
+                resolveError = nil
+                isResolving = true
+                Task {
+                    defer { isResolving = false }
+                    var resolved: [Song] = []
+                    for track in shared.tracks {
+                        guard let match = await streaming.bestMatch(forTitle: track.title, artist: track.artist),
+                              let url = try? await streaming.streamURL(for: match) else { continue }
+                        resolved.append(streaming.toSong(track: match, streamURL: url))
+                    }
+                    guard !resolved.isEmpty else {
+                        resolveError = "Couldn't find playable matches for any track in this playlist."
+                        return
+                    }
+                    player.setQueue(resolved, startIndex: 0, autoplay: true)
+                }
             } label: {
-                Label("Play All", systemImage: "play.fill")
-                    .font(.subheadline.weight(.semibold))
+                if isResolving {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Finding playable tracks…")
+                            .font(.subheadline.weight(.semibold))
+                    }
                     .frame(maxWidth: .infinity)
+                } else {
+                    Label("Play All", systemImage: "play.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
             }
             .buttonStyle(.bordered)
             .tint(AppTheme.dynamicAccent)
+            .disabled(isResolving)
             .padding(.horizontal)
 
             // Track list

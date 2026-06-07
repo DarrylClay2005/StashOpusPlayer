@@ -208,13 +208,36 @@ async def _auth_attempts_janitor() -> None:
             logger.debug("auth janitor: evicted %d stale IP entries", len(stale))
 
 
+_APP_LOGS_RETENTION_DAYS = 14
+
+
+async def _app_logs_janitor() -> None:
+    """Periodically prune old rows from ios_app_logs so client telemetry never grows unbounded."""
+    while True:
+        await asyncio.sleep(86400)  # once a day
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    deleted = await cur.execute(
+                        "DELETE FROM ios_app_logs WHERE created_at < NOW() - INTERVAL %s DAY",
+                        (_APP_LOGS_RETENTION_DAYS,),
+                    )
+            if deleted:
+                logger.info("app logs janitor: pruned %d rows older than %d days", deleted, _APP_LOGS_RETENTION_DAYS)
+        except Exception:
+            logger.exception("app logs janitor: prune failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     await cleanup_orphan_temp_dirs()
     janitor = asyncio.create_task(_auth_attempts_janitor())
+    app_logs_janitor = asyncio.create_task(_app_logs_janitor())
     yield
     janitor.cancel()
+    app_logs_janitor.cancel()
     # Shutdown: close the DB connection pool (Fix 8)
     import db as _db_module
     pool = _db_module._pool
@@ -2020,7 +2043,7 @@ async def server_stream(
     full_path = (music_root / path).resolve()
 
     # Path traversal guard
-    if not str(full_path).startswith(str(music_root)):
+    if not full_path.is_relative_to(music_root):
         raise HTTPException(status_code=403, detail="Access denied")
 
     if not full_path.exists() or not full_path.is_file():
@@ -2047,7 +2070,7 @@ async def server_artwork(
     full_path = (music_root / path).resolve()
 
     # Path traversal guard
-    if not str(full_path).startswith(str(music_root)):
+    if not full_path.is_relative_to(music_root):
         raise HTTPException(status_code=403, detail="Access denied")
 
     if not full_path.exists() or not full_path.is_file():
@@ -2300,7 +2323,7 @@ async def stream_user_music(
         raise HTTPException(status_code=503, detail="User music storage not configured")
 
     full_path = (music_dir / path).resolve()
-    if not str(full_path).startswith(str(music_dir)):
+    if not full_path.is_relative_to(music_dir):
         raise HTTPException(status_code=403, detail="Access denied")
     if not full_path.exists() or not full_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
@@ -2321,7 +2344,7 @@ async def user_music_artwork(
         raise HTTPException(status_code=503, detail="User music storage not configured")
 
     full_path = (music_dir / path).resolve()
-    if not str(full_path).startswith(str(music_dir)):
+    if not full_path.is_relative_to(music_dir):
         raise HTTPException(status_code=403, detail="Access denied")
     if not full_path.exists() or not full_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
@@ -2354,7 +2377,7 @@ async def delete_user_music(
         raise HTTPException(status_code=503, detail="User music storage not configured")
 
     full_path = (music_dir / filepath).resolve()
-    if not str(full_path).startswith(str(music_dir)):
+    if not full_path.is_relative_to(music_dir):
         raise HTTPException(status_code=403, detail="Access denied")
     if not full_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
@@ -2567,7 +2590,7 @@ async def get_gallery_image(
         raise HTTPException(status_code=503, detail="User storage not configured")
 
     image_path = (gallery_dir / row[0]).resolve()
-    if not str(image_path).startswith(str(gallery_dir.resolve())):
+    if not image_path.is_relative_to(gallery_dir.resolve()):
         raise HTTPException(status_code=403, detail="Access denied")
 
     if not image_path.exists() or not image_path.is_file():
@@ -2602,7 +2625,7 @@ async def delete_gallery_image(
     gallery_dir = _user_gallery_dir(user_id)
     if gallery_dir is not None:
         image_path = (gallery_dir / row[0]).resolve()
-        if str(image_path).startswith(str(gallery_dir.resolve())) and image_path.exists():
+        if image_path.is_relative_to(gallery_dir.resolve()) and image_path.exists():
             try:
                 image_path.unlink()
             except Exception as exc:

@@ -35,3 +35,7 @@ tmp/
 
 # Editor
 .idea/
+
+# Python
+__pycache__/
+*.pyc

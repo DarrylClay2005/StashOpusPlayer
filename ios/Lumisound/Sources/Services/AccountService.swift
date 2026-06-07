@@ -163,6 +163,7 @@ final class AccountService: ObservableObject {
            let user = try? JSONDecoder().decode(AppUser.self, from: data) {
             currentUser = user
             isLoggedIn = token != nil
+            hasDateOfBirth = user.dateOfBirth != nil
         }
         let ts = UserDefaults.standard.double(forKey: Self.lastSyncKey)
         if ts > 0 {
