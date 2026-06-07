@@ -79,6 +79,13 @@ struct LaunchView: View {
                     .opacity(contentOpacity)
                 }
 
+                // Library stats strip — turns the loading screen from a static spinner
+                // into a quick "here's what's about to load" preview. Pulls straight from
+                // already-in-memory `library` state (no network round-trip), so it's free
+                // to show immediately and never adds to launch latency.
+                statsStrip
+                    .opacity(contentOpacity)
+
                 Spacer()
 
                 VStack(spacing: 8) {
@@ -198,5 +205,54 @@ struct LaunchView: View {
                 withAnimation(.easeOut(duration: 0.5)) { isLoading = false }
             }
         }
+    }
+
+    // MARK: - Stats strip
+
+    private var statsStrip: some View {
+        HStack(spacing: 10) {
+            LaunchStatChip(icon: "music.note", value: "\(library.allSongs.count)", label: "Songs")
+            LaunchStatChip(icon: "music.mic", value: "\(library.artists.count)", label: "Artists")
+            LaunchStatChip(icon: "music.note.list", value: "\(library.playlists.count)", label: "Playlists")
+            LaunchStatChip(icon: "clock.fill", value: totalLibraryDuration, label: "Listening")
+        }
+        .padding(.horizontal, 28)
+    }
+
+    /// Sum of every song's duration, formatted like QueueView's "Xh Ym" footer total.
+    private var totalLibraryDuration: String {
+        let seconds = library.allSongs.reduce(0) { $0 + $1.duration }
+        guard seconds.isFinite, seconds > 0 else { return "0m" }
+        let total = Int(seconds.rounded())
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
+    }
+}
+
+// MARK: - LaunchStatChip
+
+private struct LaunchStatChip: View {
+    let icon: String
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundStyle(AppTheme.dynamicAccent)
+            Text(value)
+                .font(AppTheme.monoFont(size: 15).weight(.semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(AppTheme.bodyFont(size: 11))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(AppTheme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
