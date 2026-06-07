@@ -383,13 +383,21 @@ final class AccountService: ObservableObject {
             let data = try await makeRequest("/user/sync")
             let sync = try JSONDecoder().decode(SyncData.self, from: data)
 
-            // Apply favorites: toggle to match remote set
+            // Apply favorites: merge remote into local — add anything missing locally.
+            //
+            // This used to be a destructive "toggle to match remote exactly", which
+            // also *removed* any local favorite absent from the server payload. That
+            // silently wiped out the user's likes whenever the remote was behind the
+            // device (e.g. the previous session's pushSync hadn't completed before
+            // the app was terminated, or ran against a flaky connection) — which is
+            // exactly what showed up as "app data doesn't seem to hold anything
+            // locally". Only ever add; the merged superset gets pushed back up by
+            // the `.onChange(of: favoriteSongIDs)` → schedulePush handler, so both
+            // sides converge without data loss.
             let remoteIDs = Set(sync.favorites.map { $0.songId })
             let localFavorites = library.favoriteSongIDs
             let toAdd = remoteIDs.subtracting(localFavorites)
-            let toRemove = localFavorites.subtracting(remoteIDs)
-            for id in toAdd    { library.toggleFavorite(songID: id) }
-            for id in toRemove { library.toggleFavorite(songID: id) }
+            for id in toAdd { library.toggleFavorite(songID: id) }
 
             // Apply playlists: merge server playlists (add missing by name, skip existing)
             let existingNames = Set(library.playlists.map { $0.name })
@@ -406,16 +414,29 @@ final class AccountService: ObservableObject {
                 }
             }
 
-            // Restore audio settings from DB and save locally so player can pick them up
-            if let json = sync.audioSettingsJSON,
+            // Restore audio settings from DB — but only as a first-run/new-device
+            // bootstrap (no local settings yet). Unconditionally overwriting local
+            // settings with whatever the server last received clobbers more recent
+            // local changes whenever a previous pushSync didn't finish before the
+            // app was terminated (the debounced 2s push is easy to race on app
+            // close), which presents to the user as "my settings keep resetting /
+            // don't actually save". The local copy — which `onChange` keeps pushed
+            // up via schedulePush — is always at least as fresh as the server's.
+            if PersistenceService.shared.loadAudioSettings() == nil,
+               let json = sync.audioSettingsJSON,
                let jsonData = json.data(using: .utf8),
                let restoredSettings = try? JSONDecoder().decode(AudioSettings.self, from: jsonData) {
                 PersistenceService.shared.saveAudioSettings(restoredSettings)
                 // Signal the player to apply them (observers in LumisoundApp reload on launch)
             }
 
-            // Restore theme colour
-            if let hex = sync.themeColor, hex.hasPrefix("#"), hex.count == 7 {
+            // Restore theme colour — same first-run-only guard as audio settings above:
+            // there's no `.onChange` hook pushing accent-colour changes immediately
+            // (it only rides along on the next favorites/playlist/settings push), so
+            // an unconditional overwrite here would routinely revert a just-picked
+            // colour back to whatever stale value the server last happened to receive.
+            if UserDefaults.standard.data(forKey: "accent_color_data") == nil,
+               let hex = sync.themeColor, hex.hasPrefix("#"), hex.count == 7 {
                 let scanner = Scanner(string: String(hex.dropFirst()))
                 var rgb: UInt64 = 0
                 if scanner.scanHexInt64(&rgb) {
