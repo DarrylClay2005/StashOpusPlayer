@@ -13,6 +13,15 @@ struct ContentView: View {
     @AppStorage("selected_tab") private var selectedTab = 0
     @State private var showCarMode = false
 
+    /// Circular-cropped tab-bar-sized rendering of the user's avatar, shown in place
+    /// of the gearshape Settings icon when logged in. Cached in @State (recomputed only
+    /// when the avatar actually changes via onReceive below) rather than rendered inline
+    /// in `body` — `ContentView` re-evaluates on every `player` publish (including
+    /// position updates ~4×/sec during playback), and redrawing a UIGraphicsImageRenderer
+    /// pass on each of those would be exactly the kind of needless per-frame work that
+    /// caused the "update install freakout" performance issues fixed elsewhere.
+    @State private var profileTabIcon: UIImage? = nil
+
     init() {
         // Tab bar — transparent with dark blur
         let tabAppearance = UITabBarAppearance()
@@ -78,9 +87,18 @@ struct ContentView: View {
                     .tag(3)
 
                 // MARK: Tab 5 — Settings
+                // Shows the user's profile photo instead of a generic gearshape once
+                // they've uploaded one — gives a quick "is this me?" glance and matches
+                // the profile-as-settings-entry convention used by most social/media apps.
+                // Falls back to gearshape for logged-out users / no avatar uploaded.
                 SettingsView()
                     .tabItem {
-                        Label("Settings", systemImage: "gearshape")
+                        if let icon = profileTabIcon {
+                            Image(uiImage: icon)
+                            Text("Settings")
+                        } else {
+                            Label("Settings", systemImage: "gearshape")
+                        }
                     }
                     .tag(4)
             }
@@ -147,5 +165,30 @@ struct ContentView: View {
                 if isCarAudio { showCarMode = true }
             }
         }
+        // Render the tab-bar profile icon once up front and again whenever the
+        // avatar changes (login, upload, logout). `account.$avatarImage` is used
+        // (Combine subscription) rather than `.onChange(of: account.avatarImage)`
+        // since `UIImage` isn't `Equatable`.
+        .onAppear {
+            profileTabIcon = Self.circularProfileIcon(from: account.avatarImage)
+        }
+        .onReceive(account.$avatarImage) { image in
+            profileTabIcon = Self.circularProfileIcon(from: image)
+        }
+    }
+
+    /// Crops `image` to a circle at tab-bar icon size and marks it `.alwaysOriginal`
+    /// so SwiftUI renders the user's actual photo instead of template-tinting it
+    /// (which is what plain `Image(uiImage:)` would do with a system-style asset).
+    private static func circularProfileIcon(from image: UIImage?) -> UIImage? {
+        guard let image else { return nil }
+        let size: CGFloat = 28
+        let rect = CGRect(x: 0, y: 0, width: size, height: size)
+        let renderer = UIGraphicsImageRenderer(size: rect.size)
+        let cropped = renderer.image { _ in
+            UIBezierPath(ovalIn: rect).addClip()
+            image.draw(in: rect)
+        }
+        return cropped.withRenderingMode(.alwaysOriginal)
     }
 }
