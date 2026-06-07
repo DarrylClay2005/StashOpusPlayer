@@ -237,7 +237,9 @@ final class AudioPlayerManager: ObservableObject {
 
     func resume() {
         if isUsingOpusPlayer {
-            opusPlayer?.play()
+            // `.play()` always resumes at 1.0× — set `.rate` directly so the
+            // user's chosen Speed setting is honored on resume too.
+            opusPlayer?.rate = Float(audioSettings.speed)
             isPlaying = true
             updateNowPlaying()
             return
@@ -1009,7 +1011,9 @@ final class AudioPlayerManager: ObservableObject {
 
     /// Used when AVAssetReader/AVAssetExportSession cannot decode the file (e.g. Ogg/Opus container).
     /// AVPlayer has access to iOS's full codec pipeline and can always play .opus files.
-    /// Basic play/pause/seek/volume work. EQ, ReplayGain, 8D, crossfade, and gapless do not apply.
+    /// Basic play/pause/seek/volume/speed work (speed via `.rate` + `.spectral`
+    /// pitch algorithm — see `applyAudioSettings`). EQ, pitch shift, ReplayGain,
+    /// 8D, crossfade, and gapless need the AVAudioEngine graph and do not apply.
     private func scheduleWithOpusPlayer(url: URL, startTime: TimeInterval) {
         tearDownOpusPlayer()
 
@@ -1018,6 +1022,10 @@ final class AudioPlayerManager: ObservableObject {
         secondaryNode.stop()
 
         let item   = AVPlayerItem(url: url)
+        // Pitch-preserving time stretch — without this, AVPlayer's default
+        // `.varispeed` algorithm ties pitch to rate (chipmunk/slow-mo effect),
+        // which made the Speed slider feel "broken" for streamed/opus tracks.
+        item.audioTimePitchAlgorithm = .spectral
         let player = AVPlayer(playerItem: item)
         player.volume = audioSettings.volume
         opusPlayer = player
@@ -1095,7 +1103,9 @@ final class AudioPlayerManager: ObservableObject {
             }
         }
 
-        if isPlaying { player.play() }
+        // Setting `.rate` directly (rather than `.play()`, which always resumes at
+        // 1.0×) both starts playback AND applies the user's chosen Speed setting.
+        if isPlaying { player.rate = Float(audioSettings.speed) }
 
         updateNowPlaying()
         appLog("Playing via AVPlayer: \(url.lastPathComponent)", category: "audio")
@@ -1620,6 +1630,17 @@ final class AudioPlayerManager: ObservableObject {
     // MARK: - Apply Audio Settings
 
     private func applyAudioSettings() {
+        // AVPlayer fallback path (opus/webm/ogg streams) — only Speed can be
+        // mapped onto AVPlayer's API (EQ/pitch/crossfade/gapless/ReplayGain need
+        // the AVAudioEngine graph below, which this path bypasses entirely).
+        // Re-apply `.rate` directly so dragging the Speed slider mid-playback
+        // takes effect immediately instead of silently doing nothing.
+        if isUsingOpusPlayer {
+            opusPlayer?.volume = audioSettings.volume
+            if isPlaying { opusPlayer?.rate = Float(audioSettings.speed) }
+            return
+        }
+
         // Volume — apply to both nodes (secondary will be 0 unless crossfading).
         primaryNode.volume = isCrossfading ? primaryNode.volume : audioSettings.volume
         if !isCrossfading { secondaryNode.volume = audioSettings.volume }
@@ -1670,9 +1691,6 @@ final class AudioPlayerManager: ObservableObject {
         } else {
             crossfadeMixer.outputVolume = 1.0
         }
-
-        // Sync volume to AVPlayer fallback path (no EQ/effects, but volume still applies).
-        opusPlayer?.volume = audioSettings.volume
 
         // Do NOT call updateNowPlaying() here — this runs on every EQ slider drag.
     }

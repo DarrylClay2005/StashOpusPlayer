@@ -176,7 +176,7 @@ struct CacheManagerView: View {
         guard bytes > 0 else { return }
         savedBytes = bytes
         withAnimation { showSavedBanner = true }
-        Task {
+        Task { @MainActor in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             withAnimation { showSavedBanner = false }
         }
