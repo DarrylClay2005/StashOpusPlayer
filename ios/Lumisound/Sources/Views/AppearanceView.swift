@@ -7,12 +7,16 @@ struct AppearanceView: View {
 
     // MARK: State
 
+    /// Used only to source a representative song for the card-style live preview.
+    @EnvironmentObject private var library: LibraryManager
+
     @State private var customColor: Color = AppTheme.dynamicAccent
     @State private var refreshToken = UUID()
 
     @AppStorage("panel_opacity")             private var panelOpacity: Double = 1.0
     @AppStorage("nowPlaying_artworkStyle")   private var artworkStyleRaw: String = NowPlayingArtworkStyle.vinylDisc.rawValue
     @AppStorage("nowPlaying_seekerStyle")    private var seekerStyleRaw: String  = SeekerStyle.waveform.rawValue
+    @AppStorage("library_cardStyle")         private var cardStyleRaw: String    = SongCardStyle.compact.rawValue
 
     // MARK: Preset Swatches
 
@@ -73,6 +77,17 @@ struct AppearanceView: View {
                 sectionHeader("Player Style Defaults")
             } footer: {
                 Text("These set the starting style for new sessions. You can also switch styles live in the Now Playing screen.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            // MARK: — Song Card Style
+            Section {
+                cardStylePicker
+            } header: {
+                sectionHeader("Song Cards")
+            } footer: {
+                Text("Changes how song rows look across Library, Queue, Favorites, Playlists, and Artist screens.")
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }
@@ -237,6 +252,50 @@ struct AppearanceView: View {
                     }
                 }
                 .padding(.bottom, 2)
+            }
+        }
+        .padding(.vertical, 6)
+        .listRowBackground(AppTheme.surface)
+    }
+
+    private var cardStylePicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Song Row Style")
+                .font(AppTheme.bodyFont())
+                .foregroundStyle(AppTheme.textPrimary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(SongCardStyle.allCases) { style in
+                        Button {
+                            cardStyleRaw = style.rawValue
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: style.iconName)
+                                    .font(.system(size: 13, weight: .medium))
+                                Text(style.displayName)
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundStyle(cardStyleRaw == style.rawValue ? .white : AppTheme.textSecondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(
+                                cardStyleRaw == style.rawValue ? AppTheme.dynamicAccent : AppTheme.elevatedSurface,
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .animation(.easeInOut(duration: 0.15), value: cardStyleRaw)
+                    }
+                }
+                .padding(.bottom, 2)
+            }
+
+            // Live preview using a representative row in the chosen style.
+            if let previewSong = library.allSongs.first {
+                SongRow(song: previewSong, isCurrent: false)
+                    .id(cardStyleRaw)
+                    .padding(.top, 2)
             }
         }
         .padding(.vertical, 6)
