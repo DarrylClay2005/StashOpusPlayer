@@ -188,7 +188,31 @@ struct LaunchView: View {
                 withAnimation(.easeIn(duration: 0.4)) { contentOpacity = 1.0 }
             }
             Task {
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                // Previously a flat 1.5s timer — for small/cached libraries that's plenty,
+                // but for big ones (1000+ songs imported from Apple Music) the media-library
+                // scan is still running long after this fires: the user lands in a library
+                // that's still populating mid-interaction (rows reflowing, artwork popping
+                // in, the mini player jumping between tracks) — exactly the "freakout" feel
+                // reported after large imports/updates. Now we hold here until
+                // `library.isScanning` (set by scanMediaLibrary/requestAccessAndScan, the
+                // dominant scan path for big libraries — see LibraryView.onAppear) drops
+                // back to false, so the user never sees the library mid-rebuild.
+                //
+                // Two safety rails: a minimum hold so the screen doesn't just flicker for
+                // small libraries (and so we're not sampling `isScanning` in the brief gap
+                // before LibraryView.onAppear has actually flipped it true), and a maximum
+                // cap so a stuck/never-starting scan can never trap the user here.
+                let minimumHold: UInt64 = 1_200_000_000   //  1.2 s
+                let maximumHold: UInt64 = 15_000_000_000  // 15.0 s
+                let pollInterval: UInt64 = 250_000_000    //  0.25 s
+
+                try? await Task.sleep(nanoseconds: minimumHold)
+                var waited = minimumHold
+                while await MainActor.run(body: { library.isScanning }), waited < maximumHold {
+                    try? await Task.sleep(nanoseconds: pollInterval)
+                    waited += pollInterval
+                }
+
                 await MainActor.run {
                     if !account.isLoggedIn {
                         withAnimation { showPrompt = true }
