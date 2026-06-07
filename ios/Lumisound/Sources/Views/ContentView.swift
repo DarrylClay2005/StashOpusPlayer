@@ -121,7 +121,18 @@ struct ContentView: View {
             .padding(.trailing, 16)
             .padding(.top, 56)
         }
-        // Auto-activate when Bluetooth audio device connects (e.g. car stereo)
+        // Auto-activate when a genuine car stereo / CarPlay route becomes available.
+        //
+        // AVAudioSession posts route-change notifications from an internal audio
+        // thread, NOT necessarily the main thread — mutating `@State` here directly
+        // is a SwiftUI threading violation ("Publishing changes from background
+        // threads is not allowed") that can crash the app the instant *any*
+        // Bluetooth device connects or disconnects. Hop to the main actor first.
+        //
+        // Also narrowed the trigger from "any Bluetooth A2DP device" (which
+        // matches ordinary headphones/earbuds too) to `.carAudio` only, so
+        // pairing regular Bluetooth headphones no longer force-switches into
+        // Car Mode — and guard against re-presenting an already-visible sheet.
         .onReceive(
             NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)
         ) { notification in
@@ -129,11 +140,12 @@ struct ContentView: View {
                 let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
                 AVAudioSession.RouteChangeReason(rawValue: reason) == .newDeviceAvailable
             else { return }
-            let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
-            let isCarOrBT = outputs.contains {
-                $0.portType == .bluetoothA2DP || $0.portType == .carAudio
+            Task { @MainActor in
+                guard !showCarMode else { return }
+                let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+                let isCarAudio = outputs.contains { $0.portType == .carAudio }
+                if isCarAudio { showCarMode = true }
             }
-            if isCarOrBT { showCarMode = true }
         }
     }
 }

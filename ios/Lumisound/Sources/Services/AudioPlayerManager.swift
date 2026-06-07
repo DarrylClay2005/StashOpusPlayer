@@ -116,6 +116,16 @@ final class AudioPlayerManager: ObservableObject {
     // Gapless: the next file pre-loaded and scheduled on the active node.
     private var gaplessScheduled = false
 
+    // The queue index resolved by `peekNextSong()` at the moment a gapless file
+    // was scheduled or a crossfade began — captured so `advanceIndex()` lands on
+    // the SAME song that's actually already playing. Without this, shuffle mode
+    // would independently re-roll a random index when the track transition
+    // completes, landing on a different song than the one that was scheduled —
+    // which is exactly what showed up as "Now Playing doesn't correctly switch
+    // to the next song" / "Next Up doesn't update properly" (currentIndex and
+    // currentSong would point at two different songs).
+    private var pendingNextIndex: Int?
+
     // Set to true while an async HTTP download + schedule is in progress.
     // Prevents updatePositionFromPlayer() from overwriting `position` with a
     // stale value from the AVAudioPlayerNode before it has actually started.
@@ -160,34 +170,6 @@ final class AudioPlayerManager: ObservableObject {
         DarwinWidgetBridge.shared.addObserver(name: DarwinWidgetBridge.skipNext) { [weak self] in
             Task { @MainActor [weak self] in self?.skipToNext() }
         }
-
-        setupRouteChangeObserver()
-    }
-
-    // MARK: - Route Change Recovery
-
-    private func setupRouteChangeObserver() {
-        NotificationCenter.default.addObserver(
-            forName: AVAudioSession.routeChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self,
-                  let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
-                  AVAudioSession.RouteChangeReason(rawValue: reason) == .oldDeviceUnavailable
-            else { return }
-            Task { @MainActor in
-                // Give AVAudioSession 0.5s to settle before restarting engine
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                guard self.isPlaying else { return }
-                do {
-                    try self.engine.start()
-                    appLog("AudioEngine restarted after route change", category: "audio")
-                } catch {
-                    appError("AudioEngine restart failed: \(error.localizedDescription)", category: "audio")
-                }
-            }
-        }
     }
 
     deinit {
@@ -216,6 +198,7 @@ final class AudioPlayerManager: ObservableObject {
         currentSong = queue[currentIndex]
         position = 0
         gaplessScheduled = false
+        pendingNextIndex = nil
         if autoplay {
             playCurrent(from: 0)
         } else {
@@ -285,6 +268,7 @@ final class AudioPlayerManager: ObservableObject {
         crossfadeStartTimer?.invalidate()
         crossfadeStartTimer = nil
         gaplessScheduled = false
+        pendingNextIndex = nil
         position = 0
         isPlaying = false
         stopTimer()
@@ -305,6 +289,7 @@ final class AudioPlayerManager: ObservableObject {
             return
         }
         gaplessScheduled = false
+        pendingNextIndex = nil
         crossfadeStartTimer?.invalidate()
         crossfadeStartTimer = nil
         if isPlaying {
@@ -335,6 +320,7 @@ final class AudioPlayerManager: ObservableObject {
             currentIndex = nextIndex
             currentSong = queue[currentIndex]
             gaplessScheduled = false
+            pendingNextIndex = nil
             appLog("Skip next → \"\(currentSong?.displayName ?? "?")\"", category: "audio")
             playCurrent(from: 0)
             savePlaybackState()
@@ -342,6 +328,7 @@ final class AudioPlayerManager: ObservableObject {
             currentIndex = 0
             currentSong = queue[currentIndex]
             gaplessScheduled = false
+            pendingNextIndex = nil
             appLog("Skip next (loop) → \"\(currentSong?.displayName ?? "?")\"", category: "audio")
             playCurrent(from: 0)
             savePlaybackState()
@@ -362,6 +349,7 @@ final class AudioPlayerManager: ObservableObject {
         currentIndex = max(currentIndex - 1, 0)
         currentSong = queue[currentIndex]
         gaplessScheduled = false
+        pendingNextIndex = nil
         playCurrent(from: 0)
         savePlaybackState()
     }
@@ -406,6 +394,7 @@ final class AudioPlayerManager: ObservableObject {
             currentIndex = min(currentIndex, queue.count - 1)
             currentSong = queue[currentIndex]
             gaplessScheduled = false
+            pendingNextIndex = nil
             playCurrent(from: 0)
         }
     }
@@ -668,6 +657,7 @@ final class AudioPlayerManager: ObservableObject {
             fileStartFrame = startFrame
             position = startTime
             gaplessScheduled = false
+            pendingNextIndex = nil
 
             node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
                 Task { @MainActor in
@@ -784,6 +774,7 @@ final class AudioPlayerManager: ObservableObject {
             fileStartFrame  = startFrame
             position        = startTime
             gaplessScheduled = false
+            pendingNextIndex = nil
 
             node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
                 Task { @MainActor in
@@ -937,7 +928,7 @@ final class AudioPlayerManager: ObservableObject {
                     let sr = file2.processingFormat.sampleRate
                     let sf = max(0, AVAudioFramePosition(startTime * sr))
                     let fl = max(0, AVAudioFrameCount(file2.length - sf))
-                    fileStartFrame = sf; position = startTime; gaplessScheduled = false
+                    fileStartFrame = sf; position = startTime; gaplessScheduled = false; pendingNextIndex = nil
                     node.scheduleSegment(file2, startingFrame: sf, frameCount: fl, at: nil) { [weak self] in
                         Task { @MainActor in guard let self, self.scheduleGeneration == gen else { return }; self.handleTrackEnded() }
                     }
@@ -964,6 +955,7 @@ final class AudioPlayerManager: ObservableObject {
             fileStartFrame = startFrame
             position = startTime
             gaplessScheduled = false
+            pendingNextIndex = nil
 
             node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
                 Task { @MainActor in
@@ -996,6 +988,7 @@ final class AudioPlayerManager: ObservableObject {
         if gaplessScheduled {
             advanceIndex()
             gaplessScheduled = false
+            pendingNextIndex = nil
             updateNowPlaying()
             // Schedule completion for the newly playing segment.
             scheduleGaplessNext()
@@ -1198,6 +1191,7 @@ final class AudioPlayerManager: ObservableObject {
         duration = nextFile.duration
         position = elapsed
         gaplessScheduled = false
+        pendingNextIndex = nil
         updateNowPlaying()
     }
 
@@ -1239,9 +1233,14 @@ final class AudioPlayerManager: ObservableObject {
 
     // MARK: - Queue Helpers
 
-    private func peekNextSong() -> Song? {
+    /// Resolves which queue index plays after `currentIndex`, WITHOUT mutating any state.
+    /// Shuffle picks a random index — callers that schedule audio based on this result
+    /// (`peekNextSong`) cache it in `pendingNextIndex` so `advanceIndex()` can later
+    /// commit to that exact same index rather than rolling a fresh (and likely
+    /// different) random pick.
+    private func resolveNextIndex() -> Int? {
         guard !queue.isEmpty else { return nil }
-        if repeatMode == .one { return currentSong }
+        if repeatMode == .one { return currentIndex }
         let nextIndex: Int
         if shuffleEnabled && queue.count > 1 {
             let pool = queue.indices.filter { $0 != currentIndex }
@@ -1249,27 +1248,37 @@ final class AudioPlayerManager: ObservableObject {
         } else {
             nextIndex = currentIndex + 1
         }
-        if nextIndex < queue.count { return queue[nextIndex] }
-        if repeatMode == .all { return queue[0] }
+        if nextIndex < queue.count { return nextIndex }
+        if repeatMode == .all { return 0 }
         return nil
+    }
+
+    private func peekNextSong() -> Song? {
+        guard let nextIndex = resolveNextIndex() else {
+            pendingNextIndex = nil
+            return nil
+        }
+        pendingNextIndex = nextIndex
+        return queue[nextIndex]
     }
 
     private func advanceIndex() {
         guard !queue.isEmpty else { return }
         if repeatMode == .one { return }
+        // Prefer the index that was actually resolved (and scheduled/crossfaded to)
+        // by the most recent `peekNextSong()` — re-resolving here would let shuffle
+        // mode land on a different song than the audio that's already playing.
         let nextIndex: Int
-        if shuffleEnabled && queue.count > 1 {
-            let pool = queue.indices.filter { $0 != currentIndex }
-            nextIndex = pool.randomElement() ?? currentIndex
+        if let pending = pendingNextIndex, queue.indices.contains(pending) {
+            nextIndex = pending
+        } else if let resolved = resolveNextIndex() {
+            nextIndex = resolved
         } else {
-            nextIndex = currentIndex + 1
+            return
         }
-        if nextIndex < queue.count {
-            currentIndex = nextIndex
-        } else if repeatMode == .all {
-            currentIndex = 0
-        }
+        currentIndex = nextIndex
         currentSong = queue[currentIndex]
+        pendingNextIndex = nil
     }
 
     // MARK: - Audio Engine Configuration

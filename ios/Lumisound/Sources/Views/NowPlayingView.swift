@@ -20,7 +20,7 @@ private struct VerticalSlider: View {
                 x: (geo.size.width - geo.size.height) / 2,
                 y: (geo.size.height - geo.size.width) / 2
             )
-            .tint(AppTheme.accent)
+            .tint(AppTheme.dynamicAccent)
         }
     }
 }
@@ -57,7 +57,7 @@ private struct VinylDiscView: View {
                         .overlay(Circle().stroke(Color(white: 0.15), lineWidth: 2))
                 } else {
                     Circle()
-                        .fill(AppTheme.accent.opacity(0.8))
+                        .fill(AppTheme.dynamicAccent.opacity(0.8))
                         .frame(width: 130, height: 130)
                         .overlay(
                             Image(systemName: "music.note")
@@ -369,7 +369,7 @@ struct NowPlayingView: View {
                 if let song = player.currentSong {
                     ArtworkThumbnail(song: song, size: 300)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .shadow(color: AppTheme.accent.opacity(0.3), radius: 24, x: 0, y: 12)
+                        .shadow(color: AppTheme.dynamicAccent.opacity(0.3), radius: 24, x: 0, y: 12)
                 } else {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(
@@ -383,7 +383,7 @@ struct NowPlayingView: View {
                         .overlay {
                             Image(systemName: "music.note")
                                 .font(.system(size: 80, weight: .semibold))
-                                .foregroundStyle(AppTheme.accent)
+                                .foregroundStyle(AppTheme.dynamicAccent)
                         }
                         .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 10)
                 }
@@ -451,7 +451,7 @@ struct NowPlayingView: View {
                 } label: {
                     Image(systemName: library.isFavorite(songID: song.id) ? "heart.fill" : "heart")
                         .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(library.isFavorite(songID: song.id) ? AppTheme.accent : AppTheme.textSecondary)
+                        .foregroundStyle(library.isFavorite(songID: song.id) ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
@@ -552,7 +552,7 @@ struct NowPlayingView: View {
             // Shuffle
             transportButton(
                 systemName: "shuffle",
-                tint: player.shuffleEnabled ? AppTheme.accent : AppTheme.textPrimary,
+                tint: player.shuffleEnabled ? AppTheme.dynamicAccent : AppTheme.textPrimary,
                 font: .system(size: 18, weight: .medium)
             ) {
                 player.toggleShuffle()
@@ -579,9 +579,9 @@ struct NowPlayingView: View {
             } label: {
                 ZStack {
                     Circle()
-                        .fill(AppTheme.accent)
+                        .fill(AppTheme.dynamicAccent)
                         .frame(width: 68, height: 68)
-                        .shadow(color: AppTheme.accent.opacity(0.45), radius: 12, x: 0, y: 6)
+                        .shadow(color: AppTheme.dynamicAccent.opacity(0.45), radius: 12, x: 0, y: 6)
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 26, weight: .bold))
                         .foregroundStyle(.white)
@@ -607,7 +607,7 @@ struct NowPlayingView: View {
             // Repeat
             transportButton(
                 systemName: repeatIcon,
-                tint: player.repeatMode == .off ? AppTheme.textPrimary : AppTheme.accent,
+                tint: player.repeatMode == .off ? AppTheme.textPrimary : AppTheme.dynamicAccent,
                 font: .system(size: 18, weight: .medium)
             ) {
                 player.cycleRepeatMode()
@@ -665,7 +665,7 @@ struct NowPlayingView: View {
                 )
                 .overlay(
                     Capsule()
-                        .strokeBorder(AppTheme.accent.opacity(0.4), lineWidth: 1)
+                        .strokeBorder(AppTheme.dynamicAccent.opacity(0.4), lineWidth: 1)
                 )
             }
             .buttonStyle(.plain)
@@ -689,14 +689,14 @@ struct NowPlayingView: View {
                 Image(systemName: player.autoRadioEnabled ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 16))
             }
-            .foregroundStyle(player.autoRadioEnabled ? AppTheme.accent : AppTheme.textSecondary)
+            .foregroundStyle(player.autoRadioEnabled ? AppTheme.dynamicAccent : AppTheme.textSecondary)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(AppTheme.surface, in: Capsule())
             .overlay(
                 Capsule()
                     .strokeBorder(
-                        player.autoRadioEnabled ? AppTheme.accent.opacity(0.4) : Color.clear,
+                        player.autoRadioEnabled ? AppTheme.dynamicAccent.opacity(0.4) : Color.clear,
                         lineWidth: 1
                     )
             )
@@ -713,7 +713,7 @@ struct NowPlayingView: View {
                 .font(.caption)
                 .foregroundStyle(AppTheme.textSecondary)
             Slider(value: audioBinding(\.volume), in: 0...1)
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
             Image(systemName: "speaker.wave.3.fill")
                 .font(.caption)
                 .foregroundStyle(AppTheme.textSecondary)
@@ -750,7 +750,7 @@ struct NowPlayingView: View {
                 }
             }
         )
-        .tint(AppTheme.accent)
+        .tint(AppTheme.dynamicAccent)
         .panelStyle()
     }
 
@@ -791,7 +791,7 @@ struct NowPlayingView: View {
                 }
             }
             Slider(value: audioBinding(\.speed), in: 0.5...2.0)
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
         }
     }
 
@@ -832,7 +832,7 @@ struct NowPlayingView: View {
                 }
             }
             Slider(value: audioBinding(\.pitchSemitones), in: -12...12)
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
         }
     }
 
@@ -860,26 +860,43 @@ struct NowPlayingView: View {
 
     // MARK: - Queue Preview
 
+    /// Mirrors `AudioPlayerManager.resolveNextIndex`'s semantics so "Up Next" only ever
+    /// shows songs that will actually play next — previously this always wrapped the
+    /// queue regardless of `repeatMode`, so e.g. with Repeat off and the queue near its
+    /// end it listed earlier tracks that would never play (playback simply stops at the
+    /// end), which is what showed up as "Next Up doesn't update properly at all".
     private var upNextSongs: [Song] {
-        guard !player.queue.isEmpty else { return [] }
+        guard player.queue.count > 1 else { return [] }
+
+        if player.repeatMode == .one {
+            // The current song repeats — there's nothing else "up next".
+            return []
+        }
+
         if player.shuffleEnabled {
-            // When shuffle is on, show remaining songs (excluding current) in queue order.
-            // Referencing player.shuffleEnabled ensures this recomputes on toggle.
+            // Shuffle re-rolls a random pick each time a track ends, so show the
+            // remaining pool in queue order as a representative preview.
             var pool = player.queue
             if let idx = pool.firstIndex(where: { $0.id == player.currentSong?.id }) {
                 pool.remove(at: idx)
             }
             return Array(pool.prefix(10))
-        } else {
-            let start = (player.currentIndex + 1) % player.queue.count
-            var result: [Song] = []
-            var i = start
-            while result.count < 10 && i != player.currentIndex {
-                result.append(player.queue[i])
-                i = (i + 1) % player.queue.count
-            }
-            return result
         }
+
+        var result: [Song] = []
+        var i = player.currentIndex + 1
+        while result.count < 10 && i < player.queue.count {
+            result.append(player.queue[i])
+            i += 1
+        }
+        if player.repeatMode == .all {
+            i = 0
+            while result.count < 10 && i < player.currentIndex {
+                result.append(player.queue[i])
+                i += 1
+            }
+        }
+        return result
     }
 
     private var queuePreviewSection: some View {
@@ -908,13 +925,13 @@ struct NowPlayingView: View {
                                                     idx == 0
                                                         ? AnyView(
                                                             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                                                .stroke(AppTheme.accent, lineWidth: 2)
+                                                                .stroke(AppTheme.dynamicAccent, lineWidth: 2)
                                                           )
                                                         : AnyView(EmptyView())
                                                 )
                                             Text(song.displayName)
                                                 .font(.caption2)
-                                                .foregroundStyle(idx == 0 ? AppTheme.accent : AppTheme.textSecondary)
+                                                .foregroundStyle(idx == 0 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                                                 .lineLimit(1)
                                                 .frame(width: 60)
                                         }
@@ -939,12 +956,12 @@ struct NowPlayingView: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(AppTheme.accent, in: Capsule())
+                            .background(AppTheme.dynamicAccent, in: Capsule())
                     }
                     if player.shuffleEnabled {
                         Image(systemName: "shuffle")
                             .font(.caption2)
-                            .foregroundStyle(AppTheme.accent)
+                            .foregroundStyle(AppTheme.dynamicAccent)
                     }
                     Spacer()
                     Text("\(player.queue.count) tracks")
@@ -953,7 +970,7 @@ struct NowPlayingView: View {
                 }
             }
         )
-        .tint(AppTheme.accent)
+        .tint(AppTheme.dynamicAccent)
         .panelStyle()
     }
 
@@ -969,15 +986,15 @@ struct NowPlayingView: View {
                         HStack {
                             Image(systemName: "repeat")
                                 .font(.caption.weight(.bold))
-                                .foregroundStyle(AppTheme.accent)
+                                .foregroundStyle(AppTheme.dynamicAccent)
                             Text("Looping \(formatTime(player.abRepeatStart ?? 0)) → \(formatTime(player.abRepeatEnd ?? 0))")
                                 .font(.caption.monospacedDigit())
-                                .foregroundStyle(AppTheme.accent)
+                                .foregroundStyle(AppTheme.dynamicAccent)
                             Spacer()
                         }
                         .padding(.horizontal, 4)
                         .padding(.vertical, 4)
-                        .background(AppTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                        .background(AppTheme.dynamicAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
                     }
 
                     HStack(spacing: 10) {
@@ -1026,13 +1043,13 @@ struct NowPlayingView: View {
                         .foregroundStyle(AppTheme.textPrimary)
                     if player.abRepeatEnabled {
                         Circle()
-                            .fill(AppTheme.accent)
+                            .fill(AppTheme.dynamicAccent)
                             .frame(width: 7, height: 7)
                     }
                 }
             }
         )
-        .tint(AppTheme.accent)
+        .tint(AppTheme.dynamicAccent)
         .panelStyle()
     }
 
@@ -1049,7 +1066,7 @@ struct NowPlayingView: View {
                 }
             }
             .frame(width: 52, height: 40)
-            .background(isSet ? AppTheme.accent : AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(isSet ? AppTheme.dynamicAccent : AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.2), value: isSet)
@@ -1075,12 +1092,12 @@ struct NowPlayingView: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 2)
-                            .background(AppTheme.accent, in: Capsule())
+                            .background(AppTheme.dynamicAccent, in: Capsule())
                     }
                 }
             }
         )
-        .tint(AppTheme.accent)
+        .tint(AppTheme.dynamicAccent)
         .panelStyle()
     }
 
@@ -1100,7 +1117,7 @@ struct NowPlayingView: View {
                             player.audioSettings = s
                         }
                     ))
-                    .tint(AppTheme.accent)
+                    .tint(AppTheme.dynamicAccent)
                     .font(.subheadline)
 
                     if player.audioSettings.equalizerEnabled {
@@ -1123,7 +1140,7 @@ struct NowPlayingView: View {
                                             .padding(.vertical, 6)
                                             .background(
                                                 player.audioSettings.eqPreset == preset
-                                                    ? AppTheme.accent
+                                                    ? AppTheme.dynamicAccent
                                                     : AppTheme.elevatedSurface,
                                                 in: Capsule()
                                             )
@@ -1166,13 +1183,13 @@ struct NowPlayingView: View {
                         .foregroundStyle(AppTheme.textPrimary)
                     if player.audioSettings.equalizerEnabled {
                         Circle()
-                            .fill(AppTheme.accent)
+                            .fill(AppTheme.dynamicAccent)
                             .frame(width: 7, height: 7)
                     }
                 }
             }
         )
-        .tint(AppTheme.accent)
+        .tint(AppTheme.dynamicAccent)
         .panelStyle()
     }
 
@@ -1239,7 +1256,7 @@ struct NowPlayingView: View {
                     } label: {
                         Label("Sync Editor", systemImage: "waveform.and.mic")
                             .font(.caption)
-                            .foregroundStyle(AppTheme.accent)
+                            .foregroundStyle(AppTheme.dynamicAccent)
                     }
                     .padding(.top, 4)
                 }
@@ -1250,7 +1267,7 @@ struct NowPlayingView: View {
                     .foregroundStyle(AppTheme.textPrimary)
             }
         )
-        .tint(AppTheme.accent)
+        .tint(AppTheme.dynamicAccent)
         .panelStyle()
         .sheet(isPresented: $showLyricsSyncEditor) {
             LyricsSyncEditorView(initialLines: lyricsLines)
@@ -1277,7 +1294,7 @@ struct NowPlayingView: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
             Slider(value: value, in: range)
-                .tint(AppTheme.accent)
+                .tint(AppTheme.dynamicAccent)
         }
     }
 
