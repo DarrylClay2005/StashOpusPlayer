@@ -22,17 +22,48 @@ final class ArtworkService {
 
     private static let videoExtensions: Set<String> = ["mp4", "m4v", "mov"]
 
+    /// Cap for cached/persisted artwork dimensions. Was 600 — visibly blurry
+    /// on @3x displays where the largest artwork view (NowPlaying, 300pt) needs
+    /// ~900 physical px, even when the source file embeds UHD artwork. 1200
+    /// covers that with headroom across @2x/@3x without ballooning disk usage.
+    private static let artworkCacheDimension: CGFloat = 1200
+
+    /// Bump whenever `artworkCacheDimension`/JPEG quality changes — triggers a
+    /// one-time purge of disk-cached artwork written under the old settings, so
+    /// upgrading users see the quality improvement without having to find and
+    /// tap "Clear Artwork Cache" in Settings themselves.
+    private static let cacheFormatVersion = 2
+    private static let cacheVersionFileName = ".cache_format_version"
+
     private init() {
         guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
             fatalError("Caches directory unavailable")
         }
         diskCacheURL = caches.appendingPathComponent("Artwork", isDirectory: true)
         try? FileManager.default.createDirectory(at: diskCacheURL, withIntermediateDirectories: true)
+        purgeStaleArtworkCacheIfNeeded()
 
         // LRU eviction: cap at 200 images. NSCache evicts least-recently-used entries
         // automatically under memory pressure and when countLimit is exceeded.
         memoryCache.countLimit = 200
         memoryCache.totalCostLimit = 100 * 1024 * 1024   // 100 MB (was 50; video frames are large)
+    }
+
+    /// Wipes previously-cached artwork files once per `cacheFormatVersion` bump,
+    /// so stale low-resolution/low-quality images don't linger on disk and keep
+    /// being served instead of freshly (re)generated ones.
+    private func purgeStaleArtworkCacheIfNeeded() {
+        let versionFile = diskCacheURL.appendingPathComponent(Self.cacheVersionFileName)
+        let storedVersion = (try? String(contentsOf: versionFile, encoding: .utf8))
+            .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        guard storedVersion != Self.cacheFormatVersion else { return }
+
+        if let contents = try? FileManager.default.contentsOfDirectory(
+            at: diskCacheURL, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
+        ) {
+            for url in contents { try? FileManager.default.removeItem(at: url) }
+        }
+        try? "\(Self.cacheFormatVersion)".write(to: versionFile, atomically: true, encoding: .utf8)
     }
 
     func artwork(for song: Song) -> UIImage? {
@@ -52,7 +83,7 @@ final class ArtworkService {
     /// survive app restarts and NSCache evictions.
     func cacheImage(_ image: UIImage, forKey key: String) {
         setMemoryCache(image, forKey: key)
-        let resized = resizedImage(image, maxDimension: 600)
+        let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
         saveToDisk(image: resized, key: key)
     }
 
@@ -90,7 +121,7 @@ final class ArtworkService {
             appLog("Artwork: fetching remote thumbnail for \"\(song.displayName)\"", category: "artwork")
             if let image = await fetchRemoteImage(url: thumbnailURL, headers: song.httpHeaders) {
                 setMemoryCache(image, forKey: key)
-                let resized = resizedImage(image, maxDimension: 600)
+                let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
                 saveToDisk(image: resized, key: key)
                 return image
             }
@@ -113,7 +144,7 @@ final class ArtworkService {
             if let image = await fetchAssetArtwork(url: url) {
                 appLog("Artwork: embedded tag found for \"\(song.displayName)\"", category: "artwork")
                 setMemoryCache(image, forKey: key)
-                saveToDisk(image: resizedImage(image, maxDimension: 600), key: key)
+                saveToDisk(image: resizedImage(image, maxDimension: Self.artworkCacheDimension), key: key)
                 return image
             }
 
@@ -122,7 +153,7 @@ final class ArtworkService {
                 appLog("Artwork: extracting video frame for \"\(song.displayName)\"", category: "artwork")
                 if let image = await extractVideoFrame(url: url) {
                     setMemoryCache(image, forKey: key)
-                    saveToDisk(image: resizedImage(image, maxDimension: 600), key: key)
+                    saveToDisk(image: resizedImage(image, maxDimension: Self.artworkCacheDimension), key: key)
                     return image
                 }
                 appWarn("Artwork: video frame extraction failed for \"\(song.displayName)\"", category: "artwork")
@@ -134,7 +165,7 @@ final class ArtworkService {
         if let image = await fetchITunesArtwork(title: song.title, artist: song.artist) {
             appLog("Artwork: iTunes match found for \"\(song.displayName)\"", category: "artwork")
             setMemoryCache(image, forKey: key)
-            saveToDisk(image: resizedImage(image, maxDimension: 600), key: key)
+            saveToDisk(image: resizedImage(image, maxDimension: Self.artworkCacheDimension), key: key)
             return image
         }
 
@@ -191,7 +222,7 @@ final class ArtworkService {
 
     private func saveToDisk(image: UIImage, key: String) {
         let path = diskPath(key: key)
-        guard let data = image.jpegData(compressionQuality: 0.85) else {
+        guard let data = image.jpegData(compressionQuality: 0.92) else {
             appWarn("Artwork: saveToDisk encode failed for key \(key)", category: "artwork")
             return
         }
@@ -233,7 +264,7 @@ final class ArtworkService {
             let query = MPMediaQuery()
             query.addFilterPredicate(predicate)
             guard let item = query.items?.first else { return nil as UIImage? }
-            return item.artwork?.image(at: CGSize(width: 400, height: 400))
+            return item.artwork?.image(at: CGSize(width: Self.artworkCacheDimension, height: Self.artworkCacheDimension))
         }.value
 
         mediaQueryCache.setObject(image ?? noArtworkSentinel, forKey: cacheKey)
@@ -292,7 +323,7 @@ final class ArtworkService {
             let asset = AVURLAsset(url: url)
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
-            generator.maximumSize = CGSize(width: 600, height: 600)
+            generator.maximumSize = CGSize(width: Self.artworkCacheDimension, height: Self.artworkCacheDimension)
             let time = CMTime(seconds: 1, preferredTimescale: 600)
 
             if #available(iOS 16, *) {
