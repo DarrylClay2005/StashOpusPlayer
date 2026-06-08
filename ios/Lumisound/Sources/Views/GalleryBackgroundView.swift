@@ -48,8 +48,32 @@ struct GalleryBackgroundView: View {
             insertion: .scale(scale: 0.01, anchor: .center).combined(with: .opacity),
             removal:   .scale(scale: 0.01, anchor: .center).combined(with: .opacity)
         )
-        case .blur:  return .opacity
+        // "Blur In brings the next image into focus" (per the Help screen) — the
+        // incoming image should visibly sharpen from a blur, not just crossfade
+        // like .fade does. A bare .opacity here made "Blur In" indistinguishable
+        // from "Fade", silently dropping the feature its own label promises.
+        case .blur:  return .modifier(
+            active:   BlurTransitionModifier(radius: 28),
+            identity: BlurTransitionModifier(radius: 0)
+        ).combined(with: .opacity)
         case .none:  return .identity
         }
+    }
+}
+
+// MARK: - Blur Transition Modifier
+
+/// Drives `.blur(radius:)` as an interpolated transition: the incoming image
+/// sharpens from `radius` down to 0, the outgoing image blurs from 0 up to `radius`.
+private struct BlurTransitionModifier: ViewModifier, Animatable {
+    var radius: CGFloat
+
+    var animatableData: CGFloat {
+        get { radius }
+        set { radius = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content.blur(radius: radius)
     }
 }

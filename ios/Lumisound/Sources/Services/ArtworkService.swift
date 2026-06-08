@@ -159,10 +159,14 @@ final class ArtworkService {
            let thumbnailURL = URL(string: cacheKeyStr) {
             appLog("Artwork: fetching remote thumbnail for \"\(song.displayName)\"", category: "artwork")
             if let image = await fetchRemoteImage(url: thumbnailURL, headers: song.httpHeaders) {
-                setMemoryCache(image, forKey: key)
+                // Cache and return the same downsized copy that lands on disk — caching the
+                // full-resolution decode here (often far larger than artworkCacheDimension)
+                // let just a few entries blow through totalCostLimit, forcing constant
+                // evict/redecode churn while scrolling artwork-heavy views.
                 let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
+                setMemoryCache(resized, forKey: key)
                 saveToDisk(image: resized, key: key)
-                return image
+                return resized
             }
             appWarn("Artwork: remote fetch failed for \"\(song.displayName)\"", category: "artwork")
         }
@@ -182,18 +186,22 @@ final class ArtworkService {
             // Try embedded asset artwork (works for m4a, mp3, flac with embedded tags).
             if let image = await fetchAssetArtwork(url: url) {
                 appLog("Artwork: embedded tag found for \"\(song.displayName)\"", category: "artwork")
-                setMemoryCache(image, forKey: key)
-                saveToDisk(image: resizedImage(image, maxDimension: Self.artworkCacheDimension), key: key)
-                return image
+                // Embedded tags are frequently full-resolution (3000×3000+) — downsize
+                // before caching/returning so memory cost matches the disk copy.
+                let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
+                setMemoryCache(resized, forKey: key)
+                saveToDisk(image: resized, key: key)
+                return resized
             }
 
             // For local video files, extract the first frame as artwork.
             if Self.videoExtensions.contains(url.pathExtension.lowercased()) {
                 appLog("Artwork: extracting video frame for \"\(song.displayName)\"", category: "artwork")
                 if let image = await extractVideoFrame(url: url) {
-                    setMemoryCache(image, forKey: key)
-                    saveToDisk(image: resizedImage(image, maxDimension: Self.artworkCacheDimension), key: key)
-                    return image
+                    let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
+                    setMemoryCache(resized, forKey: key)
+                    saveToDisk(image: resized, key: key)
+                    return resized
                 }
                 appWarn("Artwork: video frame extraction failed for \"\(song.displayName)\"", category: "artwork")
             }
@@ -203,9 +211,10 @@ final class ArtworkService {
         appLog("Artwork: querying iTunes for \"\(song.displayName)\" by \(song.artistName)", category: "artwork")
         if let image = await fetchITunesArtwork(title: song.title, artist: song.artist) {
             appLog("Artwork: iTunes match found for \"\(song.displayName)\"", category: "artwork")
-            setMemoryCache(image, forKey: key)
-            saveToDisk(image: resizedImage(image, maxDimension: Self.artworkCacheDimension), key: key)
-            return image
+            let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
+            setMemoryCache(resized, forKey: key)
+            saveToDisk(image: resized, key: key)
+            return resized
         }
 
         markNoArtwork(key)

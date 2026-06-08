@@ -1341,7 +1341,15 @@ struct NowPlayingView: View {
     private func loadLyrics() {
         guard let song = player.currentSong else { lyricsLines = []; return }
 
-        // 1. Sidecar .lrc file next to the audio file (highest priority)
+        // 1. User-synced lyrics saved via the in-app Lyrics Sync Editor — these
+        //    represent the user's own deliberate timing work, so they take
+        //    priority over a generic sidecar file or a remote guess.
+        if let content = try? String(contentsOf: syncedLyricsURL(for: song), encoding: .utf8) {
+            lyricsLines = LrcParser.parse(content)
+            return
+        }
+
+        // 2. Sidecar .lrc file next to the audio file
         if let url = song.url {
             let lrcURL = url.deletingPathExtension().appendingPathExtension("lrc")
             if let content = try? String(contentsOf: lrcURL, encoding: .utf8) {
@@ -1350,7 +1358,7 @@ struct NowPlayingView: View {
             }
         }
 
-        // 2. LRCLIB — free, open lyrics database with synced LRC support
+        // 3. LRCLIB — free, open lyrics database with synced LRC support
         //    Falls back to LyricsOVH if LRCLIB has no synced version.
         Task {
             let title  = song.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1368,6 +1376,17 @@ struct NowPlayingView: View {
                 await MainActor.run { lyricsLines = lines }
             }
         }
+    }
+
+    /// Path where `LyricsSyncEditorView` saves user-synced lyrics: `Documents/Lyrics/{songID}.lrc`.
+    /// Filename sanitization must match `LyricsSyncEditorView.sanitizeFilename` exactly,
+    /// or saved files silently become unreadable here.
+    private func syncedLyricsURL(for song: Song) -> URL {
+        let illegal  = CharacterSet(charactersIn: "/:\\*?\"<>|")
+        let filename = song.id.components(separatedBy: illegal).joined(separator: "_") + ".lrc"
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Lyrics", isDirectory: true)
+            .appendingPathComponent(filename)
     }
 
     // MARK: - LRCLIB fetch (synced LRC)

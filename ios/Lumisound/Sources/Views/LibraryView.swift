@@ -550,18 +550,20 @@ private struct AlbumGridCell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Group {
+            // GeometryReader sizes the artwork to the actual column width — like
+            // SongGridCell/FolderGridCell, a hardcoded size here clips (3-column)
+            // or under-fills (1-column) the cell depending on the chosen layout.
+            GeometryReader { geo in
                 if let song = representativeSong {
-                    ArtworkThumbnail(song: song, size: 160)
+                    ArtworkThumbnail(song: song, size: geo.size.width)
                 } else {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(AppTheme.surface)
                         .overlay {
                             Image(systemName: "square.stack.fill")
-                                .font(.system(size: 40))
+                                .font(.system(size: geo.size.width * 0.25))
                                 .foregroundStyle(AppTheme.dynamicAccent)
                         }
-                        .frame(width: 160, height: 160)
                 }
             }
             .frame(maxWidth: .infinity)

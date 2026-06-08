@@ -34,7 +34,17 @@ final class AudioEncoderService {
         let key    = cacheKey(for: url)
         let outURL = tempDir.appendingPathComponent("play_\(key).m4a")
 
-        if FileManager.default.fileExists(atPath: outURL.path) { return outURL }
+        if FileManager.default.fileExists(atPath: outURL.path) {
+            // A prior transcode interrupted mid-write (app killed/backgrounded) can leave a
+            // truncated/corrupt .m4a behind. Without validation it would be returned as
+            // "cached" forever — pruneOldCache only sweeps files >24h old, and only at the
+            // next launch — permanently breaking playback for that track. Probe it first;
+            // if it won't open, drop it and fall through to re-transcode.
+            if (try? AVAudioFile(forReading: outURL)) != nil {
+                return outURL
+            }
+            try? FileManager.default.removeItem(at: outURL)
+        }
 
         // Tier 2 — lossless: decode to PCM → ALAC (identical to Opus decoder output)
         if await losslessTranscode(url, to: outURL) { return outURL }

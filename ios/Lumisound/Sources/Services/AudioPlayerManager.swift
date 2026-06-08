@@ -142,6 +142,8 @@ final class AudioPlayerManager: ObservableObject {
     private var opusPlayer: AVPlayer?
     private var opusTimeObserver: Any?
     private var opusStatusObserver: NSKeyValueObservation?
+    private var opusEndObserver: NSObjectProtocol?
+    private var opusFailObserver: NSObjectProtocol?
     private var isUsingOpusPlayer: Bool { opusPlayer != nil }
 
     // Schedule generation counter — incremented before every node stop/reschedule.
@@ -1098,7 +1100,7 @@ final class AudioPlayerManager: ObservableObject {
         }
 
         // Track completion → advances to next song normally.
-        NotificationCenter.default.addObserver(
+        opusEndObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main
@@ -1126,7 +1128,7 @@ final class AudioPlayerManager: ObservableObject {
             }
         }
 
-        NotificationCenter.default.addObserver(
+        opusFailObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime,
             object: item,
             queue: .main
@@ -1158,8 +1160,17 @@ final class AudioPlayerManager: ObservableObject {
             opusPlayer?.removeTimeObserver(obs)
             opusTimeObserver = nil
         }
-        if let item = opusPlayer?.currentItem {
-            NotificationCenter.default.removeObserver(self, name: .AVPlayerItemFailedToPlayToEndTime, object: item)
+        // `addObserver(forName:object:queue:using:)` registers an internal proxy as the
+        // observer (not `self`), so `removeObserver(self, name:object:)` never matched
+        // anything — both block-based observers below were silently leaking on every
+        // track switch. Removing by the captured tokens is the only way to unregister them.
+        if let obs = opusEndObserver {
+            NotificationCenter.default.removeObserver(obs)
+            opusEndObserver = nil
+        }
+        if let obs = opusFailObserver {
+            NotificationCenter.default.removeObserver(obs)
+            opusFailObserver = nil
         }
         opusPlayer?.pause()
         opusPlayer = nil

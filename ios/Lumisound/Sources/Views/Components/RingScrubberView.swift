@@ -26,7 +26,12 @@ struct RingScrubberView: View {
         VStack(spacing: 12) {
             GeometryReader { geo in
                 let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-                let radius = min(geo.size.width, geo.size.height) / 2 - 16
+                // Track/progress `Circle()` shapes below have no explicit frame, so they
+                // inscribe in the full geo box — their stroke centerline sits at exactly
+                // half the box's shorter side. The thumb dot's offset must match that
+                // radius (not an inset version) or it visibly floats inside the ring
+                // instead of riding along the progress arc.
+                let radius = min(geo.size.width, geo.size.height) / 2
 
                 ZStack {
                     // Outer decorative dashed ring — rotates while playing
