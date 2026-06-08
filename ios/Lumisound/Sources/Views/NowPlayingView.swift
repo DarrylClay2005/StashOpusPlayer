@@ -1375,19 +1375,19 @@ struct NowPlayingView: View {
             // fetch resolves — an in-flight fetch for a now-stale song can
             // land after the new one and overwrite the correct lyrics with
             // the wrong song's. Bail if the user has moved on by the time
-            // each remote call resolves.
-            func stillCurrent() -> Bool { player.currentSong?.id == songID }
+            // each remote call resolves. `currentSong` is main-actor isolated,
+            // so every check has to hop over via MainActor.run.
 
             // LRCLIB: returns synced LRC if available
             if let lines = await fetchLRCLIB(title: title, artist: artist), !lines.isEmpty {
-                await MainActor.run { if stillCurrent() { lyricsLines = lines } }
+                await MainActor.run { if player.currentSong?.id == songID { lyricsLines = lines } }
                 return
             }
-            guard stillCurrent() else { return }
+            guard await MainActor.run(body: { player.currentSong?.id == songID }) else { return }
 
             // LyricsOVH: plain text fallback (no timestamps — shown as static block)
             if let lines = await fetchLyricsOVH(title: title, artist: artist), !lines.isEmpty {
-                await MainActor.run { if stillCurrent() { lyricsLines = lines } }
+                await MainActor.run { if player.currentSong?.id == songID { lyricsLines = lines } }
             }
         }
     }

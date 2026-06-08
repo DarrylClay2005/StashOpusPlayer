@@ -51,7 +51,6 @@ struct CollaborativePlaylistView: View {
             }
         }
         .onDisappear {
-            playAllTask?.cancel()
             collaborativeService.reset()
         }
     }
@@ -468,6 +467,9 @@ private struct SharedPlaylistResultView: View {
             }
             .background(AppTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .padding(.horizontal)
+        }
+        .onDisappear {
+            playAllTask?.cancel()
         }
     }
 }
