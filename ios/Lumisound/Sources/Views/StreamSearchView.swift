@@ -529,33 +529,59 @@ struct StreamSearchView: View {
         isDownloadingAll = true
         downloadAllDone = 0
         downloadAllTotal = tracks.count
-        var failed: [String] = []
 
-        // @MainActor keeps all @State mutations on the main thread — prevents race conditions
-        // on downloadAllDone when the Task yields between iterations.
+        // Bounded-concurrency pipeline: up to `maxConcurrent` downloads run at once
+        // instead of paying a full network round-trip between every track — large
+        // playlists finish much faster. Matches the bridge's yt-dlp process semaphore
+        // (_YTDLP_SEMAPHORE) so the client can keep it fully saturated without
+        // overwhelming it. Child tasks only do the async work and report back; every
+        // @State mutation happens in the `for await` loop below, which runs on the
+        // @MainActor — same race-free guarantee the old sequential loop relied on.
+        let maxConcurrent = 10
+
         Task { @MainActor in
-            for track in tracks {
-                guard !downloadedTrackIDs.contains(track.id) else {
-                    downloadAllDone += 1
-                    continue
-                }
-                do {
-                    let localURL = try await streaming.downloadToLibrary(track: track)
-                    downloadedTrackIDs.insert(track.id)
-                    if autoCloudBackup, account.isLoggedIn, let token = account.token {
-                        Task {
-                            try? await streaming.uploadTrack(
-                                fileURL: localURL, token: token,
-                                metadata: TrackMetadata(title: track.title, artist: track.artist, durationSeconds: track.duration)
-                            )
+            var failed: [String] = []
+            var nextIndex = 0
+
+            await withTaskGroup(of: (track: StreamTrack, localURL: URL?, errorDescription: String?).self) { group in
+                func launchNext() {
+                    guard nextIndex < tracks.count else { return }
+                    let track = tracks[nextIndex]
+                    nextIndex += 1
+                    group.addTask {
+                        do {
+                            let localURL = try await streaming.downloadToLibrary(track: track)
+                            return (track, localURL, nil)
+                        } catch {
+                            appWarn("Download All: failed for \"\(track.title)\": \(error.localizedDescription)", category: "network")
+                            return (track, nil, error.localizedDescription)
                         }
                     }
-                } catch {
-                    failed.append(track.title)
-                    appWarn("Download All: failed for \"\(track.title)\": \(error.localizedDescription)", category: "network")
                 }
-                downloadAllDone += 1
+
+                for _ in 0..<min(maxConcurrent, tracks.count) {
+                    launchNext()
+                }
+
+                for await result in group {
+                    if let localURL = result.localURL {
+                        downloadedTrackIDs.insert(result.track.id)
+                        if autoCloudBackup, account.isLoggedIn, let token = account.token {
+                            Task {
+                                try? await streaming.uploadTrack(
+                                    fileURL: localURL, token: token,
+                                    metadata: TrackMetadata(title: result.track.title, artist: result.track.artist, durationSeconds: result.track.duration)
+                                )
+                            }
+                        }
+                    } else {
+                        failed.append(result.track.title)
+                    }
+                    downloadAllDone += 1
+                    launchNext()
+                }
             }
+
             library.scanLocalDocuments()
             isDownloadingAll = false
             if !failed.isEmpty {

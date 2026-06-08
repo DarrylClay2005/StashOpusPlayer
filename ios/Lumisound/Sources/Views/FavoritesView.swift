@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Sort Order
 
@@ -139,11 +140,14 @@ private struct FavoriteRow: View {
 
     @EnvironmentObject private var library: LibraryManager
 
+    private let heartHaptic = UIImpactFeedbackGenerator(style: .soft)
+
     var body: some View {
         HStack(spacing: 0) {
             SongRow(song: song, isCurrent: isCurrent)
 
             Button {
+                heartHaptic.impactOccurred()
                 library.toggleFavorite(songID: song.id)
             } label: {
                 Image(systemName: "heart.fill")

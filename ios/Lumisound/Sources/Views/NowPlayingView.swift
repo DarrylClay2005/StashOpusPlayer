@@ -222,6 +222,7 @@ struct NowPlayingView: View {
     private let seekHaptic = UIImpactFeedbackGenerator(style: .light)
     private let playHaptic = UIImpactFeedbackGenerator(style: .light)
     private let skipHaptic = UIImpactFeedbackGenerator(style: .medium)
+    private let heartHaptic = UIImpactFeedbackGenerator(style: .soft)
     private let selectHaptic = UISelectionFeedbackGenerator()
 
     var body: some View {
@@ -255,6 +256,7 @@ struct NowPlayingView: View {
             seekHaptic.prepare()
             playHaptic.prepare()
             skipHaptic.prepare()
+            heartHaptic.prepare()
             selectHaptic.prepare()
             loadLyrics()
         }
@@ -448,6 +450,7 @@ struct NowPlayingView: View {
 
             if let song = player.currentSong {
                 Button {
+                    heartHaptic.impactOccurred()
                     library.toggleFavorite(songID: song.id)
                 } label: {
                     Image(systemName: library.isFavorite(songID: song.id) ? "heart.fill" : "heart")

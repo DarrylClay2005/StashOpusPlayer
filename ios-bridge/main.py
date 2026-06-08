@@ -141,7 +141,7 @@ _FFPROBE_CACHE = _FfprobeCache(_ffprobe_cache_path)
 # yt-dlp concurrency limit (Fix 3)
 # ---------------------------------------------------------------------------
 
-_YTDLP_SEMAPHORE = asyncio.Semaphore(4)  # max 4 concurrent yt-dlp processes
+_YTDLP_SEMAPHORE = asyncio.Semaphore(10)  # max 10 concurrent yt-dlp processes — matches the iOS client's "Download All" pipeline width
 
 # ---------------------------------------------------------------------------
 # Rate limiter for auth endpoints (Fix 2)
