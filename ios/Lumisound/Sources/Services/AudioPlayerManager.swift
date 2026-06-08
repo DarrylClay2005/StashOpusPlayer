@@ -1648,6 +1648,12 @@ final class AudioPlayerManager: ObservableObject {
         rotationAngle = 0
         is8DActive = true
         let link = CADisplayLink(target: self, selector: #selector(update8DRotation))
+        // update8DRotation advances its phase assuming a 60Hz callback. On
+        // ProMotion devices CADisplayLink fires up to 120Hz by default, which
+        // would both double the audible rotation speed and double the
+        // per-effect CPU/battery cost for no benefit (this drives an audio
+        // parameter, not a visual). Pin it to 60 so the math stays correct.
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
         link.add(to: .main, forMode: .common)
         rotationLink = link
     }
@@ -1672,8 +1678,10 @@ final class AudioPlayerManager: ObservableObject {
 
     @objc private func update8DRotation() {
         guard is8DActive else { return }
-        // Advance angle by one display-link frame (assume 60 fps; CADisplayLink duration
-        // could be used for accuracy but 60 fps is the common case on iOS devices).
+        // Advance angle by one display-link frame. preferredFrameRateRange in
+        // start8DRotation pins the link to 60Hz, so this fixed-step math stays
+        // correct even on 120Hz ProMotion displays (which would otherwise call
+        // back twice as often and double the audible rotation speed).
         rotationAngle += 2 * .pi * rotationHz / 60.0
         // Wrap to keep angle in [0, 2π) to avoid floating-point drift.
         if rotationAngle >= 2 * .pi { rotationAngle -= 2 * .pi }
@@ -1692,6 +1700,10 @@ final class AudioPlayerManager: ObservableObject {
         tremoloPhase = 0
         isTremoloActive = true
         let link = CADisplayLink(target: self, selector: #selector(updateTremolo))
+        // Same 60Hz assumption as update8DRotation — pin the rate so the LFO
+        // speed stays correct (and the callback doesn't run twice as often)
+        // on 120Hz ProMotion displays.
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
         link.add(to: .main, forMode: .common)
         tremoloLink = link
     }
@@ -1732,6 +1744,10 @@ final class AudioPlayerManager: ObservableObject {
         vibratoBasePitch = audioSettings.pitchSemitones
         isVibratoActive = true
         let link = CADisplayLink(target: self, selector: #selector(updateVibrato))
+        // Same 60Hz assumption as update8DRotation — pin the rate so the
+        // pitch-modulation speed stays correct (and the callback doesn't run
+        // twice as often) on 120Hz ProMotion displays.
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
         link.add(to: .main, forMode: .common)
         vibratoLink = link
     }

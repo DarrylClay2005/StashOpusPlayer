@@ -5,6 +5,7 @@ struct SpectrumWaveformArtworkView: View {
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var barHeights: [CGFloat]
     @State private var timer: Timer? = nil
@@ -48,6 +49,19 @@ struct SpectrumWaveformArtworkView: View {
         .onChange(of: isPlaying) { playing in
             if playing { startTimer() } else { stopTimer() }
         }
+        .onChange(of: scenePhase) { phase in
+            // Background audio keeps the run loop alive, so this 12.5Hz timer
+            // would otherwise keep recomputing bar heights and re-deriving
+            // colors with nothing on screen to show for it. Just pause/resume
+            // the ticking — stopTimer() also eases the bars back to baseline,
+            // which we don't want to flash through on every backgrounding.
+            if phase == .active {
+                if isPlaying { startTimer() }
+            } else {
+                timer?.invalidate()
+                timer = nil
+            }
+        }
         .onAppear {
             if isPlaying { startTimer() }
         }
@@ -64,13 +78,21 @@ struct SpectrumWaveformArtworkView: View {
             let cy = geo.size.height / 2
             let radius = artSize / 2 + 14
 
+            // Resolve the three gradient stops to RGBA once per redraw instead
+            // of re-bridging Color → UIColor → CGColor for every one of the 36
+            // bars below — at the ~12.5Hz this redraws while playing, that
+            // bridging added up to real, easily-avoided CPU cost.
+            let startRGBA = rgbaComponents(of: AppTheme.dynamicAccent.opacity(0.9))
+            let midRGBA   = rgbaComponents(of: AppTheme.dynamicAccent)
+            let endRGBA   = rgbaComponents(of: AppTheme.accentSoft.opacity(0.7))
+
             ForEach(0..<barCount, id: \.self) { i in
                 let angle = (Double(i) / Double(barCount)) * 2 * .pi - .pi / 2
                 let barH = minBarHeight + (maxBarHeight - minBarHeight) * barHeights[i]
                 let baseX = cx + CGFloat(cos(angle)) * radius
                 let baseY = cy + CGFloat(sin(angle)) * radius
 
-                barCapsule(height: barH, index: i)
+                barCapsule(height: barH, index: i, startRGBA: startRGBA, midRGBA: midRGBA, endRGBA: endRGBA)
                     .rotationEffect(.degrees(Double(i) / Double(barCount) * 360 - 90))
                     .position(
                         x: baseX + CGFloat(cos(angle)) * barH / 2,
@@ -80,14 +102,11 @@ struct SpectrumWaveformArtworkView: View {
         }
     }
 
-    private func barCapsule(height: CGFloat, index: Int) -> some View {
+    private func barCapsule(height: CGFloat, index: Int, startRGBA: [CGFloat], midRGBA: [CGFloat], endRGBA: [CGFloat]) -> some View {
         let fraction = Double(index) / Double(barCount)
-        let startColor = AppTheme.dynamicAccent.opacity(0.9)
-        let midColor   = AppTheme.dynamicAccent
-        let endColor   = AppTheme.accentSoft.opacity(0.7)
         let barColor: Color = fraction < 0.5
-            ? interpolate(from: startColor, to: midColor, t: fraction * 2)
-            : interpolate(from: midColor, to: endColor, t: (fraction - 0.5) * 2)
+            ? interpolate(from: startRGBA, to: midRGBA, t: fraction * 2)
+            : interpolate(from: midRGBA, to: endRGBA, t: (fraction - 0.5) * 2)
 
         return Capsule()
             .fill(barColor)
@@ -186,9 +205,11 @@ struct SpectrumWaveformArtworkView: View {
 
     // MARK: Color interpolation
 
-    private func interpolate(from a: Color, to b: Color, t: Double) -> Color {
-        let cA = UIColor(a).cgColor.components ?? [0, 0, 0, 1]
-        let cB = UIColor(b).cgColor.components ?? [0, 0, 0, 1]
+    private func rgbaComponents(of color: Color) -> [CGFloat] {
+        UIColor(color).cgColor.components ?? [0, 0, 0, 1]
+    }
+
+    private func interpolate(from cA: [CGFloat], to cB: [CGFloat], t: Double) -> Color {
         func lerp(_ x: CGFloat, _ y: CGFloat) -> CGFloat { x + (y - x) * CGFloat(t) }
         let r  = lerp(cA.count > 0 ? cA[0] : 0, cB.count > 0 ? cB[0] : 0)
         let g  = lerp(cA.count > 1 ? cA[1] : 0, cB.count > 1 ? cB[1] : 0)

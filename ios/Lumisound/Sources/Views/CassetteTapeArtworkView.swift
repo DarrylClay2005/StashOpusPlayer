@@ -4,6 +4,7 @@ struct CassetteTapeArtworkView: View {
     let song: Song?
     let isPlaying: Bool
     @EnvironmentObject private var library: LibraryManager
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var spoolRotation: Double = 0
     @State private var floating = false
@@ -110,6 +111,17 @@ struct CassetteTapeArtworkView: View {
         .animation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true), value: floating)
         .onChange(of: isPlaying) { playing in
             if playing { startAnimations() } else { stopAnimations() }
+        }
+        .onChange(of: scenePhase) { phase in
+            // Background audio keeps the process (and this 8.3Hz VU-meter
+            // timer) alive with nothing visible to drive — pause/resume just
+            // the timer so it doesn't burn CPU off-screen.
+            if phase == .active {
+                if isPlaying { startVU() }
+            } else {
+                vuTimer?.invalidate()
+                vuTimer = nil
+            }
         }
         .onAppear {
             if isPlaying { startAnimations() }

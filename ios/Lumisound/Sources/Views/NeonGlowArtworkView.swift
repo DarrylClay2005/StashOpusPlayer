@@ -4,6 +4,7 @@ struct NeonGlowArtworkView: View {
     let song: Song?
     let isPlaying: Bool
     @EnvironmentObject private var library: LibraryManager
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var glowPhase: Double = 0
     @State private var ringScales: [CGFloat] = [1.0, 1.0, 1.0, 1.0, 1.0]
@@ -92,6 +93,18 @@ struct NeonGlowArtworkView: View {
         .frame(width: 310, height: 310)
         .onChange(of: isPlaying) { playing in
             updateAnimations(playing: playing)
+        }
+        .onChange(of: scenePhase) { phase in
+            // The breathe timer keeps firing on the run loop while the app is
+            // backgrounded (background audio keeps the process alive), burning
+            // CPU on an animation nobody can see. Pause it without resetting
+            // ring scales so playback resumes the visual state, not a reset.
+            if phase == .active {
+                if isPlaying { startBreathe() }
+            } else {
+                breatheTimer?.invalidate()
+                breatheTimer = nil
+            }
         }
         .onAppear {
             startHueRotation()

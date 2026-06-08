@@ -5,6 +5,7 @@ struct BarsScrubberView: View {
     let duration: TimeInterval
     let isPlaying: Bool
     let onSeek: (TimeInterval) -> Void
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var dragFraction: Double? = nil
     @State private var liveMultipliers: [CGFloat] = Array(repeating: 1.0, count: 36)
@@ -72,6 +73,16 @@ struct BarsScrubberView: View {
         }
         .onChange(of: isPlaying) { playing in
             if playing { startLiveAnimation() } else { stopLiveAnimation() }
+        }
+        .onChange(of: scenePhase) { phase in
+            // Background audio keeps this 10Hz timer ticking with the scrubber
+            // off-screen — pause/resume it instead of burning CPU for nothing.
+            if phase == .active {
+                if isPlaying { startLiveAnimation() }
+            } else {
+                animTimer?.invalidate()
+                animTimer = nil
+            }
         }
         .onAppear {
             if isPlaying { startLiveAnimation() }
