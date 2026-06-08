@@ -21,6 +21,7 @@ struct MiniPlayerBar: View {
                     NavigationStack {
                         NowPlayingView(isSheet: true)
                             .environmentObject(player)
+                            .environmentObject(player.progress)
                             .environmentObject(library)
                             .environmentObject(sleepTimer)
                     }
@@ -30,8 +31,10 @@ struct MiniPlayerBar: View {
 
     private var barContent: some View {
         ZStack(alignment: .top) {
-            // Progress bar at the very top
-            progressBar
+            // Progress bar at the very top — its own view so the high-frequency
+            // position ticks (every 0.25–0.5s) only re-render this sliver, not the
+            // whole mini-player (which is mounted on most screens at once).
+            MiniPlayerProgressBar()
 
             // Main content
             HStack(spacing: 12) {
@@ -63,22 +66,6 @@ struct MiniPlayerBar: View {
             .frame(height: 80)
         }
         .background(.ultraThinMaterial)
-    }
-
-    private var progressBar: some View {
-        GeometryReader { geo in
-            let progress = player.duration > 0 ? player.position / player.duration : 0
-            ZStack(alignment: .leading) {
-                Rectangle()
-                    .fill(AppTheme.surface)
-                    .frame(height: 2)
-                Rectangle()
-                    .fill(AppTheme.dynamicAccent)
-                    .frame(width: geo.size.width * CGFloat(progress), height: 2)
-                    .animation(.linear(duration: 0.25), value: player.position)
-            }
-        }
-        .frame(height: 2)
     }
 
     private var artworkThumbnail: some View {
@@ -153,5 +140,31 @@ struct MiniPlayerBar: View {
             skipHaptic.prepare()
             heartHaptic.prepare()
         }
+    }
+}
+
+// MARK: - MiniPlayerProgressBar
+
+/// Renders the thin progress sliver atop the mini-player. Observes `PlaybackProgress`
+/// directly (instead of reading `player.position`/`player.duration`) so its frequent
+/// re-renders stay isolated to this small view rather than cascading through
+/// `MiniPlayerBar`'s `objectWillChange` to every screen hosting it.
+private struct MiniPlayerProgressBar: View {
+    @EnvironmentObject private var progress: PlaybackProgress
+
+    var body: some View {
+        GeometryReader { geo in
+            let fraction = progress.duration > 0 ? progress.position / progress.duration : 0
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .fill(AppTheme.surface)
+                    .frame(height: 2)
+                Rectangle()
+                    .fill(AppTheme.dynamicAccent)
+                    .frame(width: geo.size.width * CGFloat(fraction), height: 2)
+                    .animation(.linear(duration: 0.25), value: progress.position)
+            }
+        }
+        .frame(height: 2)
     }
 }

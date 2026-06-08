@@ -23,6 +23,7 @@ struct LumisoundApp: App {
                 ContentView()
                     .environmentObject(libraryManager)
                     .environmentObject(player)
+                    .environmentObject(player.progress)
                     .environmentObject(sleepTimer)
                     .environmentObject(updater)
                     .environmentObject(streaming)

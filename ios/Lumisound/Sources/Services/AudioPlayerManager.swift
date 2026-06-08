@@ -3,6 +3,25 @@ import Foundation
 import MediaPlayer
 import UIKit
 
+// MARK: - PlaybackProgress
+
+/// Holds just the high-frequency playback position/duration values, observed
+/// separately from the rest of `AudioPlayerManager`'s `@Published` state. Any
+/// `@Published` change on an `ObservableObject` fires `objectWillChange` for the
+/// WHOLE object, forcing every view holding it (e.g. via `@EnvironmentObject`) to
+/// re-evaluate its `body` — regardless of which property that view actually reads.
+/// Position/duration tick every 0.25–0.5s while playing, and `MiniPlayerBar` (which
+/// only needs `currentSong`/`isPlaying`) is mounted on most screens simultaneously,
+/// so publishing them directly on `AudioPlayerManager` was cascading re-renders
+/// app-wide. Views that need live progress (the mini-player's progress bar, the
+/// Now Playing scrubbers, the lyrics sync editor) observe this lightweight object
+/// instead, so the high-frequency updates stay scoped to just those views.
+@MainActor
+final class PlaybackProgress: ObservableObject {
+    @Published var position: TimeInterval = 0
+    @Published var duration: TimeInterval = 0
+}
+
 // MARK: - AudioPlayerManager
 
 @MainActor
@@ -25,8 +44,20 @@ final class AudioPlayerManager: ObservableObject {
             WidgetDataService.shared.updatePlayState(isPlaying: isPlaying)
         }
     }
-    @Published var position: TimeInterval = 0
-    @Published var duration: TimeInterval = 0
+    /// Backing store for `position`/`duration` — see `PlaybackProgress` for why
+    /// these are split out instead of `@Published` directly on this object. Every
+    /// internal read/write site (`position = 0`, `duration > 0`, etc.) keeps
+    /// working unchanged since these remain plain gettable/settable properties.
+    let progress = PlaybackProgress()
+
+    var position: TimeInterval {
+        get { progress.position }
+        set { progress.position = newValue }
+    }
+    var duration: TimeInterval {
+        get { progress.duration }
+        set { progress.duration = newValue }
+    }
     @Published var repeatMode: RepeatMode = .off
     @Published var shuffleEnabled = false
     @Published var audioSettings = AudioSettings() {

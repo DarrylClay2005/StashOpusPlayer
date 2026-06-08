@@ -7,8 +7,8 @@ import SwiftUI
 /// Usage:
 ///  - If the current song has lyrics (already loaded as `[LrcLine]` from
 ///    NowPlayingView's `loadLyrics()` result), those lines are passed in.
-///  - Tapping a line while the song plays records `player.position` as that
-///    line's timestamp.
+///  - Tapping a line while the song plays records the current playback position
+///    (from `progress`, see `PlaybackProgress`) as that line's timestamp.
 ///  - The "Save" button writes a `.lrc` file to
 ///    `Documents/Lyrics/{songID}.lrc` in standard LRC format.
 ///  - If `initialLines` is empty, a plain-text paste area is shown first so the
@@ -20,6 +20,7 @@ struct LyricsSyncEditorView: View {
     let initialLines: [LrcLine]
 
     @EnvironmentObject private var player: AudioPlayerManager
+    @EnvironmentObject private var progress: PlaybackProgress
     @Environment(\.dismiss) private var dismiss
 
     // MARK: State
@@ -184,13 +185,13 @@ struct LyricsSyncEditorView: View {
             .buttonStyle(.plain)
 
             // Current position
-            Text(formatTime(player.position))
+            Text(formatTime(progress.position))
                 .font(.system(.body, design: .monospaced).weight(.semibold))
                 .foregroundStyle(AppTheme.textPrimary)
                 .monospacedDigit()
                 .frame(minWidth: 56, alignment: .leading)
 
-            Text("/ \(formatTime(player.duration))")
+            Text("/ \(formatTime(progress.duration))")
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(AppTheme.textSecondary)
                 .monospacedDigit()
@@ -253,7 +254,7 @@ struct LyricsSyncEditorView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             tapHaptic.impactOccurred()
-            rows[index].timestamp = player.position
+            rows[index].timestamp = progress.position
         }
         .id(index)
         .animation(.easeInOut(duration: 0.15), value: isCurrent)
@@ -307,7 +308,7 @@ struct LyricsSyncEditorView: View {
 
     private var currentHighlightIndex: Int? {
         guard !rows.isEmpty else { return nil }
-        let pos = player.position
+        let pos = progress.position
         var result: Int? = nil
         for (i, row) in rows.enumerated() {
             guard let ts = row.timestamp else { continue }

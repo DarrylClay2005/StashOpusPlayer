@@ -1058,6 +1058,20 @@ final class StreamingService: ObservableObject {
         appLog("deleteGalleryImage: deleted \(id)", category: "network")
     }
 
+    /// Downloads the actual bytes for a cloud gallery entry. The file-serving endpoint
+    /// requires the same per-user bearer token as the listing/upload/delete calls
+    /// (it's not a public URL), so this can't be loaded via a plain AsyncImage.
+    func fetchGalleryImageData(_ image: GalleryImageInfo, token: String) async -> UIImage? {
+        guard var request = makeRequest(image.url) else { return nil }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 30
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200
+        else { return nil }
+        return UIImage(data: data)
+    }
+
     // MARK: - Health Check
 
     func checkHealth() async -> Bool {

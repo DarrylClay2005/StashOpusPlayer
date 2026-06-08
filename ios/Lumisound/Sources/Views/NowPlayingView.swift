@@ -151,6 +151,7 @@ struct NowPlayingView: View {
     var isSheet: Bool = false
 
     @EnvironmentObject private var player: AudioPlayerManager
+    @EnvironmentObject private var progress: PlaybackProgress
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var sleepTimer: SleepTimerService
 
@@ -402,7 +403,7 @@ struct NowPlayingView: View {
             MinimalistArtworkView(
                 song: player.currentSong,
                 isPlaying: player.isPlaying,
-                progress: player.duration > 0 ? player.position / player.duration : 0
+                progress: progress.duration > 0 ? progress.position / progress.duration : 0
             )
             .environmentObject(library)
 
@@ -471,40 +472,40 @@ struct NowPlayingView: View {
         VStack(spacing: 10) {
             switch seekerStyle {
             case .waveform:
-                if let url = player.currentSong?.url, url.isFileURL, player.duration > 0 {
+                if let url = player.currentSong?.url, url.isFileURL, progress.duration > 0 {
                     WaveformScrubberView(
                         url: url,
-                        position: player.position,
-                        duration: player.duration,
+                        position: progress.position,
+                        duration: progress.duration,
                         isPlaying: player.isPlaying,
                         onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
                     )
                 } else {
                     ClassicScrubberView(
-                        position: player.position,
-                        duration: player.duration,
+                        position: progress.position,
+                        duration: progress.duration,
                         isPlaying: player.isPlaying,
                         onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
                     )
                 }
             case .classic:
                 ClassicScrubberView(
-                    position: player.position,
-                    duration: player.duration,
+                    position: progress.position,
+                    duration: progress.duration,
                     isPlaying: player.isPlaying,
                     onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
                 )
             case .ring:
                 RingScrubberView(
-                    position: player.position,
-                    duration: player.duration,
+                    position: progress.position,
+                    duration: progress.duration,
                     isPlaying: player.isPlaying,
                     onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
                 )
             case .bars:
                 BarsScrubberView(
-                    position: player.position,
-                    duration: player.duration,
+                    position: progress.position,
+                    duration: progress.duration,
                     isPlaying: player.isPlaying,
                     onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
                 )
@@ -1243,7 +1244,7 @@ struct NowPlayingView: View {
                     } else {
                         LyricsView(
                             lines: lyricsLines,
-                            currentPosition: player.position
+                            currentPosition: progress.position
                         )
                         .frame(height: 260)
                     }
@@ -1272,6 +1273,7 @@ struct NowPlayingView: View {
         .sheet(isPresented: $showLyricsSyncEditor) {
             LyricsSyncEditorView(initialLines: lyricsLines)
                 .environmentObject(player)
+                .environmentObject(progress)
         }
     }
 
