@@ -24,11 +24,14 @@ struct LibraryView: View {
     @EnvironmentObject private var account: AccountService
     @EnvironmentObject private var streaming: StreamingService
 
+    @AppStorage("autoCloudBackup") private var autoCloudBackup: Bool = false
+
     @State private var selectedTab: LibraryTab = .songs
     @State private var searchText: String = ""
     @State private var debouncedSearch: String = ""
     @State private var showAddMusic = false
     @State private var showOpenSharedPlaylist = false
+    @State private var backupSyncTask: Task<Void, Never>?
 
     // MARK: Filtered songs for Songs tab (uses debounced search)
 
@@ -118,6 +121,7 @@ struct LibraryView: View {
                         library.requestAccessAndScan()
                     }
                 }
+                scheduleBackupSync()
             }
             // Debounce search: wait 0.3 s after the user stops typing
             .onChange(of: searchText) { newValue in
@@ -128,6 +132,28 @@ struct LibraryView: View {
                     }
                 }
             }
+            // Auto-Backup originally only fired on the "download from search" path,
+            // so anything imported, scanned from Documents, or pulled from a watched
+            // folder never made it to the cloud. Re-check whenever the library's
+            // song count settles — scheduleBackupSync debounces so a multi-batch
+            // scan triggers one sync, not dozens, and backUpLibraryIfNeeded itself
+            // skips songs already present server-side.
+            .onChange(of: library.allSongs.count) { _ in
+                scheduleBackupSync()
+            }
+        }
+    }
+
+    /// Debounces auto-backup catch-up so rapid library changes (a scan landing in
+    /// several batches, an import finishing) collapse into a single sync pass.
+    private func scheduleBackupSync() {
+        guard autoCloudBackup, account.isLoggedIn, let token = account.token else { return }
+        backupSyncTask?.cancel()
+        let songs = library.allSongs
+        backupSyncTask = Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+            streaming.backUpLibraryIfNeeded(songs: songs, token: token)
         }
     }
 

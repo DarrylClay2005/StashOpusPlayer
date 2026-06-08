@@ -167,10 +167,10 @@ struct UploadMusicView: View {
                 .frame(width: 32)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Auto-Backup Downloads")
+                Text("Auto-Backup Library")
                     .font(AppTheme.bodyFont(size: 15).weight(.semibold))
                     .foregroundStyle(AppTheme.textPrimary)
-                Text("Automatically upload each song after it's downloaded")
+                Text("Automatically upload downloaded, imported, and scanned songs to your cloud library in the background")
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }
