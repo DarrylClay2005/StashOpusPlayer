@@ -10,6 +10,11 @@ final class DarwinWidgetBridge {
     static let skipNext       = "com.lumisound.ios.widget.skipNext"
 
     private var callbacks: [String: [() -> Void]] = [:]
+    /// Names already registered with the Darwin notify center. CFNotificationCenter
+    /// delivers once *per registration* — adding the same (observer, name) pair twice
+    /// would fire `darwinCallback` (and thus every callback in `callbacks[name]`) twice
+    /// per notification, contradicting the "safe to call multiple times" contract below.
+    private var registeredNames: Set<String> = []
 
     private init() {}
 
@@ -26,6 +31,10 @@ final class DarwinWidgetBridge {
     /// Safe to call multiple times; each call appends an additional callback.
     func addObserver(name: String, callback: @escaping () -> Void) {
         callbacks[name, default: []].append(callback)
+
+        guard !registeredNames.contains(name) else { return }
+        registeredNames.insert(name)
+
         let nc = CFNotificationCenterGetDarwinNotifyCenter()
         CFNotificationCenterAddObserver(
             nc,

@@ -97,9 +97,11 @@ final class BackgroundService: ObservableObject {
     // MARK: Disk Storage Directory
 
     private var imageStorageDir: URL {
-        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            fatalError("Document directory unavailable")
-        }
+        // Documents is effectively always available on iOS, but crashing the whole
+        // app over a missing directory for a background-image feature is too harsh —
+        // fall back to the (always-available) temp directory and degrade gracefully.
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         return docs.appendingPathComponent("BackgroundImages", isDirectory: true)
     }
 

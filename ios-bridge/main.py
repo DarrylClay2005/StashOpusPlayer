@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -12,6 +13,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -322,7 +324,67 @@ async def get_current_user(
     if not payload:
         logger.warning("JWT decode failed for token (invalid or expired)")
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # A valid JWT signature isn't enough on its own — logout (and future
+    # "sign out other devices" features) only delete the matching row in
+    # ios_user_sessions, so without this lookup a revoked or stolen token
+    # would keep working for its full lifetime. token_id is the table's
+    # primary key, so this is a single indexed point lookup per request.
+    token_id = payload.get("jti")
+    if token_id:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT 1 FROM ios_user_sessions WHERE token_id = %s AND expires_at > NOW()",
+                    (token_id,),
+                )
+                if not await cur.fetchone():
+                    raise HTTPException(status_code=401, detail="Session has been revoked")
+
     return payload
+
+
+# ---------------------------------------------------------------------------
+# SSRF guard for client-supplied URLs handed to yt-dlp
+# ---------------------------------------------------------------------------
+
+# /api/stream, /api/download (soundcloud), /api/track, and /api/resolve all take
+# a client-supplied `url` and pass it straight to a `yt-dlp <url>` subprocess.
+# yt-dlp's generic extractor will happily fetch arbitrary http(s) URLs, which
+# would let this bridge be abused as an internal-network probe / SSRF proxy
+# (e.g. http://169.254.169.254/... cloud metadata, or http://localhost:<port>/...
+# internal services). Resolve the host and reject anything that lands on a
+# non-public address rather than restricting to a fixed site allowlist — that
+# preserves yt-dlp's broad site support for legitimate playlist/track URLs.
+async def _reject_ssrf_targets(url: str) -> None:
+    parsed = urlsplit(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="URL must be http or https")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(status_code=400, detail="URL is missing a host")
+
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(hostname, None)
+    except OSError:
+        raise HTTPException(status_code=400, detail="Could not resolve URL host")
+
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise HTTPException(status_code=400, detail="URL host resolves to a disallowed address")
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +667,7 @@ async def stream(
             raise HTTPException(
                 status_code=400, detail="url parameter required for soundcloud source"
             )
+        await _reject_ssrf_targets(url)
         target_url = url
     else:
         target_url = f"https://youtube.com/watch?v={id}"
@@ -717,6 +780,7 @@ async def download_track(
             raise HTTPException(
                 status_code=400, detail="url parameter required for soundcloud source"
             )
+        await _reject_ssrf_targets(url)
         target_url = url
     else:
         target_url = f"https://youtube.com/watch?v={id}"
@@ -826,6 +890,7 @@ async def track_metadata(
     url: str = Query(..., description="Full track URL"),
 ):
     await check_auth(request)
+    await _reject_ssrf_targets(url)
 
     try:
         entries = await _run_ytdlp(
@@ -857,6 +922,7 @@ async def resolve_playlist(
     limit: int = Query(100, ge=1, le=200, description="Max tracks to return"),
 ):
     await check_auth(request)
+    await _reject_ssrf_targets(url)
 
     try:
         entries = await _run_ytdlp(

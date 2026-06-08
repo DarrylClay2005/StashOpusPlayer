@@ -115,11 +115,15 @@ struct LumisoundApp: App {
                     guard player.autoRadioEnabled else { return }
                     Task {
                         appLog("Auto-radio: seeding from \"\(seed.displayName)\" by \(seed.artistName)", category: "audio")
-                        await streaming.search(
+                        // Uses `relatedTracks`, not `search` — the latter publishes
+                        // into `searchResults`/`isSearching`/`errorMessage`, which
+                        // would silently overwrite whatever the user has up in the
+                        // Stream Search tab right as their queue runs out.
+                        let tracks = await streaming.relatedTracks(
                             query: "\(seed.artistName) \(seed.displayName)",
-                            source: "youtube"
+                            source: "youtube",
+                            limit: 5
                         )
-                        let tracks = Array(streaming.searchResults.prefix(5))
                         guard !tracks.isEmpty else {
                             appLog("Auto-radio: no results", category: "audio")
                             return

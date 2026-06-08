@@ -72,8 +72,12 @@ struct PlaylistDetailView: View {
                     reorder(newIDs: reordered)
                 }
                 .onDelete { indexSet in
-                    for index in indexSet {
-                        let song = songs[index]
+                    // Snapshot targets first — `songs` is computed from
+                    // `library.playlists`, so each removal would shift later
+                    // indices in `indexSet` mid-loop and remove the wrong songs
+                    // for multi-row swipes.
+                    let targets = indexSet.map { songs[$0] }
+                    for song in targets {
                         library.removeSong(id: song.id, fromPlaylistID: playlist.id)
                     }
                 }

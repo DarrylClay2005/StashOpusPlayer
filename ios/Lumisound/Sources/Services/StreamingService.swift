@@ -371,6 +371,38 @@ final class StreamingService: ObservableObject {
         }
     }
 
+    /// Fetches up to `limit` tracks for a raw query without touching the published
+    /// `searchResults`/`isSearching`/`errorMessage` state — see `bestMatch` above for
+    /// why that matters. Used by Auto-Radio to seed several related tracks from one
+    /// query without clobbering whatever the user has up in the Search tab. Returns
+    /// `[]` on no results or any failure.
+    func relatedTracks(query: String, source: String = "youtube", limit: Int = 5) async -> [StreamTrack] {
+        guard isConfigured else { return [] }
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return [] }
+
+        var components = URLComponents()
+        components.path = "/api/search"
+        components.queryItems = [
+            URLQueryItem(name: "q",      value: trimmed),
+            URLQueryItem(name: "limit",  value: String(limit)),
+            URLQueryItem(name: "source", value: source),
+        ]
+        guard var request = makeRequest(components.string ?? "/api/search") else { return [] }
+        request.timeoutInterval = 20
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse,
+               !(200..<300).contains(httpResponse.statusCode) {
+                return []
+            }
+            return try JSONDecoder().decode([StreamTrack].self, from: data)
+        } catch {
+            return []
+        }
+    }
+
     // MARK: - Playlist resolution
 
     /// Resolves a YouTube (or SoundCloud) playlist URL to a list of tracks via

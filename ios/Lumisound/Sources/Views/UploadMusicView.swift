@@ -517,8 +517,7 @@ struct UploadMusicView: View {
             defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
 
             // Build metadata from file attributes where possible
-            var meta = TrackMetadata()
-            let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let meta = TrackMetadata()
             // Duration and bitrate are not easily available without AVFoundation;
             // pass what we can and let the server handle the rest.
 
@@ -585,7 +584,8 @@ struct UploadMusicView: View {
 
         let destURL = importDir.appendingPathComponent(track.filename)
         if FileManager.default.fileExists(atPath: destURL.path) {
-            // Already present on device
+            // Already present — say so, otherwise the tap appears to do nothing.
+            errorMessage = "\(track.title ?? track.filename) is already on this device."
             return
         }
 

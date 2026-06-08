@@ -175,6 +175,14 @@ final class AudioPlayerManager: ObservableObject {
     private var opusStatusObserver: NSKeyValueObservation?
     private var opusEndObserver: NSObjectProtocol?
     private var opusFailObserver: NSObjectProtocol?
+
+    // Closure-based `addObserver(forName:object:queue:using:)` registers an internal
+    // proxy as "the observer" — `removeObserver(self, name:object:)` in `deinit`
+    // never matches it (see the `tearDownOpusPlayer` comment for the full
+    // explanation). These three must be removed by their captured tokens too.
+    private var backgroundObserver: NSObjectProtocol?
+    private var interruptionObserver: NSObjectProtocol?
+    private var routeChangeObserver: NSObjectProtocol?
     private var isUsingOpusPlayer: Bool { opusPlayer != nil }
 
     // Schedule generation counter — incremented before every node stop/reschedule.
@@ -194,7 +202,7 @@ final class AudioPlayerManager: ObservableObject {
         configureRemoteCommands()
         restorePlaybackState()
 
-        NotificationCenter.default.addObserver(
+        backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
             object: nil,
             queue: .main
@@ -218,7 +226,11 @@ final class AudioPlayerManager: ObservableObject {
         rotationLink?.invalidate()
         tremoloLink?.invalidate()
         vibratoLink?.invalidate()
-        NotificationCenter.default.removeObserver(self)
+        // `removeObserver(self)` is a no-op for closure-based registrations below
+        // (they're keyed on an internal proxy, not `self`) — must remove by token.
+        for token in [backgroundObserver, interruptionObserver, routeChangeObserver, opusEndObserver, opusFailObserver] {
+            if let token { NotificationCenter.default.removeObserver(token) }
+        }
         let center = MPRemoteCommandCenter.shared()
         center.playCommand.removeTarget(nil)
         center.pauseCommand.removeTarget(nil)
@@ -1497,7 +1509,7 @@ final class AudioPlayerManager: ObservableObject {
         try? session.setPreferredSampleRate(48000)
         try? session.setActive(true)
 
-        NotificationCenter.default.addObserver(
+        interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: nil,
             queue: .main
@@ -1505,7 +1517,7 @@ final class AudioPlayerManager: ObservableObject {
             Task { @MainActor in self?.handleAudioInterruption(notification) }
         }
 
-        NotificationCenter.default.addObserver(
+        routeChangeObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
             object: nil,
             queue: .main

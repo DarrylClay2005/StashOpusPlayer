@@ -118,8 +118,14 @@ final class SleepTimerService: ObservableObject {
             isFading = false
             setVolume?(0)
             onExpire?()
-            // Restore volume so it isn't stuck at 0 when the user presses Play again.
-            setVolume?(volumeBeforeFade)
+            // Restore volume so it isn't stuck at 0 when the user presses Play again —
+            // but only if nothing else changed it meanwhile. The fade mutates the same
+            // persisted `audioSettings.volume` the user's slider is bound to, so if they
+            // nudged it back up mid-fade (current value no longer ~0), blindly restoring
+            // `volumeBeforeFade` would silently discard that manual adjustment.
+            if (getVolume?() ?? 0) < 0.01 {
+                setVolume?(volumeBeforeFade)
+            }
             didExpire = true
             appLog("SleepTimer: fade complete — playback stopped", category: "general")
             // Reset the flag after one run loop so observers don't re-trigger.

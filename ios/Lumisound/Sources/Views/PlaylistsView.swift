@@ -47,8 +47,12 @@ struct PlaylistsView: View {
                     }
                 }
                 .onDelete { indexSet in
-                    for index in indexSet {
-                        library.deletePlaylist(library.playlists[index])
+                    // Snapshot targets first — deleting mutates `library.playlists`,
+                    // which would shift later indices in `indexSet` mid-loop and
+                    // delete the wrong playlists for multi-row swipes.
+                    let targets = indexSet.map { library.playlists[$0] }
+                    for playlist in targets {
+                        library.deletePlaylist(playlist)
                     }
                 }
             }

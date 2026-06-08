@@ -50,7 +50,10 @@ struct CollaborativePlaylistView: View {
                 }
             }
         }
-        .onDisappear { collaborativeService.reset() }
+        .onDisappear {
+            playAllTask?.cancel()
+            collaborativeService.reset()
+        }
     }
 }
 
@@ -350,6 +353,7 @@ private struct SharedPlaylistResultView: View {
     // per-track lookup runs.
     @State private var isResolving = false
     @State private var resolveError: String?
+    @State private var playAllTask: Task<Void, Never>?
 
     private var durationText: String {
         let total = Int(shared.tracks.reduce(0) { $0 + $1.duration }.rounded())
@@ -415,14 +419,16 @@ private struct SharedPlaylistResultView: View {
                 guard !isResolving else { return }
                 resolveError = nil
                 isResolving = true
-                Task {
+                playAllTask = Task {
                     defer { isResolving = false }
                     var resolved: [Song] = []
                     for track in shared.tracks {
+                        guard !Task.isCancelled else { return }
                         guard let match = await streaming.bestMatch(forTitle: track.title, artist: track.artist),
                               let url = try? await streaming.streamURL(for: match) else { continue }
                         resolved.append(streaming.toSong(track: match, streamURL: url))
                     }
+                    guard !Task.isCancelled else { return }
                     guard !resolved.isEmpty else {
                         resolveError = "Couldn't find playable matches for any track in this playlist."
                         return

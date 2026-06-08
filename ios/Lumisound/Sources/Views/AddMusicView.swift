@@ -176,7 +176,11 @@ struct AddMusicView: View {
                     showFilePicker = false
                     guard !urls.isEmpty else { return }
                     library.importFiles(urls: urls)
-                    importSuccess = "\(urls.count) file\(urls.count == 1 ? "" : "s") imported"
+                    // importFiles runs asynchronously (and can fail — surfaced via
+                    // library.errorMessage elsewhere), so claiming "imported" here
+                    // would be premature; match the in-progress phrasing used above
+                    // for the other two import paths.
+                    importSuccess = "Importing \(urls.count) file\(urls.count == 1 ? "" : "s")…"
                 }
                 .ignoresSafeArea()
             }
