@@ -166,9 +166,15 @@ def _check_auth_rate(client_ip: str) -> None:
 
 
 def _get_client_ip(request: Request) -> str:
+    # The leftmost entry in X-Forwarded-For is attacker-controlled (the client
+    # sets it directly); only the entry our own reverse proxy appended — the
+    # rightmost one — can be trusted. Trusting the leftmost lets a client spoof
+    # an arbitrary IP and bypass per-IP auth rate limiting.
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     return request.client.host if request.client else "unknown"
 
 
@@ -599,7 +605,7 @@ async def health():
 @app.get("/api/search")
 async def search(
     request: Request,
-    q: str = Query(..., description="Search query"),
+    q: str = Query(..., min_length=1, max_length=200, description="Search query"),
     limit: int = Query(20, ge=1, le=50, description="Max results"),
     source: str = Query("youtube", description="youtube or soundcloud"),
 ):
@@ -1129,6 +1135,10 @@ async def update_me(body: UpdateMeRequest, payload: dict = Depends(get_current_u
 
             # DOB: immutable once set
             if body.date_of_birth:
+                try:
+                    datetime.strptime(body.date_of_birth, "%Y-%m-%d")
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="date_of_birth must be in YYYY-MM-DD format")
                 await cur.execute(
                     "SELECT date_of_birth FROM ios_users WHERE id = %s",
                     (user_id,),
@@ -1166,6 +1176,8 @@ async def upload_avatar(request: Request, user: dict = Depends(get_current_user)
     body = await request.body()
     if len(body) > 1_048_576:  # 1MB limit
         raise HTTPException(status_code=413, detail="Avatar must be under 1MB")
+    if not body.startswith(b"\xff\xd8\xff"):  # JPEG magic bytes (SOI + APPn/marker)
+        raise HTTPException(status_code=400, detail="Avatar must be a JPEG image")
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -1226,7 +1238,15 @@ async def get_expanded_settings(user: dict = Depends(get_current_user)):
 
 @app.put("/user/settings/expanded")
 async def put_expanded_settings(request: Request, user: dict = Depends(get_current_user)):
-    body = await request.json()
+    raw = await request.body()
+    if len(raw) > 262_144:  # 256KB — generous for a settings blob
+        raise HTTPException(status_code=413, detail="Settings payload too large")
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
     updates = {k: v for k, v in body.items() if k in _EXPANDED_SETTINGS_ALLOWED}
     if not updates:
         return {"ok": True}
@@ -1395,15 +1415,15 @@ async def delete_playlist(
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            # Ownership check folded into the DELETE's WHERE clause (rather than a
+            # separate SELECT-then-DELETE) so the two can't race or diverge — the
+            # statement only ever removes a row this user actually owns.
             await cur.execute(
-                "SELECT id FROM ios_user_playlists WHERE id = %s AND user_id = %s",
+                "DELETE FROM ios_user_playlists WHERE id = %s AND user_id = %s",
                 (playlist_id, user_id),
             )
-            if not await cur.fetchone():
+            if cur.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Playlist not found")
-            await cur.execute(
-                "DELETE FROM ios_user_playlists WHERE id = %s", (playlist_id,)
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -1896,9 +1916,12 @@ async def revoke_shared_playlist(
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            # Re-check ownership in the UPDATE's WHERE clause itself — closes the
+            # window between the SELECT above and this statement during which the
+            # token could (in theory) have been re-assigned to another owner.
             await cur.execute(
-                "UPDATE ios_shared_playlists SET is_active = FALSE WHERE share_token = %s",
-                (share_token,),
+                "UPDATE ios_shared_playlists SET is_active = FALSE WHERE share_token = %s AND owner_user_id = %s",
+                (share_token, user_id),
             )
 
     logger.info("revoke_shared_playlist: user %s revoked share token %s", user_id, share_token)
@@ -2291,7 +2314,19 @@ async def upload_user_music(
     }:
         raise HTTPException(status_code=400, detail="Unsupported or invalid filename")
 
-    dest_dir = music_dir / folder.strip("/") if folder.strip("/") else music_dir
+    folder_clean = folder.strip("/")
+    dest_dir = (music_dir / folder_clean) if folder_clean else music_dir
+    # Reject `folder` values containing ".." (or absolute paths re-rooted by
+    # pathlib) that would resolve outside the user's music directory — without
+    # this check a client could write arbitrary files anywhere on disk that the
+    # bridge process can reach (e.g. folder="../../../etc/cron.d").
+    music_root = music_dir.resolve()
+    try:
+        resolved_dest_dir = dest_dir.resolve()
+        resolved_dest_dir.relative_to(music_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid folder path")
+    dest_dir = resolved_dest_dir
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / safe_name
 
@@ -2721,8 +2756,15 @@ def _parse_log_timestamp(value) -> Optional[str]:
 async def ingest_logs(request: Request):
     """Receives batched log entries from iOS clients. No auth required for
     internal telemetry. Inserts into ios_app_logs table."""
+    # Unauthenticated endpoint — cap body size before parsing so a client
+    # (malicious or buggy) can't force us to buffer/parse a multi-GB payload
+    # just to keep the first 100 entries. Outside the broad except below so
+    # the 413 actually reaches the client instead of being swallowed.
+    raw = await request.body()
+    if len(raw) > 1_048_576:  # 1MB — generous for a 100-entry log batch
+        raise HTTPException(status_code=413, detail="Log payload too large")
     try:
-        entries = await request.json()
+        entries = json.loads(raw)
         if not isinstance(entries, list):
             return
         rows = [

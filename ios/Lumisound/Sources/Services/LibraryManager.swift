@@ -37,6 +37,8 @@ final class LibraryManager: ObservableObject {
     /// Pending debounced rebuild task. Cancelled and replaced on each rapid mutation.
     private var pendingRebuildTask: Task<Void, Never>?
 
+    private var foregroundObserver: NSObjectProtocol?
+
     var favoriteSongs: [Song] {
         allSongs.filter { favoriteSongIDs.contains($0.id) }
     }
@@ -54,12 +56,18 @@ final class LibraryManager: ObservableObject {
         // Re-scan local documents whenever the app returns to the foreground so
         // that files the user added via the Files app while Lumisound was
         // backgrounded are picked up without requiring a manual refresh.
-        NotificationCenter.default.addObserver(
+        foregroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.scanLocalDocuments() }
+        }
+    }
+
+    deinit {
+        if let foregroundObserver {
+            NotificationCenter.default.removeObserver(foregroundObserver)
         }
     }
 
@@ -73,7 +81,8 @@ final class LibraryManager: ObservableObject {
     }
 
     private static let snapshotURL: URL = {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         return caches.appendingPathComponent("library_snapshot_v1.json")
     }()
 

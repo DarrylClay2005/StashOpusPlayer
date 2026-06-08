@@ -60,11 +60,12 @@ final class BackgroundService: ObservableObject {
     private var shuffleTimer: Timer?
     // Tracks every timer added to the RunLoop so none are orphaned on rapid addImages calls.
     private var allTimers: [Timer] = []
+    private var foregroundObserver: NSObjectProtocol?
 
     // MARK: Init — register for foreground notification
 
     init() {
-        NotificationCenter.default.addObserver(
+        foregroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.willEnterForegroundNotification,
             object: nil,
             queue: .main
@@ -73,6 +74,12 @@ final class BackgroundService: ObservableObject {
                 guard let self, self.isEnabled, !self.images.isEmpty else { return }
                 if !self.isActive { self.startShuffling() }
             }
+        }
+    }
+
+    deinit {
+        if let foregroundObserver {
+            NotificationCenter.default.removeObserver(foregroundObserver)
         }
     }
 

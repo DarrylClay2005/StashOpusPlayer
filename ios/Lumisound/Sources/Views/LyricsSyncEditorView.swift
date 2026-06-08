@@ -368,7 +368,9 @@ struct LyricsSyncEditorView: View {
 
     /// Returns (and creates if needed) Documents/Lyrics/
     private func lyricsDirectory() throws -> URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            throw NSError(domain: "LyricsSyncEditorView", code: 1, userInfo: [NSLocalizedDescriptionKey: "Documents directory unavailable"])
+        }
         let dir  = docs.appendingPathComponent("Lyrics", isDirectory: true)
         if !FileManager.default.fileExists(atPath: dir.path) {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

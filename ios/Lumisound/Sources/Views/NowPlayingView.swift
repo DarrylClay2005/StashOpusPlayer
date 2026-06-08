@@ -1365,20 +1365,29 @@ struct NowPlayingView: View {
 
         // 3. LRCLIB — free, open lyrics database with synced LRC support
         //    Falls back to LyricsOVH if LRCLIB has no synced version.
+        let songID = song.id
         Task {
             let title  = song.title.trimmingCharacters(in: .whitespacesAndNewlines)
             let artist = song.artist.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty else { return }
 
+            // Skipping tracks fires loadLyrics() again before the previous
+            // fetch resolves — an in-flight fetch for a now-stale song can
+            // land after the new one and overwrite the correct lyrics with
+            // the wrong song's. Bail if the user has moved on by the time
+            // each remote call resolves.
+            func stillCurrent() -> Bool { player.currentSong?.id == songID }
+
             // LRCLIB: returns synced LRC if available
             if let lines = await fetchLRCLIB(title: title, artist: artist), !lines.isEmpty {
-                await MainActor.run { lyricsLines = lines }
+                await MainActor.run { if stillCurrent() { lyricsLines = lines } }
                 return
             }
+            guard stillCurrent() else { return }
 
             // LyricsOVH: plain text fallback (no timestamps — shown as static block)
             if let lines = await fetchLyricsOVH(title: title, artist: artist), !lines.isEmpty {
-                await MainActor.run { lyricsLines = lines }
+                await MainActor.run { if stillCurrent() { lyricsLines = lines } }
             }
         }
     }

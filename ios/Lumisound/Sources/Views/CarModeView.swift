@@ -76,6 +76,12 @@ struct CarModeView: View {
             playHaptic.prepare()
             skipHaptic.prepare()
         }
+        .onChange(of: player.audioSettings.volume) { newValue in
+            // Volume can change from outside Car Mode (sleep-timer fade, the
+            // system volume HUD, another view) — keep the slider's local
+            // mirror in sync so it doesn't show a stale position.
+            volume = newValue
+        }
     }
 
     // MARK: - Artwork background
