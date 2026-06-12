@@ -1122,6 +1122,7 @@ final class StreamingService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.addNgrokBypassHeader()
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
@@ -1205,6 +1206,7 @@ final class StreamingService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.addNgrokBypassHeader()
         if !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }

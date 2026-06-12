@@ -590,6 +590,7 @@ struct UploadMusicView: View {
         }
 
         var request = URLRequest(url: streamURL)
+        request.addNgrokBypassHeader()
         request.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 300
 

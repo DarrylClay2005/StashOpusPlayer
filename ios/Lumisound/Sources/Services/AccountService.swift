@@ -892,6 +892,7 @@ final class AccountService: ObservableObject {
         guard let url = URL(string: base + path) else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = method
+        req.addNgrokBypassHeader()
         if let t = token, !t.isEmpty {
             req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
         }
@@ -990,6 +991,7 @@ final class AccountService: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 20
+        request.addNgrokBypassHeader()
 
         if let tok = token {
             request.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")

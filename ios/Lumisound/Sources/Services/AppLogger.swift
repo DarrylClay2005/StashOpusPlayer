@@ -181,6 +181,7 @@ final class AppLogger: ObservableObject {
         var req = URLRequest(url: url, timeoutInterval: 10)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.addNgrokBypassHeader()
 
         do {
             req.httpBody = try JSONEncoder().encode(entries)
