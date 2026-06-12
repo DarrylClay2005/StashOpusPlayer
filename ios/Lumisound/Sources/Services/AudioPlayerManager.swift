@@ -1814,7 +1814,7 @@ final class AudioPlayerManager: ObservableObject {
         AudioUnitSetParameter(unit, kDynamicsProcessorParam_HeadRoom, kAudioUnitScope_Global, 0, 1.0, 0)      // dB of headroom above the threshold
         AudioUnitSetParameter(unit, kDynamicsProcessorParam_AttackTime, kAudioUnitScope_Global, 0, 0.001, 0)  // seconds — fast enough to catch transients
         AudioUnitSetParameter(unit, kDynamicsProcessorParam_ReleaseTime, kAudioUnitScope_Global, 0, 0.05, 0)  // seconds — short so it doesn't pump audibly
-        AudioUnitSetParameter(unit, kDynamicsProcessorParam_MasterGain, kAudioUnitScope_Global, 0, 0, 0)
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_OverallGain, kAudioUnitScope_Global, 0, 0, 0)
         limiter.bypass = false
     }
 
