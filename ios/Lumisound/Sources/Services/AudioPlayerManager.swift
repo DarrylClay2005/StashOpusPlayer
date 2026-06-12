@@ -1163,7 +1163,6 @@ final class AudioPlayerManager: ObservableObject {
                 // Build a request with a realistic browser UA so CDN servers don't reject it.
                 var req = URLRequest(url: url)
                 req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", forHTTPHeaderField: "User-Agent")
-                req.addNgrokBypassHeader()
                 req.timeoutInterval = 60
                 // Apply any per-song headers (e.g. Authorization for user music / server tracks).
                 if let headers = currentSong?.httpHeaders {
@@ -1625,7 +1624,6 @@ final class AudioPlayerManager: ObservableObject {
 
             var req = URLRequest(url: url)
             req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", forHTTPHeaderField: "User-Agent")
-            req.addNgrokBypassHeader()
             req.timeoutInterval = 60
             if let headers {
                 for (field, value) in headers { req.setValue(value, forHTTPHeaderField: field) }

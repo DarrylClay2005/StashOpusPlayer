@@ -95,7 +95,6 @@ final class CollaborativeService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.addNgrokBypassHeader()
         request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = bodyData
@@ -149,7 +148,6 @@ final class CollaborativeService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.addNgrokBypassHeader()
         request.timeoutInterval = 20
 
         do {
@@ -193,7 +191,6 @@ final class CollaborativeService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
-        request.addNgrokBypassHeader()
         request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 20
 

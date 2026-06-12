@@ -646,7 +646,6 @@ struct StreamSearchView: View {
 
                 var request = URLRequest(url: streamURL)
                 request.httpMethod = "GET"
-                request.addNgrokBypassHeader()
                 if !streaming.apiKey.isEmpty {
                     request.setValue("Bearer \(streaming.apiKey)", forHTTPHeaderField: "Authorization")
                 }

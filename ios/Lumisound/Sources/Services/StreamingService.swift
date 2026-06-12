@@ -190,9 +190,9 @@ final class StreamingService: ObservableObject {
     static let preferredFormatKey = "streaming_preferred_format"
     static let downloadPathKey    = "download_path_key"
 
-    /// Public URL baked into the app — routed via SwarmPanel ngrok proxy so
+    /// Public URL baked into the app — routed via a Cloudflare Tunnel so
     /// it works anywhere without home WiFi. Users can override in Settings.
-    static let defaultBridgeURL = "https://unexpired-swung-magical.ngrok-free.dev"
+    static let defaultBridgeURL = "https://lumisound-bridge.xenusanimations.studio"
 
     // MARK: Available formats
 
@@ -1122,7 +1122,6 @@ final class StreamingService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.addNgrokBypassHeader()
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
@@ -1206,7 +1205,6 @@ final class StreamingService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.addNgrokBypassHeader()
         if !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
