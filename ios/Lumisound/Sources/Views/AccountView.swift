@@ -18,6 +18,9 @@ struct AccountView: View {
 
     // DOB
     @State private var isPickingDOB = false
+
+    // User ID copy feedback
+    @State private var didCopyUserID = false
     @State private var draftDOB = Date()
     @State private var isSavingDOB = false
 
@@ -169,6 +172,13 @@ struct AccountView: View {
                     }
                     .disabled(account.isSyncing)
 
+                    // Backup history — automatic snapshots taken before every
+                    // push/restore, in case a bad sync overwrites server data.
+                    NavigationLink(destination: BackupHistoryView()) {
+                        Label("Backup History", systemImage: "clock.arrow.circlepath")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+
                     // Error message
                     if let err = account.errorMessage {
                         Label(err, systemImage: "exclamationmark.triangle")
@@ -197,10 +207,38 @@ struct AccountView: View {
                             .foregroundStyle(AppTheme.textSecondary)
                     }
                     .foregroundStyle(AppTheme.textPrimary)
+
+                    if let stats = account.stats {
+                        LabeledContent("Total Plays") {
+                            Text("\(stats.totalPlays)")
+                                .font(AppTheme.monoFont(size: 14))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                        LabeledContent("Listening Time") {
+                            Text(formattedListenTime(stats.totalListenSeconds))
+                                .font(AppTheme.monoFont(size: 14))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                        if let topArtist = stats.topArtists.first {
+                            LabeledContent("Top Artist") {
+                                Text(topArtist.artist)
+                                    .font(AppTheme.bodyFont(size: 13))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                            .foregroundStyle(AppTheme.textPrimary)
+                        }
+                    }
                 } header: {
                     sectionHeader("Library")
                 }
                 .listRowBackground(AppTheme.surface)
+                .task {
+                    await account.fetchStats()
+                }
 
                 // MARK: Account Info Section
                 Section {
@@ -210,6 +248,35 @@ struct AccountView: View {
                             .foregroundStyle(AppTheme.textSecondary)
                     }
                     .foregroundStyle(AppTheme.textPrimary)
+
+                    // Permanent account identifier — assigned once at signup and
+                    // never changes, even if username/email/display name do.
+                    // Useful to include when reporting a bug or contacting support.
+                    if let userID = account.currentUser?.id {
+                        Button {
+                            UIPasteboard.general.string = userID
+                            withAnimation { didCopyUserID = true }
+                            Task {
+                                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                withAnimation { didCopyUserID = false }
+                            }
+                        } label: {
+                            LabeledContent("User ID") {
+                                HStack(spacing: 6) {
+                                    Text(userID)
+                                        .font(AppTheme.monoFont(size: 11))
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Image(systemName: didCopyUserID ? "checkmark" : "doc.on.doc")
+                                        .font(.caption2)
+                                        .foregroundStyle(didCopyUserID ? AppTheme.success : AppTheme.dynamicAccent)
+                                }
+                                .foregroundStyle(AppTheme.textSecondary)
+                            }
+                            .foregroundStyle(AppTheme.textPrimary)
+                        }
+                        .buttonStyle(.plain)
+                    }
 
                     if let email = account.currentUser?.email, !email.isEmpty {
                         LabeledContent("Email") {
@@ -327,6 +394,45 @@ struct AccountView: View {
                 }
                 .listRowBackground(AppTheme.surface)
 
+                // MARK: Social / Discovery Section
+                Section {
+                    NavigationLink(destination: DiscoverView()) {
+                        Label("Discover", systemImage: "sparkles")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+
+                    Toggle(isOn: Binding(
+                        get: { account.currentUser?.shareListeningActivity ?? false },
+                        set: { newValue in Task { await account.setShareListeningActivity(newValue) } }
+                    )) {
+                        Label("Share Listening Activity", systemImage: "person.wave.2")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                    .tint(AppTheme.dynamicAccent)
+                } header: {
+                    sectionHeader("Discovery")
+                } footer: {
+                    Text("When on, the song titles and artists you play (not files or links) appear in Discover's activity feed and count toward Trending for other signed-in users.")
+                        .font(AppTheme.bodyFont(size: 12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .listRowBackground(AppTheme.surface)
+
+                // MARK: Security Section
+                Section {
+                    NavigationLink(destination: ActiveSessionsView()) {
+                        Label("Active Sessions", systemImage: "laptopcomputer.and.iphone")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                    NavigationLink(destination: ChangePasswordView()) {
+                        Label("Change Password", systemImage: "key")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                } header: {
+                    sectionHeader("Security")
+                }
+                .listRowBackground(AppTheme.surface)
+
                 // MARK: Danger Section
                 Section {
                     Button(role: .destructive) {
@@ -335,6 +441,15 @@ struct AccountView: View {
                         HStack {
                             Spacer()
                             Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                            Spacer()
+                        }
+                    }
+
+                    NavigationLink(destination: DeleteAccountView()) {
+                        HStack {
+                            Spacer()
+                            Label("Delete Account", systemImage: "trash")
+                                .foregroundStyle(AppTheme.error)
                             Spacer()
                         }
                     }
@@ -350,6 +465,8 @@ struct AccountView: View {
         .onChange(of: account.isLoggedIn) { loggedIn in
             if loggedIn {
                 Task { await account.pullSync(library: library) }
+            } else {
+                dismiss()
             }
         }
         .confirmationDialog("Log Out", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
@@ -375,6 +492,15 @@ struct AccountView: View {
             return String(parts[0].prefix(1) + parts[1].prefix(1)).uppercased()
         }
         return String(name.prefix(1)).uppercased()
+    }
+
+    private func formattedListenTime(_ seconds: Int) -> String {
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        }
+        return "\(minutes)m"
     }
 
     private func sectionHeader(_ text: String) -> some View {

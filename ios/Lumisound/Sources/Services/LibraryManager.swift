@@ -31,6 +31,25 @@ final class LibraryManager: ObservableObject {
     private let artwork: ArtworkService
     private let importer = DocumentImportService()
 
+    /// Tracks how many scans (media library, local documents, watched folders,
+    /// specific-directory) are currently in flight. `isScanning` reflects
+    /// whether *any* of them are running, so the launch screen and library UI
+    /// stay in "scanning" state for the full duration of a multi-scan launch
+    /// instead of flipping to "done" as soon as the first scan finishes.
+    private var activeScanCount: Int = 0
+
+    private func beginScan() {
+        activeScanCount += 1
+        isScanning = true
+    }
+
+    private func endScan() {
+        activeScanCount = max(0, activeScanCount - 1)
+        if activeScanCount == 0 {
+            isScanning = false
+        }
+    }
+
     private var mediaSongs: [Song] = []
     private var importedSongs: [Song] = []
 
@@ -225,7 +244,9 @@ final class LibraryManager: ObservableObject {
     /// iTunes file sharing, or any subdirectory the user created inside the app folder.
     func scanLocalDocuments() {
         appLog("Scanning local documents directory", category: "library")
+        beginScan()
         Task {
+            defer { endScan() }
             let fm = FileManager.default
             guard let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
 
@@ -275,7 +296,9 @@ final class LibraryManager: ObservableObject {
     /// any new audio files not already in the library.
     func scanWatchedFolders(using folderService: MusicFolderService) {
         appLog("scanWatchedFolders: starting", category: "library")
+        beginScan()
         Task {
+            defer { endScan() }
             let urls = folderService.resolveAll()
             guard !urls.isEmpty else {
                 appLog("scanWatchedFolders: no accessible watched folders", category: "library")
@@ -321,10 +344,10 @@ final class LibraryManager: ObservableObject {
     /// security-scoped bookmark — just a direct filesystem path the app can enumerate.
     func scanSpecificDirectory(_ url: URL) {
         appLog("scanSpecificDirectory: \(url.lastPathComponent)", category: "library")
-        isScanning = true
+        beginScan()
         lastScanResult = nil
         Task {
-            defer { isScanning = false }
+            defer { endScan() }
 
             let fm = FileManager.default
             var candidates: [URL] = []
@@ -360,10 +383,19 @@ final class LibraryManager: ObservableObject {
         }
     }
 
-    /// Convenience: scans both the local Documents folder and all user-selected watched folders.
+    /// Convenience: re-scans every local source — the Documents folder, all
+    /// user-selected watched folders, and (if previously granted) the Apple
+    /// Music library — so the "Refresh" button picks up files added or
+    /// changed outside the app since the last scan, not just on next launch.
     func scanAll(folderService: MusicFolderService) {
         scanLocalDocuments()
         scanWatchedFolders(using: folderService)
+        // Only re-scan Apple Music if access was already granted — calling
+        // `scanMediaLibrary()` without that check would trigger a permission
+        // prompt for users who've never used the Apple Music Transfer feature.
+        if MPMediaLibrary.authorizationStatus() == .authorized {
+            scanMediaLibrary()
+        }
     }
 
     func requestAccessAndScan() {
@@ -433,12 +465,13 @@ final class LibraryManager: ObservableObject {
 
         appLog("scanMediaLibrary: starting (attempt \(priorAttempts + 1))", category: "library")
         appBreadcrumb("Started media library scan (attempt \(priorAttempts + 1))")
-        isScanning = true
+        beginScan()
         errorMessage = nil
         scanCrashGuardActive = false
         scanProgress = nil
 
         Task {
+            defer { endScan() }
             // The query itself is the slow, blocking part — keep it off the main actor.
             let items: [MPMediaItem] = await Task.detached(priority: .userInitiated) {
                 MPMediaQuery.songs().items ?? []
@@ -468,12 +501,27 @@ final class LibraryManager: ObservableObject {
             appLog("scanMediaLibrary: found \(scanned.count) song(s)", category: "library")
             self.mediaSongs = scanned
             self.rebuildAllSongs()
-            self.isScanning = false
             self.scanProgress = nil
             // Completed cleanly — reset the crash-loop counter so future launches
             // get the normal 2-attempt grace again rather than accumulating forever.
             defaults.set(0, forKey: Self.scanAttemptCounterKey)
             appBreadcrumb("Media library scan completed: \(scanned.count) song(s)")
+
+            // `Song.init(mediaItem:)` returns nil for items with no `assetURL` —
+            // i.e. Apple Music catalog tracks that are in the library but not
+            // downloaded to this device (cloud-only). Without this message the
+            // "Apple Music Transfer" felt completely broken for anyone whose
+            // library is mostly cloud-streamed: the scan would "complete" having
+            // imported nothing, with no indication why.
+            let skipped = items.count - scanned.count
+            if skipped > 0 {
+                let songWord = skipped == 1 ? "song" : "songs"
+                if scanned.isEmpty {
+                    self.errorMessage = "Found \(skipped) \(songWord) in your Apple Music library, but none are downloaded to this device. Open the Music app, download the songs you want (tap ⋯ → Download), then scan again."
+                } else {
+                    self.errorMessage = "Imported \(scanned.count) song(s). \(skipped) \(songWord) in your Apple Music library aren't downloaded to this device and were skipped — download them in the Music app, then scan again to add them."
+                }
+            }
         }
     }
 
@@ -497,10 +545,11 @@ final class LibraryManager: ObservableObject {
     func importFiles(urls: [URL]) {
         guard !urls.isEmpty else { return }
         appLog("Importing \(urls.count) file(s)", category: "library")
-        isScanning = true
+        beginScan()
         errorMessage = nil
 
         Task {
+            defer { endScan() }
             do {
                 let imported = try await importer.importFiles(from: urls)
                 appLog("Import complete: \(imported.count) file(s) added", category: "library")
@@ -514,7 +563,6 @@ final class LibraryManager: ObservableObject {
                 errorMessage = error.localizedDescription
             }
             rebuildAllSongs()
-            isScanning = false
         }
     }
 

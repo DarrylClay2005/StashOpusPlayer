@@ -33,6 +33,7 @@ final class AudioPlayerManager: ObservableObject {
         didSet {
             if currentSong?.id != oldValue?.id {
                 Task { await updateNowPlayingArtwork(for: currentSong) }
+                applyTrackAudioSettings(previousID: oldValue?.id)
             }
         }
     }
@@ -60,9 +61,46 @@ final class AudioPlayerManager: ObservableObject {
     }
     @Published var repeatMode: RepeatMode = .off
     @Published var shuffleEnabled = false
+    /// Queue order captured before shuffle was enabled, so it can be restored
+    /// when shuffle is turned off again.
+    private var preShuffleQueue: [Song]?
     @Published var audioSettings = AudioSettings() {
-        didSet { applyAudioSettings() }
+        didSet {
+            applyAudioSettings()
+            guard !isSwitchingTrack else { return }
+            if isUsingTrackAudioSettings, let id = currentSong?.id {
+                perTrackAudioSettings[id] = audioSettings
+                PersistenceService.shared.saveTrackAudioSettings(perTrackAudioSettings)
+                onTrackAudioSettingsChanged?()
+            } else {
+                defaultAudioSettings = audioSettings
+            }
+        }
     }
+
+    /// The user's global/default audio settings — applied to any track that
+    /// doesn't have its own saved per-track override. Mirrors `audioSettings`
+    /// except while a per-track override (or a programmatic track switch) is active.
+    private(set) var defaultAudioSettings = AudioSettings()
+
+    /// Per-track audio settings overrides, keyed by `Song.id`. Loaded from disk
+    /// at init and kept in sync with `PersistenceService` on every change.
+    @Published private(set) var perTrackAudioSettings: [String: AudioSettings] = PersistenceService.shared.loadTrackAudioSettings()
+
+    /// Whether the currently playing track has a saved per-track override active
+    /// (i.e. `audioSettings` reflects that track's own settings, not the global default).
+    @Published private(set) var isUsingTrackAudioSettings = false
+
+    /// Suppresses the `audioSettings` didSet's save-as-default/save-per-track logic
+    /// while `applyTrackAudioSettings` is itself assigning `audioSettings` during a
+    /// track switch — that assignment reflects a *recall* of previously saved
+    /// settings, not a new user edit, and must not overwrite the saved values.
+    private var isSwitchingTrack = false
+
+    /// Notifies observers (used by `StashOpusPlayerApp` to push to the backend)
+    /// whenever the per-track settings map changes.
+    var onTrackAudioSettingsChanged: (() -> Void)?
+
     @Published var errorMessage: String?
 
     // Auto-Radio
@@ -87,6 +125,11 @@ final class AudioPlayerManager: ObservableObject {
 
     private let timePitch = AVAudioUnitTimePitch()
     private let equalizer = AVAudioUnitEQ(numberOfBands: 10)
+    // Brick-wall peak limiter placed at the very end of the chain. Lets
+    // `audioSettings.volume` boost gain above 100% (up to `maxVolume`) without
+    // the boosted signal clipping — the limiter clamps transient peaks instead
+    // of letting them hard-clip in `mainMixerNode`.
+    private let limiter = AVAudioUnitDynamicsProcessor()
 
     // MARK: Private — Spatial / Special-Effect Nodes
 
@@ -183,6 +226,7 @@ final class AudioPlayerManager: ObservableObject {
     private var backgroundObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
+    private var engineConfigChangeObserver: NSObjectProtocol?
     private var isUsingOpusPlayer: Bool { opusPlayer != nil }
 
     // Schedule generation counter — incremented before every node stop/reschedule.
@@ -192,6 +236,10 @@ final class AudioPlayerManager: ObservableObject {
 
     // Audio interruption / route change
     private var wasInterrupted = false
+    // True when playback was auto-paused because the active output route
+    // disappeared (e.g. Bluetooth disconnect) — used to auto-resume when a
+    // route becomes available again.
+    private var pausedByRouteChange = false
 
     // MARK: Init / Deinit
 
@@ -228,7 +276,7 @@ final class AudioPlayerManager: ObservableObject {
         vibratoLink?.invalidate()
         // `removeObserver(self)` is a no-op for closure-based registrations below
         // (they're keyed on an internal proxy, not `self`) — must remove by token.
-        for token in [backgroundObserver, interruptionObserver, routeChangeObserver, opusEndObserver, opusFailObserver] {
+        for token in [backgroundObserver, interruptionObserver, routeChangeObserver, engineConfigChangeObserver, opusEndObserver, opusFailObserver] {
             if let token { NotificationCenter.default.removeObserver(token) }
         }
         let center = MPRemoteCommandCenter.shared()
@@ -238,6 +286,79 @@ final class AudioPlayerManager: ObservableObject {
         center.nextTrackCommand.removeTarget(nil)
         center.previousTrackCommand.removeTarget(nil)
         center.changePlaybackPositionCommand.removeTarget(nil)
+    }
+
+    // MARK: - Per-Track Audio Settings
+
+    /// Called whenever `currentSong` changes to a different track. Saves the
+    /// outgoing track's settings (if it had a custom override active) and loads
+    /// the incoming track's saved override, falling back to the global default.
+    private func applyTrackAudioSettings(previousID: String?) {
+        if let previousID, isUsingTrackAudioSettings {
+            perTrackAudioSettings[previousID] = audioSettings
+            PersistenceService.shared.saveTrackAudioSettings(perTrackAudioSettings)
+        }
+
+        isSwitchingTrack = true
+        if let id = currentSong?.id, let saved = perTrackAudioSettings[id] {
+            isUsingTrackAudioSettings = true
+            audioSettings = saved
+        } else {
+            isUsingTrackAudioSettings = false
+            audioSettings = defaultAudioSettings
+        }
+        isSwitchingTrack = false
+    }
+
+    /// Saves the current `audioSettings` (EQ, effects, volume, etc.) as a
+    /// per-track override for the currently playing song, so they're recalled
+    /// automatically the next time this track plays.
+    func saveAudioSettingsForCurrentTrack() {
+        guard let id = currentSong?.id else { return }
+        isUsingTrackAudioSettings = true
+        perTrackAudioSettings[id] = audioSettings
+        PersistenceService.shared.saveTrackAudioSettings(perTrackAudioSettings)
+        onTrackAudioSettingsChanged?()
+    }
+
+    /// Removes the saved per-track override for the currently playing song and
+    /// reverts playback to the global default settings.
+    func clearAudioSettingsForCurrentTrack() {
+        guard let id = currentSong?.id, perTrackAudioSettings[id] != nil else { return }
+        perTrackAudioSettings.removeValue(forKey: id)
+        PersistenceService.shared.saveTrackAudioSettings(perTrackAudioSettings)
+        isUsingTrackAudioSettings = false
+        isSwitchingTrack = true
+        audioSettings = defaultAudioSettings
+        isSwitchingTrack = false
+        onTrackAudioSettingsChanged?()
+    }
+
+    /// Called once at launch to restore the user's global default audio settings
+    /// from disk. `restorePlaybackState()` (called earlier, during `init()`) may
+    /// already have switched `audioSettings` to a per-track override for the
+    /// restored `currentSong` — in that case only `defaultAudioSettings` is
+    /// updated here, leaving the active per-track settings in place.
+    func restoreDefaultAudioSettings(_ settings: AudioSettings) {
+        defaultAudioSettings = settings
+        guard !isUsingTrackAudioSettings else { return }
+        isSwitchingTrack = true
+        audioSettings = settings
+        isSwitchingTrack = false
+    }
+
+    /// Replaces the entire per-track settings map (used when restoring from a
+    /// server sync). If the currently playing track has an override in the new
+    /// map, it's applied immediately.
+    func restorePerTrackAudioSettings(_ map: [String: AudioSettings]) {
+        perTrackAudioSettings = map
+        PersistenceService.shared.saveTrackAudioSettings(map)
+        if let id = currentSong?.id, let saved = map[id] {
+            isUsingTrackAudioSettings = true
+            isSwitchingTrack = true
+            audioSettings = saved
+            isSwitchingTrack = false
+        }
     }
 
     // MARK: - Public Playback Controls
@@ -250,6 +371,11 @@ final class AudioPlayerManager: ObservableObject {
         position = 0
         gaplessScheduled = false
         pendingNextIndex = nil
+        // A new queue invalidates any stashed pre-shuffle order from the previous one.
+        preShuffleQueue = nil
+        if shuffleEnabled {
+            shuffleQueue()
+        }
         if autoplay {
             playCurrent(from: 0)
         } else {
@@ -361,14 +487,9 @@ final class AudioPlayerManager: ObservableObject {
             return
         }
 
-        let nextIndex: Int
-        if shuffleEnabled && queue.count > 1 {
-            // Exclude currentIndex so the same track is never picked twice in a row.
-            let pool = queue.indices.filter { $0 != currentIndex }
-            nextIndex = pool.randomElement() ?? currentIndex
-        } else {
-            nextIndex = currentIndex + 1
-        }
+        // Shuffle mode reorders `queue` itself (see toggleShuffle/shuffleQueue) so the
+        // Up Next/Queue UI always matches what plays — just advance sequentially here too.
+        let nextIndex = currentIndex + 1
 
         if nextIndex < queue.count {
             currentIndex = nextIndex
@@ -419,7 +540,44 @@ final class AudioPlayerManager: ObservableObject {
 
     func toggleShuffle() {
         shuffleEnabled.toggle()
+        if shuffleEnabled {
+            shuffleQueue()
+        } else {
+            restoreUnshuffledQueue()
+        }
         updateNowPlaying()
+    }
+
+    /// Reorders `queue` so everything after the currently-playing track is shuffled —
+    /// this keeps the Up Next/Queue UI in sync with what `skipToNext()` will actually
+    /// play next, and produces a fresh order every time shuffle is turned on (the
+    /// previous unshuffled order is stashed so toggling shuffle off can restore it).
+    private func shuffleQueue() {
+        guard queue.count > 1 else { return }
+        if preShuffleQueue == nil {
+            preShuffleQueue = queue
+        }
+        let currentSongID = currentSong?.id
+        var rest = queue
+        let current = rest.remove(at: currentIndex)
+        rest.shuffle()
+        queue = [current] + rest
+        currentIndex = queue.firstIndex(where: { $0.id == currentSongID }) ?? 0
+        gaplessScheduled = false
+        pendingNextIndex = nil
+    }
+
+    /// Restores the queue order captured before shuffle was turned on.
+    private func restoreUnshuffledQueue() {
+        guard let original = preShuffleQueue else { return }
+        let currentSongID = currentSong?.id
+        queue = original
+        preShuffleQueue = nil
+        if let id = currentSongID, let idx = queue.firstIndex(where: { $0.id == id }) {
+            currentIndex = idx
+        }
+        gaplessScheduled = false
+        pendingNextIndex = nil
     }
 
     // MARK: - Queue Management
@@ -572,8 +730,17 @@ final class AudioPlayerManager: ObservableObject {
             repeatMode: repeatMode,
             shuffleEnabled: shuffleEnabled
         )
-        if let data = try? JSONEncoder().encode(snapshot) {
-            UserDefaults.standard.set(data, forKey: playbackStateKey)
+        // Called on every pause/skip/seek — encoding the full queue (which can be the
+        // entire library, hundreds/thousands of Song structs) synchronously on the main
+        // thread made every playback action feel laggy. Encode + write off-main, wrapped
+        // in a background task so it still finishes if this races app suspension
+        // (e.g. the didEnterBackground save).
+        let key = playbackStateKey
+        Task.detached(priority: .utility) {
+            try? await BackgroundDownloadManager.run(named: "SavePlaybackState") {
+                guard let data = try? JSONEncoder().encode(snapshot) else { return }
+                UserDefaults.standard.set(data, forKey: key)
+            }
         }
     }
 
@@ -681,7 +848,7 @@ final class AudioPlayerManager: ObservableObject {
     private func resetReplayGainForNewTrack() {
         replayGainLinearGain = 1.0
         if audioSettings.replayGainEnabled {
-            crossfadeMixer.outputVolume = min(audioSettings.volume, 1.5)
+            crossfadeMixer.outputVolume = min(audioSettings.volume, AudioSettings.maxVolume)
         }
     }
 
@@ -813,7 +980,7 @@ final class AudioPlayerManager: ObservableObject {
                             let linear = pow(10.0, gain / 20.0)
                             self.replayGainLinearGain = linear
                             // Allow a modest boost above 1.0 when normalising a quiet track.
-                            self.crossfadeMixer.outputVolume = min(linear * self.audioSettings.volume, 1.5)
+                            self.crossfadeMixer.outputVolume = min(linear * self.audioSettings.volume, AudioSettings.maxVolume)
                         }
                     }
                 }
@@ -919,7 +1086,7 @@ final class AudioPlayerManager: ObservableObject {
                             guard let self else { return }
                             let linear = pow(10.0, gain / 20.0)
                             self.replayGainLinearGain = linear
-                            self.crossfadeMixer.outputVolume = min(linear * self.audioSettings.volume, 1.5)
+                            self.crossfadeMixer.outputVolume = min(linear * self.audioSettings.volume, AudioSettings.maxVolume)
                         }
                     }
                 }
@@ -1140,6 +1307,8 @@ final class AudioPlayerManager: ObservableObject {
                 self.opusPlayer?.seek(to: CMTime(seconds: start, preferredTimescale: 600))
                 self.position = start
             }
+            // Keep lock screen / Apple Watch elapsed time in sync (see timerTick).
+            self.updateNowPlaying()
         }
 
         // Track completion → advances to next song normally.
@@ -1376,20 +1545,13 @@ final class AudioPlayerManager: ObservableObject {
     // MARK: - Queue Helpers
 
     /// Resolves which queue index plays after `currentIndex`, WITHOUT mutating any state.
-    /// Shuffle picks a random index — callers that schedule audio based on this result
-    /// (`peekNextSong`) cache it in `pendingNextIndex` so `advanceIndex()` can later
-    /// commit to that exact same index rather than rolling a fresh (and likely
-    /// different) random pick.
+    /// Shuffle reorders `queue` itself when enabled (see `shuffleQueue`), so the
+    /// upcoming index is always just the next sequential slot — keeping this in sync
+    /// with what the Up Next/Queue UI displays.
     private func resolveNextIndex() -> Int? {
         guard !queue.isEmpty else { return nil }
         if repeatMode == .one { return currentIndex }
-        let nextIndex: Int
-        if shuffleEnabled && queue.count > 1 {
-            let pool = queue.indices.filter { $0 != currentIndex }
-            nextIndex = pool.randomElement() ?? currentIndex
-        } else {
-            nextIndex = currentIndex + 1
-        }
+        let nextIndex = currentIndex + 1
         if nextIndex < queue.count { return nextIndex }
         if repeatMode == .all { return 0 }
         return nil
@@ -1524,6 +1686,30 @@ final class AudioPlayerManager: ObservableObject {
         ) { [weak self] notification in
             Task { @MainActor in self?.handleRouteChange(notification) }
         }
+
+        // The hardware can change sample rate / channel layout (e.g. switching to/from
+        // AirPlay or certain Bluetooth devices) without firing an interruption or route
+        // change with `.oldDeviceUnavailable` — `AVAudioEngine` just stops itself. Left
+        // unhandled, `isPlaying` stays true but the engine is silent and never recovers,
+        // which is exactly the "music randomly stops" symptom users hit.
+        engineConfigChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleEngineConfigurationChange() }
+        }
+    }
+
+    private func handleEngineConfigurationChange() {
+        guard !isUsingOpusPlayer, isPlaying else { return }
+        appWarn("Audio engine configuration changed — restarting engine to resume playback", category: "audio")
+        guard !engine.isRunning else { return }
+        try? AVAudioSession.sharedInstance().setActive(true)
+        startEngineIfNeeded()
+        if !activeNode.isPlaying {
+            activeNode.play()
+        }
     }
 
     private func handleAudioInterruption(_ notification: Notification) {
@@ -1563,9 +1749,25 @@ final class AudioPlayerManager: ObservableObject {
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
         else { return }
 
-        if reason == .oldDeviceUnavailable {
+        switch reason {
+        case .oldDeviceUnavailable:
             appLog("Audio route changed — output device removed, pausing", category: "audio")
             pause()
+            pausedByRouteChange = true
+        case .newDeviceAvailable:
+            // A Bluetooth device (or other output) just connected. If playback was
+            // paused because the previous route disappeared (headphones unplugged,
+            // Bluetooth dropped), resume now that audio has somewhere to go again —
+            // otherwise the user has to manually hit play every time their
+            // Bluetooth device reconnects.
+            if pausedByRouteChange {
+                pausedByRouteChange = false
+                appLog("Audio route changed — output device available, resuming", category: "audio")
+                try? AVAudioSession.sharedInstance().setActive(true)
+                resume()
+            }
+        default:
+            break
         }
     }
 
@@ -1576,6 +1778,8 @@ final class AudioPlayerManager: ObservableObject {
         engine.attach(crossfadeMixer)
         engine.attach(timePitch)
         engine.attach(equalizer)
+        engine.attach(limiter)
+        configureLimiter()
 
         // Both player nodes connect to separate mixer inputs so their volumes
         // can be ramped independently during a crossfade.
@@ -1583,9 +1787,25 @@ final class AudioPlayerManager: ObservableObject {
         engine.connect(secondaryNode, to: crossfadeMixer, fromBus: 0, toBus: 1, format: nil)
         engine.connect(crossfadeMixer, to: timePitch, format: nil)
         engine.connect(timePitch, to: equalizer, format: nil)
-        engine.connect(equalizer, to: engine.mainMixerNode, format: nil)
+        engine.connect(equalizer, to: limiter, format: nil)
+        engine.connect(limiter, to: engine.mainMixerNode, format: nil)
 
         isEngineConfigured = true
+    }
+
+    /// Configures `limiter` as a fast brick-wall peak limiter: threshold just
+    /// under 0 dBFS with a very high ratio, near-instant attack, and a short
+    /// release. With this in place, raising `crossfadeMixer.outputVolume`
+    /// above 1.0 (via `audioSettings.volume`, up to `AudioSettings.maxVolume`)
+    /// makes playback louder without the output signal hard-clipping.
+    private func configureLimiter() {
+        limiter.preGain = 0
+        limiter.threshold = -1.0     // dB — start limiting just below full scale
+        limiter.headRoom = 1.0       // dB of headroom above the threshold
+        limiter.attackTime = 0.001   // seconds — fast enough to catch transients
+        limiter.releaseTime = 0.05   // seconds — short so it doesn't pump audibly
+        limiter.masterGain = 0
+        limiter.bypass = false
     }
 
     private func configureEqualizer() {
@@ -1633,6 +1853,12 @@ final class AudioPlayerManager: ObservableObject {
                 try engine.start()
                 appLog("Audio engine recovered after rebuild", category: "audio")
                 errorMessage = nil
+                // `configureEqualizer()` resets every band to gain=0/bypass=true —
+                // without reapplying the user's EQ/effects settings here, an engine
+                // rebuild (triggered by an interruption, route change, or hardware
+                // config change) silently wipes the EQ until the user next touches
+                // a slider. Reapply so it picks up exactly where it left off.
+                applyAudioSettings()
             } catch {
                 errorMessage = error.localizedDescription
                 appError("Audio engine failed to recover: \(error.localizedDescription)", category: "audio")
@@ -1848,7 +2074,11 @@ final class AudioPlayerManager: ObservableObject {
                         gain += boost
                     }
                 }
-                band.gain = gain
+                // AVAudioUnitEQ clamps band gain to -96...24 dB internally — combining a
+                // +12 dB EQ slider with a +15 dB bass boost (27 dB) silently hit that
+                // ceiling, so the boost had less audible effect than its displayed value
+                // implied. Clamp explicitly so the applied gain matches what's shown.
+                band.gain = min(max(gain, -96), 24)
             }
         }
 
@@ -1875,7 +2105,7 @@ final class AudioPlayerManager: ObservableObject {
         // `audioSettings` didSet) refreshes the output level without clobbering the
         // per-track gain the analysis already computed.
         if audioSettings.replayGainEnabled {
-            crossfadeMixer.outputVolume = min(replayGainLinearGain * audioSettings.volume, 1.5)
+            crossfadeMixer.outputVolume = min(replayGainLinearGain * audioSettings.volume, AudioSettings.maxVolume)
         } else {
             crossfadeMixer.outputVolume = 1.0
         }
@@ -1902,6 +2132,15 @@ final class AudioPlayerManager: ObservableObject {
     private func timerTick() {
         updatePositionFromPlayer()
 
+        // Belt-and-braces recovery: if we think we're playing but the engine has
+        // silently stopped (and no interruption/route/config-change notification
+        // fired to tell us), restart it here. Without this, `isPlaying` stays true
+        // forever with no audio and no track advance — the "music randomly stops"
+        // bug — until the user manually pauses/resumes.
+        if isPlaying, !isUsingOpusPlayer, !engine.isRunning {
+            handleEngineConfigurationChange()
+        }
+
         // AB Repeat enforcement
         if abRepeatEnabled,
            let start = abRepeatStart,
@@ -1909,6 +2148,12 @@ final class AudioPlayerManager: ObservableObject {
            position >= end {
             seek(to: start)
         }
+
+        // Keep the lock screen / Apple Watch / CarPlay "Now Playing" elapsed time and
+        // playback-rate in sync with actual position — without this, those surfaces
+        // only refresh on play/pause/track-change events and can visibly drift from
+        // (or briefly disagree with) the in-app scrubber.
+        updateNowPlaying()
     }
 
     private func updatePositionFromPlayer() {

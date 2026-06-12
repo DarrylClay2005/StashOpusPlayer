@@ -67,6 +67,7 @@ private struct ShareModeView: View {
     let streaming: StreamingService
 
     @State private var didCopy = false
+    @State private var didCopyCode = false
 
     private var shareLink: String? {
         guard let token = collaborativeService.shareToken else { return nil }
@@ -118,6 +119,41 @@ private struct ShareModeView: View {
                     }
                     .padding(12)
                     .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(.horizontal)
+                }
+
+                // Share code area
+                if let code = collaborativeService.shareToken {
+                    VStack(spacing: 12) {
+                        Text("Share Code")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        // A short code others can type into "Open Shared Playlist"
+                        // — easier to read aloud or retype than the full link below.
+                        Button {
+                            UIPasteboard.general.string = code
+                            withAnimation { didCopyCode = true }
+                            Task {
+                                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                withAnimation { didCopyCode = false }
+                            }
+                        } label: {
+                            HStack {
+                                Text(code)
+                                    .font(.system(.title2, design: .monospaced).weight(.bold))
+                                    .kerning(2)
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Spacer()
+                                Image(systemName: didCopyCode ? "checkmark" : "doc.on.doc")
+                                    .foregroundStyle(didCopyCode ? AppTheme.success : AppTheme.dynamicAccent)
+                            }
+                            .padding(12)
+                            .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
                     .padding(.horizontal)
                 }
 
@@ -249,23 +285,26 @@ private struct OpenModeView: View {
         ScrollView {
             VStack(spacing: 24) {
 
-                // Token entry
+                // Code entry
                 VStack(spacing: 12) {
-                    Text("Enter Share Token")
+                    Text("Enter Share Code")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(AppTheme.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     HStack(spacing: 12) {
-                        TextField("e.g. abc123…", text: $tokenInput)
+                        TextField("e.g. AB3KQ7XZ", text: $tokenInput)
                             .foregroundStyle(AppTheme.textPrimary)
                             .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
+                            .textInputAutocapitalization(.characters)
+                            .font(.system(.body, design: .monospaced))
                             .padding(12)
                             .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                         Button {
-                            let trimmed = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let trimmed = tokenInput
+                                .trimmingCharacters(in: .whitespacesAndNewlines)
+                                .uppercased()
                             guard !trimmed.isEmpty else { return }
                             Task {
                                 await collaborativeService.fetchSharedPlaylist(

@@ -107,11 +107,11 @@ struct GlassmorphismArtworkView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(.ultraThinMaterial)
-        // Clip only the bottom corners to match the card
-        .clipShape(
-            RoundedCornerShape(radius: 20, corners: [.bottomLeft, .bottomRight])
-        )
+        // Apply Liquid Glass (iOS 26+) or a material background, then clip
+        // everything — including this view's text content — to only the
+        // bottom corners, to match the card.
+        .adaptiveGlass(in: RoundedCornerShape(radius: 20, corners: [.bottomLeft, .bottomRight]))
+        .clipShape(RoundedCornerShape(radius: 20, corners: [.bottomLeft, .bottomRight]))
     }
 
     private func updateAnimations(playing: Bool) {

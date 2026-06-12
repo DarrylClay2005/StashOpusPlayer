@@ -82,6 +82,9 @@ CREATE TABLE IF NOT EXISTS ios_user_settings (
 ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS date_of_birth DATE NULL;
 ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS avatar_data MEDIUMBLOB NULL;
 
+-- Per-track audio settings overrides, stored as a JSON map of song id -> AudioSettings.
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS track_audio_settings_json MEDIUMTEXT;
+
 -- User library tracking: what songs the user has played/imported
 CREATE TABLE IF NOT EXISTS ios_user_library (
     id VARCHAR(36) PRIMARY KEY,
@@ -186,6 +189,56 @@ CREATE TABLE IF NOT EXISTS ios_shared_playlists (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   is_active BOOLEAN DEFAULT TRUE,
   FOREIGN KEY (owner_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- In-app bug reports submitted from Settings → Help & Feature Guide → Report a Bug.
+-- user_id is nullable since the app is usable without an account.
+CREATE TABLE IF NOT EXISTS ios_bug_reports (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NULL,
+    category VARCHAR(30) DEFAULT 'other',
+    description TEXT NOT NULL,
+    contact_email VARCHAR(255),
+    app_version VARCHAR(20),
+    device_info VARCHAR(255),
+    recent_logs MEDIUMTEXT,
+    status VARCHAR(20) DEFAULT 'open',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_status (status),
+    INDEX idx_created (created_at),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE SET NULL
+);
+
+-- Opt-in flag for the public listening activity / discovery feature.
+-- When TRUE, this user's recent plays (song title/artist only — never file
+-- contents or URLs) are visible to other signed-in users via GET /social/*.
+ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS share_listening_activity BOOLEAN DEFAULT FALSE;
+
+-- Per-user snapshots of sync data (favorites, playlists, settings), taken
+-- automatically before any operation that overwrites that data server-side
+-- (notably POST /user/sync, which replaces all favorites/playlists in one
+-- shot). Lets a user recover if a bad push from a buggy/offline client wipes
+-- their server-side library. Pruned to the most recent N per user.
+CREATE TABLE IF NOT EXISTS ios_user_backups (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    reason VARCHAR(30) NOT NULL,
+    snapshot_json MEDIUMTEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user_created (user_id, created_at),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Per-user audit log of sync activity (push/pull/restore), for diagnosing
+-- "where did my data go" reports without digging through ios_app_logs.
+CREATE TABLE IF NOT EXISTS ios_sync_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    action VARCHAR(20) NOT NULL,
+    details VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user_created (user_id, created_at),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
 -- Fix playlist_id column type in ios_shared_playlists (was INT, must be VARCHAR for UUID strings).

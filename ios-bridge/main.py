@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import pathlib
+import secrets
 import shutil
 import tempfile
 import time
@@ -529,7 +530,17 @@ class LogPlayRequest(BaseModel):
 
 class UpdateSettingsRequest(BaseModel):
     audio_settings_json: Optional[str] = None
+    track_audio_settings_json: Optional[str] = None
     theme_color: Optional[str] = None
+
+
+class BugReportRequest(BaseModel):
+    category: str = "other"
+    description: str
+    contact_email: Optional[str] = None
+    app_version: Optional[str] = None
+    device_info: Optional[str] = None
+    recent_logs: Optional[str] = None
 
 
 class SyncTrack(BaseModel):
@@ -560,6 +571,7 @@ class SyncPushRequest(BaseModel):
     favorites: list[SyncFavorite] = []
     playlists: list[SyncPlaylist] = []
     audio_settings_json: Optional[str] = None
+    track_audio_settings_json: Optional[str] = None
     theme_color: Optional[str] = None
 
 
@@ -575,7 +587,8 @@ class SharePlaylistRequest(BaseModel):
 
 
 def _user_dict(row: tuple) -> dict:
-    """Map a (id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth) row."""
+    """Map a (id, username, email, display_name, avatar_url, created_at, last_login,
+    date_of_birth, share_listening_activity) row."""
     return {
         "id": row[0],
         "username": row[1],
@@ -585,6 +598,7 @@ def _user_dict(row: tuple) -> dict:
         "created_at": row[5].isoformat() if row[5] else None,
         "last_login": row[6].isoformat() if row[6] else None,
         "date_of_birth": row[7].isoformat() if len(row) > 7 and row[7] else None,
+        "share_listening_activity": bool(row[8]) if len(row) > 8 else False,
     }
 
 
@@ -1013,7 +1027,8 @@ async def register(body: RegisterRequest, request: Request):
             token = create_token(user_id, token_id)
 
             await cur.execute(
-                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth "
+                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth, "
+                "share_listening_activity "
                 "FROM ios_users WHERE id = %s",
                 (user_id,),
             )
@@ -1077,7 +1092,8 @@ async def login(body: LoginRequest, request: Request):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth "
+                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth, "
+                "share_listening_activity "
                 "FROM ios_users WHERE id = %s",
                 (user_id,),
             )
@@ -1098,6 +1114,124 @@ async def logout(payload: dict = Depends(get_current_user)):
                 )
 
 
+@app.get("/auth/sessions")
+async def list_sessions(payload: dict = Depends(get_current_user)):
+    """Lists this account's active logins (one per device/sign-in), so a user
+    can spot and revoke a session they don't recognize."""
+    user_id = payload["sub"]
+    current_token_id = payload.get("jti")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT token_id, device_name, created_at, expires_at
+                FROM ios_user_sessions
+                WHERE user_id = %s AND expires_at > NOW()
+                ORDER BY created_at DESC
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    return {
+        "sessions": [
+            {
+                "token_id": r[0],
+                "device_name": r[1],
+                "created_at": r[2].isoformat() if r[2] else None,
+                "expires_at": r[3].isoformat() if r[3] else None,
+                "is_current": r[0] == current_token_id,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.delete("/auth/sessions/{token_id}", status_code=204)
+async def revoke_session(token_id: str, payload: dict = Depends(get_current_user)):
+    """Signs out a specific device by deleting its session. A user can revoke
+    any of their own sessions, including (deliberately) the current one."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM ios_user_sessions WHERE token_id = %s AND user_id = %s",
+                (token_id, user_id),
+            )
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@app.post("/auth/change-password", status_code=204)
+async def change_password(body: ChangePasswordRequest, payload: dict = Depends(get_current_user)):
+    """Changes the account password, then revokes every other session so a
+    stolen/old token can't keep using the previous password's session."""
+    user_id = payload["sub"]
+    current_token_id = payload.get("jti")
+
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT password_hash FROM ios_users WHERE id = %s", (user_id,))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=401, detail="User not found")
+
+            if not await verify_password_async(body.current_password, row[0]):
+                raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+            new_hash = await hash_password_async(body.new_password)
+            await cur.execute(
+                "UPDATE ios_users SET password_hash = %s WHERE id = %s", (new_hash, user_id)
+            )
+            # Sign out every other device — keep only the session used to make this request.
+            await cur.execute(
+                "DELETE FROM ios_user_sessions WHERE user_id = %s AND token_id != %s",
+                (user_id, current_token_id),
+            )
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str
+
+
+@app.post("/auth/delete-account", status_code=204)
+async def delete_account(body: DeleteAccountRequest, payload: dict = Depends(get_current_user)):
+    """Permanently deletes the account and all associated data. Requires the
+    current password as confirmation. Cascading foreign keys on ios_users
+    remove playlists, favorites, history, settings, backups, uploads, etc."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT password_hash FROM ios_users WHERE id = %s", (user_id,))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=401, detail="User not found")
+
+            if not await verify_password_async(body.password, row[0]):
+                raise HTTPException(status_code=401, detail="Incorrect password")
+
+            await cur.execute("DELETE FROM ios_users WHERE id = %s", (user_id,))
+
+    # Remove the user's uploaded music/gallery files from disk — the DB rows
+    # describing them were just cascade-deleted, but the files themselves
+    # live outside the database under USER_MUSIC_DIR/{user_id}/.
+    music_dir = _user_music_dir(user_id)
+    if music_dir and music_dir.exists():
+        shutil.rmtree(music_dir, ignore_errors=True)
+
+    logger.info("delete_account: user %s deleted their account", user_id)
+
+
 @app.get("/auth/me")
 async def me(payload: dict = Depends(get_current_user)):
     user_id = payload["sub"]
@@ -1105,7 +1239,8 @@ async def me(payload: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth "
+                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth, "
+                "share_listening_activity "
                 "FROM ios_users WHERE id = %s AND is_active = TRUE",
                 (user_id,),
             )
@@ -1154,7 +1289,8 @@ async def update_me(body: UpdateMeRequest, payload: dict = Depends(get_current_u
                 )
 
             await cur.execute(
-                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth "
+                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth, "
+                "share_listening_activity "
                 "FROM ios_users WHERE id = %s AND is_active = TRUE",
                 (user_id,),
             )
@@ -1163,6 +1299,27 @@ async def update_me(body: UpdateMeRequest, payload: dict = Depends(get_current_u
     if not row:
         raise HTTPException(status_code=401, detail="User not found")
     return _user_dict(row)
+
+
+class PrivacyRequest(BaseModel):
+    share_listening_activity: bool
+
+
+@app.put("/user/privacy")
+async def update_privacy(body: PrivacyRequest, payload: dict = Depends(get_current_user)):
+    """Toggles whether this user's recent plays (title/artist only) are
+    visible to other signed-in users via GET /social/activity and
+    /social/discover."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_users SET share_listening_activity = %s WHERE id = %s AND is_active = TRUE",
+                (body.share_listening_activity, user_id),
+            )
+
+    return {"share_listening_activity": body.share_listening_activity}
 
 
 # ---------------------------------------------------------------------------
@@ -1567,6 +1724,55 @@ async def get_history(
     ]
 
 
+@app.get("/user/stats")
+async def get_stats(payload: dict = Depends(get_current_user)):
+    """Lifetime listening stats derived from ios_play_history: total plays,
+    total listening time, and top artists/tracks. Powers an "Stats" summary
+    on the Account screen."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COUNT(*), COALESCE(SUM(listen_seconds), 0) FROM ios_play_history WHERE user_id = %s",
+                (user_id,),
+            )
+            total_plays, total_seconds = await cur.fetchone()
+
+            await cur.execute(
+                """
+                SELECT artist, COUNT(*) AS plays
+                FROM ios_play_history
+                WHERE user_id = %s AND artist IS NOT NULL AND artist != ''
+                GROUP BY artist
+                ORDER BY plays DESC
+                LIMIT 5
+                """,
+                (user_id,),
+            )
+            top_artists = await cur.fetchall()
+
+            await cur.execute(
+                """
+                SELECT title, artist, COUNT(*) AS plays
+                FROM ios_play_history
+                WHERE user_id = %s AND title IS NOT NULL AND title != ''
+                GROUP BY title, artist
+                ORDER BY plays DESC
+                LIMIT 5
+                """,
+                (user_id,),
+            )
+            top_tracks = await cur.fetchall()
+
+    return {
+        "total_plays": total_plays,
+        "total_listen_seconds": int(total_seconds),
+        "top_artists": [{"artist": r[0], "play_count": r[1]} for r in top_artists],
+        "top_tracks": [{"title": r[0], "artist": r[1], "play_count": r[2]} for r in top_tracks],
+    }
+
+
 # ---------------------------------------------------------------------------
 # User Settings Endpoints
 # ---------------------------------------------------------------------------
@@ -1579,19 +1785,25 @@ async def get_settings(payload: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT audio_settings_json, theme_color, updated_at "
+                "SELECT audio_settings_json, track_audio_settings_json, theme_color, updated_at "
                 "FROM ios_user_settings WHERE user_id = %s",
                 (user_id,),
             )
             row = await cur.fetchone()
 
     if not row:
-        return {"audio_settings_json": None, "theme_color": "#EC4079", "updated_at": None}
+        return {
+            "audio_settings_json": None,
+            "track_audio_settings_json": None,
+            "theme_color": "#EC4079",
+            "updated_at": None,
+        }
 
     return {
         "audio_settings_json": row[0],
-        "theme_color": row[1],
-        "updated_at": row[2].isoformat() if row[2] else None,
+        "track_audio_settings_json": row[1],
+        "theme_color": row[2],
+        "updated_at": row[3].isoformat() if row[3] else None,
     }
 
 
@@ -1607,24 +1819,29 @@ async def update_settings(
             # Upsert settings row
             await cur.execute(
                 """
-                INSERT INTO ios_user_settings (user_id, audio_settings_json, theme_color)
-                VALUES (%s, %s, %s)
+                INSERT INTO ios_user_settings
+                    (user_id, audio_settings_json, track_audio_settings_json, theme_color)
+                VALUES (%s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     audio_settings_json = IF(%s IS NULL, audio_settings_json, %s),
+                    track_audio_settings_json = IF(%s IS NULL, track_audio_settings_json, %s),
                     theme_color = IF(%s IS NULL, theme_color, %s)
                 """,
                 (
                     user_id,
                     body.audio_settings_json,
+                    body.track_audio_settings_json,
                     body.theme_color or "#EC4079",
                     body.audio_settings_json,
                     body.audio_settings_json,
+                    body.track_audio_settings_json,
+                    body.track_audio_settings_json,
                     body.theme_color,
                     body.theme_color,
                 ),
             )
             await cur.execute(
-                "SELECT audio_settings_json, theme_color, updated_at "
+                "SELECT audio_settings_json, track_audio_settings_json, theme_color, updated_at "
                 "FROM ios_user_settings WHERE user_id = %s",
                 (user_id,),
             )
@@ -1632,8 +1849,9 @@ async def update_settings(
 
     return {
         "audio_settings_json": row[0],
-        "theme_color": row[1],
-        "updated_at": row[2].isoformat() if row[2] else None,
+        "track_audio_settings_json": row[1],
+        "theme_color": row[2],
+        "updated_at": row[3].isoformat() if row[3] else None,
     }
 
 
@@ -1642,72 +1860,206 @@ async def update_settings(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Sync snapshots, backups, and audit log
+# ---------------------------------------------------------------------------
+
+# How many automatic backups to retain per user (oldest pruned beyond this).
+_MAX_BACKUPS_PER_USER = 20
+
+
+async def _build_sync_snapshot(cur, user_id: str) -> dict:
+    """Gathers a user's favorites, playlists, and settings into the same
+    shape returned by GET /user/sync. Used both to answer pull requests and
+    to take backup snapshots before destructive writes."""
+    # Favorites
+    await cur.execute(
+        "SELECT song_id, title, artist, album FROM ios_user_favorites WHERE user_id = %s",
+        (user_id,),
+    )
+    fav_rows = await cur.fetchall()
+    favorites = [
+        {"song_id": r[0], "title": r[1], "artist": r[2], "album": r[3]}
+        for r in fav_rows
+    ]
+
+    # Playlists with tracks — single JOIN, no N+1
+    await cur.execute(
+        """
+        SELECT p.id, p.name, p.description,
+               t.track_url, t.local_song_id, t.title, t.artist, t.album,
+               t.duration_seconds, t.position
+        FROM ios_user_playlists p
+        LEFT JOIN ios_playlist_tracks t ON t.playlist_id = p.id
+        WHERE p.user_id = %s
+        ORDER BY p.updated_at DESC, t.position ASC
+        """,
+        (user_id,),
+    )
+    pl_join_rows = await cur.fetchall()
+    pl_dict: dict[str, dict] = {}
+    pl_order: list[str] = []
+    for row in pl_join_rows:
+        (pl_id, name, description,
+         t_url, t_local, t_title, t_artist, t_album, t_dur, t_pos) = row
+        if pl_id not in pl_dict:
+            pl_dict[pl_id] = {"id": pl_id, "name": name, "description": description, "tracks": []}
+            pl_order.append(pl_id)
+        if t_url is not None or t_title is not None:
+            pl_dict[pl_id]["tracks"].append({
+                "track_url": t_url,
+                "local_song_id": t_local,
+                "title": t_title,
+                "artist": t_artist,
+                "album": t_album,
+                "duration_seconds": t_dur,
+                "position": t_pos,
+            })
+    playlists = [pl_dict[pid] for pid in pl_order]
+
+    # Settings
+    await cur.execute(
+        "SELECT audio_settings_json, track_audio_settings_json, theme_color "
+        "FROM ios_user_settings WHERE user_id = %s",
+        (user_id,),
+    )
+    settings_row = await cur.fetchone()
+    audio_settings_json = settings_row[0] if settings_row else None
+    track_audio_settings_json = settings_row[1] if settings_row else None
+    theme_color = settings_row[2] if settings_row else "#EC4079"
+
+    return {
+        "favorites": favorites,
+        "playlists": playlists,
+        "audio_settings_json": audio_settings_json,
+        "track_audio_settings_json": track_audio_settings_json,
+        "theme_color": theme_color,
+    }
+
+
+async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
+    """Replaces a user's favorites/playlists/settings with the contents of a
+    snapshot dict (same shape as _build_sync_snapshot's return). Used to
+    restore a backup, with the same replace-everything semantics as a normal
+    sync push."""
+    favorites = snapshot.get("favorites") or []
+    playlists = snapshot.get("playlists") or []
+
+    await cur.execute("DELETE FROM ios_user_favorites WHERE user_id = %s", (user_id,))
+    if favorites:
+        await cur.executemany(
+            """
+            INSERT INTO ios_user_favorites (user_id, song_id, title, artist, album)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            [
+                (user_id, fav.get("song_id"), fav.get("title"), fav.get("artist"), fav.get("album"))
+                for fav in favorites
+            ],
+        )
+
+    await cur.execute("DELETE FROM ios_user_playlists WHERE user_id = %s", (user_id,))
+    if playlists:
+        await cur.executemany(
+            """
+            INSERT INTO ios_user_playlists (id, user_id, name, description)
+            VALUES (%s, %s, %s, %s)
+            """,
+            [
+                (pl.get("id") or str(uuid.uuid4()), user_id, pl.get("name"), pl.get("description"))
+                for pl in playlists
+            ],
+        )
+        all_track_rows = []
+        for pl in playlists:
+            pl_id = pl.get("id") or str(uuid.uuid4())
+            for idx, track in enumerate(pl.get("tracks") or []):
+                all_track_rows.append((
+                    str(uuid.uuid4()),
+                    pl_id,
+                    track.get("track_url"),
+                    track.get("local_song_id"),
+                    track.get("title"),
+                    track.get("artist"),
+                    track.get("album"),
+                    track.get("duration_seconds") or 0,
+                    track.get("position") if track.get("position") is not None else idx,
+                ))
+        if all_track_rows:
+            await cur.executemany(
+                """
+                INSERT INTO ios_playlist_tracks
+                    (id, playlist_id, track_url, local_song_id, title, artist, album,
+                     duration_seconds, position)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                all_track_rows,
+            )
+
+    await cur.execute(
+        """
+        INSERT INTO ios_user_settings
+            (user_id, audio_settings_json, track_audio_settings_json, theme_color)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            audio_settings_json = %s,
+            track_audio_settings_json = %s,
+            theme_color = %s
+        """,
+        (
+            user_id,
+            snapshot.get("audio_settings_json"),
+            snapshot.get("track_audio_settings_json"),
+            snapshot.get("theme_color") or "#EC4079",
+            snapshot.get("audio_settings_json"),
+            snapshot.get("track_audio_settings_json"),
+            snapshot.get("theme_color") or "#EC4079",
+        ),
+    )
+
+
+async def _create_backup(cur, user_id: str, reason: str) -> None:
+    """Snapshots the user's current sync data into ios_user_backups, then
+    prunes old backups beyond _MAX_BACKUPS_PER_USER."""
+    snapshot = await _build_sync_snapshot(cur, user_id)
+    await cur.execute(
+        "INSERT INTO ios_user_backups (id, user_id, reason, snapshot_json) VALUES (%s, %s, %s, %s)",
+        (str(uuid.uuid4()), user_id, reason[:30], json.dumps(snapshot)),
+    )
+    await cur.execute(
+        """
+        DELETE FROM ios_user_backups
+        WHERE user_id = %s
+          AND id NOT IN (
+              SELECT id FROM (
+                  SELECT id FROM ios_user_backups
+                  WHERE user_id = %s
+                  ORDER BY created_at DESC
+                  LIMIT %s
+              ) AS keep
+          )
+        """,
+        (user_id, user_id, _MAX_BACKUPS_PER_USER),
+    )
+
+
+async def _log_sync(cur, user_id: str, action: str, details: str = "") -> None:
+    await cur.execute(
+        "INSERT INTO ios_sync_log (user_id, action, details) VALUES (%s, %s, %s)",
+        (user_id, action[:20], details[:255]),
+    )
+
+
 @app.get("/user/sync")
 async def sync_pull(payload: dict = Depends(get_current_user)):
     user_id = payload["sub"]
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            # Favorites
-            await cur.execute(
-                "SELECT song_id, title, artist, album FROM ios_user_favorites WHERE user_id = %s",
-                (user_id,),
-            )
-            fav_rows = await cur.fetchall()
-            favorites = [
-                {"song_id": r[0], "title": r[1], "artist": r[2], "album": r[3]}
-                for r in fav_rows
-            ]
+            snapshot = await _build_sync_snapshot(cur, user_id)
+            await _log_sync(cur, user_id, "pull")
 
-            # Playlists with tracks — single JOIN, no N+1
-            await cur.execute(
-                """
-                SELECT p.id, p.name, p.description,
-                       t.track_url, t.local_song_id, t.title, t.artist, t.album,
-                       t.duration_seconds, t.position
-                FROM ios_user_playlists p
-                LEFT JOIN ios_playlist_tracks t ON t.playlist_id = p.id
-                WHERE p.user_id = %s
-                ORDER BY p.updated_at DESC, t.position ASC
-                """,
-                (user_id,),
-            )
-            pl_join_rows = await cur.fetchall()
-            pl_dict: dict[str, dict] = {}
-            pl_order: list[str] = []
-            for row in pl_join_rows:
-                (pl_id, name, description,
-                 t_url, t_local, t_title, t_artist, t_album, t_dur, t_pos) = row
-                if pl_id not in pl_dict:
-                    pl_dict[pl_id] = {"id": pl_id, "name": name, "description": description, "tracks": []}
-                    pl_order.append(pl_id)
-                if t_url is not None or t_title is not None:
-                    pl_dict[pl_id]["tracks"].append({
-                        "track_url": t_url,
-                        "local_song_id": t_local,
-                        "title": t_title,
-                        "artist": t_artist,
-                        "album": t_album,
-                        "duration_seconds": t_dur,
-                        "position": t_pos,
-                    })
-            playlists = [pl_dict[pid] for pid in pl_order]
-
-            # Settings
-            await cur.execute(
-                "SELECT audio_settings_json, theme_color FROM ios_user_settings WHERE user_id = %s",
-                (user_id,),
-            )
-            settings_row = await cur.fetchone()
-            audio_settings_json = settings_row[0] if settings_row else None
-            theme_color = settings_row[1] if settings_row else "#EC4079"
-
-    return {
-        "favorites": favorites,
-        "playlists": playlists,
-        "audio_settings_json": audio_settings_json,
-        "theme_color": theme_color,
-    }
+    return snapshot
 
 
 @app.post("/user/sync")
@@ -1719,6 +2071,14 @@ async def sync_push(
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            # Snapshot current state before it's overwritten, so a bad push
+            # (empty/corrupted client data) is always recoverable.
+            await _create_backup(cur, user_id, "pre_push")
+            await _log_sync(
+                cur, user_id, "push",
+                f"{len(body.favorites)} favorites, {len(body.playlists)} playlists",
+            )
+
             # Replace favorites — batch upsert
             await cur.execute(
                 "DELETE FROM ios_user_favorites WHERE user_id = %s", (user_id,)
@@ -1780,18 +2140,23 @@ async def sync_push(
             # Update settings
             await cur.execute(
                 """
-                INSERT INTO ios_user_settings (user_id, audio_settings_json, theme_color)
-                VALUES (%s, %s, %s)
+                INSERT INTO ios_user_settings
+                    (user_id, audio_settings_json, track_audio_settings_json, theme_color)
+                VALUES (%s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     audio_settings_json = IF(%s IS NULL, audio_settings_json, %s),
+                    track_audio_settings_json = IF(%s IS NULL, track_audio_settings_json, %s),
                     theme_color = IF(%s IS NULL, theme_color, %s)
                 """,
                 (
                     user_id,
                     body.audio_settings_json,
+                    body.track_audio_settings_json,
                     body.theme_color or "#EC4079",
                     body.audio_settings_json,
                     body.audio_settings_json,
+                    body.track_audio_settings_json,
+                    body.track_audio_settings_json,
                     body.theme_color,
                     body.theme_color,
                 ),
@@ -1800,9 +2165,182 @@ async def sync_push(
     return {"status": "synced"}
 
 
+@app.get("/user/backups")
+async def list_backups(payload: dict = Depends(get_current_user)):
+    """Lists this user's automatic sync backups (most recent first), without
+    their full snapshot payloads — used to populate a restore picker."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, reason, created_at,
+                       JSON_LENGTH(JSON_EXTRACT(snapshot_json, '$.favorites')) AS favorite_count,
+                       JSON_LENGTH(JSON_EXTRACT(snapshot_json, '$.playlists')) AS playlist_count
+                FROM ios_user_backups
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    return {
+        "backups": [
+            {
+                "id": r[0],
+                "reason": r[1],
+                "created_at": r[2].isoformat() if r[2] else None,
+                "favorite_count": r[3] or 0,
+                "playlist_count": r[4] or 0,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.post("/user/backups/{backup_id}/restore")
+async def restore_backup(backup_id: str, payload: dict = Depends(get_current_user)):
+    """Restores a previous sync snapshot, replacing the user's current
+    favorites/playlists/settings. The current state is itself backed up first
+    (reason 'pre_restore'), so a restore can always be undone."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT snapshot_json, created_at FROM ios_user_backups WHERE id = %s AND user_id = %s",
+                (backup_id, user_id),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Backup not found")
+
+            snapshot = json.loads(row[0])
+
+            await _create_backup(cur, user_id, "pre_restore")
+            await _apply_sync_snapshot(cur, user_id, snapshot)
+            await _log_sync(cur, user_id, "restore", f"restored backup from {row[1].isoformat() if row[1] else backup_id}")
+
+    return await sync_pull(payload)
+
+
+# ---------------------------------------------------------------------------
+# Social: listening activity & discovery
+#
+# Opt-in (ios_users.share_listening_activity, toggled via PUT /user/privacy).
+# Only title/artist/played_at from ios_play_history is exposed — never file
+# contents, URLs, or anything else from the account.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/social/activity")
+async def social_activity(
+    limit: int = Query(30, ge=1, le=100),
+    payload: dict = Depends(get_current_user),
+):
+    """Recent plays from users who've opted in to sharing listening activity,
+    newest first. Powers a simple 'what others are listening to' feed."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT u.username, u.display_name, u.avatar_url,
+                       h.title, h.artist, h.played_at
+                FROM ios_play_history h
+                JOIN ios_users u ON u.id = h.user_id
+                WHERE u.share_listening_activity = TRUE AND u.is_active = TRUE
+                ORDER BY h.played_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = await cur.fetchall()
+
+    return {
+        "activity": [
+            {
+                "username": r[0],
+                "display_name": r[1],
+                "avatar_url": r[2],
+                "title": r[3],
+                "artist": r[4],
+                "played_at": r[5].isoformat() if r[5] else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.get("/social/discover")
+async def social_discover(
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(20, ge=1, le=100),
+    payload: dict = Depends(get_current_user),
+):
+    """Trending tracks — most-played title/artist pairs over the last `days`
+    days, among users who've opted in to sharing listening activity."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT h.title, h.artist,
+                       COUNT(*) AS play_count,
+                       COUNT(DISTINCT h.user_id) AS listener_count
+                FROM ios_play_history h
+                JOIN ios_users u ON u.id = h.user_id
+                WHERE u.share_listening_activity = TRUE AND u.is_active = TRUE
+                  AND h.played_at >= NOW() - INTERVAL %s DAY
+                  AND h.title IS NOT NULL AND h.title != ''
+                GROUP BY h.title, h.artist
+                ORDER BY play_count DESC, listener_count DESC
+                LIMIT %s
+                """,
+                (days, limit),
+            )
+            rows = await cur.fetchall()
+
+    return {
+        "tracks": [
+            {
+                "title": r[0],
+                "artist": r[1],
+                "play_count": r[2],
+                "listener_count": r[3],
+            }
+            for r in rows
+        ]
+    }
+
+
 # ---------------------------------------------------------------------------
 # Collaborative Playlist Endpoints
 # ---------------------------------------------------------------------------
+
+# Excludes visually ambiguous characters (0/O, 1/I/L) so codes are easy to
+# read aloud, type, or transcribe by hand.
+_SHARE_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+_SHARE_CODE_LENGTH = 8
+
+
+def _generate_share_code() -> str:
+    return "".join(secrets.choice(_SHARE_CODE_ALPHABET) for _ in range(_SHARE_CODE_LENGTH))
+
+
+async def _unique_share_code(cur) -> str:
+    """Generates a short share code, retrying on the rare collision."""
+    for _ in range(10):
+        code = _generate_share_code()
+        await cur.execute(
+            "SELECT 1 FROM ios_shared_playlists WHERE share_token = %s",
+            (code,),
+        )
+        if not await cur.fetchone():
+            return code
+    raise HTTPException(status_code=500, detail="Could not generate a unique share code")
 
 
 @app.post("/user/playlists/share", status_code=201)
@@ -1810,10 +2348,9 @@ async def share_playlist(
     body: SharePlaylistRequest,
     payload: dict = Depends(get_current_user),
 ):
-    """Create a shareable snapshot of a playlist. Returns a share token and deep-link URL."""
+    """Create a shareable snapshot of a playlist. Returns a short share code and deep-link URL."""
     user_id = payload["sub"]
     share_id = str(uuid.uuid4())
-    share_token = str(uuid.uuid4())
 
     playlist_data = json.dumps({
         "name": body.playlist_name,
@@ -1832,6 +2369,8 @@ async def share_playlist(
             if not user_row:
                 raise HTTPException(status_code=401, detail="User not found")
 
+            share_token = await _unique_share_code(cur)
+
             await cur.execute(
                 """
                 INSERT INTO ios_shared_playlists
@@ -1842,7 +2381,7 @@ async def share_playlist(
             )
 
     share_url = f"lumisound://shared/{share_token}"
-    logger.info("share_playlist: user %s shared playlist %s as token %s", user_id, body.playlist_id, share_token)
+    logger.info("share_playlist: user %s shared playlist %s as code %s", user_id, body.playlist_id, share_token)
     return {"share_token": share_token, "share_url": share_url}
 
 
@@ -2750,6 +3289,48 @@ def _parse_log_timestamp(value) -> Optional[str]:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
     except ValueError:
         return None
+
+
+@app.post("/bug-report", status_code=201)
+async def submit_bug_report(
+    body: BugReportRequest,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_security),
+):
+    """Receives in-app bug reports from Settings → Help & Feature Guide.
+    Auth is optional — the app is usable without an account, so a logged-out
+    user can still file a report (just without a user_id to follow up via)."""
+    if not body.description.strip():
+        raise HTTPException(status_code=400, detail="Description is required")
+
+    user_id = None
+    if credentials:
+        payload = decode_token(credentials.credentials)
+        if payload:
+            user_id = payload.get("sub")
+
+    report_id = str(uuid.uuid4())
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_bug_reports
+                    (id, user_id, category, description, contact_email, app_version, device_info, recent_logs)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    report_id,
+                    user_id,
+                    body.category[:30],
+                    body.description[:5000],
+                    body.contact_email,
+                    body.app_version,
+                    body.device_info,
+                    body.recent_logs[:50_000] if body.recent_logs else None,
+                ),
+            )
+
+    return {"id": report_id, "status": "received"}
 
 
 @app.post("/internal/logs", status_code=204)

@@ -132,6 +132,25 @@ final class AppLogger: ObservableObject {
         Task { @MainActor [weak self] in await self?.flush() }
     }
 
+    // MARK: - Bug Reports
+
+    /// A short text dump of recent breadcrumbs and buffered log entries,
+    /// attached to user-submitted bug reports (Settings → Help → Report a Bug)
+    /// to give context without requiring the user to describe what led up to it.
+    func recentActivitySummary() -> String {
+        var lines: [String] = []
+        if !breadcrumbs.isEmpty {
+            lines.append("Recent activity:")
+            lines.append(contentsOf: breadcrumbs)
+        }
+        let recentLogs = buffer.suffix(50)
+        if !recentLogs.isEmpty {
+            lines.append("Recent logs:")
+            lines.append(contentsOf: recentLogs.map { "[\($0.level)][\($0.category)] \($0.message)" })
+        }
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Private
 
     private func _append(_ entry: LogEntry) {

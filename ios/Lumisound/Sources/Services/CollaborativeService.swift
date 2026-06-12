@@ -131,7 +131,7 @@ final class CollaborativeService: ObservableObject {
 
         let trimmedToken = shareToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedToken.isEmpty else {
-            errorMessage = "Please enter a share token."
+            errorMessage = "Please enter a share code."
             return
         }
 

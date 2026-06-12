@@ -63,6 +63,11 @@ struct PlaybackSnapshot: Codable, Equatable {
 }
 
 struct AudioSettings: Codable, Equatable {
+    /// Upper bound for `volume`. Values above 1.0 (100%) drive the signal
+    /// chain's gain stages hotter than unity — the output limiter in
+    /// `AudioPlayerManager` prevents this from clipping.
+    static let maxVolume: Float = 2.0
+
     var volume: Float = 1.0
     var speed: Float = 1.0
     var pitchSemitones: Float = 0.0

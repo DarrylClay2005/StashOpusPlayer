@@ -62,7 +62,7 @@ struct RingScrubberView: View {
                             color: AppTheme.dynamicAccent.opacity(ringGlow ? 0.55 : 0.15),
                             radius: ringGlow ? 8 : 2
                         )
-                        .animation(.easeInOut(duration: 0.12), value: progress)
+                        .animation(dragAngle == nil ? .easeInOut(duration: 0.12) : nil, value: progress)
 
                     // Thumb dot
                     Circle()
@@ -76,6 +76,12 @@ struct RingScrubberView: View {
                         .offset(y: -radius)
                         .rotationEffect(.degrees(progress * 360 - 90))
                         .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true), value: ringGlow)
+                        // Match the progress arc's animation so the thumb glides along
+                        // with the fill instead of snapping to each playback tick while
+                        // the arc behind it eases smoothly — the mismatch read as the
+                        // thumb "jumping" independently of the ring. Disabled while
+                        // dragging so the thumb tracks the finger 1:1.
+                        .animation(dragAngle == nil ? .easeInOut(duration: 0.12) : nil, value: progress)
 
                     // Time display
                     VStack(spacing: 2) {

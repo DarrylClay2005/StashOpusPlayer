@@ -13,7 +13,7 @@ struct StreamSearchView: View {
     @State private var searchText        = ""
     @State private var selectedSource    = "youtube"
     @State private var loadingTrackID:   String? = nil
-    @State private var downloadingTrackID: String? = nil
+    @State private var downloadingTrackIDs: Set<String> = []
     @State private var downloadedTrackIDs: Set<String> = []
     @State private var healthOK: Bool? = nil
     @State private var showHealthToast   = false
@@ -71,11 +71,11 @@ struct StreamSearchView: View {
                 .font(.system(size: 56))
                 .foregroundStyle(AppTheme.textSecondary)
 
-            Text("Bridge Server Not Configured")
+            Text("Streaming Unavailable")
                 .font(AppTheme.headlineFont(size: 18))
                 .foregroundStyle(AppTheme.textPrimary)
 
-            Text("Enter your bridge server URL in Settings → Streaming to search YouTube and SoundCloud.")
+            Text("Streaming search is currently unavailable. Please try again later.")
                 .font(AppTheme.bodyFont(size: 14))
                 .foregroundStyle(AppTheme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -285,7 +285,7 @@ struct StreamSearchView: View {
                         StreamTrackRow(
                             track: track,
                             isLoading: loadingTrackID == track.id,
-                            isDownloading: downloadingTrackID == track.id,
+                            isDownloading: downloadingTrackIDs.contains(track.id),
                             isDownloaded: downloadedTrackIDs.contains(track.id),
                             onPlay: { handlePlay(track: track) },
                             onAddToQueue: { handleAddToQueue(track: track) },
@@ -328,7 +328,7 @@ struct StreamSearchView: View {
                     Text("Server Library")
                         .font(AppTheme.headlineFont(size: 16))
                         .foregroundStyle(AppTheme.textPrimary)
-                    Text("Search your bridge server's local music collection.")
+                    Text("Search the server's music collection.")
                         .font(AppTheme.bodyFont(size: 14))
                         .foregroundStyle(AppTheme.textSecondary)
                         .multilineTextAlignment(.center)
@@ -500,8 +500,8 @@ struct StreamSearchView: View {
     }
 
     private func handleDownload(track: StreamTrack) {
-        guard downloadingTrackID == nil else { return }
-        downloadingTrackID = track.id
+        guard !downloadingTrackIDs.contains(track.id) else { return }
+        downloadingTrackIDs.insert(track.id)
         Task {
             do {
                 let localURL = try await streaming.downloadToLibrary(track: track)
@@ -518,7 +518,7 @@ struct StreamSearchView: View {
             } catch {
                 streaming.errorMessage = "Download failed: \(error.localizedDescription)"
             }
-            downloadingTrackID = nil
+            downloadingTrackIDs.remove(track.id)
         }
     }
 

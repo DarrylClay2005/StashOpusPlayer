@@ -7,6 +7,7 @@ final class PersistenceService {
         static let playlists = "playlists_v1"
         static let favorites = "favorites_v1"
         static let audioSettings = "audio_settings_v1"
+        static let trackAudioSettings = "track_audio_settings_v1"
     }
 
     private let defaults = UserDefaults.standard
@@ -69,6 +70,27 @@ final class PersistenceService {
         } catch {
             appError("loadAudioSettings decode failed: \(error)", category: "persistence")
             return nil
+        }
+    }
+
+    /// Per-track audio settings overrides, keyed by `Song.id`. Lets users save
+    /// custom EQ/effects for individual tracks that are recalled automatically
+    /// whenever that track plays again, separate from the global default settings.
+    func saveTrackAudioSettings(_ settings: [String: AudioSettings]) {
+        do {
+            defaults.set(try encoder.encode(settings), forKey: Keys.trackAudioSettings)
+        } catch {
+            appError("saveTrackAudioSettings failed: \(error)", category: "persistence")
+        }
+    }
+
+    func loadTrackAudioSettings() -> [String: AudioSettings] {
+        guard let data = defaults.data(forKey: Keys.trackAudioSettings) else { return [:] }
+        do {
+            return try decoder.decode([String: AudioSettings].self, from: data)
+        } catch {
+            appError("loadTrackAudioSettings decode failed: \(error)", category: "persistence")
+            return [:]
         }
     }
 }

@@ -14,7 +14,11 @@ struct LocalFolderDetailView: View {
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
 
-    private var songs: [Song] {
+    @State private var songs: [Song] = []
+
+    /// Off the render path (see `.task(id:)` below) so large libraries don't
+    /// re-filter/re-sort the entire song list on every body evaluation.
+    private func computeSongs() -> [Song] {
         let prefix = folderURL.standardizedFileURL.path + "/"
         return library.allSongs
             .filter { song in
@@ -106,6 +110,9 @@ struct LocalFolderDetailView: View {
         .navigationTitle(folderName)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
+        .task(id: library.allSongs.count) {
+            songs = computeSongs()
+        }
     }
 }
 

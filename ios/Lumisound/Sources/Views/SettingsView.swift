@@ -17,6 +17,10 @@ struct SettingsView: View {
 
     @State private var showLogin = false
 
+    /// Shared with `ContentView`, which hides the floating Car Mode button and
+    /// disables auto-activation on car-stereo connection when this is off.
+    @AppStorage("carModeEnabled") private var carModeEnabled: Bool = true
+
     // MARK: Body
 
     var body: some View {
@@ -227,6 +231,27 @@ struct SettingsView: View {
 
     private var playbackSection: some View {
         Section {
+            // Car Mode toggle
+            Toggle(isOn: $carModeEnabled) {
+                Label("Car Mode", systemImage: "car.fill")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if carModeEnabled {
+                Text("Shows a large-button driving layout, accessible from the floating car icon or automatically when connected to a car stereo.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            } else {
+                Text("Hides the Car Mode button and disables automatic switching when connected to a car stereo.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Crossfade toggle
             Toggle(isOn: $player.audioSettings.crossfadeEnabled) {
                 Label("Crossfade", systemImage: "waveform.path.ecg")
@@ -334,6 +359,7 @@ struct SettingsView: View {
             sectionHeader("Playback")
         }
         .listRowBackground(AppTheme.surface)
+        .animation(.easeInOut(duration: 0.22), value: carModeEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.crossfadeEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.gaplessEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.replayGainEnabled)
@@ -346,7 +372,10 @@ struct SettingsView: View {
 
     private var streamingSection: some View {
         Section {
-            // Status row
+            #if DEBUG
+            // Status row — only meaningful in DEBUG since `isConfigured` is
+            // hardcoded `true` for release builds (a default bridge URL is
+            // always baked in), so it'd always read "Configured" otherwise.
             HStack {
                 Label("Bridge Server", systemImage: "server.rack")
                     .foregroundStyle(AppTheme.textPrimary)
@@ -362,6 +391,11 @@ struct SettingsView: View {
                     )
             }
 
+            // Server URL and API key point at the developer's personal backend
+            // (a default URL is baked in via `StreamingService.defaultBridgeURL`,
+            // so the app works without any user input). These overrides are only
+            // useful for local development/testing against a different bridge,
+            // so they're hidden from end users entirely.
             // Server URL field
             HStack {
                 Label("Server URL", systemImage: "link")
@@ -388,6 +422,7 @@ struct SettingsView: View {
                 .multilineTextAlignment(.trailing)
                 .foregroundStyle(AppTheme.textSecondary)
             }
+            #endif
 
             // Audio Format picker
             HStack {
@@ -643,6 +678,10 @@ struct SettingsView: View {
         Section {
             NavigationLink(destination: SettingsHelpView()) {
                 Label("Help & Feature Guide", systemImage: "questionmark.circle")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            NavigationLink(destination: BugReportView()) {
+                Label("Report a Bug", systemImage: "ladybug")
                     .foregroundStyle(AppTheme.textPrimary)
             }
         } header: {

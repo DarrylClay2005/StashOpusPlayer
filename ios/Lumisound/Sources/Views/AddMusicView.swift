@@ -68,7 +68,13 @@ struct AddMusicView: View {
 
                 // ─────────────────────────────────────────────────────────────
                 // MARK: Scan app storage (files transferred via Mac/Finder)
+                // Hidden from release builds — most users never transfer files
+                // this way (the "Import Audio Files" picker below covers the
+                // same files plus anywhere else in Files app), and this
+                // duplicate entry point was confusing. Left in for DEBUG since
+                // it's still useful for testing scanSpecificDirectory().
                 // ─────────────────────────────────────────────────────────────
+                #if DEBUG
                 Section {
                     Button {
                         if let docs = FileManager.default
@@ -91,6 +97,7 @@ struct AddMusicView: View {
                         .font(.caption).foregroundStyle(AppTheme.textSecondary)
                 }
                 .listRowBackground(AppTheme.surface)
+                #endif
 
                 // ─────────────────────────────────────────────────────────────
                 // MARK: Import individual files from anywhere

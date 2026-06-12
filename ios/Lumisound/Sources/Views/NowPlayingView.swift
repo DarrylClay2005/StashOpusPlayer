@@ -279,6 +279,7 @@ struct NowPlayingView: View {
                 abRepeatSection
                 effectsSection
                 equalizerSection
+                trackAudioSettingsSection
                 lyricsSection
             }
             .padding(.horizontal, 16)
@@ -441,10 +442,12 @@ struct NowPlayingView: View {
                     .foregroundStyle(AppTheme.textPrimary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(player.currentSong?.artistName ?? "Choose a song from the Library")
-                    .font(.body)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .lineLimit(1)
+                MarqueeText(
+                    text: player.currentSong?.artistName ?? "Choose a song from the Library",
+                    font: .body,
+                    color: AppTheme.textSecondary
+                )
+                .frame(height: 20)
             }
             Spacer(minLength: 8)
 
@@ -712,15 +715,25 @@ struct NowPlayingView: View {
     // MARK: - Volume
 
     private var volumeSection: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "speaker.fill")
-                .font(.caption)
-                .foregroundStyle(AppTheme.textSecondary)
-            Slider(value: audioBinding(\.volume), in: 0...1)
-                .tint(AppTheme.dynamicAccent)
-            Image(systemName: "speaker.wave.3.fill")
-                .font(.caption)
-                .foregroundStyle(AppTheme.textSecondary)
+        VStack(spacing: 2) {
+            HStack(spacing: 10) {
+                Image(systemName: "speaker.fill")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                Slider(value: audioBinding(\.volume), in: 0...AudioSettings.maxVolume)
+                    .tint(AppTheme.dynamicAccent)
+                Image(systemName: "speaker.wave.3.fill")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            // Above 100% the volume slider is boosting gain beyond the
+            // device's normal output — a limiter prevents clipping, but
+            // it's worth flagging since it's an unusual range for a slider.
+            if player.audioSettings.volume > 1.0 {
+                Text("Boost: \(Int(player.audioSettings.volume * 100))%")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AppTheme.dynamicAccent)
+            }
         }
         .padding(.vertical, 2)
     }
@@ -877,16 +890,8 @@ struct NowPlayingView: View {
             return []
         }
 
-        if player.shuffleEnabled {
-            // Shuffle re-rolls a random pick each time a track ends, so show the
-            // remaining pool in queue order as a representative preview.
-            var pool = player.queue
-            if let idx = pool.firstIndex(where: { $0.id == player.currentSong?.id }) {
-                pool.remove(at: idx)
-            }
-            return Array(pool.prefix(10))
-        }
-
+        // Shuffle reorders `queue` itself (see AudioPlayerManager.shuffleQueue), so the
+        // same sequential walk below already reflects the shuffled play order.
         var result: [Song] = []
         var i = player.currentIndex + 1
         while result.count < 10 && i < player.queue.count {
@@ -1105,6 +1110,57 @@ struct NowPlayingView: View {
         .panelStyle()
     }
 
+    // MARK: - Per-Track Audio Settings
+
+    /// Lets the user pin the current EQ/effects/volume/etc. (`player.audioSettings`)
+    /// to this specific track, so they're recalled automatically every time it
+    /// plays — independent of the global default settings used for other tracks.
+    private var trackAudioSettingsSection: some View {
+        Group {
+            if player.currentSong != nil {
+                HStack(spacing: 12) {
+                    Image(systemName: player.isUsingTrackAudioSettings ? "pin.fill" : "pin")
+                        .font(.system(size: 16))
+                        .foregroundStyle(player.isUsingTrackAudioSettings ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(player.isUsingTrackAudioSettings ? "Custom Sound for This Track" : "Using Default Sound Settings")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Text(player.isUsingTrackAudioSettings
+                             ? "EQ, effects, and volume are saved just for this track."
+                             : "Save the current EQ/effects/volume to use only for this track.")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Button {
+                        selectHaptic.selectionChanged()
+                        if player.isUsingTrackAudioSettings {
+                            player.clearAudioSettingsForCurrentTrack()
+                        } else {
+                            player.saveAudioSettingsForCurrentTrack()
+                        }
+                    } label: {
+                        Text(player.isUsingTrackAudioSettings ? "Remove" : "Save")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                player.isUsingTrackAudioSettings ? AppTheme.elevatedSurface : AppTheme.dynamicAccent,
+                                in: Capsule()
+                            )
+                            .foregroundStyle(player.isUsingTrackAudioSettings ? AppTheme.textPrimary : .white)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .panelStyle()
+            }
+        }
+    }
+
     // MARK: - Equalizer
 
     private var equalizerSection: some View {
@@ -1320,13 +1376,18 @@ struct NowPlayingView: View {
     }
 
     private func triggerTrackChangeAnimation() {
-        artworkAnimationID = player.currentSong?.id ?? UUID().uuidString
+        // Fade/shrink the *current* artwork out first — only swap the `.id()` (which
+        // tears down and recreates the artwork view) once it's invisible. Updating the
+        // ID immediately used to pop the new artwork in instantly before the fade-out
+        // animation had a chance to play, producing a jarring flash on every transition
+        // (and especially during crossfade, where the swap happens mid-playback).
         withAnimation(.easeOut(duration: 0.15)) {
             artworkOpacity = 0
             artworkScale = 0.92
         }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 150_000_000)
+            artworkAnimationID = player.currentSong?.id ?? UUID().uuidString
             withAnimation(.spring(response: 0.45, dampingFraction: 0.65)) {
                 artworkOpacity = 1
                 artworkScale = 1.0

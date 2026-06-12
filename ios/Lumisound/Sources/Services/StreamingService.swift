@@ -293,7 +293,7 @@ final class StreamingService: ObservableObject {
 
     func search(query: String, source: String = "youtube") async {
         guard isConfigured else {
-            errorMessage = "Bridge server URL not configured."
+            errorMessage = "Streaming service is unavailable right now."
             return
         }
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -324,7 +324,7 @@ final class StreamingService: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse,
                !(200..<300).contains(httpResponse.statusCode) {
-                errorMessage = "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
+                errorMessage = "Streaming service is unavailable right now. Please try again later."
                 searchResults = []
                 return
             }
@@ -333,7 +333,7 @@ final class StreamingService: ObservableObject {
             appLog("Search returned \(tracks.count) result(s) for \"\(query)\"", category: "network")
         } catch {
             appError("Search failed: \(error.localizedDescription)", category: "network")
-            errorMessage = "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
+            errorMessage = "Streaming service is unavailable right now. Please try again later."
             searchResults = []
         }
     }
@@ -411,7 +411,7 @@ final class StreamingService: ObservableObject {
     /// and `isPlaylistResult` is set to `true` so the UI can show the playlist banner.
     func resolvePlaylist(url: String) async {
         guard isConfigured else {
-            errorMessage = "Bridge server URL not configured."
+            errorMessage = "Streaming service is unavailable right now."
             return
         }
         appLog("Resolving playlist: \(url)", category: "network")
@@ -573,7 +573,7 @@ final class StreamingService: ObservableObject {
             if let httpResponse = response as? HTTPURLResponse,
                !(200..<300).contains(httpResponse.statusCode) {
                 appWarn("searchServerLibrary: HTTP \(httpResponse.statusCode) for \"\(query)\"", category: "network")
-                errorMessage = "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
+                errorMessage = "Streaming service is unavailable right now. Please try again later."
                 serverTracks = []
                 return
             }
@@ -588,7 +588,7 @@ final class StreamingService: ObservableObject {
             appLog("searchServerLibrary: \(serverTracks.count) result(s) for \"\(query)\"", category: "network")
         } catch {
             appError("searchServerLibrary: \(error.localizedDescription)", category: "network")
-            errorMessage = "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
+            errorMessage = "Streaming service is unavailable right now. Please try again later."
             serverTracks = []
         }
     }
@@ -802,13 +802,25 @@ final class StreamingService: ObservableObject {
             return
         }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.timeoutInterval = 20
+        // The first request after a library change has to ffprobe every
+        // uncached file server-side before it can respond — with a large
+        // personal library this routinely took longer than the old 20s
+        // timeout, which made "My Library" appear to hang/fail forever even
+        // though the server was still working (and would have served a fast,
+        // cached response on the next try). 90s gives that cold pass room to
+        // finish; subsequent calls hit the server's ffprobe cache and return
+        // quickly regardless.
+        request.timeoutInterval = 90
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse, !(200..<300).contains(httpResponse.statusCode) {
                 appWarn("fetchUserMusic: HTTP \(httpResponse.statusCode)", category: "network")
-                errorMessage = "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
+                if httpResponse.statusCode == 401 {
+                    errorMessage = "Your session has expired. Please log in again."
+                } else {
+                    errorMessage = "Streaming service error (HTTP \(httpResponse.statusCode)). Please try again later."
+                }
                 return
             }
 
@@ -1212,7 +1224,7 @@ enum StreamingError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "Bridge server URL is not configured. Go to Settings → Streaming."
+            return "Streaming service is unavailable right now."
         case .invalidURL:
             return "The bridge returned an invalid stream URL."
         case .timeout:
@@ -1220,7 +1232,7 @@ enum StreamingError: LocalizedError {
         case .notFound(let title):
             return "Could not find a stream URL for \"\(title)\"."
         case .httpError:
-            return "Bridge server offline. Make sure the server and ngrok tunnel are running, then retry."
+            return "Streaming service is unavailable right now. Please try again later."
         }
     }
 }

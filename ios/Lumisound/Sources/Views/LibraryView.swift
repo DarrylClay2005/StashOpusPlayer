@@ -200,6 +200,12 @@ struct LibraryView: View {
             } else {
                 Button {
                     library.scanAll(folderService: folderService)
+                    // Also pull the latest favorites/playlists/settings from
+                    // the server, so "Refresh" reflects changes made on
+                    // another device, not just local filesystem changes.
+                    if account.isLoggedIn {
+                        Task { await account.pullSync(library: library, player: player) }
+                    }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -475,26 +481,36 @@ private struct ArtistRow: View {
     let artist: String
     @EnvironmentObject private var library: LibraryManager
 
-    private var songCount: Int {
-        library.songs(byArtist: artist).count
+    private var artistSongs: [Song] {
+        library.songs(byArtist: artist)
+    }
+
+    private var songCount: Int { artistSongs.count }
+
+    private var albumCount: Int {
+        Set(artistSongs.map { $0.albumName }).count
     }
 
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(AppTheme.elevatedSurface)
-                Image(systemName: "person.fill")
-                    .foregroundStyle(AppTheme.dynamicAccent)
-                    .font(.system(size: 18))
+            if let representative = artistSongs.first {
+                ArtworkThumbnail(song: representative, size: 40)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(AppTheme.elevatedSurface)
+                    Image(systemName: "person.fill")
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                        .font(.system(size: 18))
+                }
+                .frame(width: 40, height: 40)
             }
-            .frame(width: 40, height: 40)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(artist)
                     .foregroundStyle(AppTheme.textPrimary)
                     .lineLimit(1)
-                Text("\(songCount) \(songCount == 1 ? "song" : "songs")")
+                Text("\(albumCount) \(albumCount == 1 ? "album" : "albums") · \(songCount) \(songCount == 1 ? "song" : "songs")")
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
             }
@@ -628,12 +644,16 @@ private struct FoldersTab: View {
     @EnvironmentObject private var library: LibraryManager
     @AppStorage("library_folders_columns") private var columns: Int = 2
 
+    @State private var folders: [FolderEntry] = []
+
     private var gridColumns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: 12), count: columns)
     }
 
     /// Groups allSongs by their top-level subdirectory under "Imported Music".
-    private var folders: [FolderEntry] {
+    /// Computed off the render path (see `.task(id:)` below) so large libraries
+    /// don't re-run this O(n) grouping/sort on every body evaluation.
+    private func computeFolders() -> [FolderEntry] {
         guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
             return []
         }
@@ -686,6 +706,9 @@ private struct FoldersTab: View {
             }
         }
         .background(Color.clear.ignoresSafeArea())
+        .task(id: library.allSongs.count) {
+            folders = computeFolders()
+        }
         .toolbar {
             // Mirrors SongsTab's column-toggle buttons (rather than a Menu) so
             // switching the Folders layout works the same, directly-tappable way.

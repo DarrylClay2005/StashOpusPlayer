@@ -9,6 +9,11 @@ struct AppearanceView: View {
 
     /// Used only to source a representative song for the card-style live preview.
     @EnvironmentObject private var library: LibraryManager
+    /// Used to push the accent color change to the server immediately — without
+    /// this, a color picked here only syncs the next time favorites/playlists/
+    /// audio settings change (see `AccountService.pullSync`'s theme-color comment),
+    /// so a fresh install on another device could miss it entirely.
+    @EnvironmentObject private var account: AccountService
 
     @State private var customColor: Color = AppTheme.dynamicAccent
     @State private var refreshToken = UUID()
@@ -63,6 +68,7 @@ struct AppearanceView: View {
                     .onChange(of: customColor) { newColor in
                         AppTheme.saveAccentColor(newColor)
                         refreshToken = UUID()
+                        account.schedulePush(library: library)
                     }
                     .listRowBackground(AppTheme.surface)
             } header: {
@@ -110,6 +116,7 @@ struct AppearanceView: View {
                     customColor = AppTheme.accent
                     panelOpacity = 1.0
                     refreshToken = UUID()
+                    account.schedulePush(library: library)
                 } label: {
                     HStack {
                         Image(systemName: "arrow.counterclockwise")
@@ -194,6 +201,7 @@ struct AppearanceView: View {
                     AppTheme.saveAccentColor(swatch.color)
                     customColor = swatch.color
                     refreshToken = UUID()
+                    account.schedulePush(library: library)
                 } label: {
                     VStack(spacing: 4) {
                         ZStack {

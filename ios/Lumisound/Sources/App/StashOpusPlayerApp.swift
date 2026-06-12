@@ -48,7 +48,7 @@ struct LumisoundApp: App {
                     AppLogger.shared.configure(bridgeURL: streaming.bridgeURL)
 
                     // Restore audio settings — player must be configured before any resume.
-                    player.audioSettings = PersistenceService.shared.loadAudioSettings() ?? AudioSettings()
+                    player.restoreDefaultAudioSettings(PersistenceService.shared.loadAudioSettings() ?? AudioSettings())
 
                     // Wire the sleep-timer fade to the player's volume control.
                     sleepTimer.getVolume = { player.audioSettings.volume }
@@ -66,9 +66,19 @@ struct LumisoundApp: App {
 
                     // If logged in, pull latest state from DB as primary storage source.
                     if account.isLoggedIn {
-                        await account.pullSync(library: libraryManager)
+                        await account.pullSync(library: libraryManager, player: player)
                         account.startAutoPushTimer(library: libraryManager)
                         await account.loadAvatar(forceRefresh: true)
+                    }
+
+                    // Push per-track audio settings to the server whenever they change.
+                    player.onTrackAudioSettingsChanged = { [weak account, weak libraryManager, weak player] in
+                        guard let account, let libraryManager, let player else { return }
+                        account.schedulePush(
+                            library: libraryManager,
+                            audioSettings: player.defaultAudioSettings,
+                            trackAudioSettings: player.perTrackAudioSettings
+                        )
                     }
 
                     // Start periodic bridge health checks.
@@ -92,18 +102,30 @@ struct LumisoundApp: App {
                 .onChange(of: libraryManager.playlists) { _ in
                     account.schedulePush(library: libraryManager)
                 }
-                // Persist audio settings to local AND DB when they change.
+                // Persist audio settings to local AND DB when they change. While a
+                // per-track override is active, `audioSettings` reflects that
+                // track's settings rather than the global default — only persist
+                // the latter as the global default (`player.defaultAudioSettings`
+                // is unaffected by per-track overrides); the per-track values are
+                // persisted separately via `onTrackAudioSettingsChanged` above.
                 .onChange(of: player.audioSettings) { newSettings in
-                    PersistenceService.shared.saveAudioSettings(newSettings)
-                    // Pass audioSettings so the server saves them too
-                    account.schedulePush(library: libraryManager, audioSettings: newSettings)
+                    if player.isUsingTrackAudioSettings {
+                        PersistenceService.shared.saveAudioSettings(player.defaultAudioSettings)
+                    } else {
+                        PersistenceService.shared.saveAudioSettings(newSettings)
+                    }
+                    account.schedulePush(
+                        library: libraryManager,
+                        audioSettings: player.defaultAudioSettings,
+                        trackAudioSettings: player.perTrackAudioSettings
+                    )
                 }
                 .onReceive(
                     NotificationCenter.default.publisher(
                         for: UIApplication.didEnterBackgroundNotification
                     )
                 ) { _ in
-                    PersistenceService.shared.saveAudioSettings(player.audioSettings)
+                    PersistenceService.shared.saveAudioSettings(player.defaultAudioSettings)
                 }
                 .onReceive(sleepTimer.$didExpire) { expired in
                     if expired { player.pause() }

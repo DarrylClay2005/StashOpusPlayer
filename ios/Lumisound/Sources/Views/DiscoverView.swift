@@ -1,0 +1,166 @@
+import SwiftUI
+
+// MARK: - DiscoverView
+//
+// "What others are listening to" — a public activity feed and trending-tracks
+// list, built from users who've opted in via Settings/Account → Share
+// Listening Activity. See GET /social/activity and GET /social/discover.
+
+struct DiscoverView: View {
+    @EnvironmentObject private var account: AccountService
+
+    @State private var isLoading = false
+    @State private var selectedTab: Tab = .trending
+
+    private enum Tab: String, CaseIterable, Identifiable {
+        case trending = "Trending"
+        case activity = "Activity"
+        var id: String { rawValue }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $selectedTab) {
+                ForEach(Tab.allCases) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding()
+
+            List {
+                if !(account.currentUser?.shareListeningActivity ?? false) {
+                    Section {
+                        Text("Turn on \"Share Listening Activity\" in Account settings to appear here and help power Trending.")
+                            .font(AppTheme.bodyFont(size: 12))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    .listRowBackground(AppTheme.surface)
+                }
+
+                switch selectedTab {
+                case .trending:
+                    if account.trendingTracks.isEmpty {
+                        emptyRow("Nothing trending yet. Check back once more listeners opt in.")
+                    } else {
+                        Section {
+                            ForEach(Array(account.trendingTracks.enumerated()), id: \.element.id) { index, track in
+                                HStack(spacing: 12) {
+                                    Text("\(index + 1)")
+                                        .font(AppTheme.monoFont(size: 14))
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                        .frame(width: 24, alignment: .center)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(track.title)
+                                            .font(AppTheme.bodyFont(size: 14))
+                                            .foregroundStyle(AppTheme.textPrimary)
+                                            .lineLimit(1)
+                                        if let artist = track.artist, !artist.isEmpty {
+                                            Text(artist)
+                                                .font(AppTheme.bodyFont(size: 12))
+                                                .foregroundStyle(AppTheme.textSecondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    Spacer()
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        Text("\(track.playCount) plays")
+                                            .font(AppTheme.bodyFont(size: 11))
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                        Text("\(track.listenerCount) listener\(track.listenerCount == 1 ? "" : "s")")
+                                            .font(AppTheme.bodyFont(size: 11))
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+                                }
+                            }
+                        } header: {
+                            sectionHeader("Trending — last 7 days")
+                        }
+                        .listRowBackground(AppTheme.surface)
+                    }
+
+                case .activity:
+                    if account.socialActivity.isEmpty {
+                        emptyRow("No recent activity from users sharing their listening.")
+                    } else {
+                        Section {
+                            ForEach(account.socialActivity) { entry in
+                                HStack(spacing: 12) {
+                                    Circle()
+                                        .fill(AppTheme.elevatedSurface)
+                                        .frame(width: 36, height: 36)
+                                        .overlay(
+                                            Text(initials(for: entry))
+                                                .font(.caption.bold())
+                                                .foregroundStyle(AppTheme.dynamicAccent)
+                                        )
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(displayName(for: entry)) played \(entry.title ?? "a track")")
+                                            .font(AppTheme.bodyFont(size: 13))
+                                            .foregroundStyle(AppTheme.textPrimary)
+                                            .lineLimit(2)
+                                        if let artist = entry.artist, !artist.isEmpty {
+                                            Text(artist)
+                                                .font(AppTheme.bodyFont(size: 12))
+                                                .foregroundStyle(AppTheme.textSecondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    Spacer()
+                                    if let date = entry.date {
+                                        Text(date, style: .relative)
+                                            .font(AppTheme.bodyFont(size: 11))
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+                                }
+                            }
+                        } header: {
+                            sectionHeader("Recent Activity")
+                        }
+                        .listRowBackground(AppTheme.surface)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+        }
+        .background(GalleryBackgroundView().ignoresSafeArea())
+        .navigationTitle("Discover")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await refresh() }
+        .refreshable { await refresh() }
+    }
+
+    private func refresh() async {
+        isLoading = true
+        async let activity: Void = account.fetchSocialActivity()
+        async let trending: Void = account.fetchTrendingTracks()
+        _ = await (activity, trending)
+        isLoading = false
+    }
+
+    private func displayName(for entry: ActivityEntry) -> String {
+        if let name = entry.displayName, !name.isEmpty { return name }
+        return entry.username
+    }
+
+    private func initials(for entry: ActivityEntry) -> String {
+        let name = displayName(for: entry)
+        return String(name.prefix(1)).uppercased()
+    }
+
+    private func sectionHeader(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(AppTheme.bodyFont(size: 11))
+            .foregroundStyle(AppTheme.textSecondary)
+            .kerning(0.8)
+    }
+
+    private func emptyRow(_ text: String) -> some View {
+        Section {
+            Text(text)
+                .font(AppTheme.bodyFont(size: 13))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+}

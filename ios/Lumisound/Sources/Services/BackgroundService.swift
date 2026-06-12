@@ -38,7 +38,9 @@ final class BackgroundService: ObservableObject {
 
     // MARK: Published State
 
-    @Published var isEnabled: Bool = false
+    @Published var isEnabled: Bool = false {
+        didSet { saveSettings() }
+    }
     @Published var images: [UIImage] = []
     @Published var currentIndex: Int = 0
     @Published var shuffleIntervalSeconds: Double = 30.0 {
@@ -47,9 +49,15 @@ final class BackgroundService: ObservableObject {
             if isActive { startShuffling() }  // restart with new interval
         }
     }
-    @Published var animation: BackgroundAnimation = .fade
-    @Published var opacity: Double = 0.35
-    @Published var isBlurred: Bool = true
+    @Published var animation: BackgroundAnimation = .fade {
+        didSet { saveSettings() }
+    }
+    @Published var opacity: Double = 0.35 {
+        didSet { saveSettings() }
+    }
+    @Published var isBlurred: Bool = true {
+        didSet { saveSettings() }
+    }
 
     /// True when the shuffle timer is running. Stored property so iOS backgrounding
     /// doesn't silently invalidate it without us knowing.

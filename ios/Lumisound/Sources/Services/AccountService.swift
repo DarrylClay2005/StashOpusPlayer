@@ -11,6 +11,7 @@ struct AppUser: Codable, Equatable {
     let email: String?
     let avatarURL: String?
     let dateOfBirth: String?   // ISO YYYY-MM-DD, nil if not set
+    var shareListeningActivity: Bool = false
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -19,6 +20,7 @@ struct AppUser: Codable, Equatable {
         case email
         case avatarURL    = "avatar_url"
         case dateOfBirth  = "date_of_birth"
+        case shareListeningActivity = "share_listening_activity"
     }
 }
 
@@ -26,13 +28,15 @@ struct SyncData: Codable {
     var favorites: [SyncFavorite]
     var playlists: [SyncPlaylist]
     var audioSettingsJSON: String?
+    var trackAudioSettingsJSON: String?
     var themeColor: String?
 
     enum CodingKeys: String, CodingKey {
         case favorites
         case playlists
-        case audioSettingsJSON = "audio_settings_json"
-        case themeColor        = "theme_color"
+        case audioSettingsJSON      = "audio_settings_json"
+        case trackAudioSettingsJSON = "track_audio_settings_json"
+        case themeColor             = "theme_color"
     }
 }
 
@@ -55,6 +59,137 @@ struct SyncPlaylist: Codable {
     let name: String
     let description: String?
     var tracks: [SyncTrack]
+}
+
+/// Metadata for an automatic server-side backup of this user's sync data
+/// (favorites/playlists/settings), taken before every push (and before every
+/// restore). See `ios_user_backups` / GET+POST `/user/backups...` on the bridge.
+struct SyncBackup: Codable, Identifiable {
+    let id: String
+    let reason: String
+    let createdAt: String
+    let favoriteCount: Int
+    let playlistCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case reason
+        case createdAt     = "created_at"
+        case favoriteCount = "favorite_count"
+        case playlistCount = "playlist_count"
+    }
+
+    /// `created_at` parsed as a `Date`, for display with relative formatting.
+    var date: Date? {
+        ISO8601DateFormatter().date(from: createdAt)
+    }
+
+    var reasonDisplayName: String {
+        switch reason {
+        case "pre_push":    return "Before sync"
+        case "pre_restore": return "Before restore"
+        default:            return reason
+        }
+    }
+}
+
+/// A single entry in the "what others are listening to" feed (GET /social/activity).
+/// Only ever contains title/artist/played_at plus public profile info — never
+/// file contents or URLs.
+struct ActivityEntry: Codable, Identifiable {
+    let username: String
+    let displayName: String?
+    let avatarURL: String?
+    let title: String?
+    let artist: String?
+    let playedAt: String?
+
+    var id: String { "\(username)-\(playedAt ?? "")-\(title ?? "")" }
+
+    enum CodingKeys: String, CodingKey {
+        case username
+        case displayName = "display_name"
+        case avatarURL   = "avatar_url"
+        case title
+        case artist
+        case playedAt    = "played_at"
+    }
+
+    var date: Date? {
+        guard let playedAt else { return nil }
+        return ISO8601DateFormatter().date(from: playedAt)
+    }
+}
+
+/// A trending track from GET /social/discover — aggregated across users who've
+/// opted in to sharing listening activity.
+struct TrendingTrack: Codable, Identifiable {
+    let title: String
+    let artist: String?
+    let playCount: Int
+    let listenerCount: Int
+
+    var id: String { "\(title)-\(artist ?? "")" }
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case artist
+        case playCount     = "play_count"
+        case listenerCount = "listener_count"
+    }
+}
+
+/// One active login (device/session) for this account — GET /auth/sessions.
+struct AccountSession: Codable, Identifiable {
+    let tokenId: String
+    let deviceName: String?
+    let createdAt: String
+    let expiresAt: String?
+    let isCurrent: Bool
+
+    var id: String { tokenId }
+
+    enum CodingKeys: String, CodingKey {
+        case tokenId    = "token_id"
+        case deviceName = "device_name"
+        case createdAt  = "created_at"
+        case expiresAt  = "expires_at"
+        case isCurrent  = "is_current"
+    }
+
+    var createdDate: Date? {
+        ISO8601DateFormatter().date(from: createdAt)
+    }
+}
+
+/// Lifetime listening stats from GET /user/stats.
+struct AccountStats: Codable {
+    let totalPlays: Int
+    let totalListenSeconds: Int
+    let topArtists: [TopArtist]
+    let topTracks: [TopTrack]
+
+    enum CodingKeys: String, CodingKey {
+        case totalPlays         = "total_plays"
+        case totalListenSeconds = "total_listen_seconds"
+        case topArtists         = "top_artists"
+        case topTracks          = "top_tracks"
+    }
+
+    struct TopArtist: Codable, Identifiable {
+        let artist: String
+        let playCount: Int
+        var id: String { artist }
+        enum CodingKeys: String, CodingKey { case artist, playCount = "play_count" }
+    }
+
+    struct TopTrack: Codable, Identifiable {
+        let title: String
+        let artist: String?
+        let playCount: Int
+        var id: String { "\(title)-\(artist ?? "")" }
+        enum CodingKeys: String, CodingKey { case title, artist, playCount = "play_count" }
+    }
 }
 
 struct SyncTrack: Codable {
@@ -100,6 +235,11 @@ final class AccountService: ObservableObject {
         }
     }
     @Published var avatarImage: UIImage? = nil
+    @Published var backups: [SyncBackup] = []
+    @Published var socialActivity: [ActivityEntry] = []
+    @Published var trendingTracks: [TrendingTrack] = []
+    @Published var sessions: [AccountSession] = []
+    @Published var stats: AccountStats? = nil
     @Published private(set) var hasDateOfBirth: Bool = false
 
     // MARK: Persisted token
@@ -134,13 +274,17 @@ final class AccountService: ObservableObject {
 
     /// Schedules a push sync that fires 2 seconds after the last call.
     /// Rapid successive mutations only trigger one server write.
-    func schedulePush(library: LibraryManager, audioSettings: AudioSettings? = nil) {
+    func schedulePush(
+        library: LibraryManager,
+        audioSettings: AudioSettings? = nil,
+        trackAudioSettings: [String: AudioSettings]? = nil
+    ) {
         guard isLoggedIn else { return }
         syncDebounceTask?.cancel()
         syncDebounceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
             guard let self, !Task.isCancelled, self.isLoggedIn else { return }
-            await self.pushSync(library: library, audioSettings: audioSettings)
+            await self.pushSync(library: library, audioSettings: audioSettings, trackAudioSettings: trackAudioSettings)
         }
     }
 
@@ -298,7 +442,11 @@ final class AccountService: ObservableObject {
     // MARK: - Sync
 
     /// Call schedulePush instead of this directly — it debounces rapid mutations.
-    func pushSync(library: LibraryManager, audioSettings: AudioSettings? = nil) async {
+    func pushSync(
+        library: LibraryManager,
+        audioSettings: AudioSettings? = nil,
+        trackAudioSettings: [String: AudioSettings]? = nil
+    ) async {
         guard isLoggedIn else { return }
         appLog("Push sync started (favorites: \(library.favoriteSongIDs.count), playlists: \(library.playlists.count))", category: "account")
         isSyncing = true
@@ -343,6 +491,10 @@ final class AccountService: ObservableObject {
         let audioJSON: String? = audioSettings.flatMap { settings in
             (try? JSONEncoder().encode(settings)).flatMap { String(data: $0, encoding: .utf8) }
         }
+        // Serialize per-track audio settings overrides to JSON if provided
+        let trackAudioJSON: String? = trackAudioSettings.flatMap { map in
+            (try? JSONEncoder().encode(map)).flatMap { String(data: $0, encoding: .utf8) }
+        }
         // Read current accent colour from UserDefaults (saved by AppTheme.saveAccentColor)
         let themeHex: String? = {
             guard let data = UserDefaults.standard.data(forKey: "accent_color_data"),
@@ -357,6 +509,7 @@ final class AccountService: ObservableObject {
             favorites: favorites,
             playlists: playlists,
             audioSettingsJSON: audioJSON,
+            trackAudioSettingsJSON: trackAudioJSON,
             themeColor: themeHex ?? "#EC4079"
         )
 
@@ -373,7 +526,7 @@ final class AccountService: ObservableObject {
         }
     }
 
-    func pullSync(library: LibraryManager) async {
+    func pullSync(library: LibraryManager, player: AudioPlayerManager? = nil) async {
         guard isLoggedIn else { return }
         appLog("Pull sync started", category: "account")
         isSyncing = true
@@ -431,6 +584,21 @@ final class AccountService: ObservableObject {
                 // Signal the player to apply them (observers in LumisoundApp reload on launch)
             }
 
+            // Restore per-track audio settings overrides — same first-run-only
+            // guard as the global audio settings above, to avoid clobbering
+            // settings saved locally since the last successful push.
+            if PersistenceService.shared.loadTrackAudioSettings().isEmpty,
+               let json = sync.trackAudioSettingsJSON,
+               let jsonData = json.data(using: .utf8),
+               let restoredMap = try? JSONDecoder().decode([String: AudioSettings].self, from: jsonData),
+               !restoredMap.isEmpty {
+                if let player {
+                    player.restorePerTrackAudioSettings(restoredMap)
+                } else {
+                    PersistenceService.shared.saveTrackAudioSettings(restoredMap)
+                }
+            }
+
             // Restore theme colour — same first-run-only guard as audio settings above:
             // there's no `.onChange` hook pushing accent-colour changes immediately
             // (it only rides along on the next favorites/playlist/settings push), so
@@ -456,6 +624,190 @@ final class AccountService: ObservableObject {
         } catch {
             appError("Pull sync error: \(error.localizedDescription)", category: "account")
             errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Backups
+
+    /// Fetches the list of automatic server-side sync backups for this user
+    /// (taken before every push and every restore — see `ios_user_backups`).
+    func fetchBackups() async {
+        guard isLoggedIn else { return }
+        do {
+            let data = try await makeRequest("/user/backups")
+            struct Response: Decodable { let backups: [SyncBackup] }
+            let decoded = try JSONDecoder().decode(Response.self, from: data)
+            backups = decoded.backups
+        } catch let err as AccountError {
+            errorMessage = err.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Restores a server-side backup, replacing this account's favorites/
+    /// playlists/settings with the snapshot, then merges the restored data
+    /// down to this device via the normal `pullSync` path.
+    func restoreBackup(id: String, library: LibraryManager, player: AudioPlayerManager? = nil) async {
+        guard isLoggedIn else { return }
+        appLog("Restoring backup \(id)", category: "account")
+        isSyncing = true
+        errorMessage = nil
+        defer { isSyncing = false }
+
+        do {
+            _ = try await makeRequest("/user/backups/\(id)/restore", method: "POST")
+            await pullSync(library: library, player: player)
+            await fetchBackups()
+            appLog("Backup restore complete", category: "account")
+        } catch let err as AccountError {
+            appError("Backup restore failed [\(err.statusCode)]: \(err.message)", category: "account")
+            errorMessage = err.message
+        } catch {
+            appError("Backup restore error: \(error.localizedDescription)", category: "account")
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Social: listening activity & discovery
+
+    /// Toggles whether this account's recent plays are visible to other
+    /// signed-in users (title/artist only — see GET /social/activity).
+    func setShareListeningActivity(_ enabled: Bool) async {
+        guard isLoggedIn else { return }
+        struct Body: Encodable { let share_listening_activity: Bool }
+        do {
+            _ = try await makeRequest("/user/privacy", method: "PUT", body: Body(share_listening_activity: enabled))
+            if var user = currentUser {
+                user.shareListeningActivity = enabled
+                currentUser = user
+                if let data = try? JSONEncoder().encode(user) {
+                    UserDefaults.standard.set(data, forKey: Self.userKey)
+                }
+            }
+        } catch let err as AccountError {
+            errorMessage = err.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Fetches the recent "what others are listening to" feed.
+    func fetchSocialActivity() async {
+        guard isLoggedIn else { return }
+        do {
+            let data = try await makeRequest("/social/activity")
+            struct Response: Decodable { let activity: [ActivityEntry] }
+            socialActivity = try JSONDecoder().decode(Response.self, from: data).activity
+        } catch let err as AccountError {
+            errorMessage = err.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Fetches trending tracks aggregated across users sharing activity.
+    func fetchTrendingTracks() async {
+        guard isLoggedIn else { return }
+        do {
+            let data = try await makeRequest("/social/discover")
+            struct Response: Decodable { let tracks: [TrendingTrack] }
+            trendingTracks = try JSONDecoder().decode(Response.self, from: data).tracks
+        } catch let err as AccountError {
+            errorMessage = err.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Stats
+
+    /// Fetches lifetime listening stats (total plays/time, top artists/tracks).
+    func fetchStats() async {
+        guard isLoggedIn else { return }
+        do {
+            let data = try await makeRequest("/user/stats")
+            stats = try JSONDecoder().decode(AccountStats.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Sessions (active logins)
+
+    /// Fetches this account's active sessions (one per signed-in device).
+    func fetchSessions() async {
+        guard isLoggedIn else { return }
+        do {
+            let data = try await makeRequest("/auth/sessions")
+            struct Response: Decodable { let sessions: [AccountSession] }
+            sessions = try JSONDecoder().decode(Response.self, from: data).sessions
+        } catch let err as AccountError {
+            errorMessage = err.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Revokes a session by token ID. If it's the current device's session,
+    /// also clears the local session (the user is effectively signed out).
+    func revokeSession(tokenId: String) async {
+        guard isLoggedIn else { return }
+        do {
+            _ = try await makeRequest("/auth/sessions/\(tokenId)", method: "DELETE")
+            if sessions.first(where: { $0.tokenId == tokenId })?.isCurrent == true {
+                clearSession()
+                return
+            }
+            await fetchSessions()
+        } catch let err as AccountError {
+            errorMessage = err.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Password / Account deletion
+
+    /// Changes the account password. On success, every other device is
+    /// signed out by the server (see POST /auth/change-password).
+    func changePassword(currentPassword: String, newPassword: String) async -> Bool {
+        guard isLoggedIn else { return false }
+        struct Body: Encodable { let current_password: String; let new_password: String }
+        do {
+            _ = try await makeRequest(
+                "/auth/change-password", method: "POST",
+                body: Body(current_password: currentPassword, new_password: newPassword)
+            )
+            errorMessage = nil
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Permanently deletes the account and all server-side data. Requires
+    /// the current password. Clears the local session on success.
+    func deleteAccount(password: String) async -> Bool {
+        guard isLoggedIn else { return false }
+        struct Body: Encodable { let password: String }
+        do {
+            _ = try await makeRequest("/auth/delete-account", method: "POST", body: Body(password: password))
+            appLog("Account deleted", category: "account")
+            clearSession()
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
         }
     }
 

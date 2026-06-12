@@ -92,7 +92,7 @@ final class BridgeHealthService: ObservableObject {
 
         // Show toast on status change
         if prevHealthy != nil && prevHealthy != healthy {
-            toastMessage = healthy ? "✓ Bridge server connected" : "⚠ Bridge server offline"
+            toastMessage = healthy ? "✓ Streaming connected" : "⚠ Streaming unavailable"
             toastIsSuccess = healthy
             showToast = true
             try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -124,7 +124,7 @@ struct ToastView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: Capsule())
+        .adaptiveGlass(in: Capsule())
         .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
     }
 }

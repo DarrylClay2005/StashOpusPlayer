@@ -35,8 +35,16 @@ final class WidgetDataService {
             try? data.write(to: artPath, options: .atomic)
             // Store only the filename so the path stays valid after backup/restore.
             ud.set("widget_artwork.jpg", forKey: "widget_artwork_path")
-        } else if song == nil {
+        } else {
+            // No artwork for the current song (or no song at all) — clear the
+            // stored path so the widget doesn't keep showing the *previous*
+            // track's artwork next to the new track's title/artist.
             ud.removeObject(forKey: "widget_artwork_path")
+            if let container = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: appGroupID
+            ) {
+                try? FileManager.default.removeItem(at: container.appendingPathComponent("widget_artwork.jpg"))
+            }
         }
 
         reloadTimelinesThrottled()

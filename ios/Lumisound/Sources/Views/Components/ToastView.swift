@@ -19,7 +19,7 @@ private struct LumiToastView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 11)
-        .background(.regularMaterial, in: Capsule())
+        .adaptiveGlass(in: Capsule(), fallback: .regularMaterial)
         .overlay(
             Capsule()
                 .strokeBorder(

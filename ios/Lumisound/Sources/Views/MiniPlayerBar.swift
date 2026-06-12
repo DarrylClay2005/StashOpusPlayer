@@ -65,7 +65,7 @@ struct MiniPlayerBar: View {
             .padding(.bottom, 10)
             .frame(height: 80)
         }
-        .background(.ultraThinMaterial)
+        .adaptiveGlass(in: Rectangle())
     }
 
     private var artworkThumbnail: some View {
@@ -79,14 +79,18 @@ struct MiniPlayerBar: View {
     private var songInfo: some View {
         VStack(alignment: .leading, spacing: 2) {
             if let song = player.currentSong {
-                Text(song.displayName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.textPrimary)
-                    .lineLimit(1)
-                Text(song.artistName)
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .lineLimit(1)
+                MarqueeText(
+                    text: song.displayName,
+                    font: .subheadline.weight(.semibold),
+                    color: AppTheme.textPrimary
+                )
+                .frame(height: 18)
+                MarqueeText(
+                    text: song.artistName,
+                    font: .caption,
+                    color: AppTheme.textSecondary
+                )
+                .frame(height: 14)
             }
         }
     }

@@ -13,6 +13,10 @@ struct ContentView: View {
     @AppStorage("selected_tab") private var selectedTab = 0
     @State private var showCarMode = false
 
+    /// Set in Settings → Playback. When off, the floating Car Mode button is
+    /// hidden and connecting to a car stereo no longer auto-presents it.
+    @AppStorage("carModeEnabled") private var carModeEnabled: Bool = true
+
     /// Circular-cropped tab-bar-sized rendering of the user's avatar, shown in place
     /// of the gearshape Settings icon when logged in. Cached in @State (recomputed only
     /// when the avatar actually changes via onReceive below) rather than rendered inline
@@ -132,19 +136,22 @@ struct ContentView: View {
             CarModeView()
                 .environmentObject(player)
         }
-        // Floating car-mode button — top-right corner above tab bar content
+        // Floating car-mode button — top-right corner above tab bar content.
+        // Hidden entirely when the user disables Car Mode in Settings → Playback.
         .overlay(alignment: .topTrailing) {
-            Button {
-                showCarMode = true
-            } label: {
-                Image(systemName: "car.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(AppTheme.dynamicAccent)
-                    .padding(10)
-                    .background(.ultraThinMaterial, in: Circle())
+            if carModeEnabled {
+                Button {
+                    showCarMode = true
+                } label: {
+                    Image(systemName: "car.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                        .padding(10)
+                        .adaptiveGlass(tint: AppTheme.dynamicAccent, in: Circle())
+                }
+                .padding(.trailing, 16)
+                .padding(.top, 56)
             }
-            .padding(.trailing, 16)
-            .padding(.top, 56)
         }
         // Auto-activate when a genuine car stereo / CarPlay route becomes available.
         //
@@ -166,7 +173,7 @@ struct ContentView: View {
                 AVAudioSession.RouteChangeReason(rawValue: reason) == .newDeviceAvailable
             else { return }
             Task { @MainActor in
-                guard !showCarMode else { return }
+                guard carModeEnabled, !showCarMode else { return }
                 let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
                 let isCarAudio = outputs.contains { $0.portType == .carAudio }
                 if isCarAudio { showCarMode = true }
