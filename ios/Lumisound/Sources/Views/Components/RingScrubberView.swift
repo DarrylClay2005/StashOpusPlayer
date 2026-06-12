@@ -64,24 +64,33 @@ struct RingScrubberView: View {
                         )
                         .animation(dragAngle == nil ? .easeInOut(duration: 0.12) : nil, value: progress)
 
-                    // Thumb dot
-                    Circle()
-                        .fill(AppTheme.dynamicAccent)
-                        .frame(width: 16, height: 16)
-                        .shadow(
-                            color: AppTheme.dynamicAccent.opacity(ringGlow ? 0.8 : 0.4),
-                            radius: ringGlow ? 10 : 4
-                        )
-                        .scaleEffect(ringGlow ? 1.15 : 1.0)
-                        .offset(y: -radius)
-                        .rotationEffect(.degrees(progress * 360 - 90))
-                        .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true), value: ringGlow)
-                        // Match the progress arc's animation so the thumb glides along
-                        // with the fill instead of snapping to each playback tick while
-                        // the arc behind it eases smoothly — the mismatch read as the
-                        // thumb "jumping" independently of the ring. Disabled while
-                        // dragging so the thumb tracks the finger 1:1.
-                        .animation(dragAngle == nil ? .easeInOut(duration: 0.12) : nil, value: progress)
+                    // Thumb dot — positioning (offset/rotation) and the glow pulse are
+                    // applied on separate nested views. A `repeatForever` animation on
+                    // one view applies to ALL of that view's animatable properties, so
+                    // putting the pulse's `.animation(repeatForever, value: ringGlow)`
+                    // on the same view as the rotation caused the thumb's position to
+                    // get dragged along by the perpetual pulse curve instead of the
+                    // quick progress animation — which is why the ball visibly lagged
+                    // behind the actual playback time.
+                    Group {
+                        Circle()
+                            .fill(AppTheme.dynamicAccent)
+                            .frame(width: 16, height: 16)
+                            .shadow(
+                                color: AppTheme.dynamicAccent.opacity(ringGlow ? 0.8 : 0.4),
+                                radius: ringGlow ? 10 : 4
+                            )
+                            .scaleEffect(ringGlow ? 1.15 : 1.0)
+                            .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true), value: ringGlow)
+                    }
+                    .offset(y: -radius)
+                    .rotationEffect(.degrees(progress * 360 - 90))
+                    // Match the progress arc's animation so the thumb glides along
+                    // with the fill instead of snapping to each playback tick while
+                    // the arc behind it eases smoothly — the mismatch read as the
+                    // thumb "jumping" independently of the ring. Disabled while
+                    // dragging so the thumb tracks the finger 1:1.
+                    .animation(dragAngle == nil ? .easeInOut(duration: 0.12) : nil, value: progress)
 
                     // Time display
                     VStack(spacing: 2) {
