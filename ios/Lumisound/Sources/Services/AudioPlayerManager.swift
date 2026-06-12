@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import AudioToolbox
 import Foundation
 import MediaPlayer
 import UIKit
@@ -129,7 +130,16 @@ final class AudioPlayerManager: ObservableObject {
     // `audioSettings.volume` boost gain above 100% (up to `maxVolume`) without
     // the boosted signal clipping — the limiter clamps transient peaks instead
     // of letting them hard-clip in `mainMixerNode`.
-    private let limiter = AVAudioUnitDynamicsProcessor()
+    private let limiter: AVAudioUnitEffect = {
+        var description = AudioComponentDescription(
+            componentType: kAudioUnitType_Effect,
+            componentSubType: kAudioUnitSubType_DynamicsProcessor,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        return AVAudioUnitEffect(audioComponentDescription: description)
+    }()
 
     // MARK: Private — Spatial / Special-Effect Nodes
 
@@ -1799,12 +1809,12 @@ final class AudioPlayerManager: ObservableObject {
     /// above 1.0 (via `audioSettings.volume`, up to `AudioSettings.maxVolume`)
     /// makes playback louder without the output signal hard-clipping.
     private func configureLimiter() {
-        limiter.preGain = 0
-        limiter.threshold = -1.0     // dB — start limiting just below full scale
-        limiter.headRoom = 1.0       // dB of headroom above the threshold
-        limiter.attackTime = 0.001   // seconds — fast enough to catch transients
-        limiter.releaseTime = 0.05   // seconds — short so it doesn't pump audibly
-        limiter.masterGain = 0
+        let unit = limiter.audioUnit
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_Threshold, kAudioUnitScope_Global, 0, -1.0, 0)    // dB — start limiting just below full scale
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_HeadRoom, kAudioUnitScope_Global, 0, 1.0, 0)      // dB of headroom above the threshold
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_AttackTime, kAudioUnitScope_Global, 0, 0.001, 0)  // seconds — fast enough to catch transients
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_ReleaseTime, kAudioUnitScope_Global, 0, 0.05, 0)  // seconds — short so it doesn't pump audibly
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_MasterGain, kAudioUnitScope_Global, 0, 0, 0)
         limiter.bypass = false
     }
 
