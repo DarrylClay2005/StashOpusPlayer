@@ -29,13 +29,19 @@ enum LrcParser {
 
                 let minutes = TimeInterval(String(raw[minuteRange])) ?? 0
                 let seconds = TimeInterval(String(raw[secondRange])) ?? 0
-                var hundredths: TimeInterval = 0
+                var fraction: TimeInterval = 0
 
                 if let fractionRange = Range(match.range(at: 3), in: raw) {
-                    hundredths = TimeInterval(String(raw[fractionRange])) ?? 0
+                    let digits = String(raw[fractionRange])
+                    let value = TimeInterval(digits) ?? 0
+                    // A single digit is tenths (".5" = 500ms); two digits are
+                    // hundredths (".50" = 500ms). Treating a 1-digit fraction
+                    // as hundredths (".5" -> 5ms) made lines fire ~450ms early
+                    // for every timestamp using the shorter form.
+                    fraction = digits.count == 1 ? value / 10 : value / 100
                 }
 
-                parsed.append(LrcLine(time: minutes * 60 + seconds + hundredths / 100, text: text))
+                parsed.append(LrcLine(time: minutes * 60 + seconds + fraction, text: text))
             }
         }
 

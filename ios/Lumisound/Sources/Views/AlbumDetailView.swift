@@ -6,6 +6,12 @@ struct AlbumDetailView: View {
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
 
+    @AppStorage("albumDetail_columns") private var columns: Int = 1
+
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 12), count: columns)
+    }
+
     private var songs: [Song] {
         library.songs(inAlbum: album)
             .sorted {
@@ -39,60 +45,132 @@ struct AlbumDetailView: View {
     }
 
     var body: some View {
-        List {
-            // Album header — pinned at top
-            Section {
-                AlbumHeaderView(
-                    album: album,
-                    artistName: artistName,
-                    songCount: songs.count,
-                    totalDurationText: totalDurationText,
-                    songs: songs
-                )
-            }
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
-            .listSectionSeparator(.hidden)
-
-            // Play button
-            Section {
-                Button {
-                    player.setQueue(songs, startIndex: 0, autoplay: true)
-                } label: {
-                    Label("Play Album", systemImage: "play.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .tint(AppTheme.dynamicAccent)
-                .listRowBackground(Color.clear)
-            }
-            .listSectionSeparator(.hidden)
-
-            // Tracks
-            Section {
-                if songs.isEmpty {
-                    EmptyStateView(icon: "square.stack", title: "No tracks", message: "This album has no tracks.")
-                        .listRowBackground(Color.clear)
-                } else {
-                    ForEach(songs) { song in
-                        Button {
-                            player.play(song: song, in: songs)
-                        } label: {
-                            AlbumTrackRow(song: song, isCurrent: player.currentSong?.id == song.id)
-                        }
-                        .buttonStyle(.plain)
-                        .listRowBackground(AppTheme.surface.opacity(0.5))
+        Group {
+            if columns == 1 {
+                List {
+                    // Album header — pinned at top
+                    Section {
+                        AlbumHeaderView(
+                            album: album,
+                            artistName: artistName,
+                            songCount: songs.count,
+                            totalDurationText: totalDurationText,
+                            songs: songs
+                        )
                     }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                    .listSectionSeparator(.hidden)
+
+                    // Play button
+                    Section {
+                        Button {
+                            player.setQueue(songs, startIndex: 0, autoplay: true)
+                        } label: {
+                            Label("Play Album", systemImage: "play.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(AppTheme.dynamicAccent)
+                        .listRowBackground(Color.clear)
+                    }
+                    .listSectionSeparator(.hidden)
+
+                    // Tracks
+                    Section {
+                        if songs.isEmpty {
+                            EmptyStateView(icon: "square.stack", title: "No tracks", message: "This album has no tracks.")
+                                .listRowBackground(Color.clear)
+                        } else {
+                            ForEach(songs) { song in
+                                Button {
+                                    player.play(song: song, in: songs)
+                                } label: {
+                                    AlbumTrackRow(song: song, isCurrent: player.currentSong?.id == song.id)
+                                }
+                                .buttonStyle(.plain)
+                                .listRowBackground(AppTheme.surface.opacity(0.5))
+                            }
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+            } else {
+                ScrollView {
+                    VStack(spacing: 16) {
+                        AlbumHeaderView(
+                            album: album,
+                            artistName: artistName,
+                            songCount: songs.count,
+                            totalDurationText: totalDurationText,
+                            songs: songs
+                        )
+
+                        Button {
+                            player.setQueue(songs, startIndex: 0, autoplay: true)
+                        } label: {
+                            Label("Play Album", systemImage: "play.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(AppTheme.dynamicAccent)
+                        .padding(.horizontal, 16)
+
+                        if songs.isEmpty {
+                            EmptyStateView(icon: "square.stack", title: "No tracks", message: "This album has no tracks.")
+                                .padding(.top, 40)
+                        } else {
+                            LazyVGrid(columns: gridColumns, spacing: 12) {
+                                ForEach(songs) { song in
+                                    Button {
+                                        player.play(song: song, in: songs)
+                                    } label: {
+                                        AlbumTrackGridCell(song: song, isCurrent: player.currentSong?.id == song.id)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                        }
+                    }
+                    .padding(.bottom, 16)
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
         .background(Color.clear.ignoresSafeArea())
         .navigationTitle(album)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
+        .toolbar {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                Button {
+                    columns = 1
+                } label: {
+                    Image(systemName: "list.bullet")
+                        .foregroundStyle(columns == 1 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    columns = 2
+                } label: {
+                    Image(systemName: "square.grid.2x2")
+                        .foregroundStyle(columns == 2 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    columns = 3
+                } label: {
+                    Image(systemName: "square.grid.3x3")
+                        .foregroundStyle(columns == 3 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
 
@@ -193,5 +271,58 @@ private struct AlbumTrackRow: View {
         }
         .contentShape(Rectangle())
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Album Track Grid Cell (2/3-column layout)
+
+private struct AlbumTrackGridCell: View {
+    let song: Song
+    let isCurrent: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            GeometryReader { geo in
+                ArtworkThumbnail(song: song, size: geo.size.width)
+                    .overlay(alignment: .bottomTrailing) {
+                        if isCurrent {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(4)
+                                .background(AppTheme.dynamicAccent, in: Circle())
+                                .padding(4)
+                        }
+                    }
+                    .overlay(alignment: .topLeading) {
+                        if song.trackNumber > 0 {
+                            Text("\(song.trackNumber)")
+                                .font(.caption2.weight(.bold))
+                                .monospacedDigit()
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.black.opacity(0.5), in: Capsule())
+                                .padding(4)
+                        }
+                    }
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(song.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
+                    .lineLimit(2)
+                Text(song.durationText)
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 2)
+        }
+        .padding(6)
+        .background(AppTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }

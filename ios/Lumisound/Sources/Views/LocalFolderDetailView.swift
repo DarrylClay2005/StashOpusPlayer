@@ -14,6 +14,12 @@ struct LocalFolderDetailView: View {
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
 
+    @AppStorage("folderDetail_columns") private var columns: Int = 1
+
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 12), count: columns)
+    }
+
     @State private var songs: [Song] = []
 
     /// Off the render path (see `.task(id:)` below) so large libraries don't
@@ -44,74 +50,158 @@ struct LocalFolderDetailView: View {
     }
 
     var body: some View {
-        List {
-            // Header
-            Section {
-                FolderDetailHeaderView(
-                    folderName: folderName,
-                    representativeSong: songs.first,
-                    songCount: songs.count,
-                    totalDurationText: totalDurationText
-                )
-            }
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
-            .listSectionSeparator(.hidden)
-
-            // Play / Shuffle
-            Section {
-                HStack(spacing: 12) {
-                    Button {
-                        player.setQueue(songs, startIndex: 0, autoplay: true)
-                    } label: {
-                        Label("Play", systemImage: "play.fill")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
+        Group {
+            if columns == 1 {
+                List {
+                    // Header
+                    Section {
+                        FolderDetailHeaderView(
+                            folderName: folderName,
+                            representativeSong: songs.first,
+                            songCount: songs.count,
+                            totalDurationText: totalDurationText
+                        )
                     }
-                    .buttonStyle(.bordered)
-                    .tint(AppTheme.dynamicAccent)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                    .listSectionSeparator(.hidden)
 
-                    Button {
-                        let shuffled = songs.shuffled()
-                        player.setQueue(shuffled, startIndex: 0, autoplay: true)
-                    } label: {
-                        Label("Shuffle", systemImage: "shuffle")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(AppTheme.dynamicAccent)
-                }
-                .listRowBackground(Color.clear)
-            }
-            .listSectionSeparator(.hidden)
+                    // Play / Shuffle
+                    Section {
+                        HStack(spacing: 12) {
+                            Button {
+                                player.setQueue(songs, startIndex: 0, autoplay: true)
+                            } label: {
+                                Label("Play", systemImage: "play.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(AppTheme.dynamicAccent)
 
-            // Track list
-            Section {
-                if songs.isEmpty {
-                    EmptyStateView(icon: "folder", title: "Empty folder", message: "No audio files found inside \"\(folderName)\".")
-                        .listRowBackground(Color.clear)
-                } else {
-                    ForEach(songs) { song in
-                        Button {
-                            player.play(song: song, in: songs)
-                        } label: {
-                            FolderTrackRow(song: song, isCurrent: player.currentSong?.id == song.id)
+                            Button {
+                                let shuffled = songs.shuffled()
+                                player.setQueue(shuffled, startIndex: 0, autoplay: true)
+                            } label: {
+                                Label("Shuffle", systemImage: "shuffle")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(AppTheme.dynamicAccent)
                         }
-                        .buttonStyle(.plain)
-                        .listRowBackground(AppTheme.surface.opacity(0.5))
+                        .listRowBackground(Color.clear)
                     }
+                    .listSectionSeparator(.hidden)
+
+                    // Track list
+                    Section {
+                        if songs.isEmpty {
+                            EmptyStateView(icon: "folder", title: "Empty folder", message: "No audio files found inside \"\(folderName)\".")
+                                .listRowBackground(Color.clear)
+                        } else {
+                            ForEach(songs) { song in
+                                Button {
+                                    player.play(song: song, in: songs)
+                                } label: {
+                                    FolderTrackRow(song: song, isCurrent: player.currentSong?.id == song.id)
+                                }
+                                .buttonStyle(.plain)
+                                .listRowBackground(AppTheme.surface.opacity(0.5))
+                            }
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+            } else {
+                ScrollView {
+                    VStack(spacing: 16) {
+                        FolderDetailHeaderView(
+                            folderName: folderName,
+                            representativeSong: songs.first,
+                            songCount: songs.count,
+                            totalDurationText: totalDurationText
+                        )
+
+                        HStack(spacing: 12) {
+                            Button {
+                                player.setQueue(songs, startIndex: 0, autoplay: true)
+                            } label: {
+                                Label("Play", systemImage: "play.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(AppTheme.dynamicAccent)
+
+                            Button {
+                                let shuffled = songs.shuffled()
+                                player.setQueue(shuffled, startIndex: 0, autoplay: true)
+                            } label: {
+                                Label("Shuffle", systemImage: "shuffle")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(AppTheme.dynamicAccent)
+                        }
+                        .padding(.horizontal, 16)
+
+                        if songs.isEmpty {
+                            EmptyStateView(icon: "folder", title: "Empty folder", message: "No audio files found inside \"\(folderName)\".")
+                                .padding(.top, 40)
+                        } else {
+                            LazyVGrid(columns: gridColumns, spacing: 12) {
+                                ForEach(songs) { song in
+                                    Button {
+                                        player.play(song: song, in: songs)
+                                    } label: {
+                                        FolderTrackGridCell(song: song, isCurrent: player.currentSong?.id == song.id)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                        }
+                    }
+                    .padding(.bottom, 16)
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
         .background(Color.clear.ignoresSafeArea())
         .navigationTitle(folderName)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
         .task(id: library.allSongs.count) {
             songs = computeSongs()
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                Button {
+                    columns = 1
+                } label: {
+                    Image(systemName: "list.bullet")
+                        .foregroundStyle(columns == 1 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    columns = 2
+                } label: {
+                    Image(systemName: "square.grid.2x2")
+                        .foregroundStyle(columns == 2 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    columns = 3
+                } label: {
+                    Image(systemName: "square.grid.3x3")
+                        .foregroundStyle(columns == 3 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }
@@ -155,6 +245,47 @@ private struct FolderDetailHeaderView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 20)
+    }
+}
+
+// MARK: - Track Grid Cell (2/3-column layout)
+
+private struct FolderTrackGridCell: View {
+    let song: Song
+    let isCurrent: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            GeometryReader { geo in
+                ArtworkThumbnail(song: song, size: geo.size.width)
+                    .overlay(alignment: .bottomTrailing) {
+                        if isCurrent {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(4)
+                                .background(AppTheme.dynamicAccent, in: Circle())
+                                .padding(4)
+                        }
+                    }
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(song.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
+                    .lineLimit(2)
+                Text(song.artistName)
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 2)
+        }
+        .padding(6)
+        .background(AppTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

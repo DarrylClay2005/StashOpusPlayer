@@ -64,21 +64,29 @@ struct WaveformScrubberView: View {
                             .frame(maxHeight: .infinity)
                     }
 
-                    // Animated playhead line
-                    ZStack {
-                        // Glow halo behind the line
-                        Rectangle()
-                            .fill(AppTheme.dynamicAccent.opacity(playheadPulse ? 0.35 : 0.0))
-                            .frame(width: 8)
-                            .blur(radius: 4)
-                        // Main line
-                        Rectangle()
-                            .fill(Color.white.opacity(playheadPulse ? 1.0 : 0.75))
-                            .frame(width: 2)
+                    // Animated playhead line — positioning (offset) and the pulse
+                    // are applied on separate nested views. A `repeatForever`
+                    // animation on one view applies to ALL of that view's
+                    // animatable properties, so putting the pulse's
+                    // `.animation(repeatForever, value: playheadPulse)` on the same
+                    // view as the offset caused the playhead to lag behind the
+                    // actual playback position, dragged along by the pulse curve.
+                    Group {
+                        ZStack {
+                            // Glow halo behind the line
+                            Rectangle()
+                                .fill(AppTheme.dynamicAccent.opacity(playheadPulse ? 0.35 : 0.0))
+                                .frame(width: 8)
+                                .blur(radius: 4)
+                            // Main line
+                            Rectangle()
+                                .fill(Color.white.opacity(playheadPulse ? 1.0 : 0.75))
+                                .frame(width: 2)
+                        }
+                        .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: playheadPulse)
                     }
                     .frame(maxHeight: .infinity)
                     .offset(x: max(0, geo.size.width * progress - 1))
-                    .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: playheadPulse)
                 }
                 .contentShape(Rectangle())
                 .gesture(
