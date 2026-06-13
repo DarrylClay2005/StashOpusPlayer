@@ -29,6 +29,16 @@ struct DiscoverView: View {
             .padding()
 
             List {
+                if account.isLoggedIn {
+                    Section {
+                        NavigationLink(destination: DiscoverMixView()) {
+                            Label("Discover Mix", systemImage: "sparkles")
+                                .foregroundStyle(AppTheme.textPrimary)
+                        }
+                    }
+                    .listRowBackground(AppTheme.surface)
+                }
+
                 if !(account.currentUser?.shareListeningActivity ?? false) {
                     Section {
                         Text("Turn on \"Share Listening Activity\" in Account settings to appear here and help power Trending.")
