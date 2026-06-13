@@ -490,6 +490,7 @@ final class AudioPlayerManager: ObservableObject {
             scheduleCurrent(from: target)
         }
         updateNowPlaying()
+        pushPlaybackStateToBridge()
     }
 
     func skipToNext() {
