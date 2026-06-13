@@ -408,10 +408,16 @@ def _ytdlp_cookie_args() -> list[str]:
     """YouTube only paginates flat-playlist results past the first ~100 entries
     for authenticated requests. If a session cookie export is bind-mounted at
     YTDLP_COOKIES_FILE, use it — the file can be swapped out at any time
-    (no rebuild/restart needed) to refresh the session."""
+    (no rebuild/restart needed) to refresh the session.
+
+    Also skip yt-dlp's initial webpage fetch for the playlist tab and go
+    straight to the API JSON — for large playlists that contain unavailable
+    (deleted/private) videos this roughly doubles the number of entries
+    yt-dlp is able to paginate through (e.g. 105/307 -> 205/307)."""
+    args = ["--extractor-args", "youtubetab:skip=webpage"]
     if os.path.isfile(YTDLP_COOKIES_FILE) and os.path.getsize(YTDLP_COOKIES_FILE) > 0:
-        return ["--cookies", YTDLP_COOKIES_FILE]
-    return []
+        args += ["--cookies", YTDLP_COOKIES_FILE]
+    return args
 
 
 async def _run_ytdlp(*args: str, timeout: float = 30.0) -> list[dict]:
