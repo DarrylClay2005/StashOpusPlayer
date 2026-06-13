@@ -79,6 +79,13 @@ struct AchievementsView: View {
         .refreshable { await account.fetchAchievements() }
     }
 
+    private func sectionHeader(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(AppTheme.bodyFont(size: 11))
+            .foregroundStyle(AppTheme.textSecondary)
+            .kerning(0.8)
+    }
+
     private func streakLabel(_ days: Int) -> String {
         days == 1 ? "1 day" : "\(days) days"
     }

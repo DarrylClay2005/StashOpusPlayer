@@ -235,7 +235,7 @@ struct PlaylistCollaborator: Decodable, Identifiable {
 }
 
 /// One entry from GET /user/playlists/shared-with-me.
-struct SharedPlaylist: Decodable, Identifiable {
+struct SharedWithMePlaylist: Decodable, Identifiable {
     let id: String
     let name: String
     let description: String?
@@ -957,11 +957,11 @@ final class AccountService: ObservableObject {
     }
 
     /// Playlists owned by other users that this user can view/edit (GET /user/playlists/shared-with-me).
-    func fetchSharedPlaylists() async -> [SharedPlaylist] {
+    func fetchSharedPlaylists() async -> [SharedWithMePlaylist] {
         guard isLoggedIn else { return [] }
         do {
             let data = try await makeRequest("/user/playlists/shared-with-me")
-            return try JSONDecoder().decode([SharedPlaylist].self, from: data)
+            return try JSONDecoder().decode([SharedWithMePlaylist].self, from: data)
         } catch let err as AccountError {
             errorMessage = err.message
             return []

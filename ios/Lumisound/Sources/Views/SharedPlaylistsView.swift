@@ -10,7 +10,7 @@ import SwiftUI
 struct SharedPlaylistsView: View {
     @EnvironmentObject private var account: AccountService
 
-    @State private var playlists: [SharedPlaylist] = []
+    @State private var playlists: [SharedWithMePlaylist] = []
     @State private var isLoading = false
 
     var body: some View {
@@ -66,7 +66,7 @@ struct SharedPlaylistsView: View {
 // MARK: - SharedPlaylistDetailView
 
 private struct SharedPlaylistDetailView: View {
-    let summary: SharedPlaylist
+    let summary: SharedWithMePlaylist
 
     @EnvironmentObject private var account: AccountService
     @EnvironmentObject private var library: LibraryManager
