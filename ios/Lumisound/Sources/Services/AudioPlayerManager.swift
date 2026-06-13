@@ -35,6 +35,7 @@ final class AudioPlayerManager: ObservableObject {
             if currentSong?.id != oldValue?.id {
                 Task { await updateNowPlayingArtwork(for: currentSong) }
                 applyTrackAudioSettings(previousID: oldValue?.id)
+                pushPlaybackStateToBridge()
             }
         }
     }
@@ -44,6 +45,7 @@ final class AudioPlayerManager: ObservableObject {
         didSet {
             guard isPlaying != oldValue else { return }
             WidgetDataService.shared.updatePlayState(isPlaying: isPlaying)
+            pushPlaybackStateToBridge()
         }
     }
     /// Backing store for `position`/`duration` — see `PlaybackProgress` for why
@@ -2139,8 +2141,18 @@ final class AudioPlayerManager: ObservableObject {
         timer = nil
     }
 
+    /// Counts 0.5s timer ticks so `pushPlaybackStateToBridge()` runs roughly
+    /// every 5s during playback, instead of on every tick.
+    private var bridgePushTickCounter = 0
+
     private func timerTick() {
         updatePositionFromPlayer()
+
+        bridgePushTickCounter += 1
+        if bridgePushTickCounter >= 10 {
+            bridgePushTickCounter = 0
+            pushPlaybackStateToBridge()
+        }
 
         // Belt-and-braces recovery: if we think we're playing but the engine has
         // silently stopped (and no interruption/route/config-change notification
@@ -2164,6 +2176,19 @@ final class AudioPlayerManager: ObservableObject {
         // only refresh on play/pause/track-change events and can visibly drift from
         // (or briefly disagree with) the in-app scrubber.
         updateNowPlaying()
+    }
+
+    /// Mirrors the current track/position to the bridge (`/user/playback-state`)
+    /// so other surfaces — e.g. the local Discord Rich Presence daemon — can
+    /// show what this account is currently playing. Fires on play/pause/track
+    /// changes and roughly every 5s during playback; no-ops if not logged in.
+    private func pushPlaybackStateToBridge() {
+        AccountService.shared?.pushPlaybackState(
+            song: currentSong,
+            position: position,
+            duration: duration,
+            isPlaying: isPlaying
+        )
     }
 
     private func updatePositionFromPlayer() {

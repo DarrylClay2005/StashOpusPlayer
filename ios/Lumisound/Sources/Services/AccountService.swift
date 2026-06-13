@@ -302,6 +302,11 @@ final class AccountService: ObservableObject {
         autoPushTimer?.invalidate()
     }
 
+    /// Ambient reference to the app's single AccountService instance, so
+    /// services without direct access to the SwiftUI environment (e.g.
+    /// AudioPlayerManager) can push playback state. Set once at init.
+    static weak var shared: AccountService?
+
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.userKey),
            let user = try? JSONDecoder().decode(AppUser.self, from: data) {
@@ -314,6 +319,7 @@ final class AccountService: ObservableObject {
             // Bypass didSet to avoid re-writing the same value on init
             _lastSyncDate = Published(initialValue: Date(timeIntervalSince1970: ts))
         }
+        Self.shared = self
     }
 
     // MARK: - Public API
@@ -934,6 +940,41 @@ final class AccountService: ObservableObject {
             appLog("logPlay: \"\(song.title)\" \(listenSeconds)s", category: "account")
         } catch {
             appWarn("logPlay: failed for \"\(song.title)\": \(error.localizedDescription)", category: "account")
+        }
+    }
+
+    /// Pushes the current track/position to the bridge so other surfaces
+    /// (e.g. the local Discord Rich Presence daemon) can mirror "now playing"
+    /// for this account. Best-effort and silent on failure — this runs on
+    /// every play/pause/track-change and periodically during playback, so it
+    /// shouldn't spam logs or interrupt playback if the network is down.
+    private var playbackStatePushTask: Task<Void, Never>?
+
+    func pushPlaybackState(song: Song?, position: TimeInterval, duration: TimeInterval, isPlaying: Bool) {
+        guard isLoggedIn else { return }
+        struct Body: Encodable {
+            let song_id: String?
+            let title: String?
+            let artist: String?
+            let track_url: String?
+            let source: String?
+            let position_seconds: Double
+            let duration_seconds: Double
+            let is_playing: Bool
+        }
+        let body = Body(
+            song_id: song?.id,
+            title: song?.title,
+            artist: song?.artist.isEmpty == true ? nil : song?.artist,
+            track_url: song?.url?.absoluteString,
+            source: nil,
+            position_seconds: position,
+            duration_seconds: duration,
+            is_playing: isPlaying
+        )
+        playbackStatePushTask?.cancel()
+        playbackStatePushTask = Task { [weak self] in
+            _ = try? await self?.makeRequest("/user/playback-state", method: "PUT", body: body)
         }
     }
 
