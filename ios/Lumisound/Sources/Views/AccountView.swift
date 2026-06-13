@@ -22,6 +22,9 @@ struct AccountView: View {
     // User ID copy feedback
     @State private var didCopyUserID = false
 
+    // Notifications badge
+    @State private var unreadNotificationCount = 0
+
     // RPC setup token
     @State private var isGeneratingRpcToken = false
     @State private var generatedRpcToken: String?
@@ -247,12 +250,29 @@ struct AccountView: View {
                         Label("Scrobbling", systemImage: "waveform.path.ecg")
                             .foregroundStyle(AppTheme.textPrimary)
                     }
+
+                    NavigationLink(destination: NotificationsView()) {
+                        HStack {
+                            Label("Notifications", systemImage: "bell")
+                                .foregroundStyle(AppTheme.textPrimary)
+                            if unreadNotificationCount > 0 {
+                                Spacer()
+                                Text("\(unreadNotificationCount)")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 2)
+                                    .background(AppTheme.dynamicAccent, in: Capsule())
+                            }
+                        }
+                    }
                 } header: {
                     sectionHeader("Library")
                 }
                 .listRowBackground(AppTheme.surface)
                 .task {
                     await account.fetchStats()
+                    unreadNotificationCount = await account.fetchNotifications(unreadOnly: true).count
                 }
 
                 // MARK: Account Info Section
