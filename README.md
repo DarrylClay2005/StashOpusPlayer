@@ -77,7 +77,7 @@ bridge, and build-from-source instructions.
 | **Shared with Me** | View, play, or save a local copy of playlists others have shared with you |
 | **Scrobbling** | Link Last.fm and/or ListenBrainz to scrobble finished tracks automatically |
 | **Discord Webhook** | Post a "Now Playing" message to a Discord channel via incoming webhook |
-| **Discord Rich Presence** | Generate a per-user token for the [local Rich Presence bridge](discord-rpc) — shows "Listening to X by Y" on your Discord profile while Discord is open |
+| **Discord Rich Presence** | Generate a per-user token and register your Discord Application Client ID in-app; the [local Rich Presence daemon](discord-rpc) picks up both automatically and shows "Listening to X by Y" on your Discord profile while Discord is open |
 
 ### Privacy
 

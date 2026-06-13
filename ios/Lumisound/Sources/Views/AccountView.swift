@@ -25,10 +25,6 @@ struct AccountView: View {
     // Notifications badge
     @State private var unreadNotificationCount = 0
 
-    // RPC setup token
-    @State private var isGeneratingRpcToken = false
-    @State private var generatedRpcToken: String?
-    @State private var didCopyRpcToken = false
     @State private var draftDOB = Date()
     @State private var isSavingDOB = false
 
@@ -470,49 +466,14 @@ struct AccountView: View {
 
                 // MARK: Connected Tools Section
                 Section {
-                    if let token = generatedRpcToken {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(token)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(AppTheme.textPrimary)
-                                .lineLimit(3)
-                                .truncationMode(.middle)
-                                .textSelection(.enabled)
-                            Button {
-                                UIPasteboard.general.string = token
-                                didCopyRpcToken = true
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                    didCopyRpcToken = false
-                                }
-                            } label: {
-                                Label(didCopyRpcToken ? "Copied" : "Copy Token", systemImage: didCopyRpcToken ? "checkmark" : "doc.on.doc")
-                                    .foregroundStyle(AppTheme.dynamicAccent)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    } else {
-                        Button {
-                            Task {
-                                isGeneratingRpcToken = true
-                                generatedRpcToken = await account.generateRpcToken()
-                                isGeneratingRpcToken = false
-                            }
-                        } label: {
-                            HStack {
-                                Label("Generate Rich Presence Token", systemImage: "key.viewfinder")
-                                    .foregroundStyle(AppTheme.textPrimary)
-                                if isGeneratingRpcToken {
-                                    Spacer()
-                                    ProgressView()
-                                }
-                            }
-                        }
-                        .disabled(isGeneratingRpcToken)
+                    NavigationLink(destination: DiscordRichPresenceView()) {
+                        Label("Discord Rich Presence", systemImage: "key.viewfinder")
+                            .foregroundStyle(AppTheme.textPrimary)
                     }
                 } header: {
                     sectionHeader("Discord Rich Presence")
                 } footer: {
-                    Text("Generate a token for the Lumisound Discord Rich Presence tool so it can show what you're playing without storing your password. Paste it into the tool's config as \"access_token\". You can revoke it any time from Active Sessions (\"Discord RPC Bridge\").")
+                    Text("Set up the local Discord Rich Presence daemon to show what you're playing on your Discord profile.")
                         .font(AppTheme.bodyFont(size: 12))
                         .foregroundStyle(AppTheme.textSecondary)
                 }

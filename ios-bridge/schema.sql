@@ -407,3 +407,18 @@ CREATE TABLE IF NOT EXISTS ios_discord_webhooks (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+
+-- Feature: Discord Rich Presence registration. Rich Presence itself is still
+-- set by a local daemon talking to the Discord desktop client over IPC (no
+-- server-side API exists for this), but the daemon's per-user configuration
+-- (Discord Application client ID + optional Rich Presence art asset name) is
+-- registered here once via the app, so the daemon only needs the per-user
+-- RPC token (see /user/rpc-token) and fetches the rest from the server.
+CREATE TABLE IF NOT EXISTS ios_discord_rpc_config (
+    user_id VARCHAR(36) PRIMARY KEY,
+    discord_client_id VARCHAR(64) NOT NULL,
+    large_image VARCHAR(255),
+    enabled BOOLEAN DEFAULT TRUE,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);

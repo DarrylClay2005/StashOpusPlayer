@@ -226,6 +226,24 @@ class BridgeClient:
                 return self._request("GET", "/user/playback-state")
             raise
 
+    def get_rpc_config(self) -> Optional[dict]:
+        """Fetches this user's registered Discord Rich Presence settings
+        (discord_client_id, large_image, enabled) from the bridge, set via
+        Lumisound -> Account -> Discord Rich Presence. Returns None if the
+        user hasn't registered one (configured == False)."""
+        if not self.access_token:
+            self.login()
+        try:
+            result = self._request("GET", "/user/discord-rpc-config")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                log("Access token expired/invalid, re-authenticating")
+                self.login()
+                result = self._request("GET", "/user/discord-rpc-config")
+            else:
+                raise
+        return result if result.get("configured") else None
+
 
 # ---------------------------------------------------------------------------
 # Main loop
@@ -288,12 +306,31 @@ def main() -> None:
     config_path = Path(os.environ.get("LUMISOUND_RPC_CONFIG", DEFAULT_CONFIG_PATH))
     config = load_config(config_path)
 
-    client_id = config["discord_client_id"]
     bridge_url = config["bridge_url"]
     poll_interval = config.get("poll_interval_seconds", 5)
+    bridge = BridgeClient(bridge_url, config_path, config)
+
+    # client_id/large_image can be set locally, but normally come from the
+    # server-side registration made in Lumisound -> Account -> Discord Rich
+    # Presence (GET /user/discord-rpc-config) — that's the "general server"
+    # bit: the local daemon only needs bridge_url + access_token.
+    client_id = config.get("discord_client_id")
     large_image = config.get("large_image")
 
-    bridge = BridgeClient(bridge_url, config_path, config)
+    if not client_id:
+        log("No discord_client_id in local config — fetching registration from bridge")
+        rpc_config = bridge.get_rpc_config()
+        if not rpc_config:
+            log("No Discord Rich Presence config registered for this account.")
+            log("Open Lumisound -> Account -> Discord Rich Presence to register a Discord Application Client ID, or set discord_client_id in config.json.")
+            sys.exit(1)
+        if not rpc_config.get("enabled", True):
+            log("Discord Rich Presence is disabled for this account (Lumisound -> Account -> Discord Rich Presence).")
+            sys.exit(0)
+        client_id = rpc_config["discord_client_id"]
+        large_image = large_image or rpc_config.get("large_image")
+        log(f"Using registered Discord Application Client ID {client_id}")
+
     ipc = DiscordIPC(client_id)
 
     last_activity_signature: Optional[tuple] = None

@@ -13,10 +13,23 @@ Rich Presence is set over a local IPC socket (`discord-ipc-*` under
    Application**. Give it a name (e.g. "Lumisound") — this name is what
    shows up in the Rich Presence card.
 2. (Optional) Under **Rich Presence > Art Assets**, upload an image and name
-   it (e.g. `lumisound_logo`). Use that name as `large_image` in your config.
+   it (e.g. `lumisound_logo`).
 3. Copy the **Application ID** (Client ID) from the General Information page.
 
-## 2. Configure
+## 2. Register it in Lumisound
+
+In the app, go to **Account → Discord Rich Presence** and:
+
+1. Tap **Generate Rich Presence Token** — this is the only credential the
+   local daemon needs. It only allows reading your own playback state, not
+   your password, and can be revoked any time from **Account → Active
+   Sessions** ("Discord RPC Bridge") without changing your password.
+2. Enter the **Application Client ID** from step 1 (and optionally the art
+   asset name from step 1) and save. This is stored server-side
+   (`/user/discord-rpc-config`) — the daemon fetches it automatically, so
+   there's nothing to copy into a config file.
+
+## 3. Configure the daemon
 
 ```sh
 mkdir -p ~/.config/lumisound-discord-rpc
@@ -25,26 +38,19 @@ cp config.example.json ~/.config/lumisound-discord-rpc/config.json
 
 Edit `~/.config/lumisound-discord-rpc/config.json`:
 
-- `discord_client_id`: the Application ID from step 1.
 - `bridge_url`: base URL of your ios-bridge instance.
-- `access_token` (recommended): in Lumisound, go to **Account → Generate Rich
-  Presence Token** and paste the result here. This token only allows reading
-  your own playback state — it doesn't expose your password, and you can
-  revoke it any time from **Account → Active Sessions** ("Discord RPC
-  Bridge") without changing your password.
-- `username` / `password` (alternative): your Lumisound account credentials,
-  if you'd rather not use a token. On first run the daemon logs in and saves
-  the resulting access token back into this file, so the password is only
-  used once (until the token expires, at which point it logs in again
-  automatically).
+- `access_token`: the token from step 2.
 - `poll_interval_seconds`: how often to refresh (default 5). Discord's local
   IPC rate-limits `SET_ACTIVITY` to about 1 call every 4 seconds, so 5s is
   close to the practical minimum for near-real-time updates.
-- `large_image`: optional asset name from step 2.
 
-Each person who wants their own Discord Rich Presence runs their own copy of
-this daemon on their own machine with their own token — there's no central
-linking step beyond generating that token in the app.
+Everything else (Discord Application client ID, art asset name, on/off) is
+read from your account's server-side registration on every restart. You can
+still set `discord_client_id` / `large_image` locally to override the
+registered values, and `username` / `password` instead of `access_token` if
+you'd rather log in directly — but the token + app registration above is the
+recommended path, since each person just runs their own copy of this daemon
+on their own machine with their own token.
 
 ## 3. Run it
 

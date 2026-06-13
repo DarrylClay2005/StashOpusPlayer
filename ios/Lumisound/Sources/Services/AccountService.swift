@@ -322,6 +322,22 @@ struct DiscordWebhookStatus: Decodable {
     }
 }
 
+/// Response from GET /user/discord-rpc-config — the server-side registration
+/// for the local Discord Rich Presence daemon (Application client ID +
+/// optional art asset name). Lets the daemon run with just an RPC token.
+struct DiscordRpcConfig: Decodable {
+    let configured: Bool
+    let enabled: Bool
+    let discordClientId: String?
+    let largeImage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case configured, enabled
+        case discordClientId = "discord_client_id"
+        case largeImage = "large_image"
+    }
+}
+
 /// One entry from GET /user/notifications.
 struct AppNotification: Decodable, Identifiable {
     let id: String
@@ -1443,6 +1459,60 @@ final class AccountService: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             return nil
+        }
+    }
+
+    /// Fetches this account's registered Discord Rich Presence settings
+    /// (Application client ID + optional art asset name). The local
+    /// Rich Presence daemon reads this so users don't need to copy the
+    /// client ID into a config file.
+    func fetchDiscordRpcConfig() async -> DiscordRpcConfig? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/user/discord-rpc-config")
+            return try JSONDecoder().decode(DiscordRpcConfig.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Registers (or updates) the Discord Application client ID and optional
+    /// art asset name used by the local Discord Rich Presence daemon.
+    func setDiscordRpcConfig(clientId: String, largeImage: String?, enabled: Bool) async -> Bool {
+        guard isLoggedIn else { return false }
+        struct Body: Encodable {
+            let discord_client_id: String
+            let large_image: String?
+            let enabled: Bool
+        }
+        do {
+            _ = try await makeRequest("/user/discord-rpc-config", method: "PUT", body: Body(discord_client_id: clientId, large_image: largeImage, enabled: enabled))
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Removes the Discord Rich Presence registration entirely.
+    func deleteDiscordRpcConfig() async -> Bool {
+        guard isLoggedIn else { return false }
+        do {
+            _ = try await makeRequest("/user/discord-rpc-config", method: "DELETE")
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
         }
     }
 

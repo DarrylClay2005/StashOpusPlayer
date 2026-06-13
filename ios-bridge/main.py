@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import secrets
 import shutil
 import string
@@ -677,6 +678,12 @@ class PushTokenRequest(BaseModel):
 
 class DiscordWebhookRequest(BaseModel):
     webhook_url: Optional[str] = None
+    enabled: bool = True
+
+
+class DiscordRpcConfigRequest(BaseModel):
+    discord_client_id: str
+    large_image: Optional[str] = None
     enabled: bool = True
 
 
@@ -5372,6 +5379,65 @@ async def create_rpc_token(payload: dict = Depends(get_current_user)):
 
     token = create_token(user_id, token_id, expire_days=RPC_TOKEN_EXPIRE_DAYS)
     return {"token": token, "expires_at": expires_at.isoformat()}
+
+
+# ---------------------------------------------------------------------------
+# Discord Rich Presence config registration (Feature: discord-rpc-config)
+#
+# Centralizes the per-user settings the local Discord Rich Presence daemon
+# needs (Discord Application client ID + optional art asset name) so users
+# only have to put their RPC token (see /user/rpc-token) in the daemon's
+# local config — everything else is fetched from here.
+# ---------------------------------------------------------------------------
+
+_DISCORD_CLIENT_ID_RE = re.compile(r"^\d{15,25}$")
+
+
+@app.get("/user/discord-rpc-config")
+async def get_discord_rpc_config(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT discord_client_id, large_image, enabled FROM ios_discord_rpc_config WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        return {"configured": False, "enabled": False, "discord_client_id": None, "large_image": None}
+
+    return {"configured": True, "enabled": bool(row[2]), "discord_client_id": row[0], "large_image": row[1]}
+
+
+@app.put("/user/discord-rpc-config")
+async def set_discord_rpc_config(body: DiscordRpcConfigRequest, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+
+    if not _DISCORD_CLIENT_ID_RE.match(body.discord_client_id):
+        raise HTTPException(status_code=400, detail="discord_client_id must be a numeric Discord application ID")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_discord_rpc_config (user_id, discord_client_id, large_image, enabled) "
+                "VALUES (%s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE discord_client_id = VALUES(discord_client_id), "
+                "large_image = VALUES(large_image), enabled = VALUES(enabled)",
+                (user_id, body.discord_client_id, body.large_image, body.enabled),
+            )
+    return {"status": "ok"}
+
+
+@app.delete("/user/discord-rpc-config", status_code=204)
+async def delete_discord_rpc_config(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM ios_discord_rpc_config WHERE user_id = %s", (user_id,))
 
 
 # ---------------------------------------------------------------------------
