@@ -50,11 +50,11 @@ async def verify_password_async(password: str, hashed: str) -> bool:
     return await loop.run_in_executor(None, verify_password, password, hashed)
 
 
-def create_token(user_id: str, token_id: str) -> str:
+def create_token(user_id: str, token_id: str, expire_days: int = TOKEN_EXPIRE_DAYS) -> str:
     payload = {
         "sub": user_id,
         "jti": token_id,
-        "exp": datetime.now(timezone.utc) + timedelta(days=TOKEN_EXPIRE_DAYS),
+        "exp": datetime.now(timezone.utc) + timedelta(days=expire_days),
         "iat": datetime.now(timezone.utc),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)

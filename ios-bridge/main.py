@@ -5187,6 +5187,37 @@ async def delete_discord_webhook(payload: dict = Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
+# Long-lived "RPC setup" tokens — for the local Discord Rich Presence daemon
+# (and similar local tools) so a user never has to put their account
+# password in a desktop config file. Generated from Settings in the app,
+# shown once, and managed as a regular session (visible/revocable in
+# /auth/sessions like any other device).
+# ---------------------------------------------------------------------------
+
+RPC_TOKEN_EXPIRE_DAYS = 365
+
+
+@app.post("/user/rpc-token")
+async def create_rpc_token(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    token_id = str(uuid.uuid4())
+    expires_at = datetime.now(timezone.utc) + timedelta(days=RPC_TOKEN_EXPIRE_DAYS)
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_user_sessions (token_id, user_id, expires_at, device_name)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (token_id, user_id, expires_at, "Discord RPC Bridge"),
+            )
+
+    token = create_token(user_id, token_id, expire_days=RPC_TOKEN_EXPIRE_DAYS)
+    return {"token": token, "expires_at": expires_at.isoformat()}
+
+
+# ---------------------------------------------------------------------------
 # Entry point (for local dev without Docker)
 # ---------------------------------------------------------------------------
 
