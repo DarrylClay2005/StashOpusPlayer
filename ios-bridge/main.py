@@ -676,7 +676,7 @@ class PushTokenRequest(BaseModel):
 
 
 class DiscordWebhookRequest(BaseModel):
-    webhook_url: str
+    webhook_url: Optional[str] = None
     enabled: bool = True
 
 
@@ -5301,16 +5301,36 @@ async def get_discord_webhook(payload: dict = Depends(get_current_user)):
 
 @app.put("/user/discord-webhook")
 async def set_discord_webhook(body: DiscordWebhookRequest, payload: dict = Depends(get_current_user)):
-    _validate_discord_webhook(body.webhook_url)
     user_id = payload["sub"]
+
+    if body.webhook_url is not None:
+        _validate_discord_webhook(body.webhook_url)
+    else:
+        # Allow toggling `enabled` without resending the URL (which the
+        # client never sees again after it's masked by GET).
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT 1 FROM ios_discord_webhooks WHERE user_id = %s", (user_id,)
+                )
+                if not await cur.fetchone():
+                    raise HTTPException(status_code=400, detail="webhook_url is required")
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(
-                "INSERT INTO ios_discord_webhooks (user_id, webhook_url, enabled) VALUES (%s, %s, %s) "
-                "ON DUPLICATE KEY UPDATE webhook_url = VALUES(webhook_url), enabled = VALUES(enabled)",
-                (user_id, body.webhook_url, body.enabled),
-            )
+            if body.webhook_url is not None:
+                await cur.execute(
+                    "INSERT INTO ios_discord_webhooks (user_id, webhook_url, enabled) VALUES (%s, %s, %s) "
+                    "ON DUPLICATE KEY UPDATE webhook_url = VALUES(webhook_url), enabled = VALUES(enabled)",
+                    (user_id, body.webhook_url, body.enabled),
+                )
+            else:
+                await cur.execute(
+                    "UPDATE ios_discord_webhooks SET enabled = %s WHERE user_id = %s",
+                    (body.enabled, user_id),
+                )
     return {"status": "ok"}
 
 

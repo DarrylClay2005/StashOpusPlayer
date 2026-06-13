@@ -518,6 +518,21 @@ struct AccountView: View {
                 }
                 .listRowBackground(AppTheme.surface)
 
+                // MARK: Discord Webhook Section
+                Section {
+                    NavigationLink(destination: DiscordWebhookView()) {
+                        Label("Now Playing Webhook", systemImage: "message")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                } header: {
+                    sectionHeader("Discord Webhook")
+                } footer: {
+                    Text("Posts a \"Now Playing\" message to a Discord channel via an incoming webhook when you start a track.")
+                        .font(AppTheme.bodyFont(size: 12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .listRowBackground(AppTheme.surface)
+
                 // MARK: Danger Section
                 Section {
                     Button(role: .destructive) {
