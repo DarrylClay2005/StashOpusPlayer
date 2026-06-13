@@ -247,3 +247,46 @@ CREATE TABLE IF NOT EXISTS ios_sync_log (
 -- (a no-op since DDL auto-commits in MySQL), and crash the bridge on startup before
 -- ios_app_logs/ios_shared_playlists were ever created.
 ALTER TABLE ios_shared_playlists MODIFY COLUMN playlist_id VARCHAR(36) NOT NULL DEFAULT '';
+
+-- ---------------------------------------------------------------------------
+-- 10 new server-side features
+-- ---------------------------------------------------------------------------
+
+-- Feature: cross-device "continue listening" — last playback position per user
+CREATE TABLE IF NOT EXISTS ios_playback_state (
+    user_id VARCHAR(36) PRIMARY KEY,
+    song_id VARCHAR(255),
+    title TEXT,
+    artist TEXT,
+    track_url TEXT,
+    source VARCHAR(20),
+    position_seconds FLOAT DEFAULT 0,
+    duration_seconds FLOAT DEFAULT 0,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Feature: server-side loudness normalization (ReplayGain-style)
+ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS loudness_lufs FLOAT NULL;
+
+-- Feature: scheduled playlist refresh — track a source URL per playlist so the
+-- bridge can periodically re-resolve it and flag newly-added tracks.
+ALTER TABLE ios_user_playlists ADD COLUMN IF NOT EXISTS source_url TEXT NULL;
+ALTER TABLE ios_user_playlists ADD COLUMN IF NOT EXISTS source_checked_at TIMESTAMP NULL;
+ALTER TABLE ios_user_playlists ADD COLUMN IF NOT EXISTS source_new_count INT DEFAULT 0;
+
+-- Feature: shared listening rooms — host broadcasts current track/position,
+-- guests poll for state.
+CREATE TABLE IF NOT EXISTS ios_listen_rooms (
+    id VARCHAR(36) PRIMARY KEY,
+    host_user_id VARCHAR(36) NOT NULL,
+    room_code VARCHAR(8) UNIQUE NOT NULL,
+    track_url TEXT,
+    title TEXT,
+    artist TEXT,
+    position_seconds FLOAT DEFAULT 0,
+    is_playing BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (host_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);

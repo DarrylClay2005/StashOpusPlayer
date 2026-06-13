@@ -275,7 +275,7 @@ final class BackgroundService: ObservableObject {
         guard !images.isEmpty else { return }
         let next = (currentIndex + 1) % images.count
         appLog("advance: index → \(next)/\(images.count)", category: "background")
-        withAnimation(.easeInOut(duration: 0.6)) {
+        withAnimation(.easeInOut(duration: 8.0)) {
             currentIndex = next
         }
     }

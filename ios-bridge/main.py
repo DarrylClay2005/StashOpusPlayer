@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import io
 import ipaddress
 import json
 import logging
@@ -7,9 +8,12 @@ import os
 import pathlib
 import secrets
 import shutil
+import string
 import tempfile
 import time
+import urllib.request
 import uuid
+import zipfile
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -18,7 +22,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -581,6 +585,36 @@ class SharePlaylistRequest(BaseModel):
     tracks: list
 
 
+class PlaybackStateRequest(BaseModel):
+    song_id: Optional[str] = None
+    title: Optional[str] = None
+    artist: Optional[str] = None
+    track_url: Optional[str] = None
+    source: Optional[str] = None
+    position_seconds: float = 0
+    duration_seconds: float = 0
+
+
+class PlaylistSourceRequest(BaseModel):
+    source_url: str
+
+
+class CreateRoomRequest(BaseModel):
+    track_url: Optional[str] = None
+    title: Optional[str] = None
+    artist: Optional[str] = None
+    position_seconds: float = 0
+    is_playing: bool = False
+
+
+class UpdateRoomRequest(BaseModel):
+    track_url: Optional[str] = None
+    title: Optional[str] = None
+    artist: Optional[str] = None
+    position_seconds: Optional[float] = None
+    is_playing: Optional[bool] = None
+
+
 # ---------------------------------------------------------------------------
 # Helper: build user dict from DB row
 # ---------------------------------------------------------------------------
@@ -939,7 +973,7 @@ async def track_metadata(
 async def resolve_playlist(
     request: Request,
     url: str = Query(..., description="Playlist or album URL"),
-    limit: int = Query(100, ge=1, le=200, description="Max tracks to return"),
+    limit: int = Query(100, ge=1, le=1000, description="Max tracks to return"),
 ):
     await check_auth(request)
     await _reject_ssrf_targets(url)
@@ -2575,6 +2609,41 @@ def _audio_media_type(ext: str) -> str:
     return mapping.get(ext, "application/octet-stream")
 
 
+async def _measure_loudness(path: pathlib.Path) -> Optional[float]:
+    """Runs ffmpeg's loudnorm filter in analysis mode and returns the
+    integrated loudness (LUFS) of the file at `path`, or None on failure.
+    Used for server-side ReplayGain-style normalization (Feature: loudness)."""
+    cmd = [
+        "ffmpeg", "-hide_banner", "-nostats",
+        "-i", str(path),
+        "-af", "loudnorm=print_format=json",
+        "-f", "null", "-",
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+    except Exception as exc:
+        logger.warning("_measure_loudness: ffmpeg failed for %s: %s", path.name, exc)
+        return None
+
+    stderr_text = stderr_bytes.decode(errors="replace")
+    # loudnorm prints a JSON block at the end of stderr output
+    start = stderr_text.rfind("{")
+    end = stderr_text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        return None
+    try:
+        stats = json.loads(stderr_text[start:end + 1])
+        return float(stats["input_i"])
+    except (ValueError, KeyError, TypeError) as exc:
+        logger.warning("_measure_loudness: could not parse loudnorm output for %s: %s", path.name, exc)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Server Music Library Endpoints
 # ---------------------------------------------------------------------------
@@ -2875,6 +2944,37 @@ async def upload_user_music(
     if len(body) > 100 * 1024 * 1024:  # 100 MB
         raise HTTPException(status_code=413, detail="File too large (max 100 MB)")
 
+    # Compute content SHA-256 as the metadata row ID
+    content_hash = hashlib.sha256(body).hexdigest()
+
+    # Duplicate detection: if this exact content was already uploaded by this
+    # user (under any filename) and the file is still on disk, skip the write
+    # entirely and point the client at the existing copy.
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT filename FROM ios_user_music_metadata WHERE id = %s AND user_id = %s",
+                (content_hash, user_id),
+            )
+            existing = await cur.fetchone()
+    if existing:
+        existing_path = music_dir / existing[0]
+        if existing_path.exists():
+            logger.info("upload_user_music: duplicate of %s for user %s, skipping write", existing[0], user_id)
+            try:
+                existing_rel = str(existing_path.relative_to(music_dir))
+            except ValueError:
+                existing_rel = existing[0]
+            return {
+                "filename": existing[0],
+                "path": existing_rel,
+                "id": _stable_id(str(existing_path.resolve())),
+                "metadata_id": content_hash,
+                "size": existing_path.stat().st_size,
+                "duplicate": True,
+            }
+
     try:
         dest_path.write_bytes(body)
     except Exception as exc:
@@ -2888,16 +2988,17 @@ async def upload_user_music(
     except ValueError:
         rel = safe_name
 
-    # Compute content SHA-256 as the metadata row ID
-    content_hash = hashlib.sha256(body).hexdigest()
-
     # Determine MIME type from extension
     ext_lower = pathlib.Path(safe_name).suffix.lstrip(".").lower()
     mime_type = _audio_media_type(ext_lower)
 
+    # Server-side loudness analysis (ReplayGain-style) via ffmpeg's loudnorm
+    # filter. Stored as integrated loudness (LUFS) so the client can compute
+    # a gain adjustment without re-analyzing the file itself.
+    loudness_lufs = await _measure_loudness(dest_path)
+
     # Populate ios_user_music_metadata when metadata is provided
     try:
-        pool = await get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
@@ -2905,8 +3006,8 @@ async def upload_user_music(
                     INSERT INTO ios_user_music_metadata
                         (id, user_id, filename, original_filename, title, artist, album,
                          genre, year, duration_seconds, file_size_bytes, bitrate,
-                         sample_rate, mime_type, has_artwork)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         sample_rate, mime_type, has_artwork, loudness_lufs)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         filename = VALUES(filename),
                         title = IF(VALUES(title) IS NULL, title, VALUES(title)),
@@ -2918,7 +3019,8 @@ async def upload_user_music(
                         file_size_bytes = VALUES(file_size_bytes),
                         bitrate = IF(VALUES(bitrate) IS NULL, bitrate, VALUES(bitrate)),
                         sample_rate = IF(VALUES(sample_rate) IS NULL, sample_rate, VALUES(sample_rate)),
-                        mime_type = VALUES(mime_type)
+                        mime_type = VALUES(mime_type),
+                        loudness_lufs = IF(VALUES(loudness_lufs) IS NULL, loudness_lufs, VALUES(loudness_lufs))
                     """,
                     (
                         content_hash,
@@ -2936,6 +3038,7 @@ async def upload_user_music(
                         sample_rate,
                         mime_type,
                         False,
+                        loudness_lufs,
                     ),
                 )
     except Exception as exc:
@@ -2946,6 +3049,7 @@ async def upload_user_music(
         "filename": safe_name,
         "path": rel,
         "id": _stable_id(abs_path),
+        "loudness_lufs": loudness_lufs,
         "metadata_id": content_hash,
         "size": len(body),
     }
@@ -3044,7 +3148,7 @@ async def delete_user_music(
 _USER_MUSIC_METADATA_COLS = [
     "id", "user_id", "filename", "original_filename", "title", "artist", "album",
     "genre", "year", "duration_seconds", "file_size_bytes", "bitrate", "sample_rate",
-    "mime_type", "has_artwork", "uploaded_at",
+    "mime_type", "has_artwork", "uploaded_at", "loudness_lufs",
 ]
 
 
@@ -3062,7 +3166,7 @@ async def list_user_music_metadata(
                 """
                 SELECT id, user_id, filename, original_filename, title, artist, album,
                        genre, year, duration_seconds, file_size_bytes, bitrate, sample_rate,
-                       mime_type, has_artwork, uploaded_at
+                       mime_type, has_artwork, uploaded_at, loudness_lufs
                 FROM ios_user_music_metadata
                 WHERE user_id = %s
                 ORDER BY uploaded_at DESC
@@ -3270,6 +3374,517 @@ async def delete_gallery_image(
                 image_path.unlink()
             except Exception as exc:
                 logger.warning("delete_gallery_image: could not remove file %s: %s", image_path, exc)
+
+
+# ---------------------------------------------------------------------------
+# Lyrics (Feature: lyrics sync)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/lyrics")
+async def get_lyrics(
+    request: Request,
+    title: str = Query(..., min_length=1, max_length=200),
+    artist: str = Query("", max_length=200),
+    duration: Optional[int] = Query(None, description="Track duration in seconds, improves matching"),
+):
+    """Fetches synced (LRC) or plain lyrics for a track from the public
+    lrclib.net API. Returns 404 if no match is found."""
+    await check_auth(request)
+
+    params = {"track_name": title, "artist_name": artist}
+    if duration:
+        params["duration"] = str(duration)
+    query = "&".join(f"{k}={urllib.parse.quote(v)}" for k, v in params.items())
+    url = f"https://lrclib.net/api/get?{query}"
+
+    def _fetch() -> Optional[dict]:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Lumisound-iOS-Bridge/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return None
+
+    data = await asyncio.to_thread(_fetch)
+    if not data or (not data.get("syncedLyrics") and not data.get("plainLyrics")):
+        raise HTTPException(status_code=404, detail="No lyrics found")
+
+    return {
+        "title": data.get("trackName") or title,
+        "artist": data.get("artistName") or artist,
+        "synced_lyrics": data.get("syncedLyrics") or None,
+        "plain_lyrics": data.get("plainLyrics") or None,
+        "instrumental": bool(data.get("instrumental", False)),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Radio / Playlist Auto-Continuation (Feature: radio)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/radio")
+async def get_radio(
+    request: Request,
+    id: str = Query(..., description="Seed video/track ID"),
+    source: str = Query("youtube", description="youtube or soundcloud"),
+    limit: int = Query(20, ge=1, le=50, description="Max tracks to return"),
+):
+    """Returns a list of related tracks that continue from the seed track,
+    using YouTube's auto-generated "Mix" playlist (RD<id>). SoundCloud has no
+    equivalent mix concept, so this is youtube-only for now."""
+    await check_auth(request)
+
+    if source.lower() != "youtube":
+        raise HTTPException(status_code=400, detail="Radio is only supported for source=youtube")
+
+    mix_url = f"https://www.youtube.com/watch?v={id}&list=RD{id}"
+    try:
+        entries = await _run_ytdlp(
+            "--dump-json",
+            "--flat-playlist",
+            "--no-warnings",
+            mix_url,
+            timeout=30.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=408, detail="Radio resolve timed out")
+    except Exception as exc:
+        logger.error("yt-dlp radio error: %s", exc)
+        raise HTTPException(status_code=404, detail="Could not build radio")
+
+    # Drop the seed track itself and cap to `limit`.
+    tracks = [_parse_track(e, "youtube") for e in entries if e.get("id") != id]
+    return tracks[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Cross-Device Continue Listening (Feature: playback-state)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/playback-state")
+async def get_playback_state(payload: dict = Depends(get_current_user)):
+    """Returns the most recently saved playback position for this user, so
+    another device can resume where the last one left off."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT song_id, title, artist, track_url, source,
+                       position_seconds, duration_seconds, updated_at
+                FROM ios_playback_state WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "song_id": row[0],
+        "title": row[1],
+        "artist": row[2],
+        "track_url": row[3],
+        "source": row[4],
+        "position_seconds": row[5],
+        "duration_seconds": row[6],
+        "updated_at": row[7].isoformat() if row[7] else None,
+    }
+
+
+@app.put("/user/playback-state", status_code=204)
+async def update_playback_state(
+    body: PlaybackStateRequest,
+    payload: dict = Depends(get_current_user),
+):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_playback_state
+                    (user_id, song_id, title, artist, track_url, source, position_seconds, duration_seconds)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    song_id = VALUES(song_id), title = VALUES(title), artist = VALUES(artist),
+                    track_url = VALUES(track_url), source = VALUES(source),
+                    position_seconds = VALUES(position_seconds), duration_seconds = VALUES(duration_seconds)
+                """,
+                (
+                    user_id, body.song_id, body.title, body.artist, body.track_url,
+                    body.source, body.position_seconds, body.duration_seconds,
+                ),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Shared Listening Rooms (Feature: listen-rooms)
+# ---------------------------------------------------------------------------
+
+
+def _generate_room_code() -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(6))
+
+
+@app.post("/rooms", status_code=201)
+async def create_room(
+    body: CreateRoomRequest,
+    payload: dict = Depends(get_current_user),
+):
+    """Creates a shared listening room. The host's currently-playing track and
+    position are broadcast via room_code; other users can poll GET /rooms/{code}
+    to follow along ("listen together")."""
+    user_id = payload["sub"]
+    room_id = str(uuid.uuid4())
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            for _ in range(5):
+                room_code = _generate_room_code()
+                try:
+                    await cur.execute(
+                        """
+                        INSERT INTO ios_listen_rooms
+                            (id, host_user_id, room_code, track_url, title, artist, position_seconds, is_playing)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (room_id, user_id, room_code, body.track_url, body.title, body.artist,
+                         body.position_seconds, body.is_playing),
+                    )
+                    break
+                except Exception:
+                    continue
+            else:
+                raise HTTPException(status_code=500, detail="Could not allocate room code")
+
+    return {"id": room_id, "room_code": room_code}
+
+
+@app.get("/rooms/{room_code}")
+async def get_room(room_code: str):
+    """Returns the current shared-room state. No auth required so guests
+    without an account can follow a shared listening session."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, host_user_id, room_code, track_url, title, artist,
+                       position_seconds, is_playing, updated_at
+                FROM ios_listen_rooms WHERE room_code = %s
+                """,
+                (room_code.upper(),),
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    return {
+        "id": row[0],
+        "room_code": row[2],
+        "track_url": row[3],
+        "title": row[4],
+        "artist": row[5],
+        "position_seconds": row[6],
+        "is_playing": bool(row[7]),
+        "updated_at": row[8].isoformat() if row[8] else None,
+    }
+
+
+@app.put("/rooms/{room_code}")
+async def update_room(
+    room_code: str,
+    body: UpdateRoomRequest,
+    payload: dict = Depends(get_current_user),
+):
+    """Updates a shared room's playback state. Only the host can update it."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT host_user_id FROM ios_listen_rooms WHERE room_code = %s",
+                (room_code.upper(),),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Room not found")
+            if row[0] != user_id:
+                raise HTTPException(status_code=403, detail="Only the host can update this room")
+
+            updates: list[str] = []
+            params: list = []
+            for field, col in (
+                ("track_url", "track_url"), ("title", "title"), ("artist", "artist"),
+                ("position_seconds", "position_seconds"), ("is_playing", "is_playing"),
+            ):
+                value = getattr(body, field)
+                if value is not None:
+                    updates.append(f"{col} = %s")
+                    params.append(value)
+            if updates:
+                params.append(room_code.upper())
+                await cur.execute(
+                    f"UPDATE ios_listen_rooms SET {', '.join(updates)} WHERE room_code = %s",
+                    params,
+                )
+
+    return {"status": "updated"}
+
+
+# ---------------------------------------------------------------------------
+# Scheduled Playlist Refresh (Feature: playlist-refresh)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/user/playlists/{playlist_id}/source")
+async def set_playlist_source(
+    playlist_id: str,
+    body: PlaylistSourceRequest,
+    payload: dict = Depends(get_current_user),
+):
+    """Attaches a source URL (e.g. a YouTube/SoundCloud playlist) to a playlist
+    so the bridge can periodically check it for newly-added tracks."""
+    user_id = payload["sub"]
+    await _reject_ssrf_targets(body.source_url)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_user_playlists SET source_url = %s, source_new_count = 0 "
+                "WHERE id = %s AND user_id = %s",
+                (body.source_url, playlist_id, user_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Playlist not found")
+
+    return {"status": "ok"}
+
+
+@app.post("/user/playlists/{playlist_id}/refresh")
+async def refresh_playlist_source(
+    playlist_id: str,
+    payload: dict = Depends(get_current_user),
+):
+    """Re-resolves a playlist's source URL and reports how many tracks it
+    currently has versus how many are saved locally, so the client can offer
+    to import the difference."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT source_url FROM ios_user_playlists WHERE id = %s AND user_id = %s",
+                (playlist_id, user_id),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Playlist not found")
+            source_url = row[0]
+            if not source_url:
+                raise HTTPException(status_code=400, detail="Playlist has no source URL set")
+
+            await cur.execute(
+                "SELECT COUNT(*) FROM ios_playlist_tracks WHERE playlist_id = %s",
+                (playlist_id,),
+            )
+            (local_count,) = await cur.fetchone()
+
+    try:
+        entries = await _run_ytdlp("--dump-json", "--flat-playlist", "--no-warnings", source_url, timeout=60.0)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=408, detail="Playlist refresh timed out")
+    except Exception as exc:
+        logger.error("refresh_playlist_source: yt-dlp error: %s", exc)
+        raise HTTPException(status_code=404, detail="Could not resolve playlist source")
+
+    remote_count = len(entries)
+    new_count = max(0, remote_count - local_count)
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_user_playlists SET source_checked_at = NOW(), source_new_count = %s "
+                "WHERE id = %s AND user_id = %s",
+                (new_count, playlist_id, user_id),
+            )
+
+    return {"remote_count": remote_count, "local_count": local_count, "new_count": new_count}
+
+
+# ---------------------------------------------------------------------------
+# Weekly Listening Stats (Feature: weekly-stats)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/stats/weekly")
+async def get_weekly_stats(payload: dict = Depends(get_current_user)):
+    """Returns per-day play counts and listen time for the last 7 days,
+    powering a weekly activity chart on the Account screen."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT DATE(played_at) AS day, COUNT(*) AS plays, COALESCE(SUM(listen_seconds), 0) AS seconds
+                FROM ios_play_history
+                WHERE user_id = %s AND played_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                GROUP BY DATE(played_at)
+                ORDER BY day ASC
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    return [
+        {"date": r[0].isoformat(), "plays": r[1], "listen_seconds": int(r[2])}
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Duplicate Track Detection (Feature: library-duplicates)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/library/duplicates")
+async def get_library_duplicates(payload: dict = Depends(get_current_user)):
+    """Scans the user's saved playlist tracks for likely duplicates — tracks
+    with the same (normalized) title and artist appearing more than once,
+    possibly across different playlists."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT LOWER(TRIM(t.title)) AS norm_title, LOWER(TRIM(COALESCE(t.artist, ''))) AS norm_artist,
+                       COUNT(*) AS occurrences,
+                       GROUP_CONCAT(DISTINCT p.name SEPARATOR ', ') AS playlists,
+                       MIN(t.title) AS title, MIN(t.artist) AS artist
+                FROM ios_playlist_tracks t
+                JOIN ios_user_playlists p ON p.id = t.playlist_id
+                WHERE p.user_id = %s AND t.title IS NOT NULL AND t.title != ''
+                GROUP BY norm_title, norm_artist
+                HAVING occurrences > 1
+                ORDER BY occurrences DESC
+                LIMIT 100
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    return [
+        {
+            "title": r[4],
+            "artist": r[5],
+            "occurrences": r[2],
+            "playlists": r[3].split(", ") if r[3] else [],
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Bulk Export (Feature: bulk-export)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/export")
+async def export_user_data(payload: dict = Depends(get_current_user)):
+    """Returns a ZIP archive containing the user's playlists, favorites,
+    settings, and play history as JSON files — for backup or migration."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    data: dict[str, object] = {}
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT p.id, p.name, p.description, p.source_url,
+                       t.track_url, t.local_song_id, t.title, t.artist, t.album,
+                       t.duration_seconds, t.position
+                FROM ios_user_playlists p
+                LEFT JOIN ios_playlist_tracks t ON t.playlist_id = p.id
+                WHERE p.user_id = %s
+                ORDER BY p.id, t.position
+                """,
+                (user_id,),
+            )
+            playlist_rows = await cur.fetchall()
+
+            await cur.execute(
+                "SELECT song_id, title, artist, album, added_at FROM ios_user_favorites WHERE user_id = %s",
+                (user_id,),
+            )
+            favorite_rows = await cur.fetchall()
+
+            await cur.execute(
+                "SELECT audio_settings_json, track_audio_settings_json, theme_color FROM ios_user_settings WHERE user_id = %s",
+                (user_id,),
+            )
+            settings_row = await cur.fetchone()
+
+            await cur.execute(
+                "SELECT track_url, local_song_id, title, artist, played_at, listen_seconds "
+                "FROM ios_play_history WHERE user_id = %s ORDER BY played_at DESC LIMIT 1000",
+                (user_id,),
+            )
+            history_rows = await cur.fetchall()
+
+    playlists: dict[str, dict] = {}
+    for r in playlist_rows:
+        pid = r[0]
+        if pid not in playlists:
+            playlists[pid] = {"id": pid, "name": r[1], "description": r[2], "source_url": r[3], "tracks": []}
+        if r[4] is not None or r[6] is not None:
+            playlists[pid]["tracks"].append({
+                "track_url": r[4], "local_song_id": r[5], "title": r[6],
+                "artist": r[7], "album": r[8], "duration_seconds": r[9], "position": r[10],
+            })
+
+    data["playlists"] = list(playlists.values())
+    data["favorites"] = [
+        {"song_id": r[0], "title": r[1], "artist": r[2], "album": r[3],
+         "added_at": r[4].isoformat() if r[4] else None}
+        for r in favorite_rows
+    ]
+    data["settings"] = {
+        "audio_settings_json": settings_row[0] if settings_row else None,
+        "track_audio_settings_json": settings_row[1] if settings_row else None,
+        "theme_color": settings_row[2] if settings_row else None,
+    } if settings_row else {}
+    data["history"] = [
+        {"track_url": r[0], "local_song_id": r[1], "title": r[2], "artist": r[3],
+         "played_at": r[4].isoformat() if r[4] else None, "listen_seconds": r[5]}
+        for r in history_rows
+    ]
+    data["exported_at"] = datetime.now(timezone.utc).isoformat()
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("playlists.json", json.dumps(data["playlists"], indent=2, default=str))
+        zf.writestr("favorites.json", json.dumps(data["favorites"], indent=2, default=str))
+        zf.writestr("settings.json", json.dumps(data["settings"], indent=2, default=str))
+        zf.writestr("history.json", json.dumps(data["history"], indent=2, default=str))
+        zf.writestr("export_info.json", json.dumps({"exported_at": data["exported_at"], "user_id": user_id}, indent=2))
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=lumisound_export.zip"},
+    )
 
 
 # ---------------------------------------------------------------------------

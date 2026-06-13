@@ -19,7 +19,7 @@ struct StreamSearchView: View {
     @State private var showHealthToast   = false
 
     // Server library download tracking (separate from streaming downloads)
-    @State private var downloadingServerTrackID: String? = nil
+    @State private var downloadingServerTrackIDs: Set<String> = []
     @State private var downloadedServerTrackIDs: Set<String> = []
 
     @AppStorage("autoCloudBackup") private var autoCloudBackup: Bool = false
@@ -340,7 +340,7 @@ struct StreamSearchView: View {
                     ServerTrackRow(
                         track: track,
                         artworkURL: streaming.serverArtworkURL(for: track),
-                        isDownloading: downloadingServerTrackID == track.id,
+                        isDownloading: downloadingServerTrackIDs.contains(track.id),
                         isDownloaded: downloadedServerTrackIDs.contains(track.id),
                         onPlay: { handleServerPlay(track: track) },
                         onDownload: { handleServerDownload(track: track) }
@@ -620,9 +620,9 @@ struct StreamSearchView: View {
     }
 
     private func handleServerDownload(track: ServerTrack) {
-        guard downloadingServerTrackID == nil,
+        guard !downloadingServerTrackIDs.contains(track.id),
               let streamURL = streaming.serverStreamURL(for: track) else { return }
-        downloadingServerTrackID = track.id
+        downloadingServerTrackIDs.insert(track.id)
 
         Task {
             do {
@@ -640,7 +640,7 @@ struct StreamSearchView: View {
 
                 if FileManager.default.fileExists(atPath: destURL.path) {
                     downloadedServerTrackIDs.insert(track.id)
-                    downloadingServerTrackID = nil
+                    downloadingServerTrackIDs.remove(track.id)
                     return
                 }
 
@@ -656,6 +656,15 @@ struct StreamSearchView: View {
                     throw StreamingError.httpError(http.statusCode)
                 }
 
+                // Verify the download is complete before adopting it — a truncated
+                // file would otherwise sit in the library showing "0:00" forever.
+                let downloadedSize = (try? FileManager.default.attributesOfItem(atPath: tmpURL.path))?[.size] as? Int64 ?? 0
+                let expectedSize = (response as? HTTPURLResponse)?.expectedContentLength ?? -1
+                if downloadedSize <= 0 || (expectedSize > 0 && downloadedSize != expectedSize) {
+                    try? FileManager.default.removeItem(at: tmpURL)
+                    throw StreamingError.incompleteDownload
+                }
+
                 try? FileManager.default.removeItem(at: destURL)
                 try FileManager.default.moveItem(at: tmpURL, to: destURL)
 
@@ -664,7 +673,7 @@ struct StreamSearchView: View {
             } catch {
                 streaming.errorMessage = "Download failed: \(error.localizedDescription)"
             }
-            downloadingServerTrackID = nil
+            downloadingServerTrackIDs.remove(track.id)
         }
     }
 }

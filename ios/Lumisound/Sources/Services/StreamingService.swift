@@ -424,7 +424,7 @@ final class StreamingService: ObservableObject {
         components.path = "/api/resolve"
         components.queryItems = [
             URLQueryItem(name: "url",   value: url),
-            URLQueryItem(name: "limit", value: "100"),
+            URLQueryItem(name: "limit", value: "1000"),
         ]
 
         guard var request = makeRequest(components.string ?? "/api/resolve") else {
@@ -711,6 +711,17 @@ final class StreamingService: ObservableObject {
                 appError("downloadToLibrary: HTTP \(httpResponse.statusCode) for \"\(track.title)\"", category: "network")
                 throw StreamingError.httpError(httpResponse.statusCode)
             }
+        }
+
+        // Verify the downloaded file is complete before adopting it into the library.
+        // A truncated download (dropped connection, app suspended mid-transfer, etc.)
+        // would otherwise sit in the library as a track that shows "0:00" forever.
+        let downloadedSize = (try? FileManager.default.attributesOfItem(atPath: downloadedURL.path))?[.size] as? Int64 ?? 0
+        let expectedSize = (response as? HTTPURLResponse)?.expectedContentLength ?? -1
+        if downloadedSize <= 0 || (expectedSize > 0 && downloadedSize != expectedSize) {
+            try? FileManager.default.removeItem(at: downloadedURL)
+            appWarn("downloadToLibrary: incomplete download for \"\(track.title)\" (\(downloadedSize)/\(expectedSize) bytes)", category: "network")
+            throw StreamingError.incompleteDownload
         }
 
         try? FileManager.default.removeItem(at: destURL)
@@ -1220,6 +1231,7 @@ enum StreamingError: LocalizedError {
     case timeout
     case notFound(String)
     case httpError(Int)
+    case incompleteDownload
 
     var errorDescription: String? {
         switch self {
@@ -1233,6 +1245,8 @@ enum StreamingError: LocalizedError {
             return "Could not find a stream URL for \"\(title)\"."
         case .httpError:
             return "Streaming service is unavailable right now. Please try again later."
+        case .incompleteDownload:
+            return "Download was incomplete. Please try again."
         }
     }
 }
