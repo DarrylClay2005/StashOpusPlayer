@@ -290,7 +290,7 @@ def main() -> None:
 
     client_id = config["discord_client_id"]
     bridge_url = config["bridge_url"]
-    poll_interval = config.get("poll_interval_seconds", 15)
+    poll_interval = config.get("poll_interval_seconds", 5)
     large_image = config.get("large_image")
 
     bridge = BridgeClient(bridge_url, config_path, config)

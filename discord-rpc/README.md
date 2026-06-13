@@ -31,7 +31,9 @@ Edit `~/.config/lumisound-discord-rpc/config.json`:
   the daemon logs in and saves the resulting access token back into this
   file, so the password is only used once (until the token expires after 30
   days, at which point it logs in again automatically).
-- `poll_interval_seconds`: how often to refresh (default 15).
+- `poll_interval_seconds`: how often to refresh (default 5). Discord's local
+  IPC rate-limits `SET_ACTIVITY` to about 1 call every 4 seconds, so 5s is
+  close to the practical minimum for near-real-time updates.
 - `large_image`: optional asset name from step 2.
 
 ## 3. Run it
