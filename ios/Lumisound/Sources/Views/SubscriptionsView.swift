@@ -1,0 +1,217 @@
+import SwiftUI
+
+// MARK: - SubscriptionsView
+//
+// Lets the user follow YouTube/SoundCloud channels (GET/POST/DELETE
+// /user/subscriptions). "Check Now" re-resolves a channel's latest uploads
+// and surfaces any new tracks, also creating an in-app notification.
+
+struct SubscriptionsView: View {
+    @EnvironmentObject private var account: AccountService
+    @EnvironmentObject private var streaming: StreamingService
+    @EnvironmentObject private var player: AudioPlayerManager
+
+    @State private var subscriptions: [ArtistSubscription] = []
+    @State private var isLoading = false
+
+    @State private var channelURL = ""
+    @State private var channelName = ""
+    @State private var isAdding = false
+    @State private var errorText: String?
+
+    @State private var checkingID: String?
+    @State private var newTracksBySubscription: [String: [StreamTrack]] = [:]
+    @State private var loadingTrackID: String?
+
+    var body: some View {
+        List {
+            Section {
+                TextField("Channel or playlist URL", text: $channelURL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                TextField("Name (optional)", text: $channelName)
+                    .autocorrectionDisabled()
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Button {
+                    addSubscription()
+                } label: {
+                    if isAdding {
+                        ProgressView()
+                    } else {
+                        Text("Subscribe")
+                    }
+                }
+                .disabled(isAdding || channelURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                .foregroundStyle(AppTheme.dynamicAccent)
+
+                if let errorText {
+                    Text(errorText)
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.error)
+                }
+            } header: {
+                sectionHeader("Follow a Channel")
+            } footer: {
+                Text("Lumisound periodically checks followed channels for new uploads and notifies you when they appear.")
+            }
+            .listRowBackground(AppTheme.surface)
+
+            if isLoading && subscriptions.isEmpty {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .listRowBackground(Color.clear)
+            } else if subscriptions.isEmpty {
+                EmptyStateView(
+                    icon: "person.crop.circle.badge.checkmark",
+                    title: "No subscriptions",
+                    message: "Follow a YouTube or SoundCloud channel above to get notified about new uploads."
+                )
+                .listRowBackground(Color.clear)
+            } else {
+                ForEach(subscriptions) { sub in
+                    Section {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(sub.channelName ?? sub.channelUrl)
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                    .lineLimit(1)
+                                Text(sub.channelUrl)
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            Spacer()
+                            if checkingID == sub.id {
+                                ProgressView()
+                            } else {
+                                Button("Check") {
+                                    check(sub)
+                                }
+                                .font(.footnote)
+                                .foregroundStyle(AppTheme.dynamicAccent)
+                            }
+                        }
+
+                        if let newTracks = newTracksBySubscription[sub.id] {
+                            if newTracks.isEmpty {
+                                Text("No new uploads.")
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            } else {
+                                ForEach(newTracks) { track in
+                                    Button {
+                                        play(track: track)
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: "play.circle")
+                                                .foregroundStyle(AppTheme.dynamicAccent)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(track.title)
+                                                    .foregroundStyle(AppTheme.textPrimary)
+                                                    .lineLimit(1)
+                                                Text(track.artist)
+                                                    .font(.caption)
+                                                    .foregroundStyle(AppTheme.textSecondary)
+                                            }
+                                            Spacer()
+                                            if loadingTrackID == track.id {
+                                                ProgressView()
+                                            }
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                    .listRowBackground(AppTheme.surface.opacity(0.5))
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            remove(sub)
+                        } label: {
+                            Label("Unsubscribe", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color.clear.ignoresSafeArea())
+        .navigationTitle("Subscriptions")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .refreshable { await load() }
+    }
+
+    private func load() async {
+        isLoading = true
+        subscriptions = await account.fetchSubscriptions()
+        isLoading = false
+    }
+
+    private func addSubscription() {
+        let trimmedURL = channelURL.trimmingCharacters(in: .whitespaces)
+        guard !trimmedURL.isEmpty else { return }
+        let trimmedName = channelName.trimmingCharacters(in: .whitespaces)
+        isAdding = true
+        errorText = nil
+        Task {
+            if await account.addSubscription(channelUrl: trimmedURL, channelName: trimmedName.isEmpty ? nil : trimmedName) {
+                channelURL = ""
+                channelName = ""
+                await load()
+            } else {
+                errorText = account.errorMessage ?? "Failed to add subscription."
+            }
+            isAdding = false
+        }
+    }
+
+    private func remove(_ sub: ArtistSubscription) {
+        Task {
+            if await account.removeSubscription(id: sub.id) {
+                subscriptions.removeAll { $0.id == sub.id }
+                newTracksBySubscription[sub.id] = nil
+            }
+        }
+    }
+
+    private func check(_ sub: ArtistSubscription) {
+        checkingID = sub.id
+        Task {
+            newTracksBySubscription[sub.id] = await account.checkSubscription(id: sub.id)
+            checkingID = nil
+        }
+    }
+
+    private func play(track: StreamTrack) {
+        guard loadingTrackID == nil else { return }
+        loadingTrackID = track.id
+        Task {
+            defer { loadingTrackID = nil }
+            do {
+                let url = try await streaming.streamURL(for: track)
+                let song = streaming.toSong(track: track, streamURL: url)
+                player.play(song: song, in: [song])
+            } catch {
+                streaming.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func sectionHeader(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(AppTheme.bodyFont(size: 11))
+            .foregroundStyle(AppTheme.textSecondary)
+            .kerning(0.8)
+    }
+}

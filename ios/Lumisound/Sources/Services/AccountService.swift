@@ -282,6 +282,34 @@ struct ScrobbleLinks: Decodable {
     }
 }
 
+/// One entry from GET /user/subscriptions.
+struct ArtistSubscription: Decodable, Identifiable {
+    let id: String
+    let channelUrl: String
+    let channelName: String?
+    let lastVideoId: String?
+    let lastCheckedAt: String?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case channelUrl     = "channel_url"
+        case channelName    = "channel_name"
+        case lastVideoId    = "last_video_id"
+        case lastCheckedAt  = "last_checked_at"
+        case createdAt      = "created_at"
+    }
+}
+
+/// Response from POST /user/subscriptions/{id}/check.
+struct SubscriptionCheckResult: Decodable {
+    let newTracks: [StreamTrack]
+
+    enum CodingKeys: String, CodingKey {
+        case newTracks = "new_tracks"
+    }
+}
+
 /// Response from GET /user/discord-webhook.
 struct DiscordWebhookStatus: Decodable {
     let configured: Bool
@@ -1051,6 +1079,69 @@ final class AccountService: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             return nil
+        }
+    }
+
+    // MARK: - Artist/Channel Subscriptions
+
+    /// Lists the user's subscribed channels.
+    func fetchSubscriptions() async -> [ArtistSubscription] {
+        guard isLoggedIn else { return [] }
+        do {
+            let data = try await makeRequest("/user/subscriptions")
+            return try JSONDecoder().decode([ArtistSubscription].self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return []
+        } catch {
+            errorMessage = error.localizedDescription
+            return []
+        }
+    }
+
+    /// Subscribes to a channel/artist URL (YouTube or SoundCloud).
+    func addSubscription(channelUrl: String, channelName: String?) async -> Bool {
+        guard isLoggedIn else { return false }
+        struct Body: Encodable { let channel_url: String; let channel_name: String? }
+        do {
+            _ = try await makeRequest("/user/subscriptions", method: "POST", body: Body(channel_url: channelUrl, channel_name: channelName))
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Unsubscribes from a channel.
+    func removeSubscription(id: String) async -> Bool {
+        guard isLoggedIn else { return false }
+        do {
+            _ = try await makeRequest("/user/subscriptions/\(id)", method: "DELETE")
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Checks a channel for new uploads since the last check, returning any new tracks found.
+    func checkSubscription(id: String) async -> [StreamTrack] {
+        guard isLoggedIn else { return [] }
+        do {
+            let data = try await makeRequest("/user/subscriptions/\(id)/check", method: "POST")
+            return try JSONDecoder().decode(SubscriptionCheckResult.self, from: data).newTracks
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return []
+        } catch {
+            errorMessage = error.localizedDescription
+            return []
         }
     }
 

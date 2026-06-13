@@ -35,6 +35,10 @@ struct DiscoverView: View {
                             Label("Discover Mix", systemImage: "sparkles")
                                 .foregroundStyle(AppTheme.textPrimary)
                         }
+                        NavigationLink(destination: SubscriptionsView()) {
+                            Label("Subscriptions", systemImage: "person.crop.circle.badge.checkmark")
+                                .foregroundStyle(AppTheme.textPrimary)
+                        }
                     }
                     .listRowBackground(AppTheme.surface)
                 }
