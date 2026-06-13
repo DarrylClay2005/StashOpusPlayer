@@ -2660,6 +2660,13 @@ async def revoke_shared_playlist(
 
 _FFPROBE_SEMAPHORE = asyncio.Semaphore(8)  # max 8 concurrent ffprobe processes
 
+# Bounds concurrent ffmpeg analysis (_measure_loudness + _estimate_bpm) spawned
+# per uploaded track. Without this, "Download All" with auto-cloud-backup enabled
+# can fire dozens of uploads at once, each spawning two ffmpeg subprocesses with
+# no limit — this previously exhausted host memory/CPU and crashed the bridge
+# process outright (connection reset / 502 for every in-flight request).
+_UPLOAD_ANALYSIS_SEMAPHORE = asyncio.Semaphore(3)
+
 
 async def _ffprobe_tags(path: str) -> dict:
     """
@@ -3098,8 +3105,10 @@ async def upload_user_music(
     if len(body) > 100 * 1024 * 1024:  # 100 MB
         raise HTTPException(status_code=413, detail="File too large (max 100 MB)")
 
-    # Compute content SHA-256 as the metadata row ID
-    content_hash = hashlib.sha256(body).hexdigest()
+    # Compute content SHA-256 as the metadata row ID. Offloaded to a thread —
+    # hashing a 100 MB body synchronously on the event loop would stall every
+    # other request for the duration, compounding under concurrent uploads.
+    content_hash = await asyncio.to_thread(lambda: hashlib.sha256(body).hexdigest())
 
     # Duplicate detection: if this exact content was already uploaded by this
     # user (under any filename) and the file is still on disk, skip the write
@@ -3130,7 +3139,7 @@ async def upload_user_music(
             }
 
     try:
-        dest_path.write_bytes(body)
+        await asyncio.to_thread(dest_path.write_bytes, body)
     except Exception as exc:
         logger.error("upload_user_music: write failed for user %s: %s", user_id, exc)
         raise HTTPException(status_code=500, detail="Failed to save file")
@@ -3147,13 +3156,12 @@ async def upload_user_music(
     mime_type = _audio_media_type(ext_lower)
 
     # Server-side loudness analysis (ReplayGain-style) via ffmpeg's loudnorm
-    # filter. Stored as integrated loudness (LUFS) so the client can compute
-    # a gain adjustment without re-analyzing the file itself.
-    loudness_lufs = await _measure_loudness(dest_path)
-
-    # Server-side tempo (BPM) estimate, used by the client for crossfade/
-    # gapless transition tuning between tracks of similar tempo.
-    bpm = await _estimate_bpm(dest_path)
+    # filter, and tempo (BPM) estimate for crossfade/gapless tuning. Bounded by
+    # _UPLOAD_ANALYSIS_SEMAPHORE so a burst of uploads (e.g. "Download All" with
+    # auto-cloud-backup) can't spawn unlimited concurrent ffmpeg processes.
+    async with _UPLOAD_ANALYSIS_SEMAPHORE:
+        loudness_lufs = await _measure_loudness(dest_path)
+        bpm = await _estimate_bpm(dest_path)
 
     # Populate ios_user_music_metadata when metadata is provided
     try:
