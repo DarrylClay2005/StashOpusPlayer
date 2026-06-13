@@ -237,6 +237,65 @@ struct SettingsHelpView: View {
                 title: "Discover & Listening Activity",
                 body: "Account → Discover shows a Trending list of popular tracks and an Activity feed of what other users are listening to right now. To appear in either, turn on \"Share Listening Activity\" in your Account settings — this shares only song titles and artists from your play history, never file contents, URLs, or anything else. The toggle is off by default."
             ),
+            HelpTopic(
+                icon: "bell",
+                title: "Notifications",
+                body: "Account → Notifications is your inbox for server-generated updates: new achievement badges, new uploads from artists you follow, and activity on playlists you collaborate on. A badge on the Account tab and the Notifications row shows your unread count. Tap a notification to mark it read; pull to refresh for the latest."
+            ),
+            HelpTopic(
+                icon: "key.viewfinder",
+                title: "Discord Rich Presence",
+                body: "Account → \"Generate Rich Presence Token\" creates a token for the companion Lumisound Discord Rich Presence bridge — a small script you run on your own computer that shows \"Listening to <song> by <artist>\" on your Discord profile while Discord is open. Paste the generated token into the bridge's config as \"access_token\" (no Lumisound password needed). Each user runs their own copy of the bridge with their own token, so everyone's Discord presence reflects their own listening — this is how Discord accounts are \"linked\" per user. The bridge clears your presence automatically when playback is paused or idle. You can revoke a token any time from Account → Active Sessions (\"Discord RPC Bridge\") without affecting your password."
+            ),
+            HelpTopic(
+                icon: "message",
+                title: "Discord Webhook (Now Playing posts)",
+                body: "Account → \"Now Playing Webhook\" is separate from Rich Presence: it posts a one-time message to a Discord channel via an incoming webhook whenever you start a new track, so a server can have a shared \"now playing\" feed. Create an incoming webhook in your Discord server under Channel Settings → Integrations → Webhooks, paste the URL in, and toggle it on or off at any time."
+            ),
+        ]),
+        HelpCategory(icon: "person.2.fill", title: "Playlists & Sharing", topics: [
+            HelpTopic(
+                icon: "folder",
+                title: "Playlist Folders & Tags",
+                body: "Open a playlist and tap the folder icon to file it into a folder (existing or new, just type a name) and attach free-form tags. The Playlists tab groups playlists by folder automatically — playlists without a folder appear at the top. Tags are shown on the playlist detail screen and can be used to keep related playlists organised, e.g. by mood or project."
+            ),
+            HelpTopic(
+                icon: "person.2.badge.gearshape",
+                title: "Collaborative Playlists",
+                body: "From a playlist, tap Share to generate a share code or link and invite other Lumisound users as Editors (can add/remove songs) or Viewers (read-only). Anyone with the code can open Collaborative Playlists → Enter Share Code to import it. You can revoke a share link at any time, which immediately cuts off access for everyone using it."
+            ),
+            HelpTopic(
+                icon: "tray.and.arrow.down",
+                title: "Shared with Me",
+                body: "Playlists → Shared with Me lists every playlist another user has added you to as a collaborator, along with your role (Editor/Viewer) and the owner's username. Tap one to view its tracks, play them all, or save a local copy into your own library. Updates from the owner or other collaborators appear automatically the next time you open it."
+            ),
+            HelpTopic(
+                icon: "arrow.triangle.2.circlepath",
+                title: "Queue Sync",
+                body: "While signed in, your \"Up Next\" queue is saved to the server in the background as it changes, and restored automatically when you open the app on another signed-in device — so you can pick up the same playback queue on your phone and iPad. Only track identifiers and titles are stored, not audio."
+            ),
+        ]),
+        HelpCategory(icon: "sparkles", title: "Achievements & Discovery", topics: [
+            HelpTopic(
+                icon: "trophy",
+                title: "Achievements & Streaks",
+                body: "Account → Achievements tracks your listening streaks (consecutive days with at least one play), total plays, and total listening time, and unlocks badges as you hit milestones for play counts, hours listened, and streak lengths — plus a few special badges like Night Owl and Early Bird for listening at certain times of day. Badges are computed entirely server-side from your play history; there's nothing to configure."
+            ),
+            HelpTopic(
+                icon: "wand.and.stars",
+                title: "Discover Mix",
+                body: "Account → Discover → Discover Mix is a personalised list of tracks seeded from the artists you listen to most, automatically excluding anything already in your library or favourites. Tap Play All to queue the whole mix, or play/queue individual tracks. It refreshes as your listening history grows."
+            ),
+            HelpTopic(
+                icon: "person.crop.circle.badge.plus",
+                title: "Artist Subscriptions",
+                body: "Account → Subscriptions lets you follow a YouTube or SoundCloud channel/playlist URL by pasting it in and tapping Subscribe. Lumisound periodically checks followed channels for new uploads; when new tracks appear you get a notification and can play or queue them straight from the Subscriptions screen via \"Check Now\"."
+            ),
+            HelpTopic(
+                icon: "music.note.list",
+                title: "Scrobbling (Last.fm / ListenBrainz)",
+                body: "Account → Scrobbling links your Last.fm and/or ListenBrainz account so finished tracks are submitted automatically. For Last.fm, tap \"Open Last.fm to Authorize\" to approve access in Safari, then return to the app to complete the link. For ListenBrainz, paste your user token from your ListenBrainz profile settings. Use the top toggle to pause scrobbling without unlinking either service."
+            ),
         ]),
         HelpCategory(icon: "play.circle.fill", title: "Now Playing", topics: [
             HelpTopic(

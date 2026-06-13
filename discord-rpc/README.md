@@ -27,14 +27,24 @@ Edit `~/.config/lumisound-discord-rpc/config.json`:
 
 - `discord_client_id`: the Application ID from step 1.
 - `bridge_url`: base URL of your ios-bridge instance.
-- `username` / `password`: your Lumisound account credentials. On first run
-  the daemon logs in and saves the resulting access token back into this
-  file, so the password is only used once (until the token expires after 30
-  days, at which point it logs in again automatically).
+- `access_token` (recommended): in Lumisound, go to **Account → Generate Rich
+  Presence Token** and paste the result here. This token only allows reading
+  your own playback state — it doesn't expose your password, and you can
+  revoke it any time from **Account → Active Sessions** ("Discord RPC
+  Bridge") without changing your password.
+- `username` / `password` (alternative): your Lumisound account credentials,
+  if you'd rather not use a token. On first run the daemon logs in and saves
+  the resulting access token back into this file, so the password is only
+  used once (until the token expires, at which point it logs in again
+  automatically).
 - `poll_interval_seconds`: how often to refresh (default 5). Discord's local
   IPC rate-limits `SET_ACTIVITY` to about 1 call every 4 seconds, so 5s is
   close to the practical minimum for near-real-time updates.
 - `large_image`: optional asset name from step 2.
+
+Each person who wants their own Discord Rich Presence runs their own copy of
+this daemon on their own machine with their own token — there's no central
+linking step beyond generating that token in the app.
 
 ## 3. Run it
 

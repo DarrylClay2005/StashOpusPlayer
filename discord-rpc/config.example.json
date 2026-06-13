@@ -1,8 +1,7 @@
 {
   "discord_client_id": "YOUR_DISCORD_APPLICATION_CLIENT_ID",
   "bridge_url": "https://your-bridge-host.example.com",
-  "username": "your-lumisound-username",
-  "password": "your-lumisound-password",
+  "access_token": "paste a token from Lumisound -> Account -> Generate Rich Presence Token",
   "poll_interval_seconds": 5,
   "large_image": "lumisound_logo"
 }
