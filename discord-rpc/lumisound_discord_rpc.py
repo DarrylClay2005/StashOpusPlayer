@@ -318,7 +318,12 @@ def main() -> None:
                     log("Cleared Rich Presence (paused/idle)")
                 last_activity_signature = signature
 
-        except DiscordIPCError as exc:
+        except (DiscordIPCError, OSError) as exc:
+            # OSError (e.g. BrokenPipeError/ConnectionResetError) means the
+            # IPC socket died under us — usually because Discord was
+            # restarted and replaced its socket file. Drop our handle so the
+            # next loop iteration reconnects; otherwise we'd keep retrying
+            # against the same dead fd forever.
             log(f"Discord IPC error: {exc}")
             if ipc.sock:
                 ipc.close()
