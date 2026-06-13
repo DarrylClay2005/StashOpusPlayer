@@ -37,6 +37,10 @@ struct StreamSearchView: View {
     // Animation: tracks results version so we can stagger the fade-in
     @State private var resultsAnimationToken: UUID = UUID()
 
+    // Trending searches & autocomplete suggestions
+    @State private var trendingQueries: [SearchQueryCount] = []
+    @State private var suggestions: [SearchQueryCount] = []
+
     private let sources = ["youtube", "soundcloud", "server", "my"]
 
     var body: some View {
@@ -161,7 +165,16 @@ struct StreamSearchView: View {
                 streaming.serverTracks = []
                 streaming.errorMessage = nil
                 streaming.isPlaylistResult = false
+                suggestions = []
                 return
+            }
+            if selectedSource == "youtube" || selectedSource == "soundcloud" {
+                Task {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    if searchText == newValue {
+                        suggestions = await streaming.searchSuggestions(query: newValue)
+                    }
+                }
             }
             // Debounced auto-search — mirrors LibraryView's 300ms pattern (the only
             // existing trigger here was `.onSubmit(of: .search)`, which fires solely
@@ -199,6 +212,9 @@ struct StreamSearchView: View {
         .onAppear {
             if selectedSource == "my", let token = account.token {
                 Task { await streaming.fetchUserMusic(token: token) }
+            }
+            if trendingQueries.isEmpty {
+                Task { trendingQueries = await streaming.searchTrending() }
             }
         }
         // fileImporter must be at this level (NavigationStack content root), NOT inside
@@ -242,12 +258,19 @@ struct StreamSearchView: View {
                     .tint(AppTheme.dynamicAccent)
                     .foregroundStyle(AppTheme.textSecondary)
                 Spacer()
-            } else if streaming.searchResults.isEmpty && !searchText.isEmpty {
-                Spacer()
-                Text("No results for \"\(searchText)\"")
-                    .font(AppTheme.bodyFont(size: 15))
-                    .foregroundStyle(AppTheme.textSecondary)
-                Spacer()
+            } else if searchText.isEmpty {
+                trendingSearchesBody
+            } else if streaming.searchResults.isEmpty {
+                VStack(spacing: 0) {
+                    if !suggestions.isEmpty {
+                        suggestionsBody
+                    }
+                    Spacer()
+                    Text("No results for \"\(searchText)\"")
+                        .font(AppTheme.bodyFont(size: 15))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Spacer()
+                }
             } else {
                 VStack(spacing: 0) {
                     // Playlist banner — only shown after a successful playlist resolve
@@ -301,6 +324,80 @@ struct StreamSearchView: View {
                 }
             }
         }
+    }
+
+    // MARK: — Trending searches & suggestions
+
+    private var trendingSearchesBody: some View {
+        Group {
+            if trendingQueries.isEmpty {
+                Spacer()
+                Text("Search YouTube or SoundCloud, or paste a playlist URL.")
+                    .font(AppTheme.bodyFont(size: 14))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                Spacer()
+            } else {
+                List(trendingQueries) { item in
+                    Button {
+                        searchText = item.query
+                        triggerSearch()
+                    } label: {
+                        HStack {
+                            Image(systemName: "arrow.up.right")
+                                .foregroundStyle(AppTheme.dynamicAccent)
+                                .frame(width: 20)
+                            Text(item.query)
+                                .font(AppTheme.bodyFont(size: 14))
+                                .foregroundStyle(AppTheme.textPrimary)
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(AppTheme.surface)
+                    .listRowSeparatorTint(AppTheme.background)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .safeAreaInset(edge: .top) {
+                    Text("TRENDING SEARCHES")
+                        .font(AppTheme.bodyFont(size: 11))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .kerning(0.8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .background(AppTheme.background)
+                }
+            }
+        }
+    }
+
+    private var suggestionsBody: some View {
+        VStack(spacing: 0) {
+            ForEach(suggestions) { item in
+                Button {
+                    searchText = item.query
+                    triggerSearch()
+                } label: {
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .frame(width: 20)
+                        Text(item.query)
+                            .font(AppTheme.bodyFont(size: 14))
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(.plain)
+                Divider().background(AppTheme.background)
+            }
+        }
+        .background(AppTheme.surface)
     }
 
     // MARK: — Server library results

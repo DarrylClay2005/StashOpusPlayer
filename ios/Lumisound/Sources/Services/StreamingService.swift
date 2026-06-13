@@ -168,6 +168,13 @@ struct ServerTrack: Identifiable, Codable, Hashable {
 
 // MARK: - StreamResponse helpers
 
+/// One entry from GET /api/search/suggestions or /api/search/trending.
+struct SearchQueryCount: Identifiable, Codable, Hashable {
+    let query: String
+    let count: Int
+    var id: String { query }
+}
+
 private struct StreamResponse: Decodable {
     let url: String
     let expiresIn: Int
@@ -335,6 +342,57 @@ final class StreamingService: ObservableObject {
             appError("Search failed: \(error.localizedDescription)", category: "network")
             errorMessage = "Streaming service is unavailable right now. Please try again later."
             searchResults = []
+        }
+    }
+
+    /// Autocomplete suggestions for `q` — past queries from any user, starting
+    /// with `q`, most popular first. Returns `[]` on no match or any failure.
+    func searchSuggestions(query: String, limit: Int = 8) async -> [SearchQueryCount] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return [] }
+
+        var components = URLComponents()
+        components.path = "/api/search/suggestions"
+        components.queryItems = [
+            URLQueryItem(name: "q",     value: trimmed),
+            URLQueryItem(name: "limit", value: "\(limit)"),
+        ]
+        guard var request = makeRequest(components.string ?? "/api/search/suggestions") else { return [] }
+        request.timeoutInterval = 10
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse,
+               !(200..<300).contains(httpResponse.statusCode) {
+                return []
+            }
+            return try JSONDecoder().decode([SearchQueryCount].self, from: data)
+        } catch {
+            return []
+        }
+    }
+
+    /// Most popular search queries across all users in the last `days` days.
+    /// Returns `[]` on no match or any failure.
+    func searchTrending(limit: Int = 10, days: Int = 7) async -> [SearchQueryCount] {
+        var components = URLComponents()
+        components.path = "/api/search/trending"
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "days",  value: "\(days)"),
+        ]
+        guard var request = makeRequest(components.string ?? "/api/search/trending") else { return [] }
+        request.timeoutInterval = 10
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse,
+               !(200..<300).contains(httpResponse.statusCode) {
+                return []
+            }
+            return try JSONDecoder().decode([SearchQueryCount].self, from: data)
+        } catch {
+            return []
         }
     }
 
