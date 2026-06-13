@@ -237,6 +237,11 @@ struct AccountView: View {
                             .foregroundStyle(AppTheme.textPrimary)
                         }
                     }
+
+                    NavigationLink(destination: AchievementsView()) {
+                        Label("Achievements", systemImage: "trophy")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
                 } header: {
                     sectionHeader("Library")
                 }
