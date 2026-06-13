@@ -39,7 +39,11 @@ final class AudioPlayerManager: ObservableObject {
             }
         }
     }
-    @Published private(set) var queue: [Song] = []
+    @Published private(set) var queue: [Song] = [] {
+        didSet {
+            pushQueueToBridge()
+        }
+    }
     @Published private(set) var currentIndex = 0
     @Published private(set) var isPlaying = false {
         didSet {
@@ -2190,6 +2194,21 @@ final class AudioPlayerManager: ObservableObject {
             duration: duration,
             isPlaying: isPlaying
         )
+    }
+
+    private var queuePushTask: Task<Void, Never>?
+
+    /// Mirrors the "up next" queue to the bridge (`/user/queue`), debounced so
+    /// rapid changes (drag-reorder, batch removals) don't fire a request per
+    /// edit. No-ops if not logged in.
+    private func pushQueueToBridge() {
+        queuePushTask?.cancel()
+        let snapshot = queue
+        queuePushTask = Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            await AccountService.shared?.pushQueue(snapshot)
+        }
     }
 
     private func updatePositionFromPlayer() {

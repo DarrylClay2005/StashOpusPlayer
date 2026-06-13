@@ -3,7 +3,9 @@ import SwiftUI
 struct QueueView: View {
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var library: LibraryManager
+    @EnvironmentObject private var account: AccountService
     @State private var editMode: EditMode = .inactive
+    @State private var isRestoringQueue = false
 
     private var totalDuration: TimeInterval {
         player.queue.reduce(0) { $0 + $1.duration }
@@ -52,6 +54,19 @@ struct QueueView: View {
                     }
                 }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    if account.isLoggedIn {
+                        Button {
+                            restoreQueueFromCloud()
+                        } label: {
+                            if isRestoringQueue {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "icloud.and.arrow.down")
+                                    .foregroundStyle(AppTheme.dynamicAccent)
+                            }
+                        }
+                        .disabled(isRestoringQueue)
+                    }
                     if !player.queue.isEmpty {
                         Button {
                             withAnimation {
@@ -192,6 +207,20 @@ struct QueueView: View {
         .padding(.horizontal, 4)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+    }
+
+    /// Replaces the current queue with the one saved on the server (synced
+    /// from another device), keeping playback paused on whatever is now first.
+    private func restoreQueueFromCloud() {
+        guard !isRestoringQueue else { return }
+        isRestoringQueue = true
+        Task {
+            let songs = await account.fetchQueue(library: library)
+            if !songs.isEmpty {
+                player.setQueue(songs, startIndex: 0, autoplay: false)
+            }
+            isRestoringQueue = false
+        }
     }
 
     private func clearQueue() {
