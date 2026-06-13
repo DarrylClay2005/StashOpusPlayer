@@ -64,6 +64,14 @@ SUPPORTED_AUDIO_EXTS: frozenset[str] = frozenset({
     ".mp3", ".m4a", ".aac", ".wav", ".aif", ".aiff",
     ".flac", ".opus", ".ogg", ".caf", ".mp4", ".m4v",
 })
+# Optional: a YouTube Data API v3 key (https://console.cloud.google.com, enable
+# "YouTube Data API v3"). When set, /api/resolve uses playlistItems.list to
+# enumerate YouTube playlists, which paginates via nextPageToken with no
+# practical limit — unlike yt-dlp's flat-playlist scrape of the playlist page,
+# which YouTube caps at ~205 entries regardless of cookies/session (the
+# richGridRenderer/lockupViewModel grid UI's continuation simply stops being
+# returned by YouTube's browse API after ~2 pages).
+YOUTUBE_API_KEY: str = os.getenv("YOUTUBE_API_KEY", "")
 VERSION = "1.0.0"
 
 # ---------------------------------------------------------------------------
@@ -506,6 +514,103 @@ def _parse_track(entry: dict, source: str) -> dict:
         "source": source,
         "youtube_url": youtube_url,
     }
+
+
+_YOUTUBE_PLAYLIST_ID_RE = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
+
+# ISO 8601 durations as returned by YouTube Data API's contentDetails.duration,
+# e.g. "PT1H2M3S", "PT45S".
+_ISO8601_DURATION_RE = re.compile(
+    r"^PT(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?$"
+)
+
+
+def _extract_youtube_playlist_id(url: str) -> Optional[str]:
+    match = _YOUTUBE_PLAYLIST_ID_RE.search(url)
+    return match.group(1) if match else None
+
+
+def _parse_iso8601_duration(duration: str) -> int:
+    match = _ISO8601_DURATION_RE.match(duration or "")
+    if not match:
+        return 0
+    parts = match.groupdict()
+    hours = int(parts["hours"] or 0)
+    minutes = int(parts["minutes"] or 0)
+    seconds = int(parts["seconds"] or 0)
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _youtube_data_api_get(path: str, params: dict) -> dict:
+    """Synchronous GET against the YouTube Data API v3 — call via asyncio.to_thread.
+
+    The target host is a hardcoded Google domain (not derived from user input),
+    so this does not need the SSRF guard used for user-supplied playlist URLs.
+    """
+    from urllib.parse import urlencode
+
+    query = urlencode({**params, "key": YOUTUBE_API_KEY})
+    req = urllib.request.Request(f"https://www.googleapis.com/youtube/v3/{path}?{query}")
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+
+async def _resolve_youtube_playlist_via_api(playlist_id: str, limit: int) -> list[dict]:
+    """Enumerate a YouTube playlist via playlistItems.list (paginated via
+    nextPageToken — no ~205-entry cap, unlike yt-dlp's flat-playlist scrape).
+
+    Raises on any API error so the caller can fall back to yt-dlp.
+    """
+    items: list[dict] = []
+    page_token: Optional[str] = None
+    while len(items) < limit:
+        params = {
+            "part": "snippet",
+            "playlistId": playlist_id,
+            "maxResults": min(50, limit - len(items)),
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        data = await asyncio.to_thread(_youtube_data_api_get, "playlistItems", params)
+        for item in data.get("items", []):
+            snippet = item.get("snippet") or {}
+            video_id = (snippet.get("resourceId") or {}).get("videoId")
+            title = snippet.get("title") or ""
+            if not video_id or title in ("Deleted video", "Private video"):
+                continue
+            thumbnails = snippet.get("thumbnails") or {}
+            thumbnail_url = ""
+            for size in ("maxres", "standard", "high", "medium", "default"):
+                if size in thumbnails:
+                    thumbnail_url = thumbnails[size].get("url", "")
+                    break
+            items.append({
+                "id": video_id,
+                "title": title,
+                "channel": snippet.get("videoOwnerChannelTitle") or snippet.get("channelTitle"),
+                "thumbnail": thumbnail_url,
+            })
+
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+
+    # Batch-fetch durations (videos.list accepts up to 50 IDs per call).
+    for batch_start in range(0, len(items), 50):
+        batch = items[batch_start:batch_start + 50]
+        data = await asyncio.to_thread(
+            _youtube_data_api_get,
+            "videos",
+            {"part": "contentDetails", "id": ",".join(i["id"] for i in batch)},
+        )
+        durations = {
+            v["id"]: _parse_iso8601_duration((v.get("contentDetails") or {}).get("duration", ""))
+            for v in data.get("items", [])
+        }
+        for item in batch:
+            item["duration"] = durations.get(item["id"], 0)
+
+    return items
 
 
 # ---------------------------------------------------------------------------
@@ -1053,6 +1158,17 @@ async def resolve_playlist(
     await check_auth(request)
     await _reject_ssrf_targets(url)
 
+    source = "soundcloud" if "soundcloud.com" in url else "youtube"
+
+    if source == "youtube" and YOUTUBE_API_KEY:
+        playlist_id = _extract_youtube_playlist_id(url)
+        if playlist_id:
+            try:
+                items = await _resolve_youtube_playlist_via_api(playlist_id, limit)
+                return [_parse_track(item, source) for item in items]
+            except Exception as exc:
+                logger.warning("YouTube Data API resolve failed, falling back to yt-dlp: %s", exc)
+
     try:
         entries = await _run_ytdlp(
             "--dump-json",
@@ -1067,7 +1183,6 @@ async def resolve_playlist(
         logger.error("yt-dlp resolve error: %s", exc)
         raise HTTPException(status_code=404, detail="Could not resolve playlist")
 
-    source = "soundcloud" if "soundcloud.com" in url else "youtube"
     tracks = [_parse_track(e, source) for e in entries[:limit]]
     return tracks
 
