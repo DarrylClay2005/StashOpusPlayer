@@ -6,6 +6,10 @@ services:
     network_mode: "host"
     environment:
       - YTDLP_CACHE_DIR=/app/.cache/yt-dlp
+      # YouTube session cookies (Netscape format) used for flat-playlist extraction,
+      # so playlist imports/resolves aren't capped at ~100 entries. Swap out
+      # ./cookies.txt on the host to refresh the session without a rebuild.
+      - YTDLP_COOKIES_FILE=/app/cookies.txt
       - IOS_BRIDGE_API_KEY=${IOS_BRIDGE_API_KEY:-}
       - PORT=8002
       # Dedicated MariaDB credentials for the StashOpusPlayer iOS app
@@ -25,6 +29,7 @@ services:
       - USER_MUSIC_DIR=${USER_MUSIC_DIR:-/usermusic}
     volumes:
       - ./cache/yt-dlp:/app/.cache/yt-dlp
+      - ./cookies.txt:/app/cookies.txt:ro
       - /mnt/Seagate-MariaDB/lumisound-user-music:/usermusic
       # Optional: server-wide shared music directory (read-only)
       # - /path/to/your/music:/music:ro

@@ -28,6 +28,8 @@ ios/.xcode.env.local
 api_keys.txt
 secrets.txt
 local.properties
+cookies.txt
+ios-bridge/cookies.txt
 
 # Logs
 *.log

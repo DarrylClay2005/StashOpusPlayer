@@ -52,6 +52,7 @@ logger = logging.getLogger("ios-bridge")
 # ---------------------------------------------------------------------------
 
 YTDLP_CACHE_DIR: str = os.getenv("YTDLP_CACHE_DIR", "/app/.cache/yt-dlp")
+YTDLP_COOKIES_FILE: str = os.getenv("YTDLP_COOKIES_FILE", "/app/cookies.txt")
 API_KEY: str = os.getenv("IOS_BRIDGE_API_KEY", "")
 SERVER_MUSIC_DIR: str = os.getenv("SERVER_MUSIC_DIR", "")
 # Per-user music directory. Each user gets {USER_MUSIC_DIR}/{user_id}/.
@@ -403,6 +404,16 @@ async def _reject_ssrf_targets(url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _ytdlp_cookie_args() -> list[str]:
+    """YouTube only paginates flat-playlist results past the first ~100 entries
+    for authenticated requests. If a session cookie export is bind-mounted at
+    YTDLP_COOKIES_FILE, use it — the file can be swapped out at any time
+    (no rebuild/restart needed) to refresh the session."""
+    if os.path.isfile(YTDLP_COOKIES_FILE) and os.path.getsize(YTDLP_COOKIES_FILE) > 0:
+        return ["--cookies", YTDLP_COOKIES_FILE]
+    return []
+
+
 async def _run_ytdlp(*args: str, timeout: float = 30.0) -> list[dict]:
     """
     Run yt-dlp with the given arguments.
@@ -687,6 +698,7 @@ async def search(
             "--flat-playlist",
             "--no-playlist",
             "--cache-dir", YTDLP_CACHE_DIR,
+            *_ytdlp_cookie_args(),
         ]
 
     try:
@@ -982,6 +994,7 @@ async def resolve_playlist(
         entries = await _run_ytdlp(
             "--dump-json",
             "--flat-playlist",
+            *_ytdlp_cookie_args(),
             url,
             timeout=120.0,
         )
@@ -3445,6 +3458,7 @@ async def get_radio(
             "--dump-json",
             "--flat-playlist",
             "--no-warnings",
+            *_ytdlp_cookie_args(),
             mix_url,
             timeout=30.0,
         )
@@ -3699,7 +3713,7 @@ async def refresh_playlist_source(
             (local_count,) = await cur.fetchone()
 
     try:
-        entries = await _run_ytdlp("--dump-json", "--flat-playlist", "--no-warnings", source_url, timeout=60.0)
+        entries = await _run_ytdlp("--dump-json", "--flat-playlist", "--no-warnings", *_ytdlp_cookie_args(), source_url, timeout=60.0)
     except asyncio.TimeoutError:
         raise HTTPException(status_code=408, detail="Playlist refresh timed out")
     except Exception as exc:
