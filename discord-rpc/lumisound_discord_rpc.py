@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+"""
+Lumisound Discord Rich Presence bridge.
+
+Runs locally (as a systemd --user service) alongside the Discord desktop
+client. It polls the Lumisound ios-bridge server for the signed-in user's
+current playback state (GET /user/playback-state) and mirrors it to Discord
+via the local Rich Presence IPC socket, so other people on Discord can see
+"Playing Lumisound - <title> / by <artist>" on your profile.
+
+This only works because Discord's Rich Presence IPC is a local Unix socket
+that the desktop client exposes to apps running on the same machine — it
+cannot be driven remotely from the iOS app itself.
+
+Setup:
+  1. Create a Discord application at https://discord.com/developers/applications
+     (only its name and optional icon matter for Rich Presence) and copy its
+     Client ID.
+  2. Copy config.example.json to ~/.config/lumisound-discord-rpc/config.json
+     and fill in discord_client_id, bridge_url, and either access_token or
+     username/password.
+  3. Run this script directly, or install the provided systemd user service.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import struct
+import sys
+import time
+import urllib.error
+import urllib.request
+import uuid
+from pathlib import Path
+from typing import Optional
+
+OP_HANDSHAKE = 0
+OP_FRAME = 1
+OP_CLOSE = 2
+OP_PING = 3
+OP_PONG = 4
+
+DEFAULT_CONFIG_PATH = Path.home() / ".config" / "lumisound-discord-rpc" / "config.json"
+
+
+def log(msg: str) -> None:
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"{ts}  {msg}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Discord IPC client
+# ---------------------------------------------------------------------------
+
+
+def _candidate_ipc_paths() -> list[str]:
+    """Discord's RPC socket is a Unix socket named discord-ipc-{0..9}, placed
+    in one of several possible runtime directories depending on how Discord
+    was installed (native package, Flatpak, Snap)."""
+    bases = []
+    for var in ("XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"):
+        val = os.environ.get(var)
+        if val:
+            bases.append(val)
+    bases.append("/tmp")
+
+    paths = []
+    for base in bases:
+        paths.append(base)
+        paths.append(os.path.join(base, "app", "com.discordapp.Discord"))  # Flatpak
+        paths.append(os.path.join(base, "snap.discord"))  # Snap
+
+    sockets = []
+    for base in paths:
+        for i in range(10):
+            sockets.append(os.path.join(base, f"discord-ipc-{i}"))
+    return sockets
+
+
+class DiscordIPCError(Exception):
+    pass
+
+
+class DiscordIPC:
+    """Minimal client for Discord's local Rich Presence IPC protocol."""
+
+    def __init__(self, client_id: str):
+        self.client_id = client_id
+        self.sock: Optional[socket.socket] = None
+
+    def connect(self) -> None:
+        for path in _candidate_ipc_paths():
+            if not os.path.exists(path):
+                continue
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                sock.connect(path)
+            except OSError:
+                sock.close()
+                continue
+            self.sock = sock
+            self._handshake()
+            log(f"Connected to Discord IPC at {path}")
+            return
+        raise DiscordIPCError("No Discord IPC socket found — is Discord running?")
+
+    def _send(self, opcode: int, payload: dict) -> None:
+        if not self.sock:
+            raise DiscordIPCError("Not connected")
+        data = json.dumps(payload).encode("utf-8")
+        self.sock.sendall(struct.pack("<II", opcode, len(data)) + data)
+
+    def _recv(self) -> tuple[int, dict]:
+        if not self.sock:
+            raise DiscordIPCError("Not connected")
+        header = self._recv_exact(8)
+        opcode, length = struct.unpack("<II", header)
+        body = self._recv_exact(length)
+        try:
+            return opcode, json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return opcode, {}
+
+    def _recv_exact(self, n: int) -> bytes:
+        chunks = []
+        remaining = n
+        while remaining > 0:
+            chunk = self.sock.recv(remaining)
+            if not chunk:
+                raise DiscordIPCError("Discord IPC connection closed")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+
+    def _handshake(self) -> None:
+        self._send(OP_HANDSHAKE, {"v": 1, "client_id": self.client_id})
+        opcode, payload = self._recv()
+        if payload.get("evt") != "READY":
+            raise DiscordIPCError(f"Unexpected handshake response: {payload}")
+
+    def set_activity(self, activity: Optional[dict]) -> None:
+        self._send(
+            OP_FRAME,
+            {
+                "cmd": "SET_ACTIVITY",
+                "args": {"pid": os.getpid(), "activity": activity},
+                "nonce": str(uuid.uuid4()),
+            },
+        )
+        # Drain the response so it doesn't pile up in the socket buffer.
+        self._recv()
+
+    def clear_activity(self) -> None:
+        self.set_activity(None)
+
+    def close(self) -> None:
+        if self.sock:
+            try:
+                self._send(OP_CLOSE, {})
+            except OSError:
+                pass
+            self.sock.close()
+            self.sock = None
+
+
+# ---------------------------------------------------------------------------
+# Lumisound bridge client
+# ---------------------------------------------------------------------------
+
+
+class BridgeClient:
+    def __init__(self, base_url: str, config_path: Path, config: dict):
+        self.base_url = base_url.rstrip("/")
+        self.config_path = config_path
+        self.config = config
+        self.access_token: Optional[str] = config.get("access_token")
+
+    def _request(self, method: str, path: str, body: Optional[dict] = None, auth: bool = True) -> dict:
+        url = f"{self.base_url}{path}"
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "lumisound-discord-rpc/1.0",
+        }
+        if auth and self.access_token:
+            headers["Authorization"] = f"Bearer {self.access_token}"
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read()
+            return json.loads(raw) if raw else {}
+
+    def login(self) -> None:
+        username = self.config.get("username")
+        password = self.config.get("password")
+        if not username or not password:
+            raise DiscordIPCError(
+                "No access_token and no username/password configured — cannot authenticate"
+            )
+        result = self._request(
+            "POST", "/auth/login",
+            {"username": username, "password": password, "device_name": "Discord RPC Bridge"},
+            auth=False,
+        )
+        self.access_token = result["token"]
+        log("Logged in to Lumisound bridge")
+
+        # Persist the fresh token so future restarts don't need to re-login
+        # (and so a password doesn't need to stay in the config forever).
+        try:
+            self.config["access_token"] = self.access_token
+            self.config_path.write_text(json.dumps(self.config, indent=2))
+        except OSError as exc:
+            log(f"Warning: could not persist refreshed token: {exc}")
+
+    def get_playback_state(self) -> Optional[dict]:
+        if not self.access_token:
+            self.login()
+        try:
+            return self._request("GET", "/user/playback-state")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                log("Access token expired/invalid, re-authenticating")
+                self.login()
+                return self._request("GET", "/user/playback-state")
+            raise
+
+
+# ---------------------------------------------------------------------------
+# Main loop
+# ---------------------------------------------------------------------------
+
+
+def build_activity(state: dict, large_image: Optional[str]) -> Optional[dict]:
+    """Translates a /user/playback-state response into a Discord SET_ACTIVITY
+    payload, or None if nothing should be shown (paused or stale)."""
+    if not state or not state.get("title"):
+        return None
+    if not state.get("is_playing", True):
+        return None
+
+    updated_at = state.get("updated_at")
+    if updated_at:
+        try:
+            from datetime import datetime, timezone
+            updated = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            if updated.tzinfo is None:
+                # The bridge returns naive timestamps in the server's local
+                # time zone (not UTC), so compare against local "now".
+                age = (datetime.now() - updated).total_seconds()
+            else:
+                age = (datetime.now(timezone.utc) - updated).total_seconds()
+            if age > 120:
+                return None  # client hasn't reported in — likely backgrounded/closed
+        except ValueError:
+            pass
+
+    activity: dict = {
+        "details": (state.get("title") or "")[:128],
+    }
+    if state.get("artist"):
+        activity["state"] = f"by {state['artist']}"[:128]
+
+    position = state.get("position_seconds") or 0
+    duration = state.get("duration_seconds") or 0
+    now = time.time()
+    timestamps = {"start": int(now - position)}
+    if duration > 0:
+        timestamps["end"] = int(now - position + duration)
+    activity["timestamps"] = timestamps
+
+    if large_image:
+        activity["assets"] = {"large_image": large_image, "large_text": "Lumisound"}
+
+    return activity
+
+
+def load_config(config_path: Path) -> dict:
+    if not config_path.exists():
+        log(f"No config found at {config_path}")
+        log("Copy config.example.json there and fill in your details.")
+        sys.exit(1)
+    return json.loads(config_path.read_text())
+
+
+def main() -> None:
+    config_path = Path(os.environ.get("LUMISOUND_RPC_CONFIG", DEFAULT_CONFIG_PATH))
+    config = load_config(config_path)
+
+    client_id = config["discord_client_id"]
+    bridge_url = config["bridge_url"]
+    poll_interval = config.get("poll_interval_seconds", 15)
+    large_image = config.get("large_image")
+
+    bridge = BridgeClient(bridge_url, config_path, config)
+    ipc = DiscordIPC(client_id)
+
+    last_activity_signature: Optional[tuple] = None
+
+    while True:
+        try:
+            if ipc.sock is None:
+                ipc.connect()
+
+            state = bridge.get_playback_state()
+            activity = build_activity(state, large_image)
+
+            # Discord's rate limit (5 SET_ACTIVITY calls per 20s) is well
+            # above our poll interval, so we re-send every poll (timestamps
+            # need refreshing anyway) but only log when the track changes.
+            signature = (activity.get("details"), activity.get("state")) if activity else None
+            ipc.set_activity(activity)
+            if signature != last_activity_signature:
+                if activity:
+                    log(f"Now playing: {activity.get('details')} {activity.get('state', '')}")
+                else:
+                    log("Cleared Rich Presence (paused/idle)")
+                last_activity_signature = signature
+
+        except DiscordIPCError as exc:
+            log(f"Discord IPC error: {exc}")
+            if ipc.sock:
+                ipc.close()
+            last_activity_signature = None
+        except urllib.error.URLError as exc:
+            log(f"Bridge request failed: {exc}")
+        except Exception as exc:  # noqa: BLE001 — keep the daemon alive
+            log(f"Unexpected error: {exc}")
+
+        time.sleep(poll_interval)
+
+
+if __name__ == "__main__":
+    main()

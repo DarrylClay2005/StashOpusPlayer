@@ -1,0 +1,8 @@
+{
+  "discord_client_id": "YOUR_DISCORD_APPLICATION_CLIENT_ID",
+  "bridge_url": "https://your-bridge-host.example.com",
+  "username": "your-lumisound-username",
+  "password": "your-lumisound-password",
+  "poll_interval_seconds": 15,
+  "large_image": "lumisound_logo"
+}

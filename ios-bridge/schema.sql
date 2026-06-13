@@ -266,6 +266,10 @@ CREATE TABLE IF NOT EXISTS ios_playback_state (
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
+-- Feature: local Discord Rich Presence daemon needs to distinguish
+-- playing vs. paused (a stale "now playing" row alone isn't enough).
+ALTER TABLE ios_playback_state ADD COLUMN IF NOT EXISTS is_playing BOOLEAN DEFAULT TRUE;
+
 -- Feature: server-side loudness normalization (ReplayGain-style)
 ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS loudness_lufs FLOAT NULL;
 
@@ -289,4 +293,117 @@ CREATE TABLE IF NOT EXISTS ios_listen_rooms (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (host_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- ---------------------------------------------------------------------------
+-- 10 more server-side features + Discord webhook integration
+-- ---------------------------------------------------------------------------
+
+-- Feature: artist/channel subscriptions — bridge periodically re-resolves
+-- channel_url and compares against last_video_id to detect new uploads.
+CREATE TABLE IF NOT EXISTS ios_artist_subscriptions (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    channel_url TEXT NOT NULL,
+    channel_name VARCHAR(255),
+    last_video_id VARCHAR(64),
+    last_checked_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Feature: collaborative playlists — additional users granted editor/viewer
+-- access to a playlist they don't own.
+CREATE TABLE IF NOT EXISTS ios_playlist_collaborators (
+    playlist_id VARCHAR(36) NOT NULL,
+    user_id VARCHAR(36) NOT NULL,
+    role VARCHAR(10) NOT NULL DEFAULT 'editor',
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (playlist_id, user_id),
+    FOREIGN KEY (playlist_id) REFERENCES ios_user_playlists(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Feature: persistent server-side "up next" queue, independent of
+-- ios_playback_state (which only tracks the current track/position).
+CREATE TABLE IF NOT EXISTS ios_user_queue (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    position INT NOT NULL DEFAULT 0,
+    local_song_id VARCHAR(255),
+    track_url TEXT,
+    title TEXT NOT NULL,
+    artist TEXT,
+    album TEXT,
+    duration_seconds INT DEFAULT 0,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user_position (user_id, position),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Feature: scrobbling to Last.fm / ListenBrainz
+CREATE TABLE IF NOT EXISTS ios_scrobble_links (
+    user_id VARCHAR(36) PRIMARY KEY,
+    lastfm_session_key VARCHAR(64) NULL,
+    lastfm_username VARCHAR(255) NULL,
+    listenbrainz_token VARCHAR(64) NULL,
+    enabled BOOLEAN DEFAULT TRUE,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Feature: BPM analysis alongside the existing loudness pass
+ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS bpm FLOAT NULL;
+
+-- Feature: search autocomplete / trending searches
+CREATE TABLE IF NOT EXISTS ios_search_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(36) NULL,
+    query VARCHAR(255) NOT NULL,
+    source VARCHAR(20) DEFAULT 'youtube',
+    searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_query (query),
+    INDEX idx_searched (searched_at)
+);
+
+-- Feature: playlist folders/tags for organization
+ALTER TABLE ios_user_playlists ADD COLUMN IF NOT EXISTS folder VARCHAR(255) NULL;
+ALTER TABLE ios_user_playlists ADD COLUMN IF NOT EXISTS tags_json TEXT NULL;
+
+-- Feature: push notifications — registered device tokens + an in-app
+-- notification feed (room invites, subscription uploads, collaborator adds).
+CREATE TABLE IF NOT EXISTS ios_push_tokens (
+    user_id VARCHAR(36) NOT NULL,
+    device_token VARCHAR(255) NOT NULL,
+    platform VARCHAR(10) DEFAULT 'ios',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, device_token),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ios_notifications (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    type VARCHAR(30) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    body TEXT,
+    data_json TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    read_at TIMESTAMP NULL,
+    INDEX idx_user_created (user_id, created_at),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Feature: Discord "now playing" webhook integration. True per-user Discord
+-- Rich Presence ("Listening to ...") requires the Discord desktop client and
+-- a local IPC connection, which an iOS app cannot establish on a user's
+-- behalf — so instead each user can point a Discord webhook (e.g. at a
+-- channel in their own server) and the bridge posts a "Now Playing" embed.
+CREATE TABLE IF NOT EXISTS ios_discord_webhooks (
+    user_id VARCHAR(36) PRIMARY KEY,
+    webhook_url TEXT NOT NULL,
+    enabled BOOLEAN DEFAULT TRUE,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );

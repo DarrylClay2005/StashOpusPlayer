@@ -1,0 +1,12 @@
+[Unit]
+Description=Lumisound Discord Rich Presence bridge
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/run/current-system/sw/bin/python3 %h/Documents/Projects/Lumisound/discord-rpc/lumisound_discord_rpc.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

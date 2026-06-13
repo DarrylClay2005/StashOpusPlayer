@@ -1,3 +1,4 @@
+import array
 import asyncio
 import hashlib
 import io
@@ -527,11 +528,15 @@ class LoginRequest(BaseModel):
 class CreatePlaylistRequest(BaseModel):
     name: str
     description: Optional[str] = None
+    folder: Optional[str] = None
+    tags: list[str] = []
 
 
 class UpdatePlaylistRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    folder: Optional[str] = None
+    tags: Optional[list[str]] = None
 
 
 class AddFavoriteRequest(BaseModel):
@@ -610,6 +615,7 @@ class PlaybackStateRequest(BaseModel):
     source: Optional[str] = None
     position_seconds: float = 0
     duration_seconds: float = 0
+    is_playing: bool = True
 
 
 class PlaylistSourceRequest(BaseModel):
@@ -630,6 +636,46 @@ class UpdateRoomRequest(BaseModel):
     artist: Optional[str] = None
     position_seconds: Optional[float] = None
     is_playing: Optional[bool] = None
+
+
+class SubscribeChannelRequest(BaseModel):
+    channel_url: str
+    channel_name: Optional[str] = None
+
+
+class AddCollaboratorRequest(BaseModel):
+    username: str
+    role: str = "editor"  # 'editor' or 'viewer'
+
+
+class QueueTrackRequest(BaseModel):
+    local_song_id: Optional[str] = None
+    track_url: Optional[str] = None
+    title: str
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    duration_seconds: Optional[int] = 0
+
+
+class ReplaceQueueRequest(BaseModel):
+    tracks: list[QueueTrackRequest] = []
+
+
+class ScrobbleLinkRequest(BaseModel):
+    lastfm_session_key: Optional[str] = None
+    lastfm_username: Optional[str] = None
+    listenbrainz_token: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class PushTokenRequest(BaseModel):
+    device_token: str
+    platform: str = "ios"
+
+
+class DiscordWebhookRequest(BaseModel):
+    webhook_url: str
+    enabled: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -679,6 +725,8 @@ async def search(
     source = source.lower()
     if source not in ("youtube", "soundcloud"):
         raise HTTPException(status_code=400, detail="source must be 'youtube' or 'soundcloud'")
+
+    asyncio.create_task(_log_search(q, source))
 
     cache_key = f"{source}:{limit}:{q}"
     cached = _cache_get(cache_key)
@@ -1488,6 +1536,7 @@ async def get_playlists(payload: dict = Depends(get_current_user)):
             await cur.execute(
                 """
                 SELECT p.id, p.name, p.description, p.created_at, p.updated_at,
+                       p.folder, p.tags_json,
                        t.id, t.track_url, t.local_song_id, t.title, t.artist, t.album,
                        t.duration_seconds, t.position
                 FROM ios_user_playlists p
@@ -1502,7 +1551,7 @@ async def get_playlists(payload: dict = Depends(get_current_user)):
     playlists: dict[str, dict] = {}
     order: list[str] = []
     for row in rows:
-        (pl_id, name, description, created_at, updated_at,
+        (pl_id, name, description, created_at, updated_at, folder, tags_json,
          t_id, t_url, t_local, t_title, t_artist, t_album, t_dur, t_pos) = row
         if pl_id not in playlists:
             playlists[pl_id] = {
@@ -1511,6 +1560,8 @@ async def get_playlists(payload: dict = Depends(get_current_user)):
                 "description": description,
                 "created_at": created_at.isoformat() if created_at else None,
                 "updated_at": updated_at.isoformat() if updated_at else None,
+                "folder": folder,
+                "tags": json.loads(tags_json) if tags_json else [],
                 "tracks": [],
             }
             order.append(pl_id)
@@ -1541,27 +1592,29 @@ async def create_playlist(
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                INSERT INTO ios_user_playlists (id, user_id, name, description)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO ios_user_playlists (id, user_id, name, description, folder, tags_json)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (pl_id, user_id, body.name, body.description),
+                (pl_id, user_id, body.name, body.description, body.folder, json.dumps(body.tags)),
             )
             await cur.execute(
                 """
-                SELECT id, name, description, created_at, updated_at
+                SELECT id, name, description, created_at, updated_at, folder, tags_json
                 FROM ios_user_playlists WHERE id = %s
                 """,
                 (pl_id,),
             )
             row = await cur.fetchone()
 
-    pl_id, name, description, created_at, updated_at = row
+    pl_id, name, description, created_at, updated_at, folder, tags_json = row
     return {
         "id": pl_id,
         "name": name,
         "description": description,
         "created_at": created_at.isoformat() if created_at else None,
         "updated_at": updated_at.isoformat() if updated_at else None,
+        "folder": folder,
+        "tags": json.loads(tags_json) if tags_json else [],
         "tracks": [],
     }
 
@@ -1591,6 +1644,12 @@ async def update_playlist(
             if body.description is not None:
                 updates.append("description = %s")
                 values.append(body.description)
+            if body.folder is not None:
+                updates.append("folder = %s")
+                values.append(body.folder or None)
+            if body.tags is not None:
+                updates.append("tags_json = %s")
+                values.append(json.dumps(body.tags))
 
             if updates:
                 values.append(playlist_id)
@@ -1600,19 +1659,21 @@ async def update_playlist(
                 )
 
             await cur.execute(
-                "SELECT id, name, description, created_at, updated_at "
+                "SELECT id, name, description, created_at, updated_at, folder, tags_json "
                 "FROM ios_user_playlists WHERE id = %s",
                 (playlist_id,),
             )
             row = await cur.fetchone()
 
-    pl_id, name, description, created_at, updated_at = row
+    pl_id, name, description, created_at, updated_at, folder, tags_json = row
     return {
         "id": pl_id,
         "name": name,
         "description": description,
         "created_at": created_at.isoformat() if created_at else None,
         "updated_at": updated_at.isoformat() if updated_at else None,
+        "folder": folder,
+        "tags": json.loads(tags_json) if tags_json else [],
     }
 
 
@@ -1738,6 +1799,12 @@ async def log_history(
                     body.listen_seconds or 0,
                 ),
             )
+
+    # Fire-and-forget integrations: scrobble to linked Last.fm/ListenBrainz
+    # accounts and post a "Now Playing" embed to a linked Discord webhook.
+    # Neither should ever block or fail the history write itself.
+    asyncio.create_task(_scrobble_track(user_id, body.title, body.artist, body.listen_seconds or 0))
+    asyncio.create_task(_notify_now_playing_discord(user_id, body.title, body.artist))
 
     return {"id": history_id, "status": "logged"}
 
@@ -3016,6 +3083,10 @@ async def upload_user_music(
     # a gain adjustment without re-analyzing the file itself.
     loudness_lufs = await _measure_loudness(dest_path)
 
+    # Server-side tempo (BPM) estimate, used by the client for crossfade/
+    # gapless transition tuning between tracks of similar tempo.
+    bpm = await _estimate_bpm(dest_path)
+
     # Populate ios_user_music_metadata when metadata is provided
     try:
         async with pool.acquire() as conn:
@@ -3025,8 +3096,8 @@ async def upload_user_music(
                     INSERT INTO ios_user_music_metadata
                         (id, user_id, filename, original_filename, title, artist, album,
                          genre, year, duration_seconds, file_size_bytes, bitrate,
-                         sample_rate, mime_type, has_artwork, loudness_lufs)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         sample_rate, mime_type, has_artwork, loudness_lufs, bpm)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         filename = VALUES(filename),
                         title = IF(VALUES(title) IS NULL, title, VALUES(title)),
@@ -3039,7 +3110,8 @@ async def upload_user_music(
                         bitrate = IF(VALUES(bitrate) IS NULL, bitrate, VALUES(bitrate)),
                         sample_rate = IF(VALUES(sample_rate) IS NULL, sample_rate, VALUES(sample_rate)),
                         mime_type = VALUES(mime_type),
-                        loudness_lufs = IF(VALUES(loudness_lufs) IS NULL, loudness_lufs, VALUES(loudness_lufs))
+                        loudness_lufs = IF(VALUES(loudness_lufs) IS NULL, loudness_lufs, VALUES(loudness_lufs)),
+                        bpm = IF(VALUES(bpm) IS NULL, bpm, VALUES(bpm))
                     """,
                     (
                         content_hash,
@@ -3058,6 +3130,7 @@ async def upload_user_music(
                         mime_type,
                         False,
                         loudness_lufs,
+                        bpm,
                     ),
                 )
     except Exception as exc:
@@ -3069,6 +3142,7 @@ async def upload_user_music(
         "path": rel,
         "id": _stable_id(abs_path),
         "loudness_lufs": loudness_lufs,
+        "bpm": bpm,
         "metadata_id": content_hash,
         "size": len(body),
     }
@@ -3167,7 +3241,7 @@ async def delete_user_music(
 _USER_MUSIC_METADATA_COLS = [
     "id", "user_id", "filename", "original_filename", "title", "artist", "album",
     "genre", "year", "duration_seconds", "file_size_bytes", "bitrate", "sample_rate",
-    "mime_type", "has_artwork", "uploaded_at", "loudness_lufs",
+    "mime_type", "has_artwork", "uploaded_at", "loudness_lufs", "bpm",
 ]
 
 
@@ -3185,7 +3259,7 @@ async def list_user_music_metadata(
                 """
                 SELECT id, user_id, filename, original_filename, title, artist, album,
                        genre, year, duration_seconds, file_size_bytes, bitrate, sample_rate,
-                       mime_type, has_artwork, uploaded_at, loudness_lufs
+                       mime_type, has_artwork, uploaded_at, loudness_lufs, bpm
                 FROM ios_user_music_metadata
                 WHERE user_id = %s
                 ORDER BY uploaded_at DESC
@@ -3495,7 +3569,7 @@ async def get_playback_state(payload: dict = Depends(get_current_user)):
             await cur.execute(
                 """
                 SELECT song_id, title, artist, track_url, source,
-                       position_seconds, duration_seconds, updated_at
+                       position_seconds, duration_seconds, updated_at, is_playing
                 FROM ios_playback_state WHERE user_id = %s
                 """,
                 (user_id,),
@@ -3514,6 +3588,7 @@ async def get_playback_state(payload: dict = Depends(get_current_user)):
         "position_seconds": row[5],
         "duration_seconds": row[6],
         "updated_at": row[7].isoformat() if row[7] else None,
+        "is_playing": bool(row[8]),
     }
 
 
@@ -3529,16 +3604,17 @@ async def update_playback_state(
             await cur.execute(
                 """
                 INSERT INTO ios_playback_state
-                    (user_id, song_id, title, artist, track_url, source, position_seconds, duration_seconds)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    (user_id, song_id, title, artist, track_url, source, position_seconds, duration_seconds, is_playing)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     song_id = VALUES(song_id), title = VALUES(title), artist = VALUES(artist),
                     track_url = VALUES(track_url), source = VALUES(source),
-                    position_seconds = VALUES(position_seconds), duration_seconds = VALUES(duration_seconds)
+                    position_seconds = VALUES(position_seconds), duration_seconds = VALUES(duration_seconds),
+                    is_playing = VALUES(is_playing)
                 """,
                 (
                     user_id, body.song_id, body.title, body.artist, body.track_url,
-                    body.source, body.position_seconds, body.duration_seconds,
+                    body.source, body.position_seconds, body.duration_seconds, body.is_playing,
                 ),
             )
 
@@ -4008,6 +4084,1107 @@ async def ingest_logs(request: Request):
                     )
     except Exception:
         pass  # Logging must never fail the app
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers for the features below
+# ---------------------------------------------------------------------------
+
+
+async def _create_notification(
+    cur, user_id: str, type_: str, title: str, body: str = "", data: Optional[dict] = None
+) -> str:
+    """Inserts a row into ios_notifications. Caller owns the cursor/transaction."""
+    notif_id = str(uuid.uuid4())
+    await cur.execute(
+        "INSERT INTO ios_notifications (id, user_id, type, title, body, data_json) "
+        "VALUES (%s, %s, %s, %s, %s, %s)",
+        (notif_id, user_id, type_, title, body, json.dumps(data or {})),
+    )
+    return notif_id
+
+
+async def _playlist_role(cur, playlist_id: str, user_id: str) -> Optional[str]:
+    """Returns 'owner', 'editor', 'viewer', or None for *user_id*'s relationship
+    to *playlist_id*. Caller owns the cursor."""
+    await cur.execute(
+        "SELECT user_id FROM ios_user_playlists WHERE id = %s",
+        (playlist_id,),
+    )
+    row = await cur.fetchone()
+    if not row:
+        return None
+    if row[0] == user_id:
+        return "owner"
+    await cur.execute(
+        "SELECT role FROM ios_playlist_collaborators WHERE playlist_id = %s AND user_id = %s",
+        (playlist_id, user_id),
+    )
+    role_row = await cur.fetchone()
+    return role_row[0] if role_row else None
+
+
+async def _log_search(query: str, source: str) -> None:
+    """Fire-and-forget logging of a search query for trending/suggestions.
+    Never raises — search must work even if this fails."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "INSERT INTO ios_search_log (query, source) VALUES (%s, %s)",
+                    (query.strip()[:255], source),
+                )
+    except Exception as exc:
+        logger.debug("_log_search failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# BPM estimation via lightweight energy-autocorrelation (Feature: audio-bpm)
+# ---------------------------------------------------------------------------
+
+
+async def _estimate_bpm(path: pathlib.Path) -> Optional[float]:
+    """Best-effort tempo estimate (BPM) for an audio file.
+
+    Decodes the first 60s to mono 11025Hz PCM via ffmpeg, builds a coarse
+    energy-onset envelope (~50 frames/sec), and autocorrelates it to find the
+    dominant beat period in the 60-200 BPM range. This avoids depending on
+    extra analysis libraries (e.g. aubio/essentia) that aren't installed in
+    the bridge's runtime image. Returns None on any failure."""
+    cmd = [
+        "ffmpeg", "-hide_banner", "-nostats", "-v", "quiet",
+        "-i", str(path),
+        "-t", "60",
+        "-ac", "1", "-ar", "11025",
+        "-f", "s16le", "-",
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        raw, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+    except Exception as exc:
+        logger.warning("_estimate_bpm: ffmpeg decode failed for %s: %s", path.name, exc)
+        return None
+
+    # Need at least a few seconds of audio to get a meaningful estimate.
+    if len(raw) < 11025 * 2 * 4:
+        return None
+
+    samples = array.array("h")
+    samples.frombytes(raw[: len(raw) - (len(raw) % 2)])
+
+    sample_rate = 11025
+    window = sample_rate // 50  # ~20ms windows -> ~50 frames/sec
+    energies = [
+        sum(s * s for s in samples[i:i + window]) / window
+        for i in range(0, len(samples) - window, window)
+    ]
+    if len(energies) < 20:
+        return None
+
+    # Onset envelope: positive jumps in energy between consecutive windows.
+    onsets = [max(0.0, energies[i] - energies[i - 1]) for i in range(1, len(energies))]
+
+    frame_rate = sample_rate / window  # frames per second
+    min_bpm, max_bpm = 60, 200
+    min_lag = max(1, int(frame_rate * 60 / max_bpm))
+    max_lag = min(int(frame_rate * 60 / min_bpm), len(onsets) - 1)
+    if min_lag >= max_lag:
+        return None
+
+    best_lag, best_score = None, -1.0
+    for lag in range(min_lag, max_lag + 1):
+        score = sum(onsets[i] * onsets[i - lag] for i in range(lag, len(onsets)))
+        if score > best_score:
+            best_score, best_lag = score, lag
+
+    if not best_lag:
+        return None
+
+    return round(60.0 * frame_rate / best_lag, 1)
+
+
+# ---------------------------------------------------------------------------
+# Scrobbling: Last.fm / ListenBrainz (Feature: scrobbling)
+# ---------------------------------------------------------------------------
+
+LASTFM_API_KEY: str = os.getenv("LASTFM_API_KEY", "")
+LASTFM_API_SECRET: str = os.getenv("LASTFM_API_SECRET", "")
+
+
+def _lastfm_sign(params: dict) -> str:
+    sig_string = "".join(f"{k}{params[k]}" for k in sorted(params)) + LASTFM_API_SECRET
+    return hashlib.md5(sig_string.encode("utf-8")).hexdigest()
+
+
+async def _lastfm_scrobble(session_key: str, artist: str, title: str, timestamp: int) -> None:
+    if not LASTFM_API_KEY or not LASTFM_API_SECRET:
+        logger.debug("_lastfm_scrobble: LASTFM_API_KEY/SECRET not configured, skipping")
+        return
+    params = {
+        "method": "track.scrobble",
+        "api_key": LASTFM_API_KEY,
+        "sk": session_key,
+        "artist": artist,
+        "track": title,
+        "timestamp": str(timestamp),
+    }
+    params["api_sig"] = _lastfm_sign(params)
+    params["format"] = "json"
+
+    def _post() -> None:
+        try:
+            data = urllib.parse.urlencode(params).encode("utf-8")
+            req = urllib.request.Request(
+                "https://ws.audioscrobbler.com/2.0/",
+                data=data,
+                headers={"User-Agent": "Lumisound-iOS-Bridge/1.0"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10)
+        except Exception as exc:
+            logger.debug("_lastfm_scrobble request failed: %s", exc)
+
+    await asyncio.to_thread(_post)
+
+
+async def _listenbrainz_scrobble(token: str, artist: str, title: str, duration_seconds: int) -> None:
+    payload = {
+        "listen_type": "single",
+        "payload": [{
+            "listened_at": int(time.time()),
+            "track_metadata": {
+                "artist_name": artist or "Unknown Artist",
+                "track_name": title,
+                "additional_info": ({"duration": duration_seconds} if duration_seconds else {}),
+            },
+        }],
+    }
+
+    def _post() -> None:
+        try:
+            req = urllib.request.Request(
+                "https://api.listenbrainz.org/1/submit-listens",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Token {token}",
+                    "User-Agent": "Lumisound-iOS-Bridge/1.0",
+                },
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10)
+        except Exception as exc:
+            logger.debug("_listenbrainz_scrobble request failed: %s", exc)
+
+    await asyncio.to_thread(_post)
+
+
+async def _scrobble_track(user_id: str, title: str, artist: Optional[str], listen_seconds: int) -> None:
+    """Fire-and-forget scrobble to any linked services. Mirrors Last.fm's own
+    ~30-second minimum listen duration before counting a play."""
+    if listen_seconds < 30:
+        return
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT lastfm_session_key, listenbrainz_token, enabled "
+                    "FROM ios_scrobble_links WHERE user_id = %s",
+                    (user_id,),
+                )
+                row = await cur.fetchone()
+    except Exception as exc:
+        logger.debug("_scrobble_track: lookup failed: %s", exc)
+        return
+
+    if not row or not row[2]:
+        return
+    lastfm_key, listenbrainz_token, _enabled = row
+    artist_name = artist or "Unknown Artist"
+    if lastfm_key:
+        await _lastfm_scrobble(lastfm_key, artist_name, title, int(time.time()))
+    if listenbrainz_token:
+        await _listenbrainz_scrobble(listenbrainz_token, artist_name, title, listen_seconds)
+
+
+# ---------------------------------------------------------------------------
+# Discord "Now Playing" webhook (Feature: discord-webhook)
+#
+# True per-user Discord Rich Presence (the "Listening to ..." status shown on
+# a user's profile) is set via the Game SDK over a local IPC socket to the
+# Discord desktop client — there is no API for a third-party server to set it
+# on a user's behalf, and no such channel exists from an iOS app. The
+# realistic equivalent is a Discord webhook: each user can point this at a
+# channel in their own server, and the bridge posts a "Now Playing" embed
+# there whenever they log a played track.
+# ---------------------------------------------------------------------------
+
+_DISCORD_WEBHOOK_HOSTS = frozenset({"discord.com", "discordapp.com", "canary.discord.com", "ptb.discord.com"})
+
+
+def _validate_discord_webhook(url: str) -> None:
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or parsed.hostname not in _DISCORD_WEBHOOK_HOSTS:
+        raise HTTPException(
+            status_code=400,
+            detail="webhook_url must be an https://discord.com/api/webhooks/... URL",
+        )
+    if "/api/webhooks/" not in parsed.path:
+        raise HTTPException(status_code=400, detail="webhook_url does not look like a webhook URL")
+
+
+async def _post_discord_webhook(webhook_url: str, payload: dict) -> None:
+    def _post() -> None:
+        try:
+            req = urllib.request.Request(
+                webhook_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "Lumisound-iOS-Bridge/1.0"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10)
+        except Exception as exc:
+            logger.debug("_post_discord_webhook failed: %s", exc)
+
+    await asyncio.to_thread(_post)
+
+
+async def _notify_now_playing_discord(user_id: str, title: str, artist: Optional[str]) -> None:
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT webhook_url, enabled FROM ios_discord_webhooks WHERE user_id = %s",
+                    (user_id,),
+                )
+                row = await cur.fetchone()
+    except Exception as exc:
+        logger.debug("_notify_now_playing_discord: lookup failed: %s", exc)
+        return
+
+    if not row or not row[1]:
+        return
+
+    embed = {
+        "embeds": [{
+            "title": "Now Playing",
+            "description": f"**{title}**" + (f"\nby {artist}" if artist else ""),
+            "color": 0xEC4079,
+        }],
+    }
+    await _post_discord_webhook(row[0], embed)
+
+
+# ---------------------------------------------------------------------------
+# Smart Auto-Generated Playlists (Feature: discover-mix)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/discover-mix")
+async def get_discover_mix(
+    limit: int = Query(20, ge=1, le=50),
+    payload: dict = Depends(get_current_user),
+):
+    """Builds a 'Discover Mix' of suggested tracks via yt-dlp searches seeded
+    by the user's most-played artists, excluding tracks already in their
+    library or favorites."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT artist, COUNT(*) AS plays
+                FROM ios_play_history
+                WHERE user_id = %s AND artist IS NOT NULL AND artist != ''
+                GROUP BY artist
+                ORDER BY plays DESC
+                LIMIT 3
+                """,
+                (user_id,),
+            )
+            top_artists = [r[0] for r in await cur.fetchall()]
+
+            await cur.execute(
+                "SELECT song_id FROM ios_user_favorites WHERE user_id = %s "
+                "UNION SELECT song_id FROM ios_user_library WHERE user_id = %s",
+                (user_id, user_id),
+            )
+            known_ids = {r[0] for r in await cur.fetchall()}
+
+    if not top_artists:
+        return []
+
+    per_artist = max(1, limit // len(top_artists) + 1)
+    tracks: list[dict] = []
+    seen_ids: set[str] = set()
+    for artist in top_artists:
+        try:
+            entries = await _run_ytdlp(
+                f"ytsearch{per_artist}:{artist}",
+                "--dump-json", "--flat-playlist", "--no-playlist",
+                "--cache-dir", YTDLP_CACHE_DIR,
+                *_ytdlp_cookie_args(),
+                timeout=20.0,
+            )
+        except Exception as exc:
+            logger.warning("discover_mix: yt-dlp search failed for %r: %s", artist, exc)
+            continue
+        for entry in entries:
+            track = _parse_track(entry, "youtube")
+            if track["id"] in known_ids or track["id"] in seen_ids:
+                continue
+            seen_ids.add(track["id"])
+            tracks.append(track)
+            if len(tracks) >= limit:
+                break
+        if len(tracks) >= limit:
+            break
+
+    return tracks
+
+
+# ---------------------------------------------------------------------------
+# Artist/Channel Subscriptions (Feature: subscriptions)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/user/subscriptions", status_code=201)
+async def create_subscription(
+    body: SubscribeChannelRequest,
+    payload: dict = Depends(get_current_user),
+):
+    user_id = payload["sub"]
+    await _reject_ssrf_targets(body.channel_url)
+    sub_id = str(uuid.uuid4())
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_artist_subscriptions (id, user_id, channel_url, channel_name) "
+                "VALUES (%s, %s, %s, %s)",
+                (sub_id, user_id, body.channel_url, body.channel_name),
+            )
+    return {"id": sub_id, "channel_url": body.channel_url, "channel_name": body.channel_name}
+
+
+@app.get("/user/subscriptions")
+async def list_subscriptions(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, channel_url, channel_name, last_video_id, last_checked_at, created_at "
+                "FROM ios_artist_subscriptions WHERE user_id = %s ORDER BY created_at DESC",
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "channel_url": r[1],
+            "channel_name": r[2],
+            "last_video_id": r[3],
+            "last_checked_at": r[4].isoformat() if r[4] else None,
+            "created_at": r[5].isoformat() if r[5] else None,
+        }
+        for r in rows
+    ]
+
+
+@app.delete("/user/subscriptions/{sub_id}", status_code=204)
+async def delete_subscription(sub_id: str, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM ios_artist_subscriptions WHERE id = %s AND user_id = %s",
+                (sub_id, user_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Subscription not found")
+
+
+@app.post("/user/subscriptions/{sub_id}/check")
+async def check_subscription(sub_id: str, payload: dict = Depends(get_current_user)):
+    """Re-resolves a channel's latest uploads and reports any new videos since
+    the last check, creating an in-app notification for each."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT channel_url, channel_name, last_video_id FROM ios_artist_subscriptions "
+                "WHERE id = %s AND user_id = %s",
+                (sub_id, user_id),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Subscription not found")
+            channel_url, channel_name, last_video_id = row
+
+    try:
+        entries = await _run_ytdlp(
+            channel_url,
+            "--dump-json", "--flat-playlist", "--playlist-end", "5",
+            "--cache-dir", YTDLP_CACHE_DIR,
+            *_ytdlp_cookie_args(),
+            timeout=30.0,
+        )
+    except Exception as exc:
+        logger.warning("check_subscription: yt-dlp failed for %r: %s", channel_url, exc)
+        raise HTTPException(status_code=502, detail="Could not resolve channel")
+
+    tracks = [_parse_track(e, "youtube") for e in entries]
+
+    new_tracks: list[dict] = []
+    if last_video_id is not None:
+        for track in tracks:
+            if track["id"] == last_video_id:
+                break
+            new_tracks.append(track)
+    # On the very first check there's no baseline to diff against — record
+    # the current top video without flooding the user with their back catalog.
+
+    latest_id = tracks[0]["id"] if tracks else last_video_id
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_artist_subscriptions SET last_video_id = %s, last_checked_at = NOW() "
+                "WHERE id = %s",
+                (latest_id, sub_id),
+            )
+            for track in new_tracks:
+                await _create_notification(
+                    cur, user_id, "new_upload",
+                    f"New from {channel_name or 'a channel you follow'}",
+                    track["title"],
+                    {"track": track, "subscription_id": sub_id},
+                )
+
+    return {"new_tracks": new_tracks}
+
+
+# ---------------------------------------------------------------------------
+# Collaborative Playlists (Feature: playlist-collaborators)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/user/playlists/{playlist_id}/collaborators", status_code=201)
+async def add_collaborator(
+    playlist_id: str,
+    body: AddCollaboratorRequest,
+    payload: dict = Depends(get_current_user),
+):
+    if body.role not in ("editor", "viewer"):
+        raise HTTPException(status_code=400, detail="role must be 'editor' or 'viewer'")
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT user_id, name FROM ios_user_playlists WHERE id = %s",
+                (playlist_id,),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Playlist not found")
+            if row[0] != user_id:
+                raise HTTPException(status_code=403, detail="Only the owner can add collaborators")
+            playlist_name = row[1]
+
+            await cur.execute(
+                "SELECT id, username FROM ios_users WHERE username = %s",
+                (body.username,),
+            )
+            target = await cur.fetchone()
+            if not target:
+                raise HTTPException(status_code=404, detail="User not found")
+            target_id, target_username = target
+            if target_id == user_id:
+                raise HTTPException(status_code=400, detail="You already own this playlist")
+
+            await cur.execute(
+                "INSERT INTO ios_playlist_collaborators (playlist_id, user_id, role) "
+                "VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE role = VALUES(role)",
+                (playlist_id, target_id, body.role),
+            )
+            await _create_notification(
+                cur, target_id, "playlist_collaborator",
+                "Added to a playlist",
+                f"You can now {'edit' if body.role == 'editor' else 'view'} \"{playlist_name}\"",
+                {"playlist_id": playlist_id, "role": body.role},
+            )
+
+    return {"playlist_id": playlist_id, "username": target_username, "role": body.role}
+
+
+@app.get("/user/playlists/{playlist_id}/collaborators")
+async def list_collaborators(playlist_id: str, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            role = await _playlist_role(cur, playlist_id, user_id)
+            if role is None:
+                raise HTTPException(status_code=404, detail="Playlist not found")
+            await cur.execute(
+                """
+                SELECT u.id, u.username, c.role, c.added_at
+                FROM ios_playlist_collaborators c
+                JOIN ios_users u ON u.id = c.user_id
+                WHERE c.playlist_id = %s
+                ORDER BY c.added_at ASC
+                """,
+                (playlist_id,),
+            )
+            rows = await cur.fetchall()
+
+    return [
+        {"user_id": r[0], "username": r[1], "role": r[2], "added_at": r[3].isoformat() if r[3] else None}
+        for r in rows
+    ]
+
+
+@app.delete("/user/playlists/{playlist_id}/collaborators/{collab_user_id}", status_code=204)
+async def remove_collaborator(
+    playlist_id: str,
+    collab_user_id: str,
+    payload: dict = Depends(get_current_user),
+):
+    """Removes a collaborator. The owner can remove anyone; a collaborator can
+    remove themselves."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT user_id FROM ios_user_playlists WHERE id = %s",
+                (playlist_id,),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Playlist not found")
+            if row[0] != user_id and collab_user_id != user_id:
+                raise HTTPException(status_code=403, detail="Not allowed")
+
+            await cur.execute(
+                "DELETE FROM ios_playlist_collaborators WHERE playlist_id = %s AND user_id = %s",
+                (playlist_id, collab_user_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Collaborator not found")
+
+
+@app.get("/user/playlists/shared-with-me")
+async def shared_with_me(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT p.id, p.name, p.description, c.role, u.username, p.updated_at
+                FROM ios_playlist_collaborators c
+                JOIN ios_user_playlists p ON p.id = c.playlist_id
+                JOIN ios_users u ON u.id = p.user_id
+                WHERE c.user_id = %s
+                ORDER BY p.updated_at DESC
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    return [
+        {
+            "id": r[0], "name": r[1], "description": r[2], "role": r[3],
+            "owner_username": r[4], "updated_at": r[5].isoformat() if r[5] else None,
+        }
+        for r in rows
+    ]
+
+
+@app.post("/user/playlists/{playlist_id}/tracks", status_code=201)
+async def add_playlist_track(
+    playlist_id: str,
+    body: SyncTrack,
+    payload: dict = Depends(get_current_user),
+):
+    """Adds a track to a playlist. Allowed for the owner or any collaborator
+    with the 'editor' role."""
+    user_id = payload["sub"]
+    track_id = str(uuid.uuid4())
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            role = await _playlist_role(cur, playlist_id, user_id)
+            if role is None:
+                raise HTTPException(status_code=404, detail="Playlist not found")
+            if role == "viewer":
+                raise HTTPException(status_code=403, detail="You only have view access to this playlist")
+
+            await cur.execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM ios_playlist_tracks WHERE playlist_id = %s",
+                (playlist_id,),
+            )
+            next_position = (await cur.fetchone())[0]
+
+            await cur.execute(
+                """
+                INSERT INTO ios_playlist_tracks
+                    (id, playlist_id, track_url, local_song_id, title, artist, album, duration_seconds, position)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (track_id, playlist_id, body.track_url, body.local_song_id, body.title,
+                 body.artist, body.album, body.duration_seconds or 0, next_position),
+            )
+            await cur.execute(
+                "UPDATE ios_user_playlists SET updated_at = NOW() WHERE id = %s",
+                (playlist_id,),
+            )
+
+    return {"id": track_id, "position": next_position}
+
+
+# ---------------------------------------------------------------------------
+# Persistent Play Queue (Feature: user-queue)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/queue")
+async def get_queue(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, local_song_id, track_url, title, artist, album, duration_seconds, position
+                FROM ios_user_queue WHERE user_id = %s ORDER BY position ASC
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    return [
+        {
+            "id": r[0], "local_song_id": r[1], "track_url": r[2], "title": r[3],
+            "artist": r[4], "album": r[5], "duration_seconds": r[6], "position": r[7],
+        }
+        for r in rows
+    ]
+
+
+@app.put("/user/queue")
+async def replace_queue(body: ReplaceQueueRequest, payload: dict = Depends(get_current_user)):
+    """Replaces the user's entire 'up next' queue, in order, so it survives
+    app restarts and syncs across devices."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM ios_user_queue WHERE user_id = %s", (user_id,))
+            if body.tracks:
+                rows = [
+                    (str(uuid.uuid4()), user_id, idx, t.local_song_id, t.track_url, t.title,
+                     t.artist, t.album, t.duration_seconds or 0)
+                    for idx, t in enumerate(body.tracks)
+                ]
+                await cur.executemany(
+                    """
+                    INSERT INTO ios_user_queue
+                        (id, user_id, position, local_song_id, track_url, title, artist, album, duration_seconds)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    rows,
+                )
+
+    return {"status": "ok", "count": len(body.tracks)}
+
+
+@app.delete("/user/queue", status_code=204)
+async def clear_queue(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM ios_user_queue WHERE user_id = %s", (user_id,))
+
+
+# ---------------------------------------------------------------------------
+# Scrobbling Account Links (Feature: scrobbling)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/scrobble")
+async def get_scrobble_links(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT lastfm_username, listenbrainz_token, enabled FROM ios_scrobble_links WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        return {"lastfm_linked": False, "lastfm_username": None, "listenbrainz_linked": False, "enabled": True}
+
+    return {
+        "lastfm_linked": bool(row[0]),
+        "lastfm_username": row[0],
+        "listenbrainz_linked": bool(row[1]),
+        "enabled": bool(row[2]),
+    }
+
+
+@app.put("/user/scrobble")
+async def update_scrobble_links(body: ScrobbleLinkRequest, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    enabled = body.enabled if body.enabled is not None else True
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_scrobble_links
+                    (user_id, lastfm_session_key, lastfm_username, listenbrainz_token, enabled)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    lastfm_session_key = IF(VALUES(lastfm_session_key) IS NULL, lastfm_session_key, VALUES(lastfm_session_key)),
+                    lastfm_username = IF(VALUES(lastfm_username) IS NULL, lastfm_username, VALUES(lastfm_username)),
+                    listenbrainz_token = IF(VALUES(listenbrainz_token) IS NULL, listenbrainz_token, VALUES(listenbrainz_token)),
+                    enabled = VALUES(enabled)
+                """,
+                (user_id, body.lastfm_session_key, body.lastfm_username, body.listenbrainz_token, enabled),
+            )
+
+    return {"status": "ok"}
+
+
+@app.delete("/user/scrobble", status_code=204)
+async def delete_scrobble_links(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM ios_scrobble_links WHERE user_id = %s", (user_id,))
+
+
+# ---------------------------------------------------------------------------
+# Listening Achievements & Streaks (Feature: achievements)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/achievements")
+async def get_achievements(payload: dict = Depends(get_current_user)):
+    """Derives streaks and badge unlocks from ios_play_history. Computed on
+    the fly — no separate achievements table to keep in sync."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COUNT(*), COALESCE(SUM(listen_seconds), 0) FROM ios_play_history WHERE user_id = %s",
+                (user_id,),
+            )
+            total_plays, total_seconds = await cur.fetchone()
+
+            await cur.execute(
+                "SELECT DISTINCT DATE(played_at) AS d FROM ios_play_history WHERE user_id = %s ORDER BY d DESC",
+                (user_id,),
+            )
+            play_dates = [r[0] for r in await cur.fetchall()]
+
+            await cur.execute(
+                "SELECT HOUR(played_at), COUNT(*) FROM ios_play_history WHERE user_id = %s GROUP BY HOUR(played_at)",
+                (user_id,),
+            )
+            hour_counts = dict(await cur.fetchall())
+
+    # Streaks: consecutive calendar days with at least one play.
+    current_streak = 0
+    longest_streak = 0
+    if play_dates:
+        run = 1
+        longest_streak = 1
+        for i in range(1, len(play_dates)):
+            if (play_dates[i - 1] - play_dates[i]).days == 1:
+                run += 1
+            else:
+                longest_streak = max(longest_streak, run)
+                run = 1
+        longest_streak = max(longest_streak, run)
+
+        today = datetime.now(timezone.utc).date()
+        if play_dates[0] in (today, today - timedelta(days=1)):
+            current_streak = 1
+            for i in range(1, len(play_dates)):
+                if (play_dates[i - 1] - play_dates[i]).days == 1:
+                    current_streak += 1
+                else:
+                    break
+
+    total_hours = total_seconds / 3600
+    badges = []
+    badges += [f"plays_{n}" for n in (10, 50, 100, 500, 1000) if total_plays >= n]
+    badges += [f"hours_{n}" for n in (1, 10, 24, 100) if total_hours >= n]
+    badges += [f"streak_{n}" for n in (3, 7, 30, 100) if longest_streak >= n]
+    if any(hour_counts.get(h, 0) for h in range(0, 5)):
+        badges.append("night_owl")
+    if any(hour_counts.get(h, 0) for h in range(5, 9)):
+        badges.append("early_bird")
+
+    return {
+        "total_plays": total_plays,
+        "total_listen_seconds": int(total_seconds),
+        "current_streak_days": current_streak,
+        "longest_streak_days": longest_streak,
+        "badges": badges,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Search Autocomplete & Trending (Feature: search-trending)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/search/trending")
+async def search_trending(
+    request: Request,
+    limit: int = Query(10, ge=1, le=25),
+    days: int = Query(7, ge=1, le=30),
+):
+    """Most popular search queries across all users in the last *days* days."""
+    await check_auth(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT query, COUNT(*) AS hits
+                FROM ios_search_log
+                WHERE searched_at >= NOW() - INTERVAL %s DAY
+                GROUP BY query
+                ORDER BY hits DESC, MAX(searched_at) DESC
+                LIMIT %s
+                """,
+                (days, limit),
+            )
+            rows = await cur.fetchall()
+
+    return [{"query": r[0], "count": r[1]} for r in rows]
+
+
+@app.get("/api/search/suggestions")
+async def search_suggestions(
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=200),
+    limit: int = Query(8, ge=1, le=20),
+):
+    """Autocomplete suggestions: past queries starting with *q*, most popular first."""
+    await check_auth(request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT query, COUNT(*) AS hits
+                FROM ios_search_log
+                WHERE query LIKE %s
+                GROUP BY query
+                ORDER BY hits DESC
+                LIMIT %s
+                """,
+                (f"{q}%", limit),
+            )
+            rows = await cur.fetchall()
+
+    return [{"query": r[0], "count": r[1]} for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Playlist Folders (Feature: playlist-folders)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/playlists/folders")
+async def list_playlist_folders(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT COALESCE(folder, ''), COUNT(*)
+                FROM ios_user_playlists
+                WHERE user_id = %s
+                GROUP BY folder
+                ORDER BY folder ASC
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    return [{"folder": r[0] or None, "count": r[1]} for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Push Notifications (Feature: push-notifications)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/user/push-token", status_code=201)
+async def register_push_token(body: PushTokenRequest, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_push_tokens (user_id, device_token, platform) VALUES (%s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE platform = VALUES(platform)",
+                (user_id, body.device_token, body.platform),
+            )
+    return {"status": "ok"}
+
+
+@app.delete("/user/push-token/{device_token}", status_code=204)
+async def unregister_push_token(device_token: str, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM ios_push_tokens WHERE user_id = %s AND device_token = %s",
+                (user_id, device_token),
+            )
+
+
+@app.get("/user/notifications")
+async def get_notifications(
+    limit: int = Query(50, ge=1, le=200),
+    unread_only: bool = Query(False),
+    payload: dict = Depends(get_current_user),
+):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            query = (
+                "SELECT id, type, title, body, data_json, created_at, read_at "
+                "FROM ios_notifications WHERE user_id = %s"
+            )
+            params: list = [user_id]
+            if unread_only:
+                query += " AND read_at IS NULL"
+            query += " ORDER BY created_at DESC LIMIT %s"
+            params.append(limit)
+            await cur.execute(query, params)
+            rows = await cur.fetchall()
+
+    return [
+        {
+            "id": r[0], "type": r[1], "title": r[2], "body": r[3],
+            "data": json.loads(r[4]) if r[4] else {},
+            "created_at": r[5].isoformat() if r[5] else None,
+            "read_at": r[6].isoformat() if r[6] else None,
+        }
+        for r in rows
+    ]
+
+
+@app.post("/user/notifications/{notification_id}/read", status_code=204)
+async def mark_notification_read(notification_id: str, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_notifications SET read_at = NOW() WHERE id = %s AND user_id = %s AND read_at IS NULL",
+                (notification_id, user_id),
+            )
+            if cur.rowcount == 0:
+                await cur.execute(
+                    "SELECT 1 FROM ios_notifications WHERE id = %s AND user_id = %s",
+                    (notification_id, user_id),
+                )
+                if not await cur.fetchone():
+                    raise HTTPException(status_code=404, detail="Notification not found")
+
+
+@app.post("/user/notifications/read-all", status_code=204)
+async def mark_all_notifications_read(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_notifications SET read_at = NOW() WHERE user_id = %s AND read_at IS NULL",
+                (user_id,),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Discord "Now Playing" Webhook Settings (Feature: discord-webhook)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/discord-webhook")
+async def get_discord_webhook(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT webhook_url, enabled FROM ios_discord_webhooks WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        return {"configured": False, "enabled": False, "webhook_url": None}
+
+    url = row[0]
+    masked = url[:48] + "..." if len(url) > 48 else url
+    return {"configured": True, "enabled": bool(row[1]), "webhook_url": masked}
+
+
+@app.put("/user/discord-webhook")
+async def set_discord_webhook(body: DiscordWebhookRequest, payload: dict = Depends(get_current_user)):
+    _validate_discord_webhook(body.webhook_url)
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_discord_webhooks (user_id, webhook_url, enabled) VALUES (%s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE webhook_url = VALUES(webhook_url), enabled = VALUES(enabled)",
+                (user_id, body.webhook_url, body.enabled),
+            )
+    return {"status": "ok"}
+
+
+@app.delete("/user/discord-webhook", status_code=204)
+async def delete_discord_webhook(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM ios_discord_webhooks WHERE user_id = %s", (user_id,))
+
 
 # ---------------------------------------------------------------------------
 # Entry point (for local dev without Docker)
