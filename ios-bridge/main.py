@@ -4945,6 +4945,82 @@ async def delete_scrobble_links(payload: dict = Depends(get_current_user)):
             await cur.execute("DELETE FROM ios_scrobble_links WHERE user_id = %s", (user_id,))
 
 
+def _lastfm_api_get(params: dict) -> dict:
+    """Synchronous helper for signed Last.fm API GET requests."""
+    signed = dict(params)
+    signed["api_sig"] = _lastfm_sign(signed)
+    signed["format"] = "json"
+    url = "https://ws.audioscrobbler.com/2.0/?" + urllib.parse.urlencode(signed)
+    req = urllib.request.Request(url, headers={"User-Agent": "Lumisound-iOS-Bridge/1.0"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+@app.post("/user/scrobble/lastfm/request-token")
+async def lastfm_request_token(payload: dict = Depends(get_current_user)):
+    """Step 1 of the Last.fm desktop auth flow: fetch an unauthorized token
+    and the URL the user must open to approve it."""
+    if not LASTFM_API_KEY or not LASTFM_API_SECRET:
+        raise HTTPException(status_code=503, detail="Last.fm integration is not configured")
+
+    try:
+        data = await asyncio.to_thread(
+            _lastfm_api_get, {"method": "auth.gettoken", "api_key": LASTFM_API_KEY}
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Last.fm request failed: {exc}")
+
+    token = data.get("token")
+    if not token:
+        raise HTTPException(status_code=502, detail="Last.fm did not return a token")
+
+    auth_url = f"https://www.last.fm/api/auth/?api_key={LASTFM_API_KEY}&token={token}"
+    return {"token": token, "auth_url": auth_url}
+
+
+class LastfmLinkRequest(BaseModel):
+    token: str
+
+
+@app.post("/user/scrobble/lastfm/link")
+async def lastfm_link_session(body: LastfmLinkRequest, payload: dict = Depends(get_current_user)):
+    """Step 2: exchange an approved token for a session key and store it."""
+    if not LASTFM_API_KEY or not LASTFM_API_SECRET:
+        raise HTTPException(status_code=503, detail="Last.fm integration is not configured")
+
+    try:
+        data = await asyncio.to_thread(
+            _lastfm_api_get,
+            {"method": "auth.getsession", "api_key": LASTFM_API_KEY, "token": body.token},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Last.fm request failed: {exc}")
+
+    session = data.get("session")
+    if not session or not session.get("key"):
+        raise HTTPException(status_code=400, detail="Last.fm did not approve this token")
+
+    session_key = session["key"]
+    username = session.get("name")
+
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_scrobble_links (user_id, lastfm_session_key, lastfm_username, enabled)
+                VALUES (%s, %s, %s, TRUE)
+                ON DUPLICATE KEY UPDATE
+                    lastfm_session_key = VALUES(lastfm_session_key),
+                    lastfm_username = VALUES(lastfm_username)
+                """,
+                (user_id, session_key, username),
+            )
+
+    return {"lastfm_username": username}
+
+
 # ---------------------------------------------------------------------------
 # Listening Achievements & Streaks (Feature: achievements)
 # ---------------------------------------------------------------------------

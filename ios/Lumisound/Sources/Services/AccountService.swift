@@ -267,6 +267,32 @@ struct SharedPlaylistTrack: Decodable {
     }
 }
 
+/// Response from GET /user/scrobble.
+struct ScrobbleLinks: Decodable {
+    let lastfmLinked: Bool
+    let lastfmUsername: String?
+    let listenbrainzLinked: Bool
+    let enabled: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case lastfmLinked       = "lastfm_linked"
+        case lastfmUsername     = "lastfm_username"
+        case listenbrainzLinked = "listenbrainz_linked"
+        case enabled
+    }
+}
+
+/// Response from POST /user/scrobble/lastfm/request-token.
+struct LastfmRequestToken: Decodable {
+    let token: String
+    let authUrl: String
+
+    enum CodingKeys: String, CodingKey {
+        case token
+        case authUrl = "auth_url"
+    }
+}
+
 /// Full playlist (with tracks) from GET /user/playlists/{id}.
 struct SharedPlaylistDetail: Decodable {
     let id: String
@@ -893,6 +919,102 @@ final class AccountService: ObservableObject {
         do {
             let data = try await makeRequest("/user/playlists/\(playlistId)")
             return try JSONDecoder().decode(SharedPlaylistDetail.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    // MARK: - Scrobbling
+
+    /// Fetches whether the user has Last.fm/ListenBrainz scrobbling linked.
+    func fetchScrobbleLinks() async -> ScrobbleLinks? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/user/scrobble")
+            return try JSONDecoder().decode(ScrobbleLinks.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Links (or relinks) a ListenBrainz user token.
+    func linkListenBrainz(token: String) async -> Bool {
+        guard isLoggedIn else { return false }
+        struct Body: Encodable { let listenbrainz_token: String }
+        do {
+            _ = try await makeRequest("/user/scrobble", method: "PUT", body: Body(listenbrainz_token: token))
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Enables or disables scrobbling without changing linked accounts.
+    func setScrobblingEnabled(_ enabled: Bool) async -> Bool {
+        guard isLoggedIn else { return false }
+        struct Body: Encodable { let enabled: Bool }
+        do {
+            _ = try await makeRequest("/user/scrobble", method: "PUT", body: Body(enabled: enabled))
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Unlinks all scrobbling accounts.
+    func unlinkScrobbling() async -> Bool {
+        guard isLoggedIn else { return false }
+        do {
+            _ = try await makeRequest("/user/scrobble", method: "DELETE")
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Step 1 of the Last.fm desktop auth flow — fetch a token and the URL to open in Safari.
+    func lastfmRequestToken() async -> LastfmRequestToken? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/user/scrobble/lastfm/request-token", method: "POST")
+            return try JSONDecoder().decode(LastfmRequestToken.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Step 2 — exchange an approved token for a session key. Returns the linked username on success.
+    func lastfmLinkSession(token: String) async -> String? {
+        guard isLoggedIn else { return nil }
+        struct Body: Encodable { let token: String }
+        struct Response: Decodable { let lastfm_username: String? }
+        do {
+            let data = try await makeRequest("/user/scrobble/lastfm/link", method: "POST", body: Body(token: token))
+            return try JSONDecoder().decode(Response.self, from: data).lastfm_username
         } catch let err as AccountError {
             errorMessage = err.message
             return nil

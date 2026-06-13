@@ -242,6 +242,11 @@ struct AccountView: View {
                         Label("Achievements", systemImage: "trophy")
                             .foregroundStyle(AppTheme.textPrimary)
                     }
+
+                    NavigationLink(destination: ScrobblingView()) {
+                        Label("Scrobbling", systemImage: "waveform.path.ecg")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
                 } header: {
                     sectionHeader("Library")
                 }
