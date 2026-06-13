@@ -280,13 +280,12 @@ def build_activity(state: dict, large_image: Optional[str]) -> Optional[dict]:
     if state.get("artist"):
         activity["state"] = f"by {state['artist']}"[:128]
 
+    # Only set "start" — if "end" is also set, Discord renders a countdown to
+    # "end" (counting DOWN from the track's remaining time) instead of an
+    # elapsed-time counter counting UP from 0:00.
     position = state.get("position_seconds") or 0
-    duration = state.get("duration_seconds") or 0
     now = time.time()
-    timestamps = {"start": int(now - position)}
-    if duration > 0:
-        timestamps["end"] = int(now - position + duration)
-    activity["timestamps"] = timestamps
+    activity["timestamps"] = {"start": int(now - position)}
 
     if large_image:
         activity["assets"] = {"large_image": large_image, "large_text": "Lumisound"}
