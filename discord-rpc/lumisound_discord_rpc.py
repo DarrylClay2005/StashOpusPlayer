@@ -299,13 +299,39 @@ def main() -> None:
     last_activity_signature: Optional[tuple] = None
 
     while True:
+        # --- Discord IPC connection -----------------------------------
+        # Handled separately from the bridge request below: urllib's
+        # URLError/HTTPError (e.g. a 502 or read timeout from the bridge)
+        # are themselves OSError subclasses, so they must not be confused
+        # with a dead Discord IPC socket — doing so used to force a
+        # spurious IPC reconnect (and a "Cleared"/"Now playing" flicker)
+        # every time the bridge had an unrelated network hiccup.
         try:
             if ipc.sock is None:
                 ipc.connect()
+        except (DiscordIPCError, OSError) as exc:
+            log(f"Discord IPC error: {exc}")
+            if ipc.sock:
+                ipc.close()
+            last_activity_signature = None
+            time.sleep(poll_interval)
+            continue
 
+        # --- Lumisound bridge request -----------------------------------
+        try:
             state = bridge.get_playback_state()
-            activity = build_activity(state, large_image)
+        except urllib.error.URLError as exc:
+            log(f"Bridge request failed: {exc}")
+            time.sleep(poll_interval)
+            continue
+        except Exception as exc:  # noqa: BLE001 — keep the daemon alive
+            log(f"Unexpected error: {exc}")
+            time.sleep(poll_interval)
+            continue
 
+        # --- Update Rich Presence ---------------------------------------
+        activity = build_activity(state, large_image)
+        try:
             # Discord's rate limit (5 SET_ACTIVITY calls per 20s) is well
             # above our poll interval, so we re-send every poll (timestamps
             # need refreshing anyway) but only log when the track changes.
@@ -317,21 +343,14 @@ def main() -> None:
                 else:
                     log("Cleared Rich Presence (paused/idle)")
                 last_activity_signature = signature
-
         except (DiscordIPCError, OSError) as exc:
-            # OSError (e.g. BrokenPipeError/ConnectionResetError) means the
-            # IPC socket died under us — usually because Discord was
-            # restarted and replaced its socket file. Drop our handle so the
-            # next loop iteration reconnects; otherwise we'd keep retrying
-            # against the same dead fd forever.
+            # The IPC socket died under us — usually because Discord was
+            # restarted and replaced its socket file. Drop our handle so
+            # the next loop iteration reconnects.
             log(f"Discord IPC error: {exc}")
             if ipc.sock:
                 ipc.close()
             last_activity_signature = None
-        except urllib.error.URLError as exc:
-            log(f"Bridge request failed: {exc}")
-        except Exception as exc:  # noqa: BLE001 — keep the daemon alive
-            log(f"Unexpected error: {exc}")
 
         time.sleep(poll_interval)
 
