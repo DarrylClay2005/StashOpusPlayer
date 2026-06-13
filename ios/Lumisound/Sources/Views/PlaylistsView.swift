@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PlaylistsView: View {
     @EnvironmentObject private var library: LibraryManager
+    @EnvironmentObject private var account: AccountService
 
     @State private var showingCreateSheet = false
     @State private var newPlaylistName = ""
@@ -13,6 +14,18 @@ struct PlaylistsView: View {
 
     var body: some View {
         List {
+            if account.isLoggedIn {
+                Section {
+                    NavigationLink {
+                        SharedPlaylistsView()
+                    } label: {
+                        Label("Shared with Me", systemImage: "person.2.fill")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                }
+                .listRowBackground(AppTheme.surface.opacity(0.5))
+            }
+
             if library.playlists.isEmpty {
                 EmptyStateView(
                     icon: "music.note.list",

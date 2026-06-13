@@ -1699,6 +1699,60 @@ async def delete_playlist(
                 raise HTTPException(status_code=404, detail="Playlist not found")
 
 
+@app.get("/user/playlists/{playlist_id}")
+async def get_playlist(playlist_id: str, payload: dict = Depends(get_current_user)):
+    """Returns one playlist (with tracks), for the owner or any collaborator
+    (editor/viewer) — used to open playlists shared via "Shared with Me"."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            role = await _playlist_role(cur, playlist_id, user_id)
+            if role is None:
+                raise HTTPException(status_code=404, detail="Playlist not found")
+
+            await cur.execute(
+                """
+                SELECT p.id, p.name, p.description, p.created_at, p.updated_at,
+                       p.folder, p.tags_json,
+                       t.id, t.track_url, t.local_song_id, t.title, t.artist, t.album,
+                       t.duration_seconds, t.position
+                FROM ios_user_playlists p
+                LEFT JOIN ios_playlist_tracks t ON t.playlist_id = p.id
+                WHERE p.id = %s
+                ORDER BY t.position ASC
+                """,
+                (playlist_id,),
+            )
+            rows = await cur.fetchall()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    first = rows[0]
+    pl_id, name, description, created_at, updated_at, folder, tags_json = first[:7]
+    tracks = []
+    for row in rows:
+        t_id, t_url, t_local, t_title, t_artist, t_album, t_dur, t_pos = row[7:]
+        if t_id is not None:
+            tracks.append({
+                "id": t_id, "track_url": t_url, "local_song_id": t_local, "title": t_title,
+                "artist": t_artist, "album": t_album, "duration_seconds": t_dur, "position": t_pos,
+            })
+
+    return {
+        "id": pl_id,
+        "name": name,
+        "description": description,
+        "created_at": created_at.isoformat() if created_at else None,
+        "updated_at": updated_at.isoformat() if updated_at else None,
+        "folder": folder,
+        "tags": json.loads(tags_json) if tags_json else [],
+        "role": role,
+        "tracks": tracks,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Favorites Endpoints
 # ---------------------------------------------------------------------------

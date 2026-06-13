@@ -262,6 +262,15 @@ private struct ShareModeView: View {
                     }
                 }
 
+                // Collaborators — separate from the link/code above. Adding someone
+                // by username gives them edit/view access to this playlist directly
+                // in their own account (GET /user/playlists/shared-with-me), rather
+                // than via a one-off link.
+                if account.isLoggedIn {
+                    CollaboratorsSection(playlistId: playlist.id.uuidString, account: account)
+                        .padding(.horizontal)
+                }
+
                 Spacer(minLength: 40)
             }
             .padding(.vertical, 8)
@@ -269,6 +278,121 @@ private struct ShareModeView: View {
         .scrollContentBackground(.hidden)
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle("Share Playlist")
+    }
+}
+
+// MARK: - Collaborators Section
+
+private struct CollaboratorsSection: View {
+    let playlistId: String
+    let account: AccountService
+
+    @State private var collaborators: [PlaylistCollaborator] = []
+    @State private var username = ""
+    @State private var role = "editor"
+    @State private var isLoading = false
+    @State private var localError: String?
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Collaborators")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 8) {
+                TextField("Username", text: $username)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .padding(10)
+                    .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Picker("Role", selection: $role) {
+                    Text("Editor").tag("editor")
+                    Text("Viewer").tag("viewer")
+                }
+                .pickerStyle(.menu)
+                .tint(AppTheme.dynamicAccent)
+
+                Button {
+                    addCollaborator()
+                } label: {
+                    if isLoading {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(AppTheme.dynamicAccent)
+                    }
+                }
+                .disabled(isLoading || username.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            if let localError {
+                Text(localError)
+                    .font(.footnote)
+                    .foregroundStyle(AppTheme.error)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if !collaborators.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(collaborators) { collab in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(collab.username)
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Text(collab.role.capitalized)
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                            Spacer()
+                            Button {
+                                removeCollaborator(userId: collab.userId)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(AppTheme.error)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                        Divider().background(AppTheme.background)
+                    }
+                }
+                .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+        .task { await loadCollaborators() }
+    }
+
+    private func loadCollaborators() async {
+        collaborators = await account.fetchCollaborators(playlistId: playlistId)
+    }
+
+    private func addCollaborator() {
+        let trimmed = username.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        isLoading = true
+        localError = nil
+        Task {
+            let ok = await account.addCollaborator(playlistId: playlistId, username: trimmed, role: role)
+            if ok {
+                username = ""
+                await loadCollaborators()
+            } else {
+                localError = account.errorMessage ?? "Failed to add collaborator."
+            }
+            isLoading = false
+        }
+    }
+
+    private func removeCollaborator(userId: String) {
+        Task {
+            if await account.removeCollaborator(playlistId: playlistId, userId: userId) {
+                await loadCollaborators()
+            }
+        }
     }
 }
 

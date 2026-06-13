@@ -217,6 +217,65 @@ struct AccountStats: Codable {
     }
 }
 
+/// One collaborator entry from GET /user/playlists/{id}/collaborators.
+struct PlaylistCollaborator: Decodable, Identifiable {
+    let userId: String
+    let username: String
+    let role: String
+    let addedAt: String?
+
+    var id: String { userId }
+
+    enum CodingKeys: String, CodingKey {
+        case userId   = "user_id"
+        case username
+        case role
+        case addedAt  = "added_at"
+    }
+}
+
+/// One entry from GET /user/playlists/shared-with-me.
+struct SharedPlaylist: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let description: String?
+    let role: String
+    let ownerUsername: String
+    let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, role
+        case ownerUsername = "owner_username"
+        case updatedAt     = "updated_at"
+    }
+}
+
+/// One track within GET /user/playlists/{id}.
+struct SharedPlaylistTrack: Decodable {
+    let trackUrl: String?
+    let localSongId: String?
+    let title: String
+    let artist: String?
+    let album: String?
+    let durationSeconds: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case trackUrl        = "track_url"
+        case localSongId     = "local_song_id"
+        case title, artist, album
+        case durationSeconds = "duration_seconds"
+    }
+}
+
+/// Full playlist (with tracks) from GET /user/playlists/{id}.
+struct SharedPlaylistDetail: Decodable {
+    let id: String
+    let name: String
+    let description: String?
+    let role: String
+    let tracks: [SharedPlaylistTrack]
+}
+
 /// One track from GET /user/queue.
 struct QueueItem: Decodable {
     let localSongId: String?
@@ -761,6 +820,85 @@ final class AccountService: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             return []
+        }
+    }
+
+    // MARK: - Collaborative playlists
+
+    /// Adds (or updates) a collaborator on a playlist this user owns.
+    /// `role` must be "editor" or "viewer". Returns true on success.
+    func addCollaborator(playlistId: String, username: String, role: String) async -> Bool {
+        guard isLoggedIn else { return false }
+        struct Body: Encodable { let username: String; let role: String }
+        do {
+            _ = try await makeRequest("/user/playlists/\(playlistId)/collaborators", method: "POST", body: Body(username: username, role: role))
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Lists collaborators on a playlist (owner or collaborator can view).
+    func fetchCollaborators(playlistId: String) async -> [PlaylistCollaborator] {
+        guard isLoggedIn else { return [] }
+        do {
+            let data = try await makeRequest("/user/playlists/\(playlistId)/collaborators")
+            return try JSONDecoder().decode([PlaylistCollaborator].self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return []
+        } catch {
+            errorMessage = error.localizedDescription
+            return []
+        }
+    }
+
+    /// Removes a collaborator. The owner can remove anyone; a collaborator can remove themselves.
+    func removeCollaborator(playlistId: String, userId: String) async -> Bool {
+        guard isLoggedIn else { return false }
+        do {
+            _ = try await makeRequest("/user/playlists/\(playlistId)/collaborators/\(userId)", method: "DELETE")
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Playlists owned by other users that this user can view/edit (GET /user/playlists/shared-with-me).
+    func fetchSharedPlaylists() async -> [SharedPlaylist] {
+        guard isLoggedIn else { return [] }
+        do {
+            let data = try await makeRequest("/user/playlists/shared-with-me")
+            return try JSONDecoder().decode([SharedPlaylist].self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return []
+        } catch {
+            errorMessage = error.localizedDescription
+            return []
+        }
+    }
+
+    /// Fetches a single playlist (with tracks) — used to open a shared playlist.
+    func fetchPlaylistDetail(playlistId: String) async -> SharedPlaylistDetail? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/user/playlists/\(playlistId)")
+            return try JSONDecoder().decode(SharedPlaylistDetail.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
         }
     }
 
