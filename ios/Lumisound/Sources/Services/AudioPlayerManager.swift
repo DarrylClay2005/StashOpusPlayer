@@ -227,6 +227,14 @@ final class AudioPlayerManager: ObservableObject {
     // stale value from the AVAudioPlayerNode before it has actually started.
     private var isSchedulingAsync = false
 
+    // Circuit breaker for AVPlayer load/playback failures. Without this, a track
+    // with a stale/expired stream URL fails near-instantly, skipToNext() is
+    // called, repeatMode == .one replays the SAME track (or .all/.off cycles
+    // through an entire queue of equally-stale URLs), and the failure repeats
+    // in a tight loop — observed as ~3,000 "AVPlayer failed to load" errors/minute.
+    // If failures happen too fast for too long, stop playback instead of retrying.
+    private var recentLoadFailureTimestamps: [Date] = []
+
     // AVPlayer fallback for containers (e.g. .opus) that AVAssetReader cannot decode.
     // When active, this player owns audio output instead of the AVAudioEngine nodes.
     private var opusPlayer: AVPlayer?
@@ -862,7 +870,10 @@ final class AudioPlayerManager: ObservableObject {
     /// Resets ReplayGain to neutral at the start of a new track — before that track's own
     /// analysis (the `replayGainEnabled` block further down each scheduling path) computes
     /// its per-track gain — so the previous track's gain can't briefly bleed into this one.
+    /// Called only once a file/stream has loaded successfully, so this also doubles as the
+    /// reset point for the AVPlayer load-failure circuit breaker (see `handleLoadFailure`).
     private func resetReplayGainForNewTrack() {
+        recentLoadFailureTimestamps.removeAll()
         replayGainLinearGain = 1.0
         if audioSettings.replayGainEnabled {
             crossfadeMixer.outputVolume = min(audioSettings.volume, AudioSettings.maxVolume)
@@ -1278,6 +1289,31 @@ final class AudioPlayerManager: ObservableObject {
 
     // MARK: - AVPlayer fallback (Opus / WebM / OGG)
 
+    /// Records an AVPlayer load/playback failure and either advances to the next track or, if
+    /// failures are arriving in a tight loop (4+ within 5 seconds — e.g. a stale stream URL that
+    /// fails instantly and `repeatMode == .one`/`.all` keeps re-triggering the same failure),
+    /// stops playback entirely instead of spinning forever.
+    private func handleLoadFailure(message: String, userFacingMessage: String) {
+        appError(message, category: "audio")
+        tearDownOpusPlayer()
+        isPlaying = false
+        errorMessage = userFacingMessage
+
+        let now = Date()
+        recentLoadFailureTimestamps.append(now)
+        recentLoadFailureTimestamps.removeAll { now.timeIntervalSince($0) > 5 }
+
+        if recentLoadFailureTimestamps.count >= 4 {
+            recentLoadFailureTimestamps.removeAll()
+            appError("Stopping playback after repeated track-load failures in a short window", category: "audio")
+            errorMessage = "Playback stopped after repeated errors."
+            stop()
+            return
+        }
+
+        skipToNext()
+    }
+
     /// Used when AVAssetReader/AVAssetExportSession cannot decode the file (e.g. Ogg/Opus container).
     /// AVPlayer has access to iOS's full codec pipeline and can always play .opus files.
     /// Basic play/pause/seek/volume/speed work (speed via `.rate` + `.spectral`
@@ -1348,11 +1384,14 @@ final class AudioPlayerManager: ObservableObject {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     let detail = item.error?.localizedDescription ?? "unknown error"
-                    appError("AVPlayer failed to load track — skipping. \(detail)", category: "audio")
-                    self.tearDownOpusPlayer()
-                    self.isPlaying = false
-                    self.errorMessage = "Could not play this track."
-                    self.skipToNext()
+                    self.handleLoadFailure(
+                        message: "AVPlayer failed to load track — skipping. \(detail)",
+                        userFacingMessage: "Could not play this track."
+                    )
+                }
+            } else if item.status == .readyToPlay {
+                Task { @MainActor [weak self] in
+                    self?.recentLoadFailureTimestamps.removeAll()
                 }
             }
         }
@@ -1364,13 +1403,12 @@ final class AudioPlayerManager: ObservableObject {
         ) { [weak self] notification in
             guard let self else { return }
             let err = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
-            appError("AVPlayer playback failed — skipping. \(err?.localizedDescription ?? "unknown")", category: "audio")
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.tearDownOpusPlayer()
-                self.isPlaying = false
-                self.errorMessage = "Playback error."
-                self.skipToNext()
+                self.handleLoadFailure(
+                    message: "AVPlayer playback failed — skipping. \(err?.localizedDescription ?? "unknown")",
+                    userFacingMessage: "Playback error."
+                )
             }
         }
 
