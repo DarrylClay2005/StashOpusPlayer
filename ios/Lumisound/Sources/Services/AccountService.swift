@@ -775,6 +775,26 @@ final class AccountService: ObservableObject {
         }
     }
 
+    /// Generates a long-lived (365-day) "RPC setup" token for local tools
+    /// like the Discord Rich Presence bridge, so the user never has to put
+    /// their account password in a desktop config file. The token shows up
+    /// as a regular session ("Discord RPC Bridge") and can be revoked from
+    /// Active Sessions.
+    func generateRpcToken() async -> String? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/user/rpc-token", method: "POST")
+            struct Response: Decodable { let token: String; let expires_at: String }
+            return try JSONDecoder().decode(Response.self, from: data).token
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     // MARK: - Password / Account deletion
 
     /// Changes the account password. On success, every other device is
