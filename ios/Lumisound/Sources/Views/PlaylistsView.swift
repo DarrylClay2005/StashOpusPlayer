@@ -21,38 +21,33 @@ struct PlaylistsView: View {
                 )
                 .listRowBackground(Color.clear)
             } else {
-                ForEach(library.playlists) { playlist in
-                    NavigationLink {
-                        PlaylistDetailView(playlist: playlist)
-                    } label: {
-                        PlaylistRow(playlist: playlist)
-                    }
-                    .listRowBackground(AppTheme.surface.opacity(0.5))
-                    .contextMenu {
-                        // Rename
-                        Button {
-                            renameTarget = playlist
-                            renameText = playlist.name
-                            showingRenameAlert = true
-                        } label: {
-                            Label("Rename", systemImage: "pencil")
-                        }
-
-                        // Delete (destructive)
-                        Button(role: .destructive) {
-                            library.deletePlaylist(playlist)
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
+                let unfiled = library.playlists.filter { $0.folder == nil }
+                ForEach(unfiled) { playlist in
+                    playlistRow(playlist)
                 }
                 .onDelete { indexSet in
-                    // Snapshot targets first — deleting mutates `library.playlists`,
-                    // which would shift later indices in `indexSet` mid-loop and
-                    // delete the wrong playlists for multi-row swipes.
-                    let targets = indexSet.map { library.playlists[$0] }
+                    let targets = indexSet.map { unfiled[$0] }
                     for playlist in targets {
                         library.deletePlaylist(playlist)
+                    }
+                }
+
+                ForEach(library.playlistFolders, id: \.self) { folder in
+                    let folderPlaylists = library.playlists.filter { $0.folder == folder }
+                    Section {
+                        ForEach(folderPlaylists) { playlist in
+                            playlistRow(playlist)
+                        }
+                        .onDelete { indexSet in
+                            let targets = indexSet.map { folderPlaylists[$0] }
+                            for playlist in targets {
+                                library.deletePlaylist(playlist)
+                            }
+                        }
+                    } header: {
+                        Label(folder, systemImage: "folder")
+                            .font(AppTheme.bodyFont(size: 12))
+                            .foregroundStyle(AppTheme.textSecondary)
                     }
                 }
             }
@@ -96,6 +91,31 @@ struct PlaylistsView: View {
             Button("Cancel", role: .cancel) {}
         } message: { playlist in
             Text("Enter a new name for \"\(playlist.name)\".")
+        }
+    }
+
+    @ViewBuilder
+    private func playlistRow(_ playlist: Playlist) -> some View {
+        NavigationLink {
+            PlaylistDetailView(playlist: playlist)
+        } label: {
+            PlaylistRow(playlist: playlist)
+        }
+        .listRowBackground(AppTheme.surface.opacity(0.5))
+        .contextMenu {
+            Button {
+                renameTarget = playlist
+                renameText = playlist.name
+                showingRenameAlert = true
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+
+            Button(role: .destructive) {
+                library.deletePlaylist(playlist)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
     }
 }
@@ -148,6 +168,12 @@ private struct PlaylistRow: View {
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
+                if !playlist.tags.isEmpty {
+                    Text(playlist.tags.joined(separator: " · "))
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                        .lineLimit(1)
+                }
             }
         }
         .padding(.vertical, 4)

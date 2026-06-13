@@ -583,6 +583,8 @@ class SyncPlaylist(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    folder: Optional[str] = None
+    tags: list[str] = []
     tracks: list[SyncTrack] = []
 
 
@@ -2006,7 +2008,7 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
     # Playlists with tracks — single JOIN, no N+1
     await cur.execute(
         """
-        SELECT p.id, p.name, p.description,
+        SELECT p.id, p.name, p.description, p.folder, p.tags_json,
                t.track_url, t.local_song_id, t.title, t.artist, t.album,
                t.duration_seconds, t.position
         FROM ios_user_playlists p
@@ -2020,10 +2022,14 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
     pl_dict: dict[str, dict] = {}
     pl_order: list[str] = []
     for row in pl_join_rows:
-        (pl_id, name, description,
+        (pl_id, name, description, folder, tags_json,
          t_url, t_local, t_title, t_artist, t_album, t_dur, t_pos) = row
         if pl_id not in pl_dict:
-            pl_dict[pl_id] = {"id": pl_id, "name": name, "description": description, "tracks": []}
+            pl_dict[pl_id] = {
+                "id": pl_id, "name": name, "description": description,
+                "folder": folder, "tags": json.loads(tags_json) if tags_json else [],
+                "tracks": [],
+            }
             pl_order.append(pl_id)
         if t_url is not None or t_title is not None:
             pl_dict[pl_id]["tracks"].append({
@@ -2222,11 +2228,12 @@ async def sync_push(
             if body.playlists:
                 await cur.executemany(
                     """
-                    INSERT INTO ios_user_playlists (id, user_id, name, description)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO ios_user_playlists (id, user_id, name, description, folder, tags_json)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     """,
                     [
-                        (pl.id or str(uuid.uuid4()), user_id, pl.name, pl.description)
+                        (pl.id or str(uuid.uuid4()), user_id, pl.name, pl.description,
+                         pl.folder, json.dumps(pl.tags))
                         for pl in body.playlists
                     ],
                 )

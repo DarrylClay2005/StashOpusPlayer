@@ -11,6 +11,7 @@ struct PlaylistDetailView: View {
     @State private var isEditing = false
     @State private var showingAddSongs = false
     @State private var showShareSheet = false
+    @State private var showOrganizeSheet = false
 
     // Always look up the live playlist so mutations (add/remove/reorder) are reflected immediately.
     private var currentPlaylist: Playlist {
@@ -23,6 +24,39 @@ struct PlaylistDetailView: View {
 
     var body: some View {
         List {
+            // Folder / tags summary
+            if currentPlaylist.folder != nil || !currentPlaylist.tags.isEmpty {
+                Section {
+                    Button {
+                        showOrganizeSheet = true
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if let folder = currentPlaylist.folder {
+                                Label(folder, systemImage: "folder")
+                                    .font(AppTheme.bodyFont(size: 13))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                            if !currentPlaylist.tags.isEmpty {
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 6) {
+                                        ForEach(currentPlaylist.tags, id: \.self) { tag in
+                                            Text(tag)
+                                                .font(AppTheme.bodyFont(size: 11))
+                                                .foregroundStyle(AppTheme.dynamicAccent)
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(AppTheme.dynamicAccent.opacity(0.12), in: Capsule())
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listRowBackground(AppTheme.surface.opacity(0.5))
+            }
+
             if songs.isEmpty {
                 EmptyStateView(
                     icon: "music.note.list",
@@ -93,6 +127,13 @@ struct PlaylistDetailView: View {
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 Button {
+                    showOrganizeSheet = true
+                } label: {
+                    Image(systemName: "folder.badge.gearshape")
+                }
+                .tint(AppTheme.dynamicAccent)
+
+                Button {
                     showShareSheet = true
                 } label: {
                     Image(systemName: "square.and.arrow.up")
@@ -120,6 +161,10 @@ struct PlaylistDetailView: View {
                 .environmentObject(library)
                 .environmentObject(player) // SongRow context menu (SongContextMenuContent) needs it
         }
+        .sheet(isPresented: $showOrganizeSheet) {
+            PlaylistOrganizeSheet(playlist: currentPlaylist)
+                .environmentObject(library)
+        }
         .sheet(isPresented: $showShareSheet) {
             CollaborativePlaylistView(playlist: playlist)
                 .environmentObject(player)
@@ -131,6 +176,111 @@ struct PlaylistDetailView: View {
 
     private func reorder(newIDs: [Song.ID]) {
         library.reorderSongs(in: playlist.id, to: newIDs)
+    }
+}
+
+// MARK: - Playlist Organize Sheet
+//
+// Lets the user file a playlist into a folder (existing or new) and attach
+// free-form tags. Folders are just a string field on the playlist — the
+// "Folders" grouping in PlaylistsView groups by this value.
+
+private struct PlaylistOrganizeSheet: View {
+    let playlist: Playlist
+
+    @EnvironmentObject private var library: LibraryManager
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var folderText: String = ""
+    @State private var tagText: String = ""
+    @State private var tags: [String] = []
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Folder name (optional)", text: $folderText)
+                        .autocorrectionDisabled()
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .listRowBackground(AppTheme.surface)
+
+                    if !library.playlistFolders.isEmpty {
+                        ForEach(library.playlistFolders, id: \.self) { folder in
+                            Button(folder) {
+                                folderText = folder
+                            }
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .listRowBackground(AppTheme.surface)
+                        }
+                    }
+                } header: {
+                    Text("Folder")
+                } footer: {
+                    Text("Leave empty for no folder. Tap an existing folder to reuse it.")
+                }
+
+                Section {
+                    HStack {
+                        TextField("Add a tag", text: $tagText)
+                            .autocorrectionDisabled()
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .onSubmit(addTag)
+                        Button("Add", action: addTag)
+                            .disabled(tagText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .tint(AppTheme.dynamicAccent)
+                    }
+                    .listRowBackground(AppTheme.surface)
+
+                    if !tags.isEmpty {
+                        ForEach(tags, id: \.self) { tag in
+                            HStack {
+                                Text(tag)
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Spacer()
+                                Button {
+                                    tags.removeAll { $0 == tag }
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .foregroundStyle(AppTheme.error)
+                                }
+                            }
+                            .listRowBackground(AppTheme.surface)
+                        }
+                    }
+                } header: {
+                    Text("Tags")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.clear.ignoresSafeArea())
+            .navigationTitle("Organize")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .tint(AppTheme.textSecondary)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        library.setFolder(folderText, forPlaylistID: playlist.id)
+                        library.setTags(tags, forPlaylistID: playlist.id)
+                        dismiss()
+                    }
+                    .tint(AppTheme.dynamicAccent)
+                }
+            }
+            .onAppear {
+                folderText = playlist.folder ?? ""
+                tags = playlist.tags
+            }
+        }
+    }
+
+    private func addTag() {
+        let trimmed = tagText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !tags.contains(trimmed) else { return }
+        tags.append(trimmed)
+        tagText = ""
     }
 }
 

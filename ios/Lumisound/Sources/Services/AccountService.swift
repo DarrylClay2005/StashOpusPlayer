@@ -58,7 +58,32 @@ struct SyncPlaylist: Codable {
     let id: String
     let name: String
     let description: String?
+    var folder: String?
+    var tags: [String]
     var tracks: [SyncTrack]
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, folder, tags, tracks
+    }
+
+    init(id: String, name: String, description: String?, folder: String? = nil, tags: [String] = [], tracks: [SyncTrack]) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.folder = folder
+        self.tags = tags
+        self.tracks = tracks
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        folder = try container.decodeIfPresent(String.self, forKey: .folder)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        tracks = try container.decodeIfPresent([SyncTrack].self, forKey: .tracks) ?? []
+    }
 }
 
 /// Metadata for an automatic server-side backup of this user's sync data
@@ -524,6 +549,8 @@ final class AccountService: ObservableObject {
                 id: playlist.id.uuidString,
                 name: playlist.name,
                 description: nil,
+                folder: playlist.folder,
+                tags: playlist.tags,
                 tracks: tracks
             )
         }
@@ -606,6 +633,8 @@ final class AccountService: ObservableObject {
                             library.addSong(id: sid, toPlaylistID: newPL.id)
                         }
                     }
+                    if sp.folder != nil { library.setFolder(sp.folder, forPlaylistID: newPL.id) }
+                    if !sp.tags.isEmpty { library.setTags(sp.tags, forPlaylistID: newPL.id) }
                 }
             }
 

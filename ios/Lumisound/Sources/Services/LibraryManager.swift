@@ -613,6 +613,24 @@ final class LibraryManager: ObservableObject {
         persistence.savePlaylists(playlists)
     }
 
+    func setFolder(_ folder: String?, forPlaylistID playlistID: UUID) {
+        guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
+        let trimmed = folder?.trimmingCharacters(in: .whitespacesAndNewlines)
+        playlists[index].folder = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        persistence.savePlaylists(playlists)
+    }
+
+    func setTags(_ tags: [String], forPlaylistID playlistID: UUID) {
+        guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
+        playlists[index].tags = tags
+        persistence.savePlaylists(playlists)
+    }
+
+    /// All folder names currently in use, sorted, for grouping the playlists list.
+    var playlistFolders: [String] {
+        Array(Set(playlists.compactMap(\.folder))).sorted()
+    }
+
     func addSong(id songID: String, toPlaylistID playlistID: UUID) {
         guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
         guard !playlists[index].songIDs.contains(songID) else { return }
