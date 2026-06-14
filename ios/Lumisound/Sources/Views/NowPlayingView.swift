@@ -145,17 +145,10 @@ private struct VinylDiscView: View {
 // MARK: - NowPlayingView
 
 struct NowPlayingView: View {
-    /// Pass `true` when presenting as a sheet (e.g. from MiniPlayerBar) so the
-    /// view does not wrap itself in a NavigationStack — the sheet already provides
-    /// one, and nesting them produces a double navigation bar.
-    var isSheet: Bool = false
-
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var progress: PlaybackProgress
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var sleepTimer: SleepTimerService
-
-    @Environment(\.dismiss) private var dismiss
 
     // Seeking
     @State private var isSeeking = false
@@ -226,22 +219,12 @@ struct NowPlayingView: View {
     private let selectHaptic = UISelectionFeedbackGenerator()
 
     var body: some View {
-        // When shown as a tab the view owns its NavigationStack.
-        // When shown as a sheet MiniPlayerBar provides a NavigationStack already,
-        // so we skip creating another one to avoid the double-navigation-bar bug.
-        // Group lets the if/else return a single opaque type.
-        Group {
-            if isSheet {
-                scrollContent
-            } else {
-                NavigationStack {
-                    scrollContent
-                        .appScreenBackground()
-                        .background(GalleryBackgroundView().ignoresSafeArea())
-                }
-                .toolbarBackground(.hidden, for: .navigationBar)
-            }
+        NavigationStack {
+            scrollContent
+                .appScreenBackground()
+                .background(GalleryBackgroundView().ignoresSafeArea())
         }
+        .toolbarBackground(.hidden, for: .navigationBar)
         .sheet(isPresented: $showSleepTimerSheet) {
             SleepTimerSheet()
                 .environmentObject(sleepTimer)
@@ -262,7 +245,7 @@ struct NowPlayingView: View {
         }
     }
 
-    // MARK: - Scroll content (shared between tab and sheet presentations)
+    // MARK: - Scroll content
 
     private var scrollContent: some View {
         ScrollView {
@@ -286,29 +269,8 @@ struct NowPlayingView: View {
             .padding(.top, 8)
             .padding(.bottom, 32)
         }
-        // Swipe down to dismiss when presented as a sheet
-        .gesture(
-            DragGesture()
-                .onEnded { value in
-                    if value.translation.height > 60 {
-                        dismiss()
-                    }
-                }
-        )
         .navigationTitle("Now Playing")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
     }
 
     // MARK: - Artwork

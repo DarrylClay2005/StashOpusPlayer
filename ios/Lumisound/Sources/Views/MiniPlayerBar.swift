@@ -4,8 +4,16 @@ import UIKit
 struct MiniPlayerBar: View {
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var library: LibraryManager
-    @EnvironmentObject private var sleepTimer: SleepTimerService
-    @State private var showingNowPlaying = false
+
+    // Tapping the mini player switches to the Now Playing tab rather than
+    // presenting a second, freshly-instantiated NowPlayingView in a sheet.
+    // Previously each of the ~8 screens hosting MiniPlayerBar owned its own
+    // sheet-presented NowPlayingView, so the view's timers/animations/lyrics
+    // fetches could run twice (once in the Tab 2 instance, once in the sheet)
+    // whenever a sheet was open. Reusing the same @AppStorage key as
+    // ContentView's TabView selection means there is only ever one
+    // NowPlayingView instance alive.
+    @AppStorage("selected_tab") private var selectedTab = 0
 
     private let playHaptic  = UIImpactFeedbackGenerator(style: .light)
     private let skipHaptic  = UIImpactFeedbackGenerator(style: .medium)
@@ -14,18 +22,6 @@ struct MiniPlayerBar: View {
     var body: some View {
         if player.currentSong != nil {
             barContent
-                .sheet(isPresented: $showingNowPlaying) {
-                    // isSheet: true tells NowPlayingView not to wrap itself in a
-                    // NavigationStack — the sheet container provides one already,
-                    // so wrapping again would produce a double navigation bar.
-                    NavigationStack {
-                        NowPlayingView(isSheet: true)
-                            .environmentObject(player)
-                            .environmentObject(player.progress)
-                            .environmentObject(library)
-                            .environmentObject(sleepTimer)
-                    }
-                }
         }
     }
 
@@ -54,7 +50,7 @@ struct MiniPlayerBar: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    showingNowPlaying = true
+                    selectedTab = 1
                 }
 
                 Spacer(minLength: 0)
