@@ -717,10 +717,7 @@ struct NowPlayingView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background(
-                    AppTheme.surface,
-                    in: Capsule()
-                )
+                .adaptiveGlass(tint: AppTheme.dynamicAccent, in: Capsule(), fallback: .regularMaterial)
                 .overlay(
                     Capsule()
                         .strokeBorder(AppTheme.dynamicAccent.opacity(0.4), lineWidth: 1)
@@ -750,7 +747,11 @@ struct NowPlayingView: View {
             .foregroundStyle(player.autoRadioEnabled ? AppTheme.dynamicAccent : AppTheme.textSecondary)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(AppTheme.surface, in: Capsule())
+            .adaptiveGlass(
+                tint: player.autoRadioEnabled ? AppTheme.dynamicAccent : AppTheme.surface,
+                in: Capsule(),
+                fallback: .regularMaterial
+            )
             .overlay(
                 Capsule()
                     .strokeBorder(

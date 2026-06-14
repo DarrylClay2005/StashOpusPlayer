@@ -823,7 +823,7 @@ private struct FolderGridCell: View {
                             Spacer()
                         }
                         .padding(6)
-                        .background(.ultraThinMaterial)
+                        .adaptiveGlass(in: Rectangle())
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
