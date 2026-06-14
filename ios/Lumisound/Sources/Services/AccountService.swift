@@ -546,6 +546,12 @@ final class AccountService: ObservableObject {
             currentUser = user
             isLoggedIn = token != nil
             hasDateOfBirth = user.dateOfBirth != nil
+            // Show the cached avatar immediately so the launch screen never
+            // flashes the placeholder initial circle for a returning user —
+            // `loadAvatar(forceRefresh: true)` (called later, post-pullSync)
+            // skips the cache and hits the network, which is too slow for
+            // the launch screen's first frame.
+            avatarImage = loadAvatarLocally()
         }
         let ts = UserDefaults.standard.double(forKey: Self.lastSyncKey)
         if ts > 0 {

@@ -36,6 +36,7 @@ final class AudioPlayerManager: ObservableObject {
                 Task { await updateNowPlayingArtwork(for: currentSong) }
                 applyTrackAudioSettings(previousID: oldValue?.id)
                 pushPlaybackStateToBridge()
+                scheduleHistoryLog()
             }
         }
     }
@@ -2232,6 +2233,27 @@ final class AudioPlayerManager: ObservableObject {
             duration: duration,
             isPlaying: isPlaying
         )
+    }
+
+    /// Cancelled/rescheduled on every track change; the in-flight task for the
+    /// previous track.
+    private var historyLogTask: Task<Void, Never>?
+
+    /// Logs the current track to `/user/history` (`AccountService.logPlay`)
+    /// ~5s after it starts playing — long enough to filter out rapid skips,
+    /// but soon enough that a linked Discord "Now Playing" webhook and any
+    /// Last.fm/ListenBrainz scrobble reflect the track the user is actually
+    /// listening to. Without this, play history was never recorded and those
+    /// integrations silently never fired.
+    private func scheduleHistoryLog() {
+        historyLogTask?.cancel()
+        guard let song = currentSong else { return }
+        historyLogTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            guard self.currentSong?.id == song.id else { return }
+            await AccountService.shared?.logPlay(song: song, listenSeconds: Int(self.position))
+        }
     }
 
     private var queuePushTask: Task<Void, Never>?

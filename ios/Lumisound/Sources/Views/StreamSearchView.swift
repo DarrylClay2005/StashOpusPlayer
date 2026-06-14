@@ -326,6 +326,34 @@ struct StreamSearchView: View {
                                     .listRowSeparatorTint(AppTheme.background)
                                     // Staggered fade-in when results first appear
                                     .modifier(StaggeredFadeInModifier(index: globalIndex, token: resultsAnimationToken))
+                                    .contextMenu {
+                                        Button {
+                                            handlePlayNext(track: track)
+                                        } label: {
+                                            Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                                        }
+                                        Button {
+                                            handleAddToQueue(track: track)
+                                        } label: {
+                                            Label("Add to Queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+                                        }
+                                        Button {
+                                            handleDownload(track: track)
+                                        } label: {
+                                            Label("Download", systemImage: "arrow.down.circle")
+                                        }
+                                        if !track.youtubeURL.isEmpty, let linkURL = URL(string: track.youtubeURL) {
+                                            Divider()
+                                            Button {
+                                                UIPasteboard.general.string = track.youtubeURL
+                                            } label: {
+                                                Label("Copy Link", systemImage: "link")
+                                            }
+                                            ShareLink(item: linkURL) {
+                                                Label("Share", systemImage: "square.and.arrow.up")
+                                            }
+                                        }
+                                    }
                                 }
                             } header: {
                                 Text(sourceLabel(group.source))
@@ -629,6 +657,21 @@ struct StreamSearchView: View {
         }
     }
 
+    private func handlePlayNext(track: StreamTrack) {
+        guard loadingTrackID == nil else { return }
+        loadingTrackID = track.id
+        Task {
+            defer { loadingTrackID = nil }
+            do {
+                let url = try await streaming.streamURL(for: track)
+                let song = streaming.toSong(track: track, streamURL: url)
+                player.insertNext(song: song)
+            } catch {
+                streaming.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     private func handleDownload(track: StreamTrack) {
         guard !downloadingTrackIDs.contains(track.id) else { return }
         downloadingTrackIDs.insert(track.id)
@@ -847,33 +890,44 @@ private struct StreamTrackRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Thumbnail
-            AsyncImage(url: URL(string: track.thumbnailURL)) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                case .failure, .empty:
-                    Image(systemName: sourceIcon)
-                        .font(.system(size: 22))
-                        .foregroundStyle(AppTheme.textSecondary)
-                @unknown default:
-                    Color.clear
+            // Thumbnail with a small source-icon badge in the corner — gives each
+            // row an at-a-glance platform indicator even outside its grouped section.
+            ZStack(alignment: .bottomTrailing) {
+                AsyncImage(url: URL(string: track.thumbnailURL)) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    case .failure, .empty:
+                        Image(systemName: sourceIcon)
+                            .font(.system(size: 22))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    @unknown default:
+                        Color.clear
+                    }
                 }
+                .frame(width: 56, height: 56)
+                .background(AppTheme.elevatedSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .clipped()
+
+                Image(systemName: sourceIcon)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(4)
+                    .background(sourceTint, in: Circle())
+                    .overlay(Circle().stroke(AppTheme.surface, lineWidth: 1.5))
+                    .offset(x: 4, y: 4)
             }
-            .frame(width: 52, height: 52)
-            .background(AppTheme.elevatedSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .clipped()
 
             // Title + artist
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(track.title)
-                    .font(AppTheme.bodyFont(size: 14))
+                    .font(AppTheme.bodyFont(size: 14).weight(.semibold))
                     .foregroundStyle(AppTheme.textPrimary)
                     .lineLimit(1)
-                Text(track.artist)
+                Text(track.artist.isEmpty ? sourceLabelForTrack : track.artist)
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
                     .lineLimit(1)
@@ -940,6 +994,14 @@ private struct StreamTrackRow: View {
 
     private var sourceIcon: String {
         track.source == "soundcloud" ? "cloud.fill" : "play.rectangle.fill"
+    }
+
+    private var sourceTint: Color {
+        track.source == "soundcloud" ? Color.orange : Color.red
+    }
+
+    private var sourceLabelForTrack: String {
+        track.source == "soundcloud" ? "SoundCloud" : "YouTube"
     }
 }
 

@@ -200,8 +200,15 @@ struct LaunchView: View {
                 logoOpacity = 1.0
             }
             Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 300_000_000)
-                withAnimation(.easeIn(duration: 0.4)) { contentOpacity = 1.0 }
+                // Was a flat 300ms delay regardless of whether the account/avatar
+                // were already available (they usually are, restored synchronously
+                // in AccountService.init from local storage/cache) — that made the
+                // "Hello! @username" greeting feel like it loaded late. Show it
+                // immediately when we already have the user; otherwise keep a short
+                // delay so the fade-in doesn't pop in mid-logo-animation.
+                let delay: UInt64 = (account.isLoggedIn && account.currentUser != nil) ? 0 : 300_000_000
+                if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+                withAnimation(.easeIn(duration: 0.3)) { contentOpacity = 1.0 }
             }
             Task {
                 // Previously a flat 1.5s timer — for small/cached libraries that's plenty,
