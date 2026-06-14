@@ -490,6 +490,11 @@ final class StreamingService: ObservableObject {
             return
         }
         request.timeoutInterval = 130  // slightly over server timeout
+        // Lets the bridge use this account's personal YouTube Data API key
+        // (Account -> ... ) for full playlist enumeration, if one is set.
+        if let accountToken = AccountService.shared?.token {
+            request.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
+        }
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -747,9 +752,59 @@ final class StreamingService: ObservableObject {
         components.path = "/api/download"
         components.queryItems = queryItems
 
-        guard var request = makeRequest(components.string ?? "/api/download") else {
+        guard let request = makeRequest(components.string ?? "/api/download") else {
             throw StreamingError.invalidURL
         }
+
+        // Big playlists hammer the bridge's yt-dlp pipeline hard enough that some
+        // tracks come back truncated or with invalid audio data even though the
+        // HTTP transfer "succeeds". Retry the whole download a few times — with a
+        // fresh temp file and a full integrity check each time — before giving up,
+        // so a single flaky fetch doesn't leave a corrupt file in the library.
+        let maxAttempts = 3
+        var lastError: Error = StreamingError.corruptDownload
+
+        for attempt in 1...maxAttempts {
+            do {
+                let destURL = try await attemptDownload(
+                    track: track,
+                    request: request,
+                    safeName: safeName,
+                    requestedExt: requestedExt,
+                    importDir: importDir
+                )
+                if attempt != 1 {
+                    appLog("downloadToLibrary: succeeded for \"\(track.title)\" on attempt \(attempt)/\(maxAttempts)", category: "network")
+                }
+                return destURL
+            } catch let error as StreamingError {
+                switch error {
+                case .incompleteDownload, .corruptDownload:
+                    lastError = error
+                    appWarn("downloadToLibrary: attempt \(attempt)/\(maxAttempts) failed for \"\(track.title)\": \(error.localizedDescription)", category: "network")
+                    continue
+                default:
+                    // Not-found / timeout / HTTP errors are unlikely to be fixed by retrying.
+                    throw error
+                }
+            }
+        }
+
+        throw lastError
+    }
+
+    /// Performs a single download attempt for `downloadToLibrary`, including the
+    /// HTTP request, completeness check, move-into-place, and an `AVAudioFile`
+    /// integrity check on the final file. Throws `.incompleteDownload` or
+    /// `.corruptDownload` on failure so the caller can retry.
+    private func attemptDownload(
+        track: StreamTrack,
+        request: URLRequest,
+        safeName: String,
+        requestedExt: String,
+        importDir: URL
+    ) async throws -> URL {
+        var request = request
         // Give the bridge 5 min to run yt-dlp before iOS cancels the request.
         request.timeoutInterval = 360
 
@@ -814,6 +869,17 @@ final class StreamingService: ObservableObject {
         if actualExt != requestedExt {
             appLog("downloadToLibrary: bridge returned .\(actualExt) instead of requested .\(requestedExt) for \"\(track.title)\" — saved with correct extension", category: "network")
         }
+
+        // Final integrity check: the byte count matched what the server promised, but
+        // yt-dlp can still emit a file AVAudioFile can't decode (corrupt remux, dropped
+        // moov atom, etc.) — exactly what CorruptFileFinderService flags later. Catch it
+        // immediately so the retry loop can re-fetch instead of leaving a dead file behind.
+        guard CorruptFileFinderService.isValidAudioFile(at: destURL) else {
+            try? FileManager.default.removeItem(at: destURL)
+            appWarn("downloadToLibrary: corrupt/unreadable file for \"\(track.title)\" — discarding", category: "network")
+            throw StreamingError.corruptDownload
+        }
+
         appLog("Download complete: \(destURL.lastPathComponent)", category: "network")
 
         // Pre-seed the artwork cache with the track's thumbnail so it's immediately
@@ -1336,6 +1402,7 @@ enum StreamingError: LocalizedError {
     case notFound(String)
     case httpError(Int)
     case incompleteDownload
+    case corruptDownload
 
     var errorDescription: String? {
         switch self {
@@ -1351,6 +1418,8 @@ enum StreamingError: LocalizedError {
             return "Streaming service is unavailable right now. Please try again later."
         case .incompleteDownload:
             return "Download was incomplete. Please try again."
+        case .corruptDownload:
+            return "Downloaded file failed an integrity check. Please try again."
         }
     }
 }

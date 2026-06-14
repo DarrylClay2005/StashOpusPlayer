@@ -395,6 +395,12 @@ CREATE TABLE IF NOT EXISTS ios_notifications (
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
+-- Per-user YouTube Data API v3 key, used by /api/resolve to enumerate full
+-- YouTube playlists via playlistItems.list (bypassing yt-dlp's ~205-entry
+-- flat-playlist cap). Falls back to the server-wide YOUTUBE_API_KEY env var
+-- when a user hasn't set their own.
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS youtube_api_key VARCHAR(128) NULL;
+
 -- Feature: Discord "now playing" webhook integration. True per-user Discord
 -- Rich Presence ("Listening to ...") requires the Discord desktop client and
 -- a local IPC connection, which an iOS app cannot establish on a user's

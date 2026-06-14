@@ -106,7 +106,6 @@ struct FavoritesView: View {
         .background(Color.clear.ignoresSafeArea())
         .navigationTitle("Favorites")
         .navigationBarTitleDisplayMode(.large)
-        .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {

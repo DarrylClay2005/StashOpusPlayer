@@ -178,6 +178,7 @@ struct DocumentImportService {
         var genre = ""
         var trackNumber = 0
         var year = ""
+        var sourceTrackID: String?
 
         for item in commonMetadata {
             switch item.commonKey?.rawValue {
@@ -196,6 +197,15 @@ struct DocumentImportService {
         // available through the common key set.
         for item in metadata {
             let idRaw = item.identifier?.rawValue.lowercased() ?? ""
+            let keyRaw = (item.key as? String)?.lowercased() ?? ""
+
+            // Stable source ID embedded by the bridge's /api/download (e.g.
+            // "youtube:dQw4w9WgXcQ") — stored as a custom MP4/ID3/Vorbis tag
+            // named "LUMISOUND_ID". Surfaces under different identifier forms
+            // depending on container, so check both the identifier and key.
+            if sourceTrackID == nil, idRaw.contains("lumisound_id") || keyRaw.contains("lumisound_id") {
+                sourceTrackID = item.stringValue
+            }
 
             if genre.isEmpty, idRaw.contains("genre") {
                 genre = item.stringValue ?? genre
@@ -260,6 +270,9 @@ struct DocumentImportService {
             if trackNumber == 0, let v = vorbis["TRACKNUMBER"] ?? vorbis["TRACK"], !v.isEmpty {
                 trackNumber = Int(v.split(separator: "/").first.map(String.init) ?? v) ?? 0
             }
+            if sourceTrackID == nil, let v = vorbis["LUMISOUND_ID"], !v.isEmpty {
+                sourceTrackID = v
+            }
         }
 
         // Filename fallback: if title is still the raw filename, try "Artist - Title" pattern
@@ -321,7 +334,8 @@ struct DocumentImportService {
             year: year,
             genre: genre,
             bitrate: bitrate,
-            sampleRate: sampleRate
+            sampleRate: sampleRate,
+            sourceTrackID: sourceTrackID
         )
 
         appLog("Metadata: \"\(song.title)\" by \(song.artist.isEmpty ? "unknown" : song.artist) [\(fileExt), \(String(format: "%.0f", song.duration))s]", category: "library")

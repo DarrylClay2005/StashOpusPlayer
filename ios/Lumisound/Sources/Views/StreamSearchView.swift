@@ -781,25 +781,50 @@ struct StreamSearchView: View {
                 }
                 request.timeoutInterval = 120
 
-                let (tmpURL, response) = try await URLSession.shared.download(for: request)
-                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                    throw StreamingError.httpError(http.statusCode)
+                // Retry a few times on incomplete/corrupt transfers, same as
+                // StreamingService.downloadToLibrary, before giving up.
+                let maxAttempts = 3
+                var lastError: Error = StreamingError.corruptDownload
+
+                for attempt in 1...maxAttempts {
+                    do {
+                        let (tmpURL, response) = try await URLSession.shared.download(for: request)
+                        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                            throw StreamingError.httpError(http.statusCode)
+                        }
+
+                        // Verify the download is complete before adopting it — a truncated
+                        // file would otherwise sit in the library showing "0:00" forever.
+                        let downloadedSize = (try? FileManager.default.attributesOfItem(atPath: tmpURL.path))?[.size] as? Int64 ?? 0
+                        let expectedSize = (response as? HTTPURLResponse)?.expectedContentLength ?? -1
+                        if downloadedSize <= 0 || (expectedSize > 0 && downloadedSize != expectedSize) {
+                            try? FileManager.default.removeItem(at: tmpURL)
+                            throw StreamingError.incompleteDownload
+                        }
+
+                        try? FileManager.default.removeItem(at: destURL)
+                        try FileManager.default.moveItem(at: tmpURL, to: destURL)
+
+                        guard CorruptFileFinderService.isValidAudioFile(at: destURL) else {
+                            try? FileManager.default.removeItem(at: destURL)
+                            throw StreamingError.corruptDownload
+                        }
+
+                        library.scanLocalDocuments()
+                        downloadedServerTrackIDs.insert(track.id)
+                        lastError = StreamingError.corruptDownload
+                        break
+                    } catch let error as StreamingError {
+                        switch error {
+                        case .incompleteDownload, .corruptDownload:
+                            lastError = error
+                            if attempt == maxAttempts { throw error }
+                            continue
+                        default:
+                            throw error
+                        }
+                    }
                 }
-
-                // Verify the download is complete before adopting it — a truncated
-                // file would otherwise sit in the library showing "0:00" forever.
-                let downloadedSize = (try? FileManager.default.attributesOfItem(atPath: tmpURL.path))?[.size] as? Int64 ?? 0
-                let expectedSize = (response as? HTTPURLResponse)?.expectedContentLength ?? -1
-                if downloadedSize <= 0 || (expectedSize > 0 && downloadedSize != expectedSize) {
-                    try? FileManager.default.removeItem(at: tmpURL)
-                    throw StreamingError.incompleteDownload
-                }
-
-                try? FileManager.default.removeItem(at: destURL)
-                try FileManager.default.moveItem(at: tmpURL, to: destURL)
-
-                library.scanLocalDocuments()
-                downloadedServerTrackIDs.insert(track.id)
             } catch {
                 streaming.errorMessage = "Download failed: \(error.localizedDescription)"
             }

@@ -494,6 +494,21 @@ struct AccountView: View {
                 }
                 .listRowBackground(AppTheme.surface)
 
+                // MARK: YouTube Data API Key Section
+                Section {
+                    NavigationLink(destination: YoutubeApiKeyView()) {
+                        Label("YouTube API Key", systemImage: "key")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                } header: {
+                    sectionHeader("Streaming")
+                } footer: {
+                    Text("Add your own YouTube Data API v3 key so full playlists (beyond ~205 tracks) resolve completely when imported or played, linked to your account and yt-dlp lookups.")
+                        .font(AppTheme.bodyFont(size: 12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .listRowBackground(AppTheme.surface)
+
                 // MARK: Danger Section
                 Section {
                     Button(role: .destructive) {

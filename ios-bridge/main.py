@@ -568,7 +568,7 @@ def _parse_iso8601_duration(duration: str) -> int:
     return hours * 3600 + minutes * 60 + seconds
 
 
-def _youtube_data_api_get(path: str, params: dict) -> dict:
+def _youtube_data_api_get(path: str, params: dict, api_key: str) -> dict:
     """Synchronous GET against the YouTube Data API v3 — call via asyncio.to_thread.
 
     The target host is a hardcoded Google domain (not derived from user input),
@@ -576,13 +576,13 @@ def _youtube_data_api_get(path: str, params: dict) -> dict:
     """
     from urllib.parse import urlencode
 
-    query = urlencode({**params, "key": YOUTUBE_API_KEY})
+    query = urlencode({**params, "key": api_key})
     req = urllib.request.Request(f"https://www.googleapis.com/youtube/v3/{path}?{query}")
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read())
 
 
-async def _resolve_youtube_playlist_via_api(playlist_id: str, limit: int) -> list[dict]:
+async def _resolve_youtube_playlist_via_api(playlist_id: str, limit: int, api_key: str) -> list[dict]:
     """Enumerate a YouTube playlist via playlistItems.list (paginated via
     nextPageToken — no ~205-entry cap, unlike yt-dlp's flat-playlist scrape).
 
@@ -598,7 +598,7 @@ async def _resolve_youtube_playlist_via_api(playlist_id: str, limit: int) -> lis
         }
         if page_token:
             params["pageToken"] = page_token
-        data = await asyncio.to_thread(_youtube_data_api_get, "playlistItems", params)
+        data = await asyncio.to_thread(_youtube_data_api_get, "playlistItems", params, api_key)
         for item in data.get("items", []):
             snippet = item.get("snippet") or {}
             video_id = (snippet.get("resourceId") or {}).get("videoId")
@@ -629,6 +629,7 @@ async def _resolve_youtube_playlist_via_api(playlist_id: str, limit: int) -> lis
             _youtube_data_api_get,
             "videos",
             {"part": "contentDetails", "id": ",".join(i["id"] for i in batch)},
+            api_key,
         )
         durations = {
             v["id"]: _parse_iso8601_duration((v.get("contentDetails") or {}).get("duration", ""))
@@ -638,6 +639,22 @@ async def _resolve_youtube_playlist_via_api(playlist_id: str, limit: int) -> lis
             item["duration"] = durations.get(item["id"], 0)
 
     return items
+
+
+async def _youtube_api_key_for_user(user_id: str) -> str:
+    """Returns the user's personal YouTube Data API key if they've set one,
+    otherwise falls back to the server-wide YOUTUBE_API_KEY env var."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT youtube_api_key FROM ios_user_settings WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+    if row and row[0]:
+        return row[0]
+    return YOUTUBE_API_KEY
 
 
 # ---------------------------------------------------------------------------
@@ -811,6 +828,10 @@ class PushTokenRequest(BaseModel):
 class DiscordWebhookRequest(BaseModel):
     webhook_url: Optional[str] = None
     enabled: bool = True
+
+
+class YoutubeApiKeyRequest(BaseModel):
+    api_key: Optional[str] = None
 
 
 class DiscordRpcConfigRequest(BaseModel):
@@ -1032,55 +1053,123 @@ async def download_track(
     extra_args, expected_ext = _download_format_args(format)
 
     safe_title = (title or id).replace("/", "-").replace(":", "-")[:100]
-    # Use UUID-based temp dir to prevent collisions (Fix 6)
-    tmp_dir = pathlib.Path(tempfile.gettempdir()) / f"dl_{uuid.uuid4().hex}"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    output_template = str(tmp_dir / f"{safe_title}.%(ext)s")
 
-    cmd = [
-        "yt-dlp",
-        "--no-playlist",
-        "--embed-metadata",
-        # --embed-thumbnail intentionally omitted: requires AtomicParsley for M4A
-        # which is not in the Docker image. The iOS ArtworkService handles artwork
-        # display separately via the thumbnailURL field from search results.
-        "-o", output_template,
-        *extra_args,
-        target_url,
+    # Large playlists drive this endpoint hard via the iOS "Download All" pipeline,
+    # and yt-dlp occasionally exits 0 while leaving a truncated/corrupt file behind
+    # (interrupted remux, dropped connection mid-transcode, etc.) — exactly what the
+    # app's built-in corruption finder flags later. Retry the whole yt-dlp invocation
+    # a few times, verifying the result with ffprobe each time, before giving up.
+    max_attempts = 3
+    output_file: Optional[pathlib.Path] = None
+    actual_ext = expected_ext
+    tmp_dir: Optional[pathlib.Path] = None
+
+    for attempt in range(1, max_attempts + 1):
+        # Use UUID-based temp dir to prevent collisions (Fix 6)
+        tmp_dir = pathlib.Path(tempfile.gettempdir()) / f"dl_{uuid.uuid4().hex}"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        output_template = str(tmp_dir / f"{safe_title}.%(ext)s")
+
+        cmd = [
+            "yt-dlp",
+            "--no-playlist",
+            "--embed-metadata",
+            # --embed-thumbnail intentionally omitted: requires AtomicParsley for M4A
+            # which is not in the Docker image. The iOS ArtworkService handles artwork
+            # display separately via the thumbnailURL field from search results.
+            "-o", output_template,
+            *extra_args,
+            target_url,
+        ]
+        logger.info("Download cmd (attempt %d/%d): %s", attempt, max_attempts, " ".join(cmd))
+
+        async with _YTDLP_SEMAPHORE:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=300.0)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.communicate()  # reap the zombie (Fix 7)
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                raise HTTPException(status_code=408, detail="Download timed out")
+
+        if proc.returncode != 0:
+            err_text = stderr_bytes.decode(errors="replace")[-500:]
+            logger.error("yt-dlp download failed (attempt %d/%d): %s", attempt, max_attempts, err_text)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            if attempt == max_attempts:
+                raise HTTPException(status_code=404, detail="Could not download track")
+            continue
+
+        # yt-dlp may choose a slightly different extension than requested — scan the dir.
+        candidate: Optional[pathlib.Path] = None
+        candidate_ext = expected_ext
+        for fname in tmp_dir.iterdir():
+            candidate = fname
+            candidate_ext = fname.suffix.lstrip(".") or expected_ext
+            break
+
+        if not candidate or not candidate.exists():
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            if attempt == max_attempts:
+                raise HTTPException(status_code=404, detail="Downloaded file not found")
+            continue
+
+        if not await _verify_downloaded_audio(candidate):
+            logger.warning(
+                "Downloaded file failed ffprobe integrity check (attempt %d/%d): %s",
+                attempt, max_attempts, candidate,
+            )
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            if attempt == max_attempts:
+                raise HTTPException(status_code=502, detail="Downloaded file failed integrity check")
+            continue
+
+        output_file = candidate
+        actual_ext = candidate_ext
+        break
+
+    if not output_file or not output_file.exists() or tmp_dir is None:
+        if tmp_dir is not None:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=404, detail="Downloaded file not found")
+
+    # Tag the file with a stable, source-derived unique track ID (e.g.
+    # "youtube:dQw4w9WgXcQ"). This lets the iOS duplicate finder and library
+    # recognise the same source track across re-downloads/re-imports under
+    # different filenames, rather than relying on filename-derived identity.
+    # Remux is a stream copy (no re-encode) so quality/size are unaffected;
+    # on any failure we just keep the untagged file.
+    source_id = f"{source}:{id}"
+    tagged_file = tmp_dir / f"{output_file.stem}_tagged{output_file.suffix}"
+    tag_cmd = [
+        "ffmpeg", "-y",
+        "-i", str(output_file),
+        "-map_metadata", "0",
+        "-c", "copy",
+        "-metadata", f"LUMISOUND_ID={source_id}",
+        str(tagged_file),
     ]
-    logger.info("Download cmd: %s", " ".join(cmd))
-
-    async with _YTDLP_SEMAPHORE:
+    try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
+            *tag_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        try:
-            _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=300.0)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.communicate()  # reap the zombie (Fix 7)
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise HTTPException(status_code=408, detail="Download timed out")
-
-    if proc.returncode != 0:
-        err_text = stderr_bytes.decode(errors="replace")[-500:]
-        logger.error("yt-dlp download failed: %s", err_text)
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise HTTPException(status_code=404, detail="Could not download track")
-
-    # yt-dlp may choose a slightly different extension than requested — scan the dir.
-    output_file: Optional[pathlib.Path] = None
-    actual_ext = expected_ext
-    for fname in tmp_dir.iterdir():
-        output_file = fname
-        actual_ext = fname.suffix.lstrip(".") or expected_ext
-        break
-
-    if not output_file or not output_file.exists():
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise HTTPException(status_code=404, detail="Downloaded file not found")
+        await asyncio.wait_for(proc.communicate(), timeout=60.0)
+        if proc.returncode == 0 and tagged_file.exists() and tagged_file.stat().st_size > 0:
+            output_file.unlink(missing_ok=True)
+            output_file = tagged_file
+        else:
+            logger.warning("LUMISOUND_ID tagging failed for %s, serving untagged file", output_file)
+            tagged_file.unlink(missing_ok=True)
+    except (asyncio.TimeoutError, Exception) as exc:
+        logger.warning("LUMISOUND_ID tagging error for %s: %s", output_file, exc)
+        tagged_file.unlink(missing_ok=True)
 
     content_type_map = {
         "mp3":  "audio/mpeg",
@@ -1105,6 +1194,48 @@ async def download_track(
         media_type=media_type,
         filename=f"{safe_title}.{actual_ext}",
     )
+
+
+async def _verify_downloaded_audio(path: pathlib.Path) -> bool:
+    """
+    Returns True if ffprobe finds at least one audio stream with a non-zero
+    duration in *path*. Used right after a yt-dlp download to catch truncated
+    or corrupt output (interrupted remux/transcode) before serving it to the
+    client — the same class of issue the iOS app's corruption finder flags.
+    """
+    cmd = [
+        "ffprobe", "-v", "quiet",
+        "-print_format", "json",
+        "-show_streams", "-show_format",
+        str(path),
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+    except (asyncio.TimeoutError, Exception):
+        return False
+
+    if proc.returncode != 0:
+        return False
+
+    try:
+        data = json.loads(stdout_bytes.decode(errors="replace"))
+    except Exception:
+        return False
+
+    streams = data.get("streams") or []
+    has_audio = any(s.get("codec_type") == "audio" for s in streams)
+
+    try:
+        duration = float((data.get("format") or {}).get("duration", 0))
+    except (TypeError, ValueError):
+        duration = 0.0
+
+    return has_audio and duration > 0
 
 
 def _download_format_args(format: str) -> tuple[list[str], str]:
@@ -1170,14 +1301,22 @@ async def resolve_playlist(
 
     source = _source_from_url(url)
 
-    if source == "youtube" and YOUTUBE_API_KEY:
-        playlist_id = _extract_youtube_playlist_id(url)
-        if playlist_id:
-            try:
-                items = await _resolve_youtube_playlist_via_api(playlist_id, limit)
-                return [_parse_track(item, source) for item in items]
-            except Exception as exc:
-                logger.warning("YouTube Data API resolve failed, falling back to yt-dlp: %s", exc)
+    if source == "youtube":
+        api_key = YOUTUBE_API_KEY
+        account_token = request.headers.get("X-Account-Token", "")
+        if account_token:
+            payload = decode_token(account_token)
+            if payload and payload.get("sub"):
+                api_key = await _youtube_api_key_for_user(payload["sub"])
+
+        if api_key:
+            playlist_id = _extract_youtube_playlist_id(url)
+            if playlist_id:
+                try:
+                    items = await _resolve_youtube_playlist_via_api(playlist_id, limit, api_key)
+                    return [_parse_track(item, source) for item in items]
+                except Exception as exc:
+                    logger.warning("YouTube Data API resolve failed, falling back to yt-dlp: %s", exc)
 
     # SoundCloud flat-playlist entries are sparse (often missing artist/duration/
     # thumbnails) — use full --dump-json for complete metadata, same as /api/search.
@@ -5490,6 +5629,60 @@ async def delete_discord_webhook(payload: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("DELETE FROM ios_discord_webhooks WHERE user_id = %s", (user_id,))
+
+
+# ---------------------------------------------------------------------------
+# Per-user YouTube Data API key (Feature: youtube-api-key)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/youtube-api-key")
+async def get_youtube_api_key(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT youtube_api_key FROM ios_user_settings WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+
+    key = row[0] if row else None
+    if not key:
+        return {"configured": False, "api_key": None}
+
+    masked = key[:6] + "..." + key[-4:] if len(key) > 10 else "..."
+    return {"configured": True, "api_key": masked}
+
+
+@app.put("/user/youtube-api-key")
+async def set_youtube_api_key(body: YoutubeApiKeyRequest, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    if not body.api_key:
+        raise HTTPException(status_code=400, detail="api_key is required")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_user_settings (user_id, youtube_api_key) VALUES (%s, %s) "
+                "ON DUPLICATE KEY UPDATE youtube_api_key = VALUES(youtube_api_key)",
+                (user_id, body.api_key),
+            )
+    return {"status": "ok"}
+
+
+@app.delete("/user/youtube-api-key", status_code=204)
+async def delete_youtube_api_key(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_user_settings SET youtube_api_key = NULL WHERE user_id = %s",
+                (user_id,),
+            )
 
 
 # ---------------------------------------------------------------------------

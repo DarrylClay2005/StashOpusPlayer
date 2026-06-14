@@ -15,6 +15,12 @@ struct Song: Identifiable, Hashable, Codable {
     var genre: String
     var bitrate: Int
     var sampleRate: Int
+    /// Stable source-derived identifier (e.g. "youtube:dQw4w9WgXcQ"), read from the
+    /// `LUMISOUND_ID` metadata tag the bridge embeds in tracks downloaded via
+    /// `/api/download`. Lets the duplicate finder and library recognise the same
+    /// source track across re-downloads/re-imports under different filenames.
+    /// `nil` for tracks without this tag (older downloads, on-device imports).
+    var sourceTrackID: String?
     /// HTTP headers to include when fetching this song's URL (e.g. Authorization for user music).
     /// Not persisted across launches — tokens expire and are re-acquired on next login.
     var httpHeaders: [String: String]?
@@ -33,6 +39,7 @@ struct Song: Identifiable, Hashable, Codable {
         genre: String = "",
         bitrate: Int = 0,
         sampleRate: Int = 0,
+        sourceTrackID: String? = nil,
         httpHeaders: [String: String]? = nil
     ) {
         self.id = id
@@ -48,6 +55,7 @@ struct Song: Identifiable, Hashable, Codable {
         self.genre = genre
         self.bitrate = bitrate
         self.sampleRate = sampleRate
+        self.sourceTrackID = sourceTrackID
         self.httpHeaders = httpHeaders
     }
 

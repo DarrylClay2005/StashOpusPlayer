@@ -73,6 +73,26 @@ final class CorruptFileFinderService: ObservableObject {
         Task { await runScan(in: docs) }
     }
 
+    // MARK: - Single-File Integrity Check
+
+    /// Returns `true` if `url` points to a regular, non-empty audio file that
+    /// `AVAudioFile` can open. Used right after downloads to catch corrupt or
+    /// truncated files (e.g. dropped connections, bad yt-dlp output) before
+    /// they're adopted into the library — same checks as `scanDirectory`, but
+    /// for a single freshly-downloaded file so callers can retry immediately.
+    nonisolated static func isValidAudioFile(at url: URL) -> Bool {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? Int64,
+              size >= 1_024 else { return false }
+
+        do {
+            _ = try AVAudioFile(forReading: url)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     // MARK: - Private Scan Worker (nonisolated, runs off main actor)
 
     private static let audioExtensions: Set<String> = [

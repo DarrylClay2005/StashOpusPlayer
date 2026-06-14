@@ -338,6 +338,20 @@ struct DiscordRpcConfig: Decodable {
     }
 }
 
+/// Response shape for GET /user/youtube-api-key — the user's personal YouTube
+/// Data API v3 key, used by /api/resolve to enumerate full YouTube playlists
+/// (bypassing yt-dlp's ~205-entry flat-playlist cap). `apiKey` is masked
+/// (e.g. "AIzaSy...AbPw") since the full key is never sent back after saving.
+struct YoutubeApiKeyConfig: Decodable {
+    let configured: Bool
+    let apiKey: String?
+
+    enum CodingKeys: String, CodingKey {
+        case configured
+        case apiKey = "api_key"
+    }
+}
+
 /// One entry from GET /user/notifications.
 struct AppNotification: Decodable, Identifiable {
     let id: String
@@ -1506,6 +1520,54 @@ final class AccountService: ObservableObject {
         guard isLoggedIn else { return false }
         do {
             _ = try await makeRequest("/user/discord-rpc-config", method: "DELETE")
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Fetches this account's personal YouTube Data API key status (masked).
+    func fetchYoutubeApiKey() async -> YoutubeApiKeyConfig? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/user/youtube-api-key")
+            return try JSONDecoder().decode(YoutubeApiKeyConfig.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Saves (or replaces) this account's personal YouTube Data API key.
+    /// Used by /api/resolve for full-playlist enumeration via playlistItems.list,
+    /// and falls back to the server-wide key if unset.
+    func setYoutubeApiKey(_ apiKey: String) async -> Bool {
+        guard isLoggedIn else { return false }
+        struct Body: Encodable { let api_key: String }
+        do {
+            _ = try await makeRequest("/user/youtube-api-key", method: "PUT", body: Body(api_key: apiKey))
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Removes this account's personal YouTube Data API key.
+    func deleteYoutubeApiKey() async -> Bool {
+        guard isLoggedIn else { return false }
+        do {
+            _ = try await makeRequest("/user/youtube-api-key", method: "DELETE")
             return true
         } catch let err as AccountError {
             errorMessage = err.message
