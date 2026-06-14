@@ -5,6 +5,7 @@ import io
 import ipaddress
 import json
 import logging
+import math
 import os
 import pathlib
 import re
@@ -3435,6 +3436,7 @@ async def upload_user_music(
     async with _UPLOAD_ANALYSIS_SEMAPHORE:
         loudness_lufs = await _measure_loudness(dest_path)
         bpm = await _estimate_bpm(dest_path)
+        musical_key = await _estimate_key(dest_path)
 
     # Populate ios_user_music_metadata when metadata is provided
     try:
@@ -3445,8 +3447,8 @@ async def upload_user_music(
                     INSERT INTO ios_user_music_metadata
                         (id, user_id, filename, original_filename, title, artist, album,
                          genre, year, duration_seconds, file_size_bytes, bitrate,
-                         sample_rate, mime_type, has_artwork, loudness_lufs, bpm)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         sample_rate, mime_type, has_artwork, loudness_lufs, bpm, musical_key)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         filename = VALUES(filename),
                         title = IF(VALUES(title) IS NULL, title, VALUES(title)),
@@ -3460,7 +3462,8 @@ async def upload_user_music(
                         sample_rate = IF(VALUES(sample_rate) IS NULL, sample_rate, VALUES(sample_rate)),
                         mime_type = VALUES(mime_type),
                         loudness_lufs = IF(VALUES(loudness_lufs) IS NULL, loudness_lufs, VALUES(loudness_lufs)),
-                        bpm = IF(VALUES(bpm) IS NULL, bpm, VALUES(bpm))
+                        bpm = IF(VALUES(bpm) IS NULL, bpm, VALUES(bpm)),
+                        musical_key = IF(VALUES(musical_key) IS NULL, musical_key, VALUES(musical_key))
                     """,
                     (
                         content_hash,
@@ -3480,6 +3483,7 @@ async def upload_user_music(
                         False,
                         loudness_lufs,
                         bpm,
+                        musical_key,
                     ),
                 )
     except Exception as exc:
@@ -3492,6 +3496,7 @@ async def upload_user_music(
         "id": _stable_id(abs_path),
         "loudness_lufs": loudness_lufs,
         "bpm": bpm,
+        "musical_key": musical_key,
         "metadata_id": content_hash,
         "size": len(body),
     }
@@ -3590,7 +3595,7 @@ async def delete_user_music(
 _USER_MUSIC_METADATA_COLS = [
     "id", "user_id", "filename", "original_filename", "title", "artist", "album",
     "genre", "year", "duration_seconds", "file_size_bytes", "bitrate", "sample_rate",
-    "mime_type", "has_artwork", "uploaded_at", "loudness_lufs", "bpm",
+    "mime_type", "has_artwork", "uploaded_at", "loudness_lufs", "bpm", "musical_key",
 ]
 
 
@@ -3608,7 +3613,7 @@ async def list_user_music_metadata(
                 """
                 SELECT id, user_id, filename, original_filename, title, artist, album,
                        genre, year, duration_seconds, file_size_bytes, bitrate, sample_rate,
-                       mime_type, has_artwork, uploaded_at, loudness_lufs, bpm
+                       mime_type, has_artwork, uploaded_at, loudness_lufs, bpm, musical_key
                 FROM ios_user_music_metadata
                 WHERE user_id = %s
                 ORDER BY uploaded_at DESC
@@ -4555,6 +4560,119 @@ async def _estimate_bpm(path: pathlib.Path) -> Optional[float]:
         return None
 
     return round(60.0 * frame_rate / best_lag, 1)
+
+
+# ---------------------------------------------------------------------------
+# Musical key estimation via chroma + Krumhansl-Schmuckler (Feature: audio-key)
+# ---------------------------------------------------------------------------
+
+# Krumhansl-Schmuckler key profiles — relative perceived "fit" of each pitch
+# class (C, C#, D, ... B) within a major/minor tonal context, used to score
+# how well a chroma vector matches each of the 24 major/minor keys.
+_KS_MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
+_KS_MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+_PITCH_CLASS_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def _goertzel_power(samples: "array.array", sample_rate: int, freq: float) -> float:
+    """Power of `samples` at `freq` Hz via the Goertzel algorithm — a cheap
+    single-bin DFT, used here instead of a full FFT since we only need ~36
+    target frequencies (3 octaves x 12 pitch classes) and numpy isn't
+    available in the bridge's runtime image."""
+    w = 2.0 * math.pi * freq / sample_rate
+    coeff = 2.0 * math.cos(w)
+    q1 = q2 = 0.0
+    for s in samples:
+        q0 = coeff * q1 - q2 + s
+        q2 = q1
+        q1 = q0
+    return q1 * q1 + q2 * q2 - q1 * q2 * coeff
+
+
+def _chroma_vector(samples: "array.array", sample_rate: int) -> list[float]:
+    """Builds a 12-bin chroma vector (one bin per pitch class C..B) by
+    summing Goertzel energy across octaves 2-4 (~65 Hz - 1 kHz), the range
+    where most musical tonal content lives."""
+    chroma = [0.0] * 12
+    nyquist = sample_rate / 2
+    for octave in range(2, 5):
+        for pitch in range(12):
+            freq = 440.0 * (2.0 ** ((pitch - 9 + (octave - 4) * 12) / 12.0))
+            if freq >= nyquist:
+                continue
+            chroma[pitch] += _goertzel_power(samples, sample_rate, freq)
+    return chroma
+
+
+def _correlation(a: list[float], b: list[float]) -> float:
+    mean_a = sum(a) / len(a)
+    mean_b = sum(b) / len(b)
+    num = sum((x - mean_a) * (y - mean_b) for x, y in zip(a, b))
+    den = math.sqrt(sum((x - mean_a) ** 2 for x in a) * sum((y - mean_b) ** 2 for y in b))
+    return num / den if den else 0.0
+
+
+def _key_from_chroma(chroma: list[float]) -> Optional[str]:
+    if not any(chroma):
+        return None
+    best_key, best_score = None, -2.0
+    for root in range(12):
+        rotated = chroma[root:] + chroma[:root]
+        major_score = _correlation(rotated, _KS_MAJOR_PROFILE)
+        minor_score = _correlation(rotated, _KS_MINOR_PROFILE)
+        if major_score > best_score:
+            best_score, best_key = major_score, f"{_PITCH_CLASS_NAMES[root]} major"
+        if minor_score > best_score:
+            best_score, best_key = minor_score, f"{_PITCH_CLASS_NAMES[root]} minor"
+    return best_key
+
+
+async def _estimate_key(path: pathlib.Path) -> Optional[str]:
+    """Best-effort musical key estimate (e.g. "A minor"), for harmonic
+    mixing/automixing — matching tracks in compatible keys for smoother
+    crossfade transitions.
+
+    Decodes the first 20s to mono 5512Hz PCM via ffmpeg, builds a 12-bin
+    chroma vector via `_chroma_vector`, and correlates it against the
+    Krumhansl-Schmuckler major/minor profiles (all 24 rotations) to find the
+    best-matching key. Returns None on any failure."""
+    sample_rate = 5512
+    cmd = [
+        "ffmpeg", "-hide_banner", "-nostats", "-v", "quiet",
+        "-i", str(path),
+        "-t", "20",
+        "-ac", "1", "-ar", str(sample_rate),
+        "-f", "s16le", "-",
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        raw, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+    except Exception as exc:
+        logger.warning("_estimate_key: ffmpeg decode failed for %s: %s", path.name, exc)
+        return None
+
+    if len(raw) < sample_rate * 2 * 4:
+        return None
+
+    samples = array.array("h")
+    samples.frombytes(raw[: len(raw) - (len(raw) % 2)])
+
+    try:
+        # The Goertzel passes are pure-Python loops over ~110k samples x 36
+        # target frequencies — run off the event loop so a burst of uploads
+        # doesn't stall other requests for several seconds each.
+        chroma = await asyncio.wait_for(
+            asyncio.to_thread(_chroma_vector, samples, sample_rate), timeout=20.0
+        )
+    except Exception as exc:
+        logger.warning("_estimate_key: chroma analysis failed for %s: %s", path.name, exc)
+        return None
+
+    return _key_from_chroma(chroma)
 
 
 # ---------------------------------------------------------------------------

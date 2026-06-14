@@ -428,3 +428,7 @@ CREATE TABLE IF NOT EXISTS ios_discord_rpc_config (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+
+-- Feature: musical key estimation (Krumhansl-Schmuckler chroma analysis)
+-- alongside BPM/loudness, for harmonic-mixing-aware automixing/crossfade.
+ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS musical_key VARCHAR(16) NULL;
