@@ -680,6 +680,7 @@ struct StreamSearchView: View {
                 let localURL = try await streaming.downloadToLibrary(track: track)
                 library.scanLocalDocuments()
                 downloadedTrackIDs.insert(track.id)
+                ToastCenter.shared.show("Downloaded \"\(track.title)\"", category: .download, icon: "checkmark.circle.fill")
                 if autoCloudBackup, account.isLoggedIn, let token = account.token {
                     Task {
                         try? await streaming.uploadTrack(
@@ -690,6 +691,7 @@ struct StreamSearchView: View {
                 }
             } catch {
                 streaming.errorMessage = "Download failed: \(error.localizedDescription)"
+                ToastCenter.shared.show("Failed to download \"\(track.title)\"", category: .error)
             }
             downloadingTrackIDs.remove(track.id)
         }
@@ -757,8 +759,12 @@ struct StreamSearchView: View {
 
             library.scanLocalDocuments()
             isDownloadingAll = false
-            if !failed.isEmpty {
+            let succeeded = tracks.count - failed.count
+            if failed.isEmpty {
+                ToastCenter.shared.show("Downloaded \(succeeded) tracks", category: .download)
+            } else {
                 streaming.errorMessage = "\(failed.count) track(s) failed to download."
+                ToastCenter.shared.show("Downloaded \(succeeded), \(failed.count) failed", category: .warning)
             }
         }
     }
@@ -778,8 +784,10 @@ struct StreamSearchView: View {
             do {
                 try await streaming.deleteUserMusic(path: track.serverPath, token: token)
                 await streaming.fetchUserMusic(token: token)
+                ToastCenter.shared.show("Deleted \"\(track.title)\" from cloud", category: .info, icon: "trash")
             } catch {
                 streaming.errorMessage = "Delete failed: \(error.localizedDescription)"
+                ToastCenter.shared.show("Failed to delete \"\(track.title)\"", category: .error)
             }
             deletingUserTrackPath = nil
         }

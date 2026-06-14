@@ -8,6 +8,7 @@ struct ContentView: View {
     @EnvironmentObject private var streaming: StreamingService
     @EnvironmentObject private var account: AccountService
     @EnvironmentObject private var bridgeHealth: BridgeHealthService
+    @ObservedObject private var toastCenter = ToastCenter.shared
 
     /// Persists the last-selected tab across launches.
     @AppStorage("selected_tab") private var selectedTab = 0
@@ -130,6 +131,15 @@ struct ContentView: View {
                 .animation(.spring(response: 0.4, dampingFraction: 0.75), value: bridgeHealth.showToast)
                 .allowsHitTesting(false)
             }
+
+            // MARK: App-wide categorized toasts — favorites, playlists, downloads, etc.
+            VStack {
+                ToastOverlay()
+                    .padding(.top, 56)
+                Spacer()
+            }
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: toastCenter.current)
+            .allowsHitTesting(false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .fullScreenCover(isPresented: $showCarMode) {

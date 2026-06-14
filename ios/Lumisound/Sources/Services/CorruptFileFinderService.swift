@@ -53,6 +53,8 @@ final class CorruptFileFinderService: ObservableObject {
             }
         }.value
         corruptFiles = []
+        let fileWord = toDelete.count == 1 ? "file" : "files"
+        ToastCenter.shared.show("Deleted \(toDelete.count) corrupt \(fileWord)", category: .info, icon: "trash")
     }
 
     // MARK: - Daily Auto-Check

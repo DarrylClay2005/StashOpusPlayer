@@ -558,9 +558,12 @@ final class LibraryManager: ObservableObject {
                     Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id })
                         .compactMap { $0.value.first }
                 )
+                let songWord = imported.count == 1 ? "song" : "songs"
+                ToastCenter.shared.show("Imported \(imported.count) \(songWord)", category: .success, icon: "tray.and.arrow.down.fill")
             } catch {
                 appError("Import failed: \(error.localizedDescription)", category: "library")
                 errorMessage = error.localizedDescription
+                ToastCenter.shared.show("Import failed: \(error.localizedDescription)", category: .error)
             }
             rebuildAllSongs()
         }
@@ -573,8 +576,10 @@ final class LibraryManager: ObservableObject {
     func toggleFavorite(songID: String) {
         if favoriteSongIDs.contains(songID) {
             favoriteSongIDs.remove(songID)
+            ToastCenter.shared.show("Removed from Favorites", category: .info, icon: "heart")
         } else {
             favoriteSongIDs.insert(songID)
+            ToastCenter.shared.show("Added to Favorites", category: .success, icon: "heart.fill")
         }
         persistence.saveFavorites(favoriteSongIDs)
     }
@@ -600,11 +605,13 @@ final class LibraryManager: ObservableObject {
         let playlist = Playlist(id: UUID(), name: name, songIDs: [], createdAt: Date())
         playlists.append(playlist)
         persistence.savePlaylists(playlists)
+        ToastCenter.shared.show("Created playlist \"\(name)\"", category: .success, icon: "music.note.list")
     }
 
     func deletePlaylist(_ playlist: Playlist) {
         playlists.removeAll { $0.id == playlist.id }
         persistence.savePlaylists(playlists)
+        ToastCenter.shared.show("Deleted playlist \"\(playlist.name)\"", category: .info, icon: "trash")
     }
 
     func renamePlaylist(_ playlist: Playlist, to newName: String) {
@@ -633,15 +640,20 @@ final class LibraryManager: ObservableObject {
 
     func addSong(id songID: String, toPlaylistID playlistID: UUID) {
         guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
-        guard !playlists[index].songIDs.contains(songID) else { return }
+        guard !playlists[index].songIDs.contains(songID) else {
+            ToastCenter.shared.show("Already in \"\(playlists[index].name)\"", category: .info, icon: "music.note.list")
+            return
+        }
         playlists[index].songIDs.append(songID)
         persistence.savePlaylists(playlists)
+        ToastCenter.shared.show("Added to \"\(playlists[index].name)\"", category: .success, icon: "text.badge.plus")
     }
 
     func removeSong(id songID: String, fromPlaylistID playlistID: UUID) {
         guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
         playlists[index].songIDs.removeAll { $0 == songID }
         persistence.savePlaylists(playlists)
+        ToastCenter.shared.show("Removed from \"\(playlists[index].name)\"", category: .info, icon: "text.badge.minus")
     }
 
     func reorderSongs(in playlistID: UUID, to newIDs: [Song.ID]) {
@@ -674,6 +686,7 @@ final class LibraryManager: ObservableObject {
         }
         persistence.savePlaylists(playlists)
         rebuildAllSongs()
+        ToastCenter.shared.show("Deleted \"\(song.displayName)\"", category: .info, icon: "trash")
     }
 
     /// Debounced rebuild — cancels any pending task and schedules a new one after 0.1 s.
