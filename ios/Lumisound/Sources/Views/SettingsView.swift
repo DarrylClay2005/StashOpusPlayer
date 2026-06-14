@@ -215,6 +215,12 @@ struct SettingsView: View {
                     .foregroundStyle(AppTheme.textPrimary)
             }
 
+            // Duplicate finder
+            NavigationLink(destination: DuplicateFilesView()) {
+                Label("Duplicate Finder", systemImage: "doc.on.doc")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+
             // Storage & cache manager
             NavigationLink(destination: CacheManagerView().environmentObject(cacheManager)) {
                 Label("Storage & Cache", systemImage: "internaldrive")

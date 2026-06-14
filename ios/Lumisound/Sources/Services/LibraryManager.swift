@@ -654,6 +654,28 @@ final class LibraryManager: ObservableObject {
         artwork.artwork(for: song)
     }
 
+    /// Permanently removes a locally-imported/downloaded song: deletes its
+    /// backing file, drops it from `importedSongs`/`allSongs`, and removes any
+    /// references to it from playlists and favorites. Used by the duplicate
+    /// finder to delete redundant copies. Only works for imported songs (those
+    /// with a file `url` and no `persistentID`) — songs from the Apple Music
+    /// library can't be deleted from within the app sandbox, so callers should
+    /// filter those out before offering deletion.
+    func removeImportedSong(id songID: String) {
+        guard let song = importedSongs.first(where: { $0.id == songID }) else { return }
+        if let url = song.url {
+            try? FileManager.default.removeItem(at: url)
+        }
+        importedSongs.removeAll { $0.id == songID }
+        favoriteSongIDs.remove(songID)
+        persistence.saveFavorites(favoriteSongIDs)
+        for index in playlists.indices {
+            playlists[index].songIDs.removeAll { $0 == songID }
+        }
+        persistence.savePlaylists(playlists)
+        rebuildAllSongs()
+    }
+
     /// Debounced rebuild — cancels any pending task and schedules a new one after 0.1 s.
     /// This prevents runaway work when rapid successive mutations occur (e.g. bulk imports).
     ///
