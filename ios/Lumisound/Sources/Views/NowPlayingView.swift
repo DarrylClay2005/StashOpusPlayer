@@ -196,6 +196,15 @@ struct NowPlayingView: View {
         return .waveform
     }()
 
+    // Playtime counter style
+    @State private var playtimeCounterStyle: PlaytimeCounterStyle = {
+        if let raw = UserDefaults.standard.string(forKey: "nowPlaying_playtimeCounterStyle"),
+           let style = PlaytimeCounterStyle(rawValue: raw) {
+            return style
+        }
+        return .elapsedRemaining
+    }()
+
     // Queue preview panel
     @AppStorage("nowPlaying_showQueuePreview") private var showQueuePreview = true
 
@@ -518,7 +527,48 @@ struct NowPlayingView: View {
                 )
             }
 
+            playtimeCounterRow
             seekerStylePicker
+            playtimeCounterStylePicker
+        }
+    }
+
+    private var playtimeCounterRow: some View {
+        Text(playtimeCounterStyle.text(position: progress.position, duration: progress.duration))
+            .font(AppTheme.monoFont(size: 13))
+            .foregroundStyle(AppTheme.textSecondary)
+            .contentTransition(.numericText())
+            .animation(.snappy, value: progress.position)
+    }
+
+    private var playtimeCounterStylePicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) {
+                ForEach(PlaytimeCounterStyle.allCases) { style in
+                    Button {
+                        selectHaptic.selectionChanged()
+                        playtimeCounterStyle = style
+                        UserDefaults.standard.set(style.rawValue, forKey: "nowPlaying_playtimeCounterStyle")
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: style.iconName)
+                                .font(.system(size: 11, weight: .medium))
+                            Text(style.displayName)
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundStyle(playtimeCounterStyle == style ? .white : AppTheme.textSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            playtimeCounterStyle == style ? AppTheme.dynamicAccent : AppTheme.surface,
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .animation(.easeInOut(duration: 0.18), value: playtimeCounterStyle)
+                }
+            }
+            .padding(.horizontal, 2)
         }
     }
 
