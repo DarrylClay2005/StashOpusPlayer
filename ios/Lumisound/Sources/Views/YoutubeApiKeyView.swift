@@ -14,8 +14,14 @@ struct YoutubeApiKeyView: View {
     @State private var status: YoutubeApiKeyConfig?
     @State private var apiKey = ""
     @State private var isSaving = false
+    @State private var isValidating = false
     @State private var errorText: String?
     @State private var didSave = false
+
+    /// Once a configured key is rejected for quota, re-show the entry field
+    /// so the user can replace it. Shared with SettingsView's YouTube API
+    /// Key section via the same UserDefaults key.
+    @AppStorage("youtube_api_key_quota_exceeded") private var quotaExceeded = false
 
     var body: some View {
         List {
@@ -27,7 +33,11 @@ struct YoutubeApiKeyView: View {
                             .foregroundStyle(AppTheme.textSecondary)
                     }
                     .foregroundStyle(AppTheme.textPrimary)
-                } else {
+                }
+
+                // Entry field — hidden once a key is configured, unless that
+                // key's quota has been exhausted (so the user can replace it).
+                if status?.configured != true || quotaExceeded {
                     TextField("AIza...", text: $apiKey)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
@@ -40,7 +50,7 @@ struct YoutubeApiKeyView: View {
             }
             .listRowBackground(AppTheme.surface)
 
-            if status?.configured != true {
+            if status?.configured != true || quotaExceeded {
                 Section {
                     Button {
                         save()
@@ -66,8 +76,23 @@ struct YoutubeApiKeyView: View {
                 .listRowBackground(Color.clear)
             }
 
+            // Validate / Remove — always visible once a key is configured.
             if status?.configured == true {
                 Section {
+                    Button {
+                        validate()
+                    } label: {
+                        HStack {
+                            Label("Validate API Key", systemImage: "checkmark.shield")
+                                .foregroundStyle(AppTheme.dynamicAccent)
+                            Spacer()
+                            if isValidating {
+                                ProgressView().tint(AppTheme.dynamicAccent)
+                            }
+                        }
+                    }
+                    .disabled(isValidating)
+
                     Button(role: .destructive) {
                         removeKey()
                     } label: {
@@ -98,11 +123,33 @@ struct YoutubeApiKeyView: View {
             if await account.setYoutubeApiKey(trimmed) {
                 didSave = true
                 apiKey = ""
+                quotaExceeded = false
                 status = await account.fetchYoutubeApiKey()
             } else {
                 errorText = account.errorMessage ?? "Failed to save API key."
             }
             isSaving = false
+        }
+    }
+
+    private func validate() {
+        isValidating = true
+        errorText = nil
+        Task {
+            let result = await account.validateYouTubeAPIKey()
+            switch result {
+            case "valid":
+                quotaExceeded = false
+                ToastCenter.shared.show("YouTube API key is valid", category: .success, icon: "checkmark.seal")
+            case "invalid":
+                ToastCenter.shared.show("YouTube API key is invalid", category: .error, icon: "xmark.seal")
+            case "quota_exceeded":
+                quotaExceeded = true
+                ToastCenter.shared.show("YouTube API quota exceeded for today", category: .warning, icon: "exclamationmark.triangle")
+            default:
+                ToastCenter.shared.show("Couldn't validate key — check connection", category: .error, icon: "wifi.exclamationmark")
+            }
+            isValidating = false
         }
     }
 
@@ -112,6 +159,7 @@ struct YoutubeApiKeyView: View {
                 status = await account.fetchYoutubeApiKey()
                 apiKey = ""
                 didSave = false
+                quotaExceeded = false
             }
         }
     }

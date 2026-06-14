@@ -29,6 +29,11 @@ struct SettingsView: View {
     @State private var isSavingYouTubeKey = false
     @State private var youtubeExposureTimer: Timer?
 
+    /// Once a configured key is rejected for quota, re-show the "Set Key"
+    /// field so the user can replace it. Persisted so it survives app
+    /// relaunches until a new/working key is saved or validates again.
+    @AppStorage("youtube_api_key_quota_exceeded") private var youtubeKeyQuotaExceeded = false
+
     // MARK: Body
 
     var body: some View {
@@ -599,46 +604,51 @@ struct SettingsView: View {
                 .foregroundStyle(AppTheme.textSecondary)
         }
 
-        // Entry field for setting/replacing the key
-        HStack {
-            Label("Set Key", systemImage: "pencil")
-                .foregroundStyle(AppTheme.textPrimary)
-            SecureField("Paste YouTube Data API v3 key", text: $youtubeKeyInput)
-                .keyboardType(.asciiCapable)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .multilineTextAlignment(.trailing)
-                .foregroundStyle(AppTheme.textSecondary)
-        }
-
-        if !youtubeKeyInput.isEmpty {
-            Button {
-                Task {
-                    isSavingYouTubeKey = true
-                    let ok = await account.setYoutubeApiKey(youtubeKeyInput)
-                    isSavingYouTubeKey = false
-                    if ok {
-                        youtubeKeyInput = ""
-                        ToastCenter.shared.show("YouTube API key saved", category: .success, icon: "key.horizontal")
-                        await refreshYouTubeKeyStatus()
-                    } else {
-                        ToastCenter.shared.show("Couldn't save key — check connection", category: .error, icon: "exclamationmark.triangle")
-                    }
-                }
-            } label: {
-                HStack {
-                    Label("Save Key", systemImage: "checkmark.circle")
-                        .foregroundStyle(AppTheme.dynamicAccent)
-                    Spacer()
-                    if isSavingYouTubeKey {
-                        ProgressView().tint(AppTheme.dynamicAccent)
-                    }
-                }
+        // Entry field for setting/replacing the key — hidden once a key is
+        // configured, unless that key's quota has been exhausted (so the
+        // user can drop in a replacement).
+        if youtubeKeyConfig?.configured != true || youtubeKeyQuotaExceeded {
+            HStack {
+                Label("Set Key", systemImage: "pencil")
+                    .foregroundStyle(AppTheme.textPrimary)
+                SecureField("Paste YouTube Data API v3 key", text: $youtubeKeyInput)
+                    .keyboardType(.asciiCapable)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(AppTheme.textSecondary)
             }
-            .disabled(isSavingYouTubeKey)
+
+            if !youtubeKeyInput.isEmpty {
+                Button {
+                    Task {
+                        isSavingYouTubeKey = true
+                        let ok = await account.setYoutubeApiKey(youtubeKeyInput)
+                        isSavingYouTubeKey = false
+                        if ok {
+                            youtubeKeyInput = ""
+                            youtubeKeyQuotaExceeded = false
+                            ToastCenter.shared.show("YouTube API key saved", category: .success, icon: "key.horizontal")
+                            await refreshYouTubeKeyStatus()
+                        } else {
+                            ToastCenter.shared.show("Couldn't save key — check connection", category: .error, icon: "exclamationmark.triangle")
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Label("Save Key", systemImage: "checkmark.circle")
+                            .foregroundStyle(AppTheme.dynamicAccent)
+                        Spacer()
+                        if isSavingYouTubeKey {
+                            ProgressView().tint(AppTheme.dynamicAccent)
+                        }
+                    }
+                }
+                .disabled(isSavingYouTubeKey)
+            }
         }
 
-        // Validate API Key button
+        // Validate API Key button — always visible once a key is configured.
         Button {
             Task {
                 isValidatingYouTubeKey = true
@@ -646,10 +656,12 @@ struct SettingsView: View {
                 isValidatingYouTubeKey = false
                 switch status {
                 case "valid":
+                    youtubeKeyQuotaExceeded = false
                     ToastCenter.shared.show("YouTube API key is valid", category: .success, icon: "checkmark.seal")
                 case "invalid":
                     ToastCenter.shared.show("YouTube API key is invalid", category: .error, icon: "xmark.seal")
                 case "quota_exceeded":
+                    youtubeKeyQuotaExceeded = true
                     ToastCenter.shared.show("YouTube API quota exceeded for today", category: .warning, icon: "exclamationmark.triangle")
                 default:
                     ToastCenter.shared.show("Couldn't validate key — check connection", category: .error, icon: "wifi.exclamationmark")
@@ -673,6 +685,7 @@ struct SettingsView: View {
                 Task {
                     let ok = await account.deleteYoutubeApiKey()
                     if ok {
+                        youtubeKeyQuotaExceeded = false
                         ToastCenter.shared.show("YouTube API key removed", category: .info, icon: "key.horizontal")
                         await refreshYouTubeKeyStatus()
                     } else {
