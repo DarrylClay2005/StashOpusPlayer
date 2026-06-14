@@ -52,7 +52,10 @@ struct AmbientArtworkBackground: View {
             palette = nil
             return
         }
-        let image = library.artwork(for: song) ?? await ArtworkService.shared.loadArtwork(for: song)
+        var image = library.artwork(for: song)
+        if image == nil {
+            image = await ArtworkService.shared.loadArtwork(for: song)
+        }
         guard let image else {
             palette = nil
             return
