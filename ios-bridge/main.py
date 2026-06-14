@@ -678,6 +678,39 @@ async def _resolve_youtube_playlist_via_api(playlist_id: str, limit: int, api_ke
     return items
 
 
+async def _record_download_history(
+    user_id: str,
+    source: str,
+    source_id: str,
+    title: str,
+    artist: str,
+    thumbnail_url: str,
+    duration_seconds: int,
+    format: str,
+) -> None:
+    """Upserts a row in ios_download_history for (user_id, source, source_id),
+    bumping download_count and last_downloaded_at on repeat downloads."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_download_history
+                    (id, user_id, source, source_id, title, artist, thumbnail_url, duration_seconds, format)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    title = VALUES(title),
+                    artist = VALUES(artist),
+                    thumbnail_url = VALUES(thumbnail_url),
+                    duration_seconds = VALUES(duration_seconds),
+                    format = VALUES(format),
+                    download_count = download_count + 1,
+                    last_downloaded_at = CURRENT_TIMESTAMP
+                """,
+                (str(uuid.uuid4()), user_id, source, source_id, title, artist, thumbnail_url, duration_seconds, format),
+            )
+
+
 async def _youtube_api_key_for_user(user_id: str) -> str:
     """Returns the user's personal YouTube Data API key if they've set one,
     otherwise falls back to the server-wide YOUTUBE_API_KEY env var."""
@@ -1268,6 +1301,9 @@ async def download_track(
     url: Optional[str] = Query(None, description="Full URL (required for soundcloud)"),
     format: str = Query("m4a", description="Audio format: mp3, m4a, flac, opus, best"),
     title: Optional[str] = Query(None, description="Safe filename hint (no extension)"),
+    artist: Optional[str] = Query(None, description="Artist name, recorded in download history"),
+    thumbnail: Optional[str] = Query(None, description="Thumbnail URL, recorded in download history"),
+    duration: Optional[int] = Query(None, description="Duration in seconds, recorded in download history"),
     existing_ids: Optional[str] = Query(
         None,
         description="Comma-separated 'source:id' manifest of tracks the client already "
@@ -1424,6 +1460,28 @@ async def download_track(
     except (asyncio.TimeoutError, Exception) as exc:
         logger.warning("LUMISOUND_ID tagging error for %s: %s", output_file, exc)
         tagged_file.unlink(missing_ok=True)
+
+    # Record this download in the user's history (best-effort — an account
+    # token is optional, and history-tracking failures shouldn't block the
+    # download itself). Powers "My Library" search, "Previously downloaded"
+    # restore, and download stats.
+    account_token = request.headers.get("X-Account-Token", "")
+    if account_token:
+        payload = decode_token(account_token)
+        if payload and payload.get("sub"):
+            try:
+                await _record_download_history(
+                    user_id=payload["sub"],
+                    source=source,
+                    source_id=id,
+                    title=title or id,
+                    artist=artist or "",
+                    thumbnail_url=thumbnail or "",
+                    duration_seconds=duration or 0,
+                    format=actual_ext,
+                )
+            except Exception:
+                logger.exception("Failed to record download history for user %s", payload["sub"])
 
     content_type_map = {
         "mp3":  "audio/mpeg",
@@ -3749,6 +3807,62 @@ def _user_music_dir(user_id: str) -> Optional[pathlib.Path]:
     if root is None:
         return None
     return root / user_id
+
+
+@app.get("/user/download-history")
+async def get_download_history(
+    search: str = Query("", description="Filter by title/artist"),
+    limit: int = Query(200, ge=1, le=1000),
+    user: dict = Depends(get_current_user),
+):
+    """Lists tracks the authenticated user has ever downloaded via /api/download,
+    most-recently-downloaded first. Used for "My Library" search (finds tracks
+    even if no longer present on-device) and "previously downloaded" restore."""
+    user_id = user["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if search:
+                await cur.execute(
+                    """
+                    SELECT source, source_id, title, artist, thumbnail_url, duration_seconds,
+                           format, download_count, last_downloaded_at
+                    FROM ios_download_history
+                    WHERE user_id = %s AND (title LIKE %s OR artist LIKE %s)
+                    ORDER BY last_downloaded_at DESC
+                    LIMIT %s
+                    """,
+                    (user_id, f"%{search}%", f"%{search}%", limit),
+                )
+            else:
+                await cur.execute(
+                    """
+                    SELECT source, source_id, title, artist, thumbnail_url, duration_seconds,
+                           format, download_count, last_downloaded_at
+                    FROM ios_download_history
+                    WHERE user_id = %s
+                    ORDER BY last_downloaded_at DESC
+                    LIMIT %s
+                    """,
+                    (user_id, limit),
+                )
+            rows = await cur.fetchall()
+
+    tracks = [
+        {
+            "source": r[0],
+            "id": r[1],
+            "title": r[2],
+            "artist": r[3] or "",
+            "thumbnail_url": r[4] or "",
+            "duration_seconds": r[5] or 0,
+            "format": r[6],
+            "download_count": r[7],
+            "last_downloaded_at": r[8].isoformat() if r[8] else None,
+        }
+        for r in rows
+    ]
+    return {"tracks": tracks, "total": len(tracks)}
 
 
 @app.get("/user/music")

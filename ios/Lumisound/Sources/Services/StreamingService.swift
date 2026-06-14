@@ -62,6 +62,51 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - DownloadHistoryTrack  (server-side record of past /api/download calls)
+
+/// A track this account has downloaded before, as recorded server-side by
+/// `/api/download` and returned by `/user/download-history`. Used to surface
+/// "My Library" search results for tracks the user has ever downloaded (even
+/// if no longer present on this device) and to power a "previously
+/// downloaded" restore list.
+struct DownloadHistoryTrack: Identifiable, Codable, Hashable {
+    let source: String
+    let id: String
+    let title: String
+    let artist: String
+    let thumbnailURL: String
+    let durationSeconds: Int
+    let format: String
+    let downloadCount: Int
+    let lastDownloadedAt: String?
+
+    var sourceTrackID: String { "\(source):\(id)" }
+
+    /// Converts to a `StreamTrack` so it can be downloaded/played via the
+    /// same pipeline as search results.
+    var asStreamTrack: StreamTrack {
+        let youtubeURL = source == "youtube" ? "https://youtube.com/watch?v=\(id)" : ""
+        return StreamTrack(
+            id: id,
+            title: title,
+            artist: artist,
+            durationSeconds: durationSeconds,
+            thumbnailURL: thumbnailURL,
+            source: source,
+            youtubeURL: youtubeURL
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case source, id, title, artist
+        case thumbnailURL = "thumbnail_url"
+        case durationSeconds = "duration_seconds"
+        case format
+        case downloadCount = "download_count"
+        case lastDownloadedAt = "last_downloaded_at"
+    }
+}
+
 // MARK: - TrackMetadata  (client-provided metadata for upload)
 
 struct TrackMetadata {
@@ -234,6 +279,8 @@ final class StreamingService: ObservableObject {
 
     @Published var userMusicTracks: [UserMusicTrack] = []
     @Published var isLoadingUserMusic = false
+    @Published var downloadHistory: [DownloadHistoryTrack] = []
+    @Published var isLoadingDownloadHistory = false
     @Published var isUploadingUserMusic = false
     @Published var uploadProgress: Double = 0
 
@@ -799,10 +846,13 @@ final class StreamingService: ObservableObject {
 
         // Hit the /api/download endpoint which runs yt-dlp with metadata embedding.
         var queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "id",     value: track.id),
-            URLQueryItem(name: "source", value: track.source),
-            URLQueryItem(name: "format", value: fmt),
-            URLQueryItem(name: "title",  value: safeName),
+            URLQueryItem(name: "id",       value: track.id),
+            URLQueryItem(name: "source",   value: track.source),
+            URLQueryItem(name: "format",   value: fmt),
+            URLQueryItem(name: "title",    value: safeName),
+            URLQueryItem(name: "artist",   value: track.artist),
+            URLQueryItem(name: "thumbnail", value: track.thumbnailURL),
+            URLQueryItem(name: "duration", value: String(track.durationSeconds)),
         ]
         if track.source == "soundcloud" {
             queryItems.append(URLQueryItem(name: "url", value: track.youtubeURL))
@@ -821,8 +871,13 @@ final class StreamingService: ObservableObject {
         components.path = "/api/download"
         components.queryItems = queryItems
 
-        guard let request = makeRequest(components.string ?? "/api/download") else {
+        guard var request = makeRequest(components.string ?? "/api/download") else {
             throw StreamingError.invalidURL
+        }
+        // Lets the bridge record this download in the account's server-side
+        // download history (My Library search, previously-downloaded restore).
+        if let accountToken = AccountService.shared?.token {
+            request.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
         }
 
         // Big playlists hammer the bridge's yt-dlp pipeline hard enough that some
@@ -1090,6 +1145,45 @@ final class StreamingService: ObservableObject {
         } catch {
             appError("fetchUserMusic: \(error.localizedDescription)", category: "network")
             errorMessage = "Failed to load your library: \(error.localizedDescription)"
+        }
+    }
+
+    /// Fetches the tracks this account has downloaded before (server-side
+    /// history), optionally filtered by `search`. Used by "My Library" search
+    /// to surface tracks the user has ever had — even ones no longer present
+    /// on this device — and by the "previously downloaded" restore list.
+    func fetchDownloadHistory(token: String, search: String = "") async {
+        appLog("fetchDownloadHistory: search=\"\(search)\"", category: "network")
+        isLoadingDownloadHistory = true
+        defer { isLoadingDownloadHistory = false }
+
+        var components = URLComponents()
+        components.path = "/user/download-history"
+        components.queryItems = [URLQueryItem(name: "limit", value: "200")]
+        if !search.isEmpty {
+            components.queryItems?.append(URLQueryItem(name: "search", value: search))
+        }
+
+        guard var request = makeRequest(components.string ?? "/user/download-history") else {
+            return
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse, !(200..<300).contains(httpResponse.statusCode) {
+                appWarn("fetchDownloadHistory: HTTP \(httpResponse.statusCode)", category: "network")
+                return
+            }
+            struct Response: Decodable {
+                let tracks: [DownloadHistoryTrack]
+                let total: Int
+            }
+            let decoded = try JSONDecoder().decode(Response.self, from: data)
+            downloadHistory = decoded.tracks
+            appLog("fetchDownloadHistory: \(decoded.tracks.count) tracks", category: "network")
+        } catch {
+            appError("fetchDownloadHistory: \(error.localizedDescription)", category: "network")
         }
     }
 

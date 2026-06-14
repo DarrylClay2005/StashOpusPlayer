@@ -483,3 +483,27 @@ ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS earned_badges_json MEDIUM
 ALTER TABLE ios_artist_subscriptions ADD COLUMN IF NOT EXISTS channel_id VARCHAR(64) NULL;
 ALTER TABLE ios_artist_subscriptions ADD COLUMN IF NOT EXISTS channel_thumbnail TEXT NULL;
 ALTER TABLE ios_scrobble_links ADD COLUMN IF NOT EXISTS librefm_username VARCHAR(255) NULL;
+
+-- Records every track a user has successfully downloaded via /api/download
+-- (regardless of whether they later delete/lose the local file). Powers:
+--   - "My Library" search (find tracks the user has ever had, even if the
+--     on-device library doesn't currently have them)
+--   - "Previously downloaded" restore list after reinstall/corruption-delete
+--   - Listening/download stats (most-downloaded artists, totals, etc.)
+CREATE TABLE IF NOT EXISTS ios_download_history (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    source VARCHAR(20) NOT NULL,
+    source_id VARCHAR(255) NOT NULL,
+    title TEXT NOT NULL,
+    artist TEXT,
+    thumbnail_url TEXT,
+    duration_seconds INT DEFAULT 0,
+    format VARCHAR(10) DEFAULT 'm4a',
+    download_count INT DEFAULT 1,
+    first_downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY user_track (user_id, source, source_id),
+    INDEX idx_user_history (user_id, last_downloaded_at),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);

@@ -34,7 +34,7 @@ services:
       - USER_MUSIC_DIR=${USER_MUSIC_DIR:-/usermusic}
     volumes:
       - ./cache/yt-dlp:/app/.cache/yt-dlp
-      - ./cookies.txt:/app/cookies.txt:ro
+      - ./cookies.txt:/app/cookies.txt
       - /mnt/Seagate-MariaDB/lumisound-user-music:/usermusic
       # Optional: server-wide shared music directory (read-only)
       # - /path/to/your/music:/music:ro
