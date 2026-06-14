@@ -706,7 +706,7 @@ final class StreamingService: ObservableObject {
     func downloadToLibrary(track: StreamTrack) async throws -> URL {
         appLog("Download started: \"\(track.title)\" [fmt: \(preferredFormat)]", category: "network")
         let fmt = preferredFormat
-        let ext = fileExtension(for: fmt)
+        let requestedExt = fileExtension(for: fmt)
 
         let importDir = downloadDirectory
         do {
@@ -722,11 +722,14 @@ final class StreamingService: ObservableObject {
                 .replacingOccurrences(of: ":", with: "-")
                 .prefix(100)
         )
-        let destURL = importDir.appendingPathComponent("\(safeName).\(ext)")
 
-        if FileManager.default.fileExists(atPath: destURL.path) {
-            appLog("downloadToLibrary: already exists, skipping \(destURL.lastPathComponent)", category: "network")
-            return destURL
+        // Check for an existing download under the requested extension before hitting
+        // the network — the actual extension is only known after the response arrives
+        // (see below), so this is just the common-case fast path.
+        let provisionalDestURL = importDir.appendingPathComponent("\(safeName).\(requestedExt)")
+        if FileManager.default.fileExists(atPath: provisionalDestURL.path) {
+            appLog("downloadToLibrary: already exists, skipping \(provisionalDestURL.lastPathComponent)", category: "network")
+            return provisionalDestURL
         }
 
         // Hit the /api/download endpoint which runs yt-dlp with metadata embedding.
@@ -782,12 +785,34 @@ final class StreamingService: ObservableObject {
             throw StreamingError.incompleteDownload
         }
 
+        // The bridge can fall back to a different container than requested (e.g. yt-dlp
+        // has no native m4a stream for this video and serves webm/opus instead while
+        // `format=m4a` was requested) — `_download_format_args` on the bridge already
+        // reflects this in the `Content-Type` header. Saving such a file with a `.m4a`
+        // extension makes AVAudioFile misparse it (it picks a decoder based on the file
+        // extension): playback's timer keeps advancing from the engine's render clock
+        // while no audio is actually decoded, which is the "silently lands ~1 minute in"
+        // bug. Trust the response's actual content type over the requested format.
+        let actualExt = extensionForContentType(
+            (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")
+        ) ?? requestedExt
+        let destURL = importDir.appendingPathComponent("\(safeName).\(actualExt)")
+
+        if FileManager.default.fileExists(atPath: destURL.path) {
+            try? FileManager.default.removeItem(at: downloadedURL)
+            appLog("downloadToLibrary: already exists, skipping \(destURL.lastPathComponent)", category: "network")
+            return destURL
+        }
+
         try? FileManager.default.removeItem(at: destURL)
         do {
             try FileManager.default.moveItem(at: downloadedURL, to: destURL)
         } catch {
             appError("downloadToLibrary: move failed for \"\(track.title)\": \(error)", category: "network")
             throw error
+        }
+        if actualExt != requestedExt {
+            appLog("downloadToLibrary: bridge returned .\(actualExt) instead of requested .\(requestedExt) for \"\(track.title)\" — saved with correct extension", category: "network")
         }
         appLog("Download complete: \(destURL.lastPathComponent)", category: "network")
 
@@ -808,6 +833,27 @@ final class StreamingService: ObservableObject {
         case "opus": return "opus"
         case "wav":  return "wav"
         default:     return "m4a"   // m4a and best both produce m4a
+        }
+    }
+
+    /// Maps the `/api/download` response's `Content-Type` (set by the bridge's
+    /// `content_type_map` from yt-dlp's *actual* output container, which can differ
+    /// from the requested `format` when that container isn't available for a given
+    /// video) back to a file extension. Returns `nil` for missing/unrecognized
+    /// content types so the caller can fall back to the requested format's extension.
+    private func extensionForContentType(_ contentType: String?) -> String? {
+        guard let contentType else { return nil }
+        // Strip any "; charset=..." parameters before matching.
+        let base = contentType.split(separator: ";").first.map(String.init)?
+            .trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        switch base {
+        case "audio/mpeg":      return "mp3"
+        case "audio/mp4":       return "m4a"
+        case "audio/flac":      return "flac"
+        case "audio/ogg":       return "opus"
+        case "audio/wav", "audio/x-wav", "audio/wave": return "wav"
+        case "audio/webm":      return "webm"
+        default:                return nil
         }
     }
 

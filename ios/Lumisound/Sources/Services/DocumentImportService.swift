@@ -58,7 +58,8 @@ enum DocumentImportError: LocalizedError {
 struct DocumentImportService {
     static let supportedExtensions: Set<String> = [
         "mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "mp4", "opus",
-        "m4v", "mov"  // video containers with audio tracks
+        "m4v", "mov",  // video containers with audio tracks
+        "webm", "ogg"  // yt-dlp can fall back to these containers for /api/download
     ]
     private var supportedExtensions: Set<String> { Self.supportedExtensions }
 

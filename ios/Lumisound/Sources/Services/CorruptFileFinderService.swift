@@ -77,7 +77,7 @@ final class CorruptFileFinderService: ObservableObject {
 
     private static let audioExtensions: Set<String> = [
         "mp3", "m4a", "aac", "flac", "wav", "aiff", "aif",
-        "ogg", "opus", "wma", "caf", "alac", "mp4"
+        "ogg", "opus", "wma", "caf", "alac", "mp4", "webm"
     ]
 
     nonisolated static func scanDirectory(_ directory: URL) -> [CorruptFileEntry] {
