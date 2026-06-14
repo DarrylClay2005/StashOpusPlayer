@@ -13,6 +13,8 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
     case spectrumWaveform
     case cassetteTape
     case neonGlow
+    case auraGlow
+    case tiltCard
 
     var id: String { rawValue }
 
@@ -28,6 +30,8 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .spectrumWaveform: return "Spectrum"
         case .cassetteTape:     return "Cassette"
         case .neonGlow:         return "Neon Glow"
+        case .auraGlow:         return "Aura Glow"
+        case .tiltCard:         return "Tilt Card"
         }
     }
 
@@ -43,6 +47,8 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .spectrumWaveform: return "waveform.path.ecg"
         case .cassetteTape:     return "recordingtape"
         case .neonGlow:         return "sparkles"
+        case .auraGlow:         return "circle.hexagongrid.fill"
+        case .tiltCard:         return "rotate.3d"
         }
     }
 }

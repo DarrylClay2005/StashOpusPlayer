@@ -66,7 +66,17 @@ struct AudioSettings: Codable, Equatable {
     /// Upper bound for `volume`. Values above 1.0 (100%) drive the signal
     /// chain's gain stages hotter than unity — the output limiter in
     /// `AudioPlayerManager` prevents this from clipping.
-    static let maxVolume: Float = 2.0
+    ///
+    /// `AVAudioMixerNode.outputVolume` and `AVAudioPlayerNode.volume` are both
+    /// hard-clamped to `0...1` by AVFoundation, so any boost above unity is
+    /// realised separately via `AVAudioUnitEQ.globalGain` (in dB). `4.0` here
+    /// corresponds to `20*log10(4) ≈ +12 dB` of boost headroom — the widest
+    /// range the slider exposes.
+    static let maxVolume: Float = 4.0
+
+    /// Maximum boost, in dB, applied via `AVAudioUnitEQ.globalGain` when
+    /// `volume` exceeds `1.0`. Matches `20*log10(maxVolume)`.
+    static let maxBoostDB: Float = 12.0
 
     var volume: Float = 1.0
     var speed: Float = 1.0

@@ -15,6 +15,9 @@ struct LaunchView: View {
     @State private var logoOpacity: Double = 0
     @State private var contentOpacity: Double = 0
 
+    // Gentle breathing pulse on the app icon while the launch screen is visible.
+    @State private var logoBreathing = false
+
     var body: some View {
         ZStack {
             AppTheme.background.ignoresSafeArea()
@@ -29,7 +32,7 @@ struct LaunchView: View {
                     .frame(width: 110, height: 110)
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .shadow(color: AppTheme.dynamicAccent.opacity(0.5), radius: 24, x: 0, y: 8)
-                    .scaleEffect(logoScale)
+                    .scaleEffect(logoScale * (logoBreathing ? 1.03 : 1.0))
                     .opacity(logoOpacity)
 
                 if account.isLoggedIn, let user = account.currentUser {
@@ -198,6 +201,14 @@ struct LaunchView: View {
             withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
                 logoScale = 1.0
                 logoOpacity = 1.0
+            }
+            // Start a subtle breathing pulse on the icon once the entrance
+            // spring has settled, for as long as the launch screen is up.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                    logoBreathing = true
+                }
             }
             Task { @MainActor in
                 // Was a flat 300ms delay regardless of whether the account/avatar

@@ -43,6 +43,10 @@ struct PlaylistsView: View {
                     for playlist in targets {
                         library.deletePlaylist(playlist)
                     }
+                    if let name = targets.first?.name {
+                        let suffix = targets.count > 1 ? " and \(targets.count - 1) more" : ""
+                        ToastCenter.shared.show("Deleted \"\(name)\"\(suffix)", category: .info, icon: "trash")
+                    }
                 }
 
                 ForEach(library.playlistFolders, id: \.self) { folder in
@@ -55,6 +59,10 @@ struct PlaylistsView: View {
                             let targets = indexSet.map { folderPlaylists[$0] }
                             for playlist in targets {
                                 library.deletePlaylist(playlist)
+                            }
+                            if let name = targets.first?.name {
+                                let suffix = targets.count > 1 ? " and \(targets.count - 1) more" : ""
+                                ToastCenter.shared.show("Deleted \"\(name)\"\(suffix)", category: .info, icon: "trash")
                             }
                         }
                     } header: {
@@ -85,6 +93,7 @@ struct PlaylistsView: View {
                 onCreate: { name in
                     library.createPlaylist(name: name)
                     showingCreateSheet = false
+                    ToastCenter.shared.show("Playlist \"\(name)\" created", category: .success, icon: "music.note.list")
                 },
                 onCancel: {
                     showingCreateSheet = false
@@ -99,6 +108,7 @@ struct PlaylistsView: View {
                 let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
                     library.renamePlaylist(playlist, to: trimmed)
+                    ToastCenter.shared.show("Renamed to \"\(trimmed)\"", category: .success, icon: "pencil")
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -126,6 +136,7 @@ struct PlaylistsView: View {
 
             Button(role: .destructive) {
                 library.deletePlaylist(playlist)
+                ToastCenter.shared.show("Deleted \"\(playlist.name)\"", category: .info, icon: "trash")
             } label: {
                 Label("Delete", systemImage: "trash")
             }

@@ -20,6 +20,8 @@ final class CorruptFileFinderService: ObservableObject {
         return ts > 0 ? Date(timeIntervalSince1970: ts) : nil
     }()
 
+    private var periodicTimer: Timer?
+
     // MARK: - Scan
 
     /// Scans all audio files inside `directory` for corruption.
@@ -57,16 +59,31 @@ final class CorruptFileFinderService: ObservableObject {
         ToastCenter.shared.show("Deleted \(toDelete.count) corrupt \(fileWord)", category: .info, icon: "trash")
     }
 
-    // MARK: - Daily Auto-Check
+    // MARK: - Periodic Auto-Check
 
-    /// Call once on app launch. Runs a scan of the app's Documents directory
-    /// if 24 hours or more have elapsed since the last scan.
-    func runDailyCheckIfNeeded() {
-        let lastTS = UserDefaults.standard.double(forKey: "corruptFinder_lastScanTimestamp")
-        let lastDate = lastTS > 0 ? Date(timeIntervalSince1970: lastTS) : .distantPast
-        let secondsPerDay: TimeInterval = 86_400
-        guard Date().timeIntervalSince(lastDate) >= secondsPerDay else { return }
+    /// Call once on app launch. Runs an immediate scan of the app's Documents
+    /// directory, then re-scans automatically every 5 minutes while the app
+    /// process is alive — for every user, no opt-in required.
+    func startPeriodicScanning() {
+        guard periodicTimer == nil else { return }
 
+        scanDocumentsDirectory()
+
+        let interval: TimeInterval = 5 * 60
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.scanDocumentsDirectory() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        periodicTimer = timer
+    }
+
+    /// Stops the periodic scan timer started by `startPeriodicScanning()`.
+    func stopPeriodicScanning() {
+        periodicTimer?.invalidate()
+        periodicTimer = nil
+    }
+
+    private func scanDocumentsDirectory() {
         guard let docs = FileManager.default.urls(
             for: .documentDirectory,
             in: .userDomainMask

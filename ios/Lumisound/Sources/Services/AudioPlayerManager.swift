@@ -105,7 +105,7 @@ final class AudioPlayerManager: ObservableObject {
     /// settings, not a new user edit, and must not overwrite the saved values.
     private var isSwitchingTrack = false
 
-    /// Notifies observers (used by `StashOpusPlayerApp` to push to the backend)
+    /// Notifies observers (used by `LumisoundApp` to push to the backend)
     /// whenever the per-track settings map changes.
     var onTrackAudioSettingsChanged: (() -> Void)?
 
@@ -876,9 +876,10 @@ final class AudioPlayerManager: ObservableObject {
     private func resetReplayGainForNewTrack() {
         recentLoadFailureTimestamps.removeAll()
         replayGainLinearGain = 1.0
-        if audioSettings.replayGainEnabled {
-            crossfadeMixer.outputVolume = min(audioSettings.volume, AudioSettings.maxVolume)
-        }
+        // Re-apply the master volume/boost (and reset ReplayGain's contribution
+        // to neutral) so a track change can't leave the previous track's
+        // analysed ReplayGain — or a stale boost level — applied to the new one.
+        applyOutputGain()
     }
 
     /// Core scheduler — loads the audio file, seeks to `startTime`, and arms the completion handler
@@ -1008,8 +1009,10 @@ final class AudioPlayerManager: ObservableObject {
                             guard let self else { return }
                             let linear = pow(10.0, gain / 20.0)
                             self.replayGainLinearGain = linear
-                            // Allow a modest boost above 1.0 when normalising a quiet track.
-                            self.crossfadeMixer.outputVolume = min(linear * self.audioSettings.volume, AudioSettings.maxVolume)
+                            // Re-derive the output gain split (mixer attenuation +
+                            // EQ globalGain boost) now that ReplayGain's contribution
+                            // is known.
+                            self.applyOutputGain()
                         }
                     }
                 }
@@ -1115,7 +1118,10 @@ final class AudioPlayerManager: ObservableObject {
                             guard let self else { return }
                             let linear = pow(10.0, gain / 20.0)
                             self.replayGainLinearGain = linear
-                            self.crossfadeMixer.outputVolume = min(linear * self.audioSettings.volume, AudioSettings.maxVolume)
+                            // Re-derive the output gain split (mixer attenuation +
+                            // EQ globalGain boost) now that ReplayGain's contribution
+                            // is known.
+                            self.applyOutputGain()
                         }
                     }
                 }
@@ -2104,7 +2110,13 @@ final class AudioPlayerManager: ObservableObject {
         // Re-apply `.rate` directly so dragging the Speed slider mid-playback
         // takes effect immediately instead of silently doing nothing.
         if isUsingOpusPlayer {
-            opusPlayer?.volume = audioSettings.volume
+            // AVPlayer.volume is hard-clamped to 0...1 by AVFoundation and this
+            // path bypasses the AVAudioEngine graph entirely (no `equalizer`/
+            // `limiter` available here to realise a boost above unity). Clamp
+            // explicitly so values above 1.0 don't silently no-op — boost beyond
+            // 100% simply isn't available for opus/webm/ogg streams played via
+            // this fallback.
+            opusPlayer?.volume = min(audioSettings.volume, 1.0)
             if isPlaying { opusPlayer?.rate = Float(audioSettings.speed) }
             return
         }
@@ -2153,20 +2165,59 @@ final class AudioPlayerManager: ObservableObject {
             }
         }
 
-        // ReplayGain: re-combine the current track's analysed gain (replayGainLinearGain,
-        // computed asynchronously in scheduleCurrent/transcodeAndSchedule from embedded
-        // REPLAYGAIN_TRACK_GAIN metadata or RMS analysis) with the live volume. Using the
-        // SAME formula here as the analysis callback — rather than a separate flat-cap
-        // value — means a mid-track volume/EQ/speed tweak (which re-invokes this via the
-        // `audioSettings` didSet) refreshes the output level without clobbering the
-        // per-track gain the analysis already computed.
-        if audioSettings.replayGainEnabled {
-            crossfadeMixer.outputVolume = min(replayGainLinearGain * audioSettings.volume, AudioSettings.maxVolume)
-        } else {
-            crossfadeMixer.outputVolume = 1.0
-        }
+        // ReplayGain + master volume/boost: re-combine the current track's analysed
+        // gain (replayGainLinearGain, computed asynchronously in scheduleCurrent/
+        // transcodeAndSchedule from embedded REPLAYGAIN_TRACK_GAIN metadata or RMS
+        // analysis) with the live volume. Using the SAME formula here as the analysis
+        // callback — rather than a separate flat-cap value — means a mid-track
+        // volume/EQ/speed tweak (which re-invokes this via the `audioSettings` didSet)
+        // refreshes the output level without clobbering the per-track gain the
+        // analysis already computed.
+        applyOutputGain()
 
         // Do NOT call updateNowPlaying() here — this runs on every EQ slider drag.
+    }
+
+    /// Applies the ReplayGain correction (if enabled) and any volume boost above
+    /// 100% to the output stage. The 0...100% portion of `audioSettings.volume`
+    /// is applied separately, directly to the player node(s) — see
+    /// `applyAudioSettings()` and the crossfade/tremolo helpers — since
+    /// `AVAudioPlayerNode.volume` already handles that range correctly.
+    ///
+    /// `AVAudioMixerNode.outputVolume` is hard-clamped by AVFoundation to `0...1`,
+    /// so it (and the player nodes) can only ever *attenuate* — neither can express
+    /// the boost above unity that `audioSettings.volume` allows (up to
+    /// `AudioSettings.maxVolume`, i.e. up to +12 dB), nor a ReplayGain correction
+    /// greater than 1.0x for a quiet track. To realise gain beyond what those
+    /// attenuation-only stages contribute, the *remaining* portion of the desired
+    /// total gain is applied as positive dB on `equalizer.globalGain`, which is NOT
+    /// clamped to unity. The brick-wall `limiter` further down the chain (see
+    /// `configureLimiter`) catches any peaks this boost would otherwise clip.
+    private func applyOutputGain() {
+        let rgGain: Float = audioSettings.replayGainEnabled ? replayGainLinearGain : 1.0
+        let userVol = audioSettings.volume
+
+        // Desired total linear gain across the whole chain.
+        let totalLinear = max(0, rgGain * userVol)
+
+        // What the player-node volume (set in applyAudioSettings/crossfade/tremolo
+        // to `min(userVol, 1.0)`) and the mixer's outputVolume can each contribute
+        // on their own, attenuation-only (0...1).
+        let nodeContribution = min(max(userVol, 0), 1.0)
+        let mixerContribution = min(max(rgGain, 0), 1.0)
+        crossfadeMixer.outputVolume = mixerContribution
+
+        // Whatever's left over — i.e. gain the node+mixer pair can't express
+        // because both are capped at 1.0x — is made up as positive dB via the
+        // EQ's global gain.
+        let attenuationApplied = nodeContribution * mixerContribution
+        if totalLinear > attenuationApplied, attenuationApplied > 0 {
+            let boostLinear = totalLinear / attenuationApplied
+            let boostDB = 20 * log10(boostLinear)
+            equalizer.globalGain = min(max(boostDB, 0), AudioSettings.maxBoostDB)
+        } else {
+            equalizer.globalGain = 0
+        }
     }
 
     // MARK: - Position Tracking

@@ -249,6 +249,18 @@ final class StreamingService: ObservableObject {
     @Published var isLoadingGallery = false
     @Published var isUploadingGalleryImage = false
 
+    // MARK: Ambient shared reference
+    //
+    // Mirrors `AccountService.shared` — gives `BackgroundService` (which has no
+    // direct SwiftUI environment access to this type at the point gallery images
+    // are mutated) a way to trigger cloud gallery upload/restore automatically,
+    // for all logged-in users, with no opt-in UI.
+    static weak var shared: StreamingService?
+
+    init() {
+        Self.shared = self
+    }
+
     // MARK: Persisted settings
 
     var bridgeURL: String {
@@ -464,10 +476,28 @@ final class StreamingService: ObservableObject {
 
     // MARK: - Playlist resolution
 
+    /// Builds the comma-separated "source:id" manifest of tracks the user
+    /// already has, from `songs` (typically `LibraryManager.allSongs`). Sent
+    /// to `/api/resolve` and `/api/download` so the bridge can skip
+    /// re-downloading/re-listing tracks the client already has. Only songs
+    /// with a non-empty `sourceTrackID` (the `LUMISOUND_ID`-tagged downloads)
+    /// can be matched this way — local-only imports have no such ID and are
+    /// simply omitted from the manifest.
+    func existingTrackManifest(songs: [Song]) -> String {
+        songs.compactMap { song -> String? in
+            guard let id = song.sourceTrackID, !id.isEmpty else { return nil }
+            return id
+        }
+        .joined(separator: ",")
+    }
+
     /// Resolves a YouTube (or SoundCloud) playlist URL to a list of tracks via
     /// the bridge's `/api/resolve` endpoint. Results are published on `searchResults`
     /// and `isPlaylistResult` is set to `true` so the UI can show the playlist banner.
-    func resolvePlaylist(url: String) async {
+    /// `existingSongs` (typically `LibraryManager.allSongs`) is sent as a dedupe
+    /// manifest so tracks the user already has are excluded from the result —
+    /// pass `[]` to disable this (e.g. callers without library access).
+    func resolvePlaylist(url: String, existingSongs: [Song] = []) async {
         guard isConfigured else {
             errorMessage = "Streaming service is unavailable right now."
             return
@@ -484,6 +514,10 @@ final class StreamingService: ObservableObject {
             URLQueryItem(name: "url",   value: url),
             URLQueryItem(name: "limit", value: "1000"),
         ]
+        let manifest = existingTrackManifest(songs: existingSongs)
+        if !manifest.isEmpty {
+            components.queryItems?.append(URLQueryItem(name: "existing_ids", value: manifest))
+        }
 
         guard var request = makeRequest(components.string ?? "/api/resolve") else {
             errorMessage = "Invalid bridge URL."
@@ -705,15 +739,41 @@ final class StreamingService: ObservableObject {
 
     // MARK: - Download to Library
 
-    /// Downloads a stream track's audio permanently to `downloadDirectory` using the
-    /// `/api/download` endpoint (which embeds metadata and thumbnail into the file).
-    /// If the file already exists it is returned immediately without re-downloading.
-    func downloadToLibrary(track: StreamTrack) async throws -> URL {
+    /// Downloads a stream track's audio permanently to `downloadDirectory` (or
+    /// `destinationDir` if provided — used by folder-structure restore to place
+    /// redownloaded tracks back into their original watched-folder path) using
+    /// the `/api/download` endpoint (which embeds metadata and thumbnail into
+    /// the file). If the file already exists it is returned immediately without
+    /// re-downloading.
+    ///
+    /// `existingSongs` (typically `LibraryManager.allSongs`) enables pre-download
+    /// dedupe: if a song in `existingSongs` shares this track's `sourceTrackID`
+    /// ("\(track.source):\(track.id)") and its local file passes
+    /// `CorruptFileFinderService.isValidAudioFile(at:)`, the download is skipped
+    /// entirely and that song's existing file URL is returned. If the matching
+    /// local file is missing or corrupt, the download proceeds normally to
+    /// replace it. Pass `[]` (the default) to disable this check.
+    func downloadToLibrary(track: StreamTrack, destinationDir: URL? = nil, existingSongs: [Song] = []) async throws -> URL {
+        let sourceTrackID = "\(track.source):\(track.id)"
+
+        // Pre-download dedupe — skip entirely if we already have a valid copy
+        // of this exact source track (matched by sourceTrackID/LUMISOUND_ID).
+        if let match = existingSongs.first(where: { $0.sourceTrackID == sourceTrackID }),
+           let existingURL = match.url,
+           FileManager.default.fileExists(atPath: existingURL.path) {
+            if CorruptFileFinderService.isValidAudioFile(at: existingURL) {
+                appLog("downloadToLibrary: skipping \"\(track.title)\" — valid existing copy at \(existingURL.lastPathComponent)", category: "network")
+                return existingURL
+            } else {
+                appWarn("downloadToLibrary: existing copy of \"\(track.title)\" is corrupt — redownloading to replace it", category: "network")
+            }
+        }
+
         appLog("Download started: \"\(track.title)\" [fmt: \(preferredFormat)]", category: "network")
         let fmt = preferredFormat
         let requestedExt = fileExtension(for: fmt)
 
-        let importDir = downloadDirectory
+        let importDir = destinationDir ?? downloadDirectory
         do {
             try FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)
         } catch {
@@ -746,6 +806,15 @@ final class StreamingService: ObservableObject {
         ]
         if track.source == "soundcloud" {
             queryItems.append(URLQueryItem(name: "url", value: track.youtubeURL))
+        }
+        // Defense-in-depth: also tell the bridge what the client already has, so
+        // a stale/incomplete `existingSongs` snapshot still gets server-side dedupe.
+        // Exclude this track's own ID — if we got this far the pre-download check
+        // above either found no local copy or found a corrupt one that needs
+        // replacing, so the server must not skip *this* download.
+        let manifest = existingTrackManifest(songs: existingSongs.filter { $0.sourceTrackID != sourceTrackID })
+        if !manifest.isEmpty {
+            queryItems.append(URLQueryItem(name: "existing_ids", value: manifest))
         }
 
         var components = URLComponents()

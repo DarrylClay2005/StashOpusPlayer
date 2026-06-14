@@ -30,6 +30,19 @@ struct SyncData: Codable {
     var audioSettingsJSON: String?
     var trackAudioSettingsJSON: String?
     var themeColor: String?
+    var vinylDiscEnabled: Bool?
+    var showQueuePreview: Bool?
+    var songsPerRow: Int?
+    var albumsPerRow: Int?
+    var bgAnimation: String?
+    var bgOpacity: Double?
+    var preferredAudioFormat: String?
+    var downloadPath: String?
+    var carModeEnabled: Bool?
+    var libraryArtistsColumns: Int?
+    var nowPlayingArtworkStyle: String?
+    var nowPlayingSeekerStyle: String?
+    var earnedBadgesJSON: String?
 
     enum CodingKeys: String, CodingKey {
         case favorites
@@ -37,6 +50,54 @@ struct SyncData: Codable {
         case audioSettingsJSON      = "audio_settings_json"
         case trackAudioSettingsJSON = "track_audio_settings_json"
         case themeColor             = "theme_color"
+        case vinylDiscEnabled       = "vinyl_disc_enabled"
+        case showQueuePreview       = "show_queue_preview"
+        case songsPerRow            = "songs_per_row"
+        case albumsPerRow           = "albums_per_row"
+        case bgAnimation            = "bg_animation"
+        case bgOpacity              = "bg_opacity"
+        case preferredAudioFormat   = "preferred_audio_format"
+        case downloadPath           = "download_path"
+        case carModeEnabled         = "car_mode_enabled"
+        case libraryArtistsColumns  = "library_artists_columns"
+        case nowPlayingArtworkStyle = "now_playing_artwork_style"
+        case nowPlayingSeekerStyle  = "now_playing_seeker_style"
+        case earnedBadgesJSON       = "earned_badges_json"
+    }
+}
+
+// MARK: - Folder Structure Backup (item 3)
+
+/// One track inside a backed-up watched folder, as pushed to/pulled from
+/// `/user/folder-backups`. `sourceTrackID` (the `LUMISOUND_ID`-style identifier,
+/// e.g. "youtube:dQw4w9WgXcQ") is what makes a track auto-redownloadable on
+/// restore; tracks without one were local-only imports and can only have their
+/// folder recreated (empty) for the user to re-add manually.
+struct FolderBackupTrack: Codable, Hashable {
+    var filename: String
+    var title: String?
+    var artist: String?
+    var durationSeconds: Double?
+    var sourceTrackID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case filename
+        case title
+        case artist
+        case durationSeconds = "duration_seconds"
+        case sourceTrackID   = "source_track_id"
+    }
+}
+
+/// One watched/imported folder's backed-up structure: its path relative to the
+/// app's Documents directory, plus the tracks that lived inside it.
+struct FolderBackupEntry: Codable, Hashable {
+    var folderPath: String
+    var tracks: [FolderBackupTrack]
+
+    enum CodingKeys: String, CodingKey {
+        case folderPath = "folder_path"
+        case tracks
     }
 }
 
@@ -272,12 +333,16 @@ struct ScrobbleLinks: Decodable {
     let lastfmLinked: Bool
     let lastfmUsername: String?
     let listenbrainzLinked: Bool
+    let librefmLinked: Bool
+    let librefmUsername: String?
     let enabled: Bool
 
     enum CodingKeys: String, CodingKey {
         case lastfmLinked       = "lastfm_linked"
         case lastfmUsername     = "lastfm_username"
         case listenbrainzLinked = "listenbrainz_linked"
+        case librefmLinked      = "librefm_linked"
+        case librefmUsername    = "librefm_username"
         case enabled
     }
 }
@@ -290,14 +355,32 @@ struct ArtistSubscription: Decodable, Identifiable {
     let lastVideoId: String?
     let lastCheckedAt: String?
     let createdAt: String?
+    let channelId: String?
+    let channelThumbnail: String?
 
     enum CodingKeys: String, CodingKey {
         case id
-        case channelUrl     = "channel_url"
-        case channelName    = "channel_name"
-        case lastVideoId    = "last_video_id"
-        case lastCheckedAt  = "last_checked_at"
-        case createdAt      = "created_at"
+        case channelUrl        = "channel_url"
+        case channelName       = "channel_name"
+        case lastVideoId       = "last_video_id"
+        case lastCheckedAt     = "last_checked_at"
+        case createdAt         = "created_at"
+        case channelId         = "channel_id"
+        case channelThumbnail  = "channel_thumbnail"
+    }
+}
+
+/// Result from POST /youtube/resolve-channel — a real YouTube channel
+/// resolved from a URL/@handle/search term.
+struct ResolvedChannel: Decodable {
+    let channelId: String
+    let channelTitle: String
+    let channelThumbnail: String
+
+    enum CodingKeys: String, CodingKey {
+        case channelId        = "channel_id"
+        case channelTitle     = "channel_title"
+        case channelThumbnail = "channel_thumbnail"
     }
 }
 
@@ -752,12 +835,68 @@ final class AccountService: ObservableObject {
             return String(format: "#%02X%02X%02X", Int(r*255), Int(g*255), Int(b*255))
         }()
 
+        let defaults = UserDefaults.standard
+
+        // Visual/layout preferences — mirrored from ios_user_settings_expanded
+        // columns so they round-trip through the normal sync push/pull too.
+        // "Vinyl disc enabled" maps to the legacy `nowPlaying_showVinylDisc`
+        // bool if present (NowPlayingView migrates it to nowPlaying_artworkStyle
+        // on first read), otherwise derive it from the current artwork style.
+        let vinylDiscEnabled: Bool? = {
+            if let legacy = defaults.object(forKey: "nowPlaying_showVinylDisc") as? Bool {
+                return legacy
+            }
+            if let style = defaults.string(forKey: "nowPlaying_artworkStyle") {
+                return style == "vinylDisc"
+            }
+            return nil
+        }()
+        let showQueuePreview: Bool? = defaults.object(forKey: "nowPlaying_showQueuePreview") != nil
+            ? defaults.bool(forKey: "nowPlaying_showQueuePreview") : nil
+        let songsPerRow: Int? = defaults.object(forKey: "library_songs_columns") != nil
+            ? defaults.integer(forKey: "library_songs_columns") : nil
+        let albumsPerRow: Int? = defaults.object(forKey: "library_albums_columns") != nil
+            ? defaults.integer(forKey: "library_albums_columns") : nil
+        let bgAnimation = defaults.string(forKey: "bgService.animation")
+        let bgOpacity: Double? = defaults.object(forKey: "bgService.opacity") != nil
+            ? defaults.double(forKey: "bgService.opacity") : nil
+        let preferredAudioFormat = defaults.string(forKey: StreamingService.preferredFormatKey)
+        let downloadPath = defaults.string(forKey: StreamingService.downloadPathKey)
+
+        // New sync fields
+        let carModeEnabled: Bool? = defaults.object(forKey: "carModeEnabled") != nil
+            ? defaults.bool(forKey: "carModeEnabled") : nil
+        let libraryArtistsColumns: Int? = defaults.object(forKey: "library_artists_columns") != nil
+            ? defaults.integer(forKey: "library_artists_columns") : nil
+        let nowPlayingArtworkStyle = defaults.string(forKey: "nowPlaying_artworkStyle")
+        let nowPlayingSeekerStyle = defaults.string(forKey: "nowPlaying_seekerStyle")
+        let earnedBadgesJSON: String? = {
+            guard let data = defaults.data(forKey: "earnedBadges"),
+                  let decoded = try? JSONDecoder().decode(Set<String>.self, from: data),
+                  !decoded.isEmpty
+            else { return nil }
+            return (try? JSONEncoder().encode(decoded)).flatMap { String(data: $0, encoding: .utf8) }
+        }()
+
         let payload = SyncData(
             favorites: favorites,
             playlists: playlists,
             audioSettingsJSON: audioJSON,
             trackAudioSettingsJSON: trackAudioJSON,
-            themeColor: themeHex ?? "#EC4079"
+            themeColor: themeHex ?? "#EC4079",
+            vinylDiscEnabled: vinylDiscEnabled,
+            showQueuePreview: showQueuePreview,
+            songsPerRow: songsPerRow,
+            albumsPerRow: albumsPerRow,
+            bgAnimation: bgAnimation,
+            bgOpacity: bgOpacity,
+            preferredAudioFormat: preferredAudioFormat,
+            downloadPath: downloadPath,
+            carModeEnabled: carModeEnabled,
+            libraryArtistsColumns: libraryArtistsColumns,
+            nowPlayingArtworkStyle: nowPlayingArtworkStyle,
+            nowPlayingSeekerStyle: nowPlayingSeekerStyle,
+            earnedBadgesJSON: earnedBadgesJSON
         )
 
         do {
@@ -862,6 +1001,81 @@ final class AccountService: ObservableObject {
                     let g = CGFloat((rgb >> 8)  & 0xFF) / 255
                     let b = CGFloat( rgb        & 0xFF) / 255
                     AppTheme.saveAccentColor(Color(red: r, green: g, blue: b))
+                }
+            }
+
+            // Restore expanded visual/layout preferences and the new sync
+            // fields — same first-run-only guard as audio settings/theme above:
+            // only apply when the local UserDefaults key is unset, so a fresher
+            // local change is never clobbered by a stale server value.
+            let defaults = UserDefaults.standard
+
+            if defaults.object(forKey: "nowPlaying_showVinylDisc") == nil,
+               defaults.string(forKey: "nowPlaying_artworkStyle") == nil,
+               let vinylDiscEnabled = sync.vinylDiscEnabled {
+                defaults.set(vinylDiscEnabled, forKey: "nowPlaying_showVinylDisc")
+            }
+            if defaults.object(forKey: "nowPlaying_showQueuePreview") == nil,
+               let showQueuePreview = sync.showQueuePreview {
+                defaults.set(showQueuePreview, forKey: "nowPlaying_showQueuePreview")
+            }
+            if defaults.object(forKey: "library_songs_columns") == nil,
+               let songsPerRow = sync.songsPerRow {
+                defaults.set(songsPerRow, forKey: "library_songs_columns")
+            }
+            if defaults.object(forKey: "library_albums_columns") == nil,
+               let albumsPerRow = sync.albumsPerRow {
+                defaults.set(albumsPerRow, forKey: "library_albums_columns")
+            }
+            if defaults.string(forKey: "bgService.animation") == nil,
+               let bgAnimation = sync.bgAnimation {
+                defaults.set(bgAnimation, forKey: "bgService.animation")
+            }
+            if defaults.object(forKey: "bgService.opacity") == nil,
+               let bgOpacity = sync.bgOpacity {
+                defaults.set(bgOpacity, forKey: "bgService.opacity")
+            }
+            if defaults.string(forKey: StreamingService.preferredFormatKey) == nil,
+               let preferredAudioFormat = sync.preferredAudioFormat {
+                defaults.set(preferredAudioFormat, forKey: StreamingService.preferredFormatKey)
+            }
+            if defaults.string(forKey: StreamingService.downloadPathKey) == nil,
+               let downloadPath = sync.downloadPath {
+                defaults.set(downloadPath, forKey: StreamingService.downloadPathKey)
+            }
+            if defaults.object(forKey: "carModeEnabled") == nil,
+               let carModeEnabled = sync.carModeEnabled {
+                defaults.set(carModeEnabled, forKey: "carModeEnabled")
+            }
+            if defaults.object(forKey: "library_artists_columns") == nil,
+               let libraryArtistsColumns = sync.libraryArtistsColumns {
+                defaults.set(libraryArtistsColumns, forKey: "library_artists_columns")
+            }
+            if defaults.string(forKey: "nowPlaying_artworkStyle") == nil,
+               let nowPlayingArtworkStyle = sync.nowPlayingArtworkStyle {
+                defaults.set(nowPlayingArtworkStyle, forKey: "nowPlaying_artworkStyle")
+            }
+            if defaults.string(forKey: "nowPlaying_seekerStyle") == nil,
+               let nowPlayingSeekerStyle = sync.nowPlayingSeekerStyle {
+                defaults.set(nowPlayingSeekerStyle, forKey: "nowPlaying_seekerStyle")
+            }
+
+            // Earned badges: UNION merge with local regardless of whether local
+            // already has a value — badges should never be "lost" by syncing
+            // from a device that hasn't unlocked them all yet.
+            if let json = sync.earnedBadgesJSON,
+               let jsonData = json.data(using: .utf8),
+               let remoteBadges = try? JSONDecoder().decode(Set<String>.self, from: jsonData),
+               !remoteBadges.isEmpty {
+                var localBadges: Set<String> = []
+                if let stored = defaults.data(forKey: "earnedBadges"),
+                   let decoded = try? JSONDecoder().decode(Set<String>.self, from: stored) {
+                    localBadges = decoded
+                }
+                let merged = localBadges.union(remoteBadges)
+                if merged != localBadges,
+                   let encoded = try? JSONEncoder().encode(merged) {
+                    defaults.set(encoded, forKey: "earnedBadges")
                 }
             }
 
@@ -1118,6 +1332,38 @@ final class AccountService: ObservableObject {
         }
     }
 
+    /// Step 1 of the Libre.fm desktop auth flow — same protocol as Last.fm, different host.
+    func librefmRequestToken() async -> LastfmRequestToken? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/user/scrobble/librefm/request-token", method: "POST")
+            return try JSONDecoder().decode(LastfmRequestToken.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Step 2 — exchange an approved Libre.fm token for a session key. Returns the linked username on success.
+    func librefmLinkSession(token: String) async -> String? {
+        guard isLoggedIn else { return nil }
+        struct Body: Encodable { let token: String }
+        struct Response: Decodable { let librefm_username: String? }
+        do {
+            let data = try await makeRequest("/user/scrobble/librefm/link", method: "POST", body: Body(token: token))
+            return try JSONDecoder().decode(Response.self, from: data).librefm_username
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     // MARK: - Artist/Channel Subscriptions
 
     /// Lists the user's subscribed channels.
@@ -1163,6 +1409,38 @@ final class AccountService: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             return false
+        }
+    }
+
+    /// Resolves a YouTube channel URL/@handle/search term to a real channel
+    /// (id, title, thumbnail) via POST /youtube/resolve-channel.
+    func resolveYoutubeChannel(query: String) async -> ResolvedChannel? {
+        guard isLoggedIn else { return nil }
+        struct Body: Encodable { let query: String }
+        do {
+            let data = try await makeRequest("/youtube/resolve-channel", method: "POST", body: Body(query: query))
+            return try JSONDecoder().decode(ResolvedChannel.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Fetches recent uploads for a resolved channel (GET /youtube/channel-uploads).
+    func fetchChannelUploads(channelId: String, limit: Int = 10) async -> [StreamTrack] {
+        guard isLoggedIn else { return [] }
+        do {
+            let data = try await makeRequest("/youtube/channel-uploads?channel_id=\(channelId)&limit=\(limit)")
+            return try JSONDecoder().decode([StreamTrack].self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return []
+        } catch {
+            errorMessage = error.localizedDescription
+            return []
         }
     }
 
@@ -1325,6 +1603,30 @@ final class AccountService: ObservableObject {
         }
     }
 
+    /// Deletes all of this user's automatic sync backups from the server.
+    /// Does not affect the user's current favorites/playlists/settings —
+    /// only the snapshot history shown in Backup History.
+    func clearBackups() async {
+        guard isLoggedIn else { return }
+        appLog("Clearing all backups", category: "account")
+        isSyncing = true
+        errorMessage = nil
+        defer { isSyncing = false }
+
+        do {
+            _ = try await makeRequest("/user/backups", method: "DELETE")
+            backups = []
+            ToastCenter.shared.show("Cleared backup history", category: .info, icon: "trash")
+            appLog("Backups cleared", category: "account")
+        } catch let err as AccountError {
+            appError("Clear backups failed [\(err.statusCode)]: \(err.message)", category: "account")
+            errorMessage = err.message
+        } catch {
+            appError("Clear backups error: \(error.localizedDescription)", category: "account")
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// Restores a server-side backup, replacing this account's favorites/
     /// playlists/settings with the snapshot, then merges the restored data
     /// down to this device via the normal `pullSync` path.
@@ -1346,6 +1648,68 @@ final class AccountService: ObservableObject {
         } catch {
             appError("Backup restore error: \(error.localizedDescription)", category: "account")
             errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Folder structure backup (item 3)
+
+    /// Debounce task mirroring `schedulePush` — folder-structure pushes ride
+    /// along on the same 2-second debounce window as the main sync push, since
+    /// both are triggered by the same kinds of changes (library rescans/imports).
+    private var folderBackupDebounceTask: Task<Void, Never>?
+
+    /// Schedules a push of the watched-folder structure 2 seconds after the
+    /// last call. Called whenever watched folders or the library's imported
+    /// songs change (folder added/removed, rescan picks up new files, etc.).
+    func scheduleFolderBackupPush(folderService: MusicFolderService, library: LibraryManager) {
+        guard isLoggedIn else { return }
+        folderBackupDebounceTask?.cancel()
+        folderBackupDebounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard let self, !Task.isCancelled, self.isLoggedIn else { return }
+            await self.pushFolderBackups(folderService: folderService, library: library)
+        }
+    }
+
+    /// Pushes the current watched-folder structure (relative paths under
+    /// Documents + the tracks in each) to the server, replacing any previous
+    /// folder backup wholesale. Fire-and-forget — failures are logged only.
+    func pushFolderBackups(folderService: MusicFolderService, library: LibraryManager) async {
+        guard isLoggedIn else { return }
+        let entries = folderService.folderBackupEntries(songs: library.allSongs)
+        struct Body: Encodable {
+            let folders: [FolderBackupEntry]
+            enum CodingKeys: String, CodingKey { case folders }
+        }
+        do {
+            _ = try await makeRequest("/user/folder-backups", method: "PUT", body: Body(folders: entries))
+            appLog("pushFolderBackups: pushed \(entries.count) folder(s)", category: "account")
+        } catch let err as AccountError {
+            appWarn("pushFolderBackups failed [\(err.statusCode)]: \(err.message)", category: "account")
+        } catch {
+            appWarn("pushFolderBackups error: \(error.localizedDescription)", category: "account")
+        }
+    }
+
+    /// Fetches this account's backed-up folder structure, if any. Returns an
+    /// empty array if the user never pushed one (never used watched folders, or
+    /// hasn't synced since this feature shipped).
+    func fetchFolderBackups() async -> [FolderBackupEntry] {
+        guard isLoggedIn else { return [] }
+        struct Response: Decodable {
+            let folders: [FolderBackupEntry]
+            enum CodingKeys: String, CodingKey { case folders }
+        }
+        do {
+            let data = try await makeRequest("/user/folder-backups")
+            let decoded = try JSONDecoder().decode(Response.self, from: data)
+            return decoded.folders
+        } catch let err as AccountError {
+            appWarn("fetchFolderBackups failed [\(err.statusCode)]: \(err.message)", category: "account")
+            return []
+        } catch {
+            appWarn("fetchFolderBackups error: \(error.localizedDescription)", category: "account")
+            return []
         }
     }
 
@@ -1566,6 +1930,43 @@ final class AccountService: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             return false
+        }
+    }
+
+    /// Validates this account's stored YouTube Data API key with a minimal
+    /// server-side call. Returns "valid", "invalid", "quota_exceeded", or
+    /// "error" (network/other failure).
+    func validateYouTubeAPIKey() async -> String {
+        guard isLoggedIn else { return "error" }
+        struct Response: Decodable { let status: String }
+        do {
+            let data = try await makeRequest("/youtube/validate-key", method: "POST")
+            return try JSONDecoder().decode(Response.self, from: data).status
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return "error"
+        } catch {
+            errorMessage = error.localizedDescription
+            return "error"
+        }
+    }
+
+    /// Checks whether this account's stored YouTube Data API key shows signs
+    /// of having been leaked/abused (invalid, referrer-restricted, or
+    /// quota-exhausted shortly after setup).
+    func checkYouTubeKeyExposure() async -> (exposed: Bool, detail: String) {
+        guard isLoggedIn else { return (false, "") }
+        struct Response: Decodable { let exposed: Bool; let detail: String }
+        do {
+            let data = try await makeRequest("/youtube/key-exposure-check")
+            let decoded = try JSONDecoder().decode(Response.self, from: data)
+            return (decoded.exposed, decoded.detail)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return (false, "")
+        } catch {
+            errorMessage = error.localizedDescription
+            return (false, "")
         }
     }
 

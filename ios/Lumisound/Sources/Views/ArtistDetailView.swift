@@ -32,6 +32,15 @@ struct ArtistDetailView: View {
 
     var body: some View {
         List {
+            // Artist header — real profile picture, matching the look of
+            // AlbumDetailView's/LocalFolderDetailView's headers.
+            Section {
+                ArtistHeaderView(artist: artist, songCount: songs.count, albumCount: albums.count)
+            }
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets())
+            .listSectionSeparator(.hidden)
+
             if songs.isEmpty {
                 EmptyStateView(
                     icon: "person.crop.circle",
@@ -47,7 +56,9 @@ struct ArtistDetailView: View {
                 .listRowBackground(Color.clear)
                 .listSectionSeparator(.hidden)
 
-                // Albums and their songs
+                // Albums and their songs — uses the same SongRow component as
+                // the main Songs tab so rows look/behave identically (context
+                // menus, favorite/play targets, styling) everywhere.
                 ForEach(albums, id: \.self) { album in
                     Section {
                         ForEach(songs(inAlbum: album)) { song in
@@ -56,9 +67,7 @@ struct ArtistDetailView: View {
                             } label: {
                                 SongRow(
                                     song: song,
-                                    isCurrent: player.currentSong?.id == song.id,
-                                    showArtwork: false,
-                                    subtitle: song.year.isEmpty ? nil : song.year
+                                    isCurrent: player.currentSong?.id == song.id
                                 )
                             }
                             .buttonStyle(.plain)
@@ -102,6 +111,34 @@ struct ArtistDetailView: View {
             .tint(AppTheme.dynamicAccent)
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Artist Header
+
+private struct ArtistHeaderView: View {
+    let artist: String
+    let songCount: Int
+    let albumCount: Int
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ArtistAvatar(artist: artist, size: 144, cornerRadius: 72)
+                .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
+
+            VStack(spacing: 6) {
+                Text(artist)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .multilineTextAlignment(.center)
+
+                Text("\(albumCount) \(albumCount == 1 ? "album" : "albums") · \(songCount) \(songCount == 1 ? "song" : "songs")")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
     }
 }
 

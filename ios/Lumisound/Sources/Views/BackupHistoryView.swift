@@ -15,6 +15,7 @@ struct BackupHistoryView: View {
 
     @State private var isLoading = false
     @State private var pendingRestore: SyncBackup?
+    @State private var showClearAllConfirm = false
 
     var body: some View {
         List {
@@ -69,6 +70,26 @@ struct BackupHistoryView: View {
                         .foregroundStyle(AppTheme.textSecondary)
                 }
                 .listRowBackground(AppTheme.surface)
+
+                Section {
+                    Button(role: .destructive) {
+                        showClearAllConfirm = true
+                    } label: {
+                        HStack {
+                            Label("Clear All Backups", systemImage: "trash")
+                            Spacer()
+                            if account.isSyncing {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(account.isSyncing)
+                } footer: {
+                    Text("Permanently deletes all backup snapshots. Your current favorites, playlists, and settings are not affected.")
+                        .font(AppTheme.bodyFont(size: 12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .listRowBackground(AppTheme.surface)
             }
         }
         .scrollContentBackground(.hidden)
@@ -103,6 +124,18 @@ struct BackupHistoryView: View {
             } else {
                 Text("This replaces your current favorites, playlists, and synced settings with this snapshot.")
             }
+        }
+        .confirmationDialog(
+            "Clear all backups?",
+            isPresented: $showClearAllConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Clear All", role: .destructive) {
+                Task { await account.clearBackups() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes all \(account.backups.count) backup snapshot\(account.backups.count == 1 ? "" : "s"). This cannot be undone.")
         }
     }
 }

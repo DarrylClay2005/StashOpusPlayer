@@ -84,6 +84,10 @@ struct DuplicateFilesView: View {
                         }
                     } header: {
                         sectionHeader("\(group.songs.count) Copies — \(group.reason.label)")
+                    } footer: {
+                        Text("Total playtime: \(formattedDuration(group.totalDuration)) across \(group.songs.count) copies. Longer individual copies are usually more complete — check the duration shown next to each copy before deleting.")
+                            .font(AppTheme.bodyFont(size: 12))
+                            .foregroundStyle(AppTheme.textSecondary)
                     }
                     .listRowBackground(AppTheme.surface)
                 }
@@ -165,7 +169,7 @@ struct DuplicateFilesView: View {
     }
 
     private func rowSubtitle(for song: Song) -> String {
-        var parts = [song.artistName, song.albumName]
+        var parts = [song.artistName, song.albumName, song.durationText]
         if let sourceID = song.sourceTrackID, !sourceID.isEmpty {
             parts.append(sourceID)
         }
@@ -179,5 +183,18 @@ struct DuplicateFilesView: View {
             .font(AppTheme.bodyFont(size: 11))
             .foregroundStyle(AppTheme.textSecondary)
             .kerning(0.8)
+    }
+
+    /// Formats a total duration in seconds as "H:MM:SS" (or "M:SS" under an hour).
+    private func formattedDuration(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "0:00" }
+        let total = Int(seconds.rounded())
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        if h > 0 {
+            return "\(h):\(String(format: "%02d", m)):\(String(format: "%02d", s))"
+        }
+        return "\(m):\(String(format: "%02d", s))"
     }
 }

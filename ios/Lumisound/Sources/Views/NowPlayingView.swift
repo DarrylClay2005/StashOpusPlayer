@@ -197,7 +197,7 @@ struct NowPlayingView: View {
     }()
 
     // Queue preview panel
-    @State private var showQueuePreview = true
+    @AppStorage("nowPlaying_showQueuePreview") private var showQueuePreview = true
 
     // Sleep Timer sheet
     @State private var showSleepTimerSheet = false
@@ -391,6 +391,14 @@ struct NowPlayingView: View {
         case .neonGlow:
             NeonGlowArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
+
+        case .auraGlow:
+            AuraGlowArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .tiltCard:
+            TiltCardArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
         }
     }
 
@@ -404,13 +412,16 @@ struct NowPlayingView: View {
                     .foregroundStyle(AppTheme.textPrimary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
+                    .contentTransition(.opacity)
                 MarqueeText(
                     text: player.currentSong?.artistName ?? "Choose a song from the Library",
                     font: .body,
                     color: AppTheme.textSecondary
                 )
                 .frame(height: 20)
+                .contentTransition(.opacity)
             }
+            .animation(.easeInOut(duration: 0.25), value: player.currentSong?.id)
             Spacer(minLength: 8)
 
             if let song = player.currentSong {
@@ -486,6 +497,20 @@ struct NowPlayingView: View {
                 )
             case .pill:
                 PillScrubberView(
+                    position: progress.position,
+                    duration: progress.duration,
+                    isPlaying: player.isPlaying,
+                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
+                )
+            case .neonLine:
+                NeonLineScrubberView(
+                    position: progress.position,
+                    duration: progress.duration,
+                    isPlaying: player.isPlaying,
+                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
+                )
+            case .dotTrack:
+                DotTrackScrubberView(
                     position: progress.position,
                     duration: progress.duration,
                     isPlaying: player.isPlaying,
@@ -703,10 +728,13 @@ struct NowPlayingView: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
             // Above 100% the volume slider is boosting gain beyond the
-            // device's normal output — a limiter prevents clipping, but
-            // it's worth flagging since it's an unusual range for a slider.
+            // device's normal output (via the EQ's global gain stage, in dB —
+            // see AudioPlayerManager.applyOutputGain) — a limiter prevents
+            // clipping, but it's worth flagging since it's an unusual range
+            // for a slider.
             if player.audioSettings.volume > 1.0 {
-                Text("Boost: \(Int(player.audioSettings.volume * 100))%")
+                let boostDB = 20 * log10(player.audioSettings.volume)
+                Text("Boost: +\(String(format: "%.1f", boostDB)) dB")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(AppTheme.dynamicAccent)
             }
@@ -1402,6 +1430,12 @@ struct NowPlayingView: View {
 
         // 3. LRCLIB — free, open lyrics database with synced LRC support
         //    Falls back to LyricsOVH if LRCLIB has no synced version.
+        // Clear any lyrics left over from the previous track *before* kicking
+        // off the remote fetch — otherwise the previous song's lyrics stay on
+        // screen (and scroll/highlight against the new song's `progress`)
+        // until the network call resolves, which looks like "wrong track"
+        // lyrics for the new song.
+        lyricsLines = []
         let songID = song.id
         Task {
             let title  = song.title.trimmingCharacters(in: .whitespacesAndNewlines)

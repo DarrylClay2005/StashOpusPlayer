@@ -117,6 +117,7 @@ struct AppearanceView: View {
                     panelOpacity = 1.0
                     refreshToken = UUID()
                     account.schedulePush(library: library)
+                    ToastCenter.shared.show("Appearance reset to default", category: .info, icon: "arrow.counterclockwise")
                 } label: {
                     HStack {
                         Image(systemName: "arrow.counterclockwise")
@@ -202,6 +203,7 @@ struct AppearanceView: View {
                     customColor = swatch.color
                     refreshToken = UUID()
                     account.schedulePush(library: library)
+                    ToastCenter.shared.show("Accent color set to \(swatch.name)", category: .success, icon: "paintbrush.fill")
                 } label: {
                     VStack(spacing: 4) {
                         ZStack {

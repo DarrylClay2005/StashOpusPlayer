@@ -336,6 +336,13 @@ final class LibraryManager: ObservableObject {
             importedSongs.append(contentsOf: newSongs)
             importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
             rebuildAllSongs()
+
+            // Push the updated folder structure (new tracks in watched folders)
+            // to the server so it survives a reinstall — debounced, all
+            // logged-in users, no opt-in toggle.
+            if !newSongs.isEmpty {
+                AccountService.shared?.scheduleFolderBackupPush(folderService: folderService, library: self)
+            }
         }
     }
 

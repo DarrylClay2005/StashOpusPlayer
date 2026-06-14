@@ -44,6 +44,15 @@ struct SongRow: View {
 
     @AppStorage("library_cardStyle") private var cardStyleRaw: String = SongCardStyle.compact.rawValue
 
+    // Tap/press feedback — brief scale-down + opacity dip while pressed, spring
+    // back on release. Driven by a simultaneous zero-distance drag gesture so it
+    // doesn't compete with/consume the tap handled by the enclosing Button or
+    // `.onTapGesture` at call sites.
+    @State private var isPressed = false
+
+    // Per-row fade + slide entrance, played once when the row first appears.
+    @State private var hasAppeared = false
+
     private var style: SongCardStyle {
         SongCardStyle(rawValue: cardStyleRaw) ?? .compact
     }
@@ -62,6 +71,24 @@ struct SongRow: View {
             }
         }
         .contentShape(Rectangle())
+        .scaleEffect(isPressed ? 0.97 : 1.0)
+        .opacity(isPressed ? 0.85 : 1.0)
+        .animation(.spring(response: 0.25, dampingFraction: 0.6), value: isPressed)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in if !isPressed { isPressed = true } }
+                .onEnded { _ in isPressed = false }
+        )
+        .opacity(hasAppeared ? 1 : 0)
+        .offset(y: hasAppeared ? 0 : 6)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.22)) {
+                hasAppeared = true
+            }
+        }
+        // Animate the "now playing" highlight (accent text/background/border)
+        // transitioning in or out, instead of snapping instantly.
+        .animation(.easeInOut(duration: 0.25), value: isCurrent)
         .contextMenu {
             SongContextMenuContent(song: song)
                 .environmentObject(library)
@@ -203,6 +230,108 @@ struct SongRow: View {
             .font(font)
             .foregroundStyle(AppTheme.textSecondary)
             .monospacedDigit()
+    }
+}
+
+// MARK: - SongGridCell
+//
+// Shared grid-cell presentation for songs, used by the main Songs tab's
+// 2/3-column grid as well as AlbumDetailView and LocalFolderDetailView's
+// grid layouts — keeps artwork sizing, "now playing" badge, and text styling
+// consistent everywhere a song grid is shown.
+
+struct SongGridCell: View {
+    let song: Song
+    let isCurrent: Bool
+    /// Optional override for the secondary line (defaults to the artist name).
+    var subtitle: String? = nil
+    /// Optional track-number badge shown in the top-leading corner of the artwork
+    /// (used by AlbumDetailView's grid).
+    var trackNumber: Int? = nil
+
+    @EnvironmentObject private var library: LibraryManager
+    @EnvironmentObject private var player: AudioPlayerManager
+
+    // Tap/press feedback, mirroring `SongRow` — scale-down + opacity dip while
+    // pressed via a simultaneous zero-distance drag gesture, spring back on release.
+    @State private var isPressed = false
+
+    // Per-cell fade + slide entrance, played once when the cell first appears.
+    @State private var hasAppeared = false
+
+    private var resolvedSubtitle: String {
+        subtitle ?? song.artistName
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // GeometryReader ensures the artwork fills the actual column width instead of
+            // being locked to a hardcoded size, which caused clipping/spacing issues.
+            GeometryReader { geo in
+                ArtworkThumbnail(song: song, size: geo.size.width)
+                    .overlay(alignment: .bottomTrailing) {
+                        if isCurrent {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(4)
+                                .background(AppTheme.dynamicAccent, in: Circle())
+                                .padding(4)
+                        }
+                    }
+                    .overlay(alignment: .topLeading) {
+                        if let trackNumber, trackNumber > 0 {
+                            Text("\(trackNumber)")
+                                .font(.caption2.weight(.bold))
+                                .monospacedDigit()
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.black.opacity(0.5), in: Capsule())
+                                .padding(4)
+                        }
+                    }
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(song.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
+                    .lineLimit(2)
+                Text(resolvedSubtitle)
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 2)
+        }
+        .padding(6)
+        .background(AppTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .scaleEffect(isPressed ? 0.96 : 1.0)
+        .opacity(isPressed ? 0.85 : 1.0)
+        .animation(.spring(response: 0.25, dampingFraction: 0.6), value: isPressed)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in if !isPressed { isPressed = true } }
+                .onEnded { _ in isPressed = false }
+        )
+        .opacity(hasAppeared ? 1 : 0)
+        .scaleEffect(hasAppeared ? 1 : 0.96)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.22)) {
+                hasAppeared = true
+            }
+        }
+        // Animate the "now playing" highlight (accent text/badge) transitioning
+        // in or out, instead of snapping instantly.
+        .animation(.easeInOut(duration: 0.25), value: isCurrent)
+        .contextMenu {
+            SongContextMenuContent(song: song)
+                .environmentObject(library)
+                .environmentObject(player)
+        }
     }
 }
 

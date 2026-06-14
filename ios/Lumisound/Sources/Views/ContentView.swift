@@ -14,9 +14,13 @@ struct ContentView: View {
     @AppStorage("selected_tab") private var selectedTab = 0
     @State private var showCarMode = false
 
+    /// Drives a quick scale "pop" on the freshly-selected tab's content —
+    /// dips slightly below 1.0 then springs back to 1.0 each time the tab changes.
+    @State private var tabPopScale: CGFloat = 1.0
+
     /// Set in Settings → Playback. When off, the floating Car Mode button is
     /// hidden and connecting to a car stereo no longer auto-presents it.
-    @AppStorage("carModeEnabled") private var carModeEnabled: Bool = true
+    @AppStorage("carModeEnabled") private var carModeEnabled: Bool = false
 
     /// Circular-cropped tab-bar-sized rendering of the user's avatar, shown in place
     /// of the gearshape Settings icon when logged in. Cached in @State (recomputed only
@@ -54,6 +58,11 @@ struct ContentView: View {
             GalleryBackgroundView()
                 .ignoresSafeArea()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Invisible — checks once per install whether the server has a
+            // backed-up watched-folder structure for this account and, if so,
+            // prompts to redownload tracks back into their original folders.
+            RestoreFoldersPromptView()
 
             TabView(selection: $selectedTab) {
 
@@ -108,14 +117,26 @@ struct ContentView: View {
                     .tag(4)
             }
             .tint(AppTheme.dynamicAccent)
-            // Subtle cross-fade between tabs
+            // Subtle cross-fade + "pop" scale-in between tabs. iOS 16 doesn't expose
+            // a way to animate transitions *between* TabView pages or to animate the
+            // native tab-bar icons themselves (`.symbolEffect(.bounce)` needs iOS 17),
+            // so this gives the newly-selected tab's content a quick settle-in instead.
+            .scaleEffect(tabPopScale)
             .animation(.easeInOut(duration: 0.18), value: selectedTab)
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: tabPopScale)
             // Crash-context breadcrumb — "what was the user doing right before
             // the crash" is the single most useful fact for diagnosing reports
             // like "it just freezes/crashes sometimes". See AppLogger.breadcrumb.
             .onChange(of: selectedTab) { newValue in
                 let names = ["Library", "Playing", "Queue", "Search", "Settings"]
                 appBreadcrumb("Switched to \(names.indices.contains(newValue) ? names[newValue] : "tab \(newValue)") tab")
+
+                // Quick scale "pop" — dip down then spring back to 1.0 — gives the
+                // newly-selected tab a tactile settle-in feel.
+                tabPopScale = 0.98
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                    tabPopScale = 1.0
+                }
             }
             // No explicit .frame() on TabView — it must size itself from its content.
             // An explicit frame here can cause stretch/overflow on certain device sizes.

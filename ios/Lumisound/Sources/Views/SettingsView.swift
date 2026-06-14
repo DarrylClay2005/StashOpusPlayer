@@ -19,7 +19,15 @@ struct SettingsView: View {
 
     /// Shared with `ContentView`, which hides the floating Car Mode button and
     /// disables auto-activation on car-stereo connection when this is off.
-    @AppStorage("carModeEnabled") private var carModeEnabled: Bool = true
+    @AppStorage("carModeEnabled") private var carModeEnabled: Bool = false
+
+    // MARK: YouTube API Key Validation / Exposure Check State
+
+    @State private var youtubeKeyConfig: YoutubeApiKeyConfig?
+    @State private var youtubeKeyInput = ""
+    @State private var isValidatingYouTubeKey = false
+    @State private var isSavingYouTubeKey = false
+    @State private var youtubeExposureTimer: Timer?
 
     // MARK: Body
 
@@ -37,12 +45,12 @@ struct SettingsView: View {
                 }
 
                 accountSection
-                librarySection
-                playbackSection
-                streamingSection
-                sleepTimerSection
-                audioSection
+                playbackAudioSection
+                carModeSection
                 appearanceSection
+                librarySection
+                streamingDownloadsSection
+                sleepTimerSection
                 updatesSection
                 helpSection
                 aboutSection
@@ -55,6 +63,14 @@ struct SettingsView: View {
             .sheet(isPresented: $showLogin) {
                 LoginView()
                     .environmentObject(account)
+            }
+            .task {
+                await refreshYouTubeKeyStatus()
+                startYouTubeExposureMonitor()
+            }
+            .onDisappear {
+                youtubeExposureTimer?.invalidate()
+                youtubeExposureTimer = nil
             }
         }
     }
@@ -233,9 +249,9 @@ struct SettingsView: View {
         .listRowBackground(AppTheme.surface)
     }
 
-    // MARK: — Playback Section
+    // MARK: — Car Mode Section
 
-    private var playbackSection: some View {
+    private var carModeSection: some View {
         Section {
             // Car Mode toggle
             Toggle(isOn: $carModeEnabled) {
@@ -257,7 +273,17 @@ struct SettingsView: View {
                     .padding(.leading, 16)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
+        } header: {
+            sectionHeader("Car Mode")
+        }
+        .listRowBackground(AppTheme.surface)
+        .animation(.easeInOut(duration: 0.22), value: carModeEnabled)
+    }
 
+    // MARK: — Playback & Audio Section
+
+    private var playbackAudioSection: some View {
+        Section {
             // Crossfade toggle
             Toggle(isOn: $player.audioSettings.crossfadeEnabled) {
                 Label("Crossfade", systemImage: "waveform.path.ecg")
@@ -361,22 +387,95 @@ struct SettingsView: View {
                 }
             }
 
+            // Equalizer toggle
+            Toggle(isOn: $player.audioSettings.equalizerEnabled) {
+                Label("Equalizer", systemImage: "slider.vertical.3")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            // EQ Preset picker
+            if player.audioSettings.equalizerEnabled {
+                HStack {
+                    Label("EQ Preset", systemImage: "waveform")
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    Picker("", selection: $player.audioSettings.eqPreset) {
+                        ForEach(EQPreset.allCases) { preset in
+                            Text(preset.displayName)
+                                .tag(preset)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(AppTheme.dynamicAccent)
+                    .onChange(of: player.audioSettings.eqPreset) { newPreset in
+                        player.applyEQPreset(newPreset)
+                    }
+                }
+            }
+
+            // Bass Boost toggle
+            Toggle(isOn: $player.audioSettings.bassBoostEnabled) {
+                Label("Bass Boost", systemImage: "waveform.path")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if player.audioSettings.bassBoostEnabled {
+                Text("Boosts the 32 Hz and 64 Hz bands for deeper, punchier bass. Adjust the gain below to taste.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Bass Boost gain slider — only shown when enabled
+            if player.audioSettings.bassBoostEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Label("Boost Gain", systemImage: "speaker.plus")
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .font(AppTheme.bodyFont(size: 14))
+                        Spacer()
+                        Text(String(format: "%.1f dB", player.audioSettings.bassBoostGain))
+                            .font(AppTheme.monoFont(size: 14))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    Slider(value: $player.audioSettings.bassBoostGain, in: 0...15, step: 0.5)
+                        .tint(AppTheme.dynamicAccent)
+                    HStack {
+                        Text("0 dB").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
+                        Spacer()
+                        Text("15 dB").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+                .padding(.leading, 16)
+            }
+
+            // Player error message (if any)
+            if let error = player.errorMessage {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(AppTheme.bodyFont(size: 13))
+                    .foregroundStyle(AppTheme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
         } header: {
-            sectionHeader("Playback")
+            sectionHeader("Playback & Audio")
         }
         .listRowBackground(AppTheme.surface)
-        .animation(.easeInOut(duration: 0.22), value: carModeEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.crossfadeEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.gaplessEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.replayGainEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.bassBoostEnabled)
     }
 
-    // MARK: — Streaming Section
+    // MARK: — Streaming & Downloads Section
 
     @State private var showHealthResult = false
     @State private var healthOK = false
 
-    private var streamingSection: some View {
+    private var streamingDownloadsSection: some View {
         Section {
             #if DEBUG
             // Status row — only meaningful in DEBUG since `isConfigured` is
@@ -466,10 +565,130 @@ struct SettingsView: View {
                 }
             }
 
+            // YouTube Data API key — only relevant when signed in, since the
+            // key is stored server-side on the user's account.
+            if account.isLoggedIn {
+                youtubeAPIKeySection
+            }
+
         } header: {
-            sectionHeader("Streaming")
+            sectionHeader("Streaming & Downloads")
         }
         .listRowBackground(AppTheme.surface)
+    }
+
+    // MARK: — YouTube API Key Rows
+
+    /// Masked display of the configured key (or a placeholder if none set).
+    private var youtubeKeyDisplay: String {
+        guard let config = youtubeKeyConfig, config.configured, let masked = config.apiKey else {
+            return "Not set"
+        }
+        return masked
+    }
+
+    @ViewBuilder
+    private var youtubeAPIKeySection: some View {
+        // Status / masked key row
+        HStack {
+            Label("YouTube API Key", systemImage: "key.horizontal")
+                .foregroundStyle(AppTheme.textPrimary)
+            Spacer()
+            Text(youtubeKeyDisplay)
+                .font(AppTheme.monoFont(size: 13))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+
+        // Entry field for setting/replacing the key
+        HStack {
+            Label("Set Key", systemImage: "pencil")
+                .foregroundStyle(AppTheme.textPrimary)
+            SecureField("Paste YouTube Data API v3 key", text: $youtubeKeyInput)
+                .keyboardType(.asciiCapable)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+
+        if !youtubeKeyInput.isEmpty {
+            Button {
+                Task {
+                    isSavingYouTubeKey = true
+                    let ok = await account.setYoutubeApiKey(youtubeKeyInput)
+                    isSavingYouTubeKey = false
+                    if ok {
+                        youtubeKeyInput = ""
+                        ToastCenter.shared.show("YouTube API key saved", category: .success, icon: "key.horizontal")
+                        await refreshYouTubeKeyStatus()
+                    } else {
+                        ToastCenter.shared.show("Couldn't save key — check connection", category: .error, icon: "exclamationmark.triangle")
+                    }
+                }
+            } label: {
+                HStack {
+                    Label("Save Key", systemImage: "checkmark.circle")
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                    Spacer()
+                    if isSavingYouTubeKey {
+                        ProgressView().tint(AppTheme.dynamicAccent)
+                    }
+                }
+            }
+            .disabled(isSavingYouTubeKey)
+        }
+
+        // Validate API Key button
+        Button {
+            Task {
+                isValidatingYouTubeKey = true
+                let status = await account.validateYouTubeAPIKey()
+                isValidatingYouTubeKey = false
+                switch status {
+                case "valid":
+                    ToastCenter.shared.show("YouTube API key is valid", category: .success, icon: "checkmark.seal")
+                case "invalid":
+                    ToastCenter.shared.show("YouTube API key is invalid", category: .error, icon: "xmark.seal")
+                case "quota_exceeded":
+                    ToastCenter.shared.show("YouTube API quota exceeded for today", category: .warning, icon: "exclamationmark.triangle")
+                default:
+                    ToastCenter.shared.show("Couldn't validate key — check connection", category: .error, icon: "wifi.exclamationmark")
+                }
+            }
+        } label: {
+            HStack {
+                Label("Validate API Key", systemImage: "checkmark.shield")
+                    .foregroundStyle(AppTheme.dynamicAccent)
+                Spacer()
+                if isValidatingYouTubeKey {
+                    ProgressView().tint(AppTheme.dynamicAccent)
+                }
+            }
+        }
+        .disabled(isValidatingYouTubeKey || youtubeKeyConfig?.configured != true)
+
+        // Remove key
+        if youtubeKeyConfig?.configured == true {
+            Button(role: .destructive) {
+                Task {
+                    let ok = await account.deleteYoutubeApiKey()
+                    if ok {
+                        ToastCenter.shared.show("YouTube API key removed", category: .info, icon: "key.horizontal")
+                        await refreshYouTubeKeyStatus()
+                    } else {
+                        ToastCenter.shared.show("Couldn't remove key — check connection", category: .error, icon: "exclamationmark.triangle")
+                    }
+                }
+            } label: {
+                Label("Remove Key", systemImage: "trash")
+                    .foregroundStyle(AppTheme.error)
+            }
+        }
+
+        Text("Used by Lumisound's bridge to enumerate full YouTube playlists. Falls back to a shared server key if unset. Never displayed in full once saved.")
+            .font(.caption)
+            .foregroundStyle(AppTheme.textSecondary)
+            .padding(.leading, 16)
     }
 
     // MARK: — Sleep Timer Section
@@ -484,6 +703,7 @@ struct SettingsView: View {
                     Spacer()
                     Button("Cancel") {
                         sleepTimer.cancel()
+                        ToastCenter.shared.show("Sleep timer cancelled", category: .info, icon: "moon.zzz")
                     }
                     .foregroundStyle(AppTheme.warning)
                 }
@@ -499,6 +719,7 @@ struct SettingsView: View {
 
                 Button {
                     sleepTimer.start()
+                    ToastCenter.shared.show("Sleep timer started", category: .success, icon: "moon.zzz.fill")
                 } label: {
                     Label("Start Sleep Timer", systemImage: "moon.zzz")
                         .foregroundStyle(AppTheme.dynamicAccent)
@@ -508,90 +729,6 @@ struct SettingsView: View {
             sectionHeader("Sleep Timer")
         }
         .listRowBackground(AppTheme.surface)
-    }
-
-    // MARK: — Audio Section
-
-    private var audioSection: some View {
-        Section {
-            // Equalizer toggle
-            Toggle(isOn: $player.audioSettings.equalizerEnabled) {
-                Label("Equalizer", systemImage: "slider.vertical.3")
-                    .foregroundStyle(AppTheme.textPrimary)
-            }
-            .tint(AppTheme.dynamicAccent)
-
-            // EQ Preset picker
-            if player.audioSettings.equalizerEnabled {
-                HStack {
-                    Label("EQ Preset", systemImage: "waveform")
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    Picker("", selection: $player.audioSettings.eqPreset) {
-                        ForEach(EQPreset.allCases) { preset in
-                            Text(preset.displayName)
-                                .tag(preset)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(AppTheme.dynamicAccent)
-                    .onChange(of: player.audioSettings.eqPreset) { newPreset in
-                        player.applyEQPreset(newPreset)
-                    }
-                }
-            }
-
-            // Bass Boost toggle
-            Toggle(isOn: $player.audioSettings.bassBoostEnabled) {
-                Label("Bass Boost", systemImage: "waveform.path")
-                    .foregroundStyle(AppTheme.textPrimary)
-            }
-            .tint(AppTheme.dynamicAccent)
-
-            if player.audioSettings.bassBoostEnabled {
-                Text("Boosts the 32 Hz and 64 Hz bands for deeper, punchier bass. Adjust the gain below to taste.")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .padding(.leading, 16)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            // Bass Boost gain slider — only shown when enabled
-            if player.audioSettings.bassBoostEnabled {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Label("Boost Gain", systemImage: "speaker.plus")
-                            .foregroundStyle(AppTheme.textSecondary)
-                            .font(AppTheme.bodyFont(size: 14))
-                        Spacer()
-                        Text(String(format: "%.1f dB", player.audioSettings.bassBoostGain))
-                            .font(AppTheme.monoFont(size: 14))
-                            .foregroundStyle(AppTheme.textSecondary)
-                    }
-                    Slider(value: $player.audioSettings.bassBoostGain, in: 0...15, step: 0.5)
-                        .tint(AppTheme.dynamicAccent)
-                    HStack {
-                        Text("0 dB").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
-                        Spacer()
-                        Text("15 dB").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
-                    }
-                }
-                .padding(.leading, 16)
-            }
-
-            // Player error message (if any)
-            if let error = player.errorMessage {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(AppTheme.bodyFont(size: 13))
-                    .foregroundStyle(AppTheme.warning)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-        } header: {
-            sectionHeader("Audio")
-        }
-        .listRowBackground(AppTheme.surface)
-        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.bassBoostEnabled)
     }
 
     // MARK: — Appearance Section
@@ -798,5 +935,56 @@ struct SettingsView: View {
         if semitones == 0 { return "0 st" }
         let sign = semitones > 0 ? "+" : ""
         return String(format: "%@%.1f st", sign, semitones)
+    }
+
+    // MARK: — YouTube API Key Helpers
+
+    /// Refreshes the masked YouTube API key status from the bridge.
+    private func refreshYouTubeKeyStatus() async {
+        guard account.isLoggedIn else { return }
+        youtubeKeyConfig = await account.fetchYoutubeApiKey()
+    }
+
+    /// Starts a 5-minute repeating timer that checks whether the user's
+    /// YouTube API key has been exposed (e.g. leaked in a public commit/log),
+    /// surfacing a warning toast if so. Runs only while Settings is visible.
+    private func startYouTubeExposureMonitor() {
+        guard youtubeExposureTimer == nil else { return }
+
+        // Immediate first check, then repeat every 5 minutes.
+        Task { await checkYouTubeKeyExposureAndNotify() }
+
+        let accountService = account
+        let timer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { [weak accountService] _ in
+            guard let accountService else { return }
+            Task { @MainActor in
+                await SettingsView.checkExposureAndNotify(account: accountService)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        youtubeExposureTimer = timer
+    }
+
+    private func checkYouTubeKeyExposureAndNotify() async {
+        await Self.checkExposureAndNotify(account: account)
+    }
+
+    /// Checks for a leaked YouTube API key and shows a warning toast if found.
+    /// Takes `account` explicitly so the recurring `Timer` closure can capture
+    /// it weakly instead of capturing the whole view.
+    @MainActor
+    private static func checkExposureAndNotify(account: AccountService) async {
+        guard account.isLoggedIn else { return }
+        let result = await account.checkYouTubeKeyExposure()
+        if result.exposed {
+            let detail = result.detail.isEmpty
+                ? "Your YouTube API key may be publicly exposed."
+                : result.detail
+            ToastCenter.shared.show(
+                "\(detail) Consider regenerating your key in Google Cloud Console.",
+                category: .warning,
+                icon: "exclamationmark.shield"
+            )
+        }
     }
 }

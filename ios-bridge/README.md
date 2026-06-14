@@ -1,6 +1,6 @@
-# StashOpusPlayer iOS Bridge
+# Lumisound iOS Bridge
 
-A minimal FastAPI server that wraps yt-dlp to give the StashOpusPlayer iOS app
+A minimal FastAPI server that wraps yt-dlp to give the Lumisound iOS app
 YouTube and SoundCloud search plus on-demand stream URL resolution.
 
 ## Run

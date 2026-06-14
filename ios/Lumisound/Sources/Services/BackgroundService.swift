@@ -76,6 +76,17 @@ final class BackgroundService: ObservableObject {
     private var allTimers: [Timer] = []
     private var foregroundObserver: NSObjectProtocol?
 
+    /// Debounce task for automatic cloud gallery backup — mirrors
+    /// `AccountService.schedulePush`'s 2-second debounce so rapid successive
+    /// `addImages`/`removeImage`/`clearAll` calls (e.g. picking 20 photos at
+    /// once) only trigger one upload pass.
+    private var cloudSyncTask: Task<Void, Never>?
+
+    /// Set once per app launch the first time a cloud gallery restore has been
+    /// attempted, so `loadSettings()` (which can run more than once, e.g. after
+    /// `willEnterForegroundNotification`) doesn't repeatedly hit the network.
+    private var didAttemptCloudRestore = false
+
     // MARK: Init — register for foreground notification
 
     init() {
@@ -142,6 +153,7 @@ final class BackgroundService: ObservableObject {
         startShuffling()
         objectWillChange.send()
         appLog("addImages: gallery ready (images=\(images.count), active=\(isActive))", category: "background")
+        scheduleCloudGallerySync(newImages: newImages)
     }
 
     func removeImage(at index: Int) {
@@ -154,12 +166,116 @@ final class BackgroundService: ObservableObject {
             currentIndex = images.count - 1
         }
         saveImagesToDisk()
+        scheduleCloudGallerySync()
     }
 
     func clearAll() {
         images.removeAll()
         currentIndex = 0
         saveImagesToDisk()
+        scheduleCloudGallerySync()
+    }
+
+    // MARK: Cloud Gallery Backup (automatic, all logged-in users, no opt-in)
+
+    /// Schedules an automatic cloud backup of the gallery 2 seconds after the
+    /// last image-list mutation. When `newImages` is non-nil, only those new
+    /// images are uploaded (existing cloud copies are left alone); otherwise
+    /// (removal/clear) the full local gallery is re-synced — any cloud image
+    /// no longer present locally is deleted so cloud and device stay in sync.
+    private func scheduleCloudGallerySync(newImages: [UIImage]? = nil) {
+        guard AccountService.shared?.isLoggedIn == true,
+              let streaming = StreamingService.shared else { return }
+
+        cloudSyncTask?.cancel()
+        cloudSyncTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+            guard let self, !Task.isCancelled,
+                  let token = AccountService.shared?.token, !token.isEmpty
+            else { return }
+
+            if let newImages, !newImages.isEmpty {
+                // Upload-only path: just push the newly-added images.
+                for (offset, image) in newImages.enumerated() {
+                    guard !Task.isCancelled else { return }
+                    let order = self.images.count - newImages.count + offset
+                    do {
+                        _ = try await streaming.uploadGalleryImage(image, token: token, displayOrder: order)
+                    } catch {
+                        appWarn("BackgroundService: cloud gallery upload failed: \(error.localizedDescription)", category: "background")
+                    }
+                }
+                appLog("BackgroundService: auto-uploaded \(newImages.count) new gallery image(s) to cloud", category: "background")
+                return
+            }
+
+            // Removal/clear path: reconcile the cloud gallery to match the local
+            // image count by deleting the trailing cloud entries beyond what's
+            // left locally. We don't have a stable per-image cloud ID locally,
+            // so this is a best-effort prune rather than a precise diff.
+            do {
+                let cloud = try await streaming.fetchGalleryImages(token: token)
+                let excess = cloud.count - self.images.count
+                if excess > 0 {
+                    let toDelete = cloud.sorted { $0.displayOrder > $1.displayOrder }.prefix(excess)
+                    for image in toDelete {
+                        guard !Task.isCancelled else { return }
+                        try? await streaming.deleteGalleryImage(id: image.id, token: token)
+                    }
+                    appLog("BackgroundService: pruned \(excess) cloud gallery image(s) after local removal", category: "background")
+                }
+            } catch {
+                appWarn("BackgroundService: cloud gallery reconcile failed: \(error.localizedDescription)", category: "background")
+            }
+        }
+    }
+
+    /// Called on first login after a fresh install/reinstall (when the local
+    /// gallery is empty but the user has cloud-backed-up images) to redownload
+    /// and repopulate the local gallery automatically — no opt-in toggle.
+    /// Safe to call repeatedly; only does work once per app launch and only
+    /// when there are no local images yet (so it never clobbers images the
+    /// user has already picked on this device).
+    func restoreGalleryFromCloudIfNeeded() {
+        guard !didAttemptCloudRestore else { return }
+        guard images.isEmpty else {
+            didAttemptCloudRestore = true
+            return
+        }
+        guard AccountService.shared?.isLoggedIn == true,
+              let token = AccountService.shared?.token, !token.isEmpty,
+              let streaming = StreamingService.shared
+        else { return }
+
+        didAttemptCloudRestore = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let cloud = try await streaming.fetchGalleryImages(token: token)
+                guard !cloud.isEmpty else { return }
+                var restored: [UIImage] = []
+                for entry in cloud.sorted(by: { $0.displayOrder < $1.displayOrder }) {
+                    if let img = await streaming.fetchGalleryImageData(entry, token: token) {
+                        restored.append(img)
+                    }
+                }
+                guard !restored.isEmpty else { return }
+                // Append directly to `images`/disk rather than via `addImages` —
+                // avoids re-triggering an upload of the images we just downloaded.
+                self.images = restored
+                self.saveImagesToDisk()
+                if !self.isEnabled {
+                    self.isEnabled = true
+                    self.saveSettings()
+                }
+                self.currentIndex = 0
+                self.startShuffling()
+                appLog("restoreGalleryFromCloudIfNeeded: restored \(restored.count) gallery image(s) from cloud", category: "background")
+                ToastCenter.shared.show("Restored \(restored.count) background image\(restored.count == 1 ? "" : "s") from your account", category: .success, icon: "icloud.and.arrow.down")
+            } catch {
+                appWarn("restoreGalleryFromCloudIfNeeded: \(error.localizedDescription)", category: "background")
+            }
+        }
     }
 
     // MARK: Disk Persistence
@@ -340,5 +456,10 @@ final class BackgroundService: ObservableObject {
             isEnabled = false
         }
         appLog("loadSettings: enabled=\(isEnabled) images=\(images.count) interval=\(shuffleIntervalSeconds)s active=\(isActive)", category: "background")
+
+        // Automatic cloud restore for returning users on a fresh install: if no
+        // local gallery images exist but the account has cloud-backed-up ones,
+        // redownload them. No-ops for logged-out users or users with local images.
+        restoreGalleryFromCloudIfNeeded()
     }
 }

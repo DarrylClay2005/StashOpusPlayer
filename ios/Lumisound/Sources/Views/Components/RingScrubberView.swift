@@ -84,7 +84,14 @@ struct RingScrubberView: View {
                             .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true), value: ringGlow)
                     }
                     .offset(y: -radius)
-                    .rotationEffect(.degrees(progress * 360 - 90))
+                    // The base offset `(0, -radius)` already sits at the top (12
+                    // o'clock), which is where the progress arc's `trim(from:0,
+                    // to:_)` starts after its own `-90°` rotation (see the arc
+                    // above). So the thumb must sweep from that same zero point —
+                    // applying an additional `-90°` here rotated the thumb a
+                    // quarter turn ahead of the arc, putting it at 9 o'clock when
+                    // progress was ~0 instead of riding the arc's tip at 12.
+                    .rotationEffect(.degrees(progress * 360))
                     // Match the progress arc's animation so the thumb glides along
                     // with the fill instead of snapping to each playback tick while
                     // the arc behind it eases smoothly — the mismatch read as the

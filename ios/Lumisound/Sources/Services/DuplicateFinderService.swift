@@ -21,14 +21,26 @@ final class DuplicateFinderService: ObservableObject {
 
     // MARK: - Scan
 
+    /// Tolerance (in seconds) used when comparing two songs' `duration` for the
+    /// "same title & artist" secondary match. Re-encodes/re-downloads of the same
+    /// source track can differ by a fraction of a second due to container overhead
+    /// or trimming, so an exact match is too strict.
+    static let durationTolerance: TimeInterval = 2.0
+
     /// Groups `songs` into sets of likely duplicates. Two songs are considered
     /// duplicates if either:
     ///  - they share the same non-empty `sourceTrackID` (e.g. both were
     ///    downloaded from the same YouTube/SoundCloud track via the stream
-    ///    search, tagged with the `LUMISOUND_ID` metadata tag), or
+    ///    search, tagged with the `LUMISOUND_ID` metadata tag) — this is the
+    ///    "definite duplicate" case, regardless of duration, or
     ///  - they have the same normalized title + artist (case/whitespace/
-    ///    punctuation-insensitive), which catches duplicates imported from
-    ///    different sources (e.g. once via Apple Music, once via download).
+    ///    punctuation-insensitive) AND their durations are within
+    ///    `durationTolerance` of each other — this catches duplicates imported
+    ///    from different sources (e.g. once via Apple Music, once via download,
+    ///    or two separate re-downloads of the same track under different
+    ///    filenames/IDs). Title+artist matches whose durations differ by more
+    ///    than the tolerance are treated as distinct tracks (e.g. a "Radio Edit"
+    ///    vs an "Extended Mix" sharing a title) and are not grouped together.
     func runScan(songs: [Song]) async {
         guard !isScanning else { return }
         isScanning = true
@@ -74,18 +86,48 @@ final class DuplicateFinderService: ObservableObject {
             consumed.formUnion(group.map(\.id))
         }
 
-        // Second pass: group remaining songs by normalized title + artist.
+        // Second pass: group remaining songs by normalized title + artist, then
+        // split each of those groups further by duration — only songs whose
+        // durations fall within `durationTolerance` of each other are considered
+        // the same track (re-downloads/re-encodes vs. genuinely different
+        // versions sharing a title, e.g. "Radio Edit" vs "Extended Mix").
         var byTitleArtist: [String: [Song]] = [:]
         for song in songs where !consumed.contains(song.id) {
             let key = normalize(song.title) + "|" + normalize(song.artist)
             guard !key.isEmpty, key != "|" else { continue }
             byTitleArtist[key, default: []].append(song)
         }
-        for (_, group) in byTitleArtist where group.count > 1 {
-            groups.append(DuplicateGroup(id: UUID(), songs: group, reason: .sameTitleAndArtist))
+        for (_, candidates) in byTitleArtist where candidates.count > 1 {
+            for cluster in clusterByDuration(candidates) where cluster.count > 1 {
+                groups.append(DuplicateGroup(id: UUID(), songs: cluster, reason: .sameTitleAndArtist))
+            }
         }
 
         return groups.sorted { $0.songs.count > $1.songs.count }
+    }
+
+    /// Splits `songs` (already grouped by normalized title + artist) into clusters
+    /// where every pair of durations within a cluster is within
+    /// `durationTolerance` of each other. Sorts by duration first and then does a
+    /// simple chain-grouping pass, so e.g. durations [120, 121, 122, 200, 201]
+    /// with a 2s tolerance become two clusters: [120, 121, 122] and [200, 201].
+    nonisolated private static func clusterByDuration(_ songs: [Song]) -> [[Song]] {
+        let sorted = songs.sorted { $0.duration < $1.duration }
+        var clusters: [[Song]] = []
+        var current: [Song] = []
+        var clusterStart: TimeInterval?
+
+        for song in sorted {
+            if let start = clusterStart, song.duration - start > durationTolerance {
+                clusters.append(current)
+                current = []
+                clusterStart = nil
+            }
+            if clusterStart == nil { clusterStart = song.duration }
+            current.append(song)
+        }
+        if !current.isEmpty { clusters.append(current) }
+        return clusters
     }
 
     /// Lowercases, strips diacritics/punctuation, and collapses whitespace so
@@ -107,6 +149,13 @@ struct DuplicateGroup: Identifiable {
     let id: UUID
     let songs: [Song]
     let reason: DuplicateReason
+
+    /// Combined playtime of every copy in this group, e.g. "8:42 total" across
+    /// 3 copies — shown alongside each copy's own duration so the user can
+    /// judge which copy is more complete (longer = likely fewer cuts/ads).
+    var totalDuration: TimeInterval {
+        songs.reduce(0) { $0 + $1.duration }
+    }
 }
 
 // MARK: - DuplicateReason

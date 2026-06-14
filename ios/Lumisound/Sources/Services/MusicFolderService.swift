@@ -139,6 +139,78 @@ final class MusicFolderService: ObservableObject {
         return valid
     }
 
+    // MARK: - Folder Structure Backup (item 3)
+
+    /// Builds the payload pushed to `PUT /user/folder-backups`: for each watched
+    /// folder that resolves to a path under the app's Documents directory, its
+    /// path relative to Documents plus the songs (from `songs`, typically
+    /// `LibraryManager.allSongs`) whose file URL lives inside that folder.
+    ///
+    /// Folders outside Documents (e.g. picked via the Files app from iCloud
+    /// Drive/another app's sandbox) are skipped — their contents aren't
+    /// recoverable into "this install's Documents" in any meaningful way, and
+    /// the security-scoped bookmark wouldn't survive a reinstall anyway.
+    func folderBackupEntries(songs: [Song]) -> [FolderBackupEntry] {
+        guard let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return []
+        }
+        let docsPath = docsDir.standardizedFileURL.path
+
+        var entries: [FolderBackupEntry] = []
+        for folder in watchedFolders {
+            var isStale = false
+            guard let resolved = try? URL(
+                resolvingBookmarkData: folder.bookmarkData,
+                options: [],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) else { continue }
+
+            let folderPath = resolved.standardizedFileURL.path
+            guard folderPath.hasPrefix(docsPath) else { continue }
+
+            var relative = String(folderPath.dropFirst(docsPath.count))
+            while relative.hasPrefix("/") { relative.removeFirst() }
+            guard !relative.isEmpty else { continue }
+
+            // Songs whose file lives inside this folder (recursively).
+            let prefix = folderPath.hasSuffix("/") ? folderPath : folderPath + "/"
+            let tracks: [FolderBackupTrack] = songs.compactMap { song -> FolderBackupTrack? in
+                guard let url = song.url else { return nil }
+                let path = url.standardizedFileURL.path
+                guard path.hasPrefix(prefix) else { return nil }
+                return FolderBackupTrack(
+                    filename: url.lastPathComponent,
+                    title: song.title,
+                    artist: song.artist,
+                    durationSeconds: song.duration,
+                    sourceTrackID: song.sourceTrackID
+                )
+            }
+
+            entries.append(FolderBackupEntry(folderPath: relative, tracks: tracks))
+        }
+        return entries
+    }
+
+    /// Recreates `relativePath` (relative to Documents) as an empty directory
+    /// under Documents, returning the resulting URL on success. Used during
+    /// "restore my folders" — track files are then redownloaded/placed into
+    /// the returned directory by the caller.
+    func recreateFolder(relativePath: String) -> URL? {
+        guard let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let target = docsDir.appendingPathComponent(relativePath, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+            return target
+        } catch {
+            appError("recreateFolder: failed to create \(relativePath): \(error.localizedDescription)", category: "library")
+            return nil
+        }
+    }
+
     // MARK: - Persistence
 
     private func saveBookmarks() {

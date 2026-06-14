@@ -407,73 +407,92 @@ private struct SongsTab: View {
     }
 }
 
-// MARK: - Song Grid Cell
-
-private struct SongGridCell: View {
-    let song: Song
-    let isCurrent: Bool
-    @EnvironmentObject private var library: LibraryManager
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // GeometryReader ensures the artwork fills the actual column width instead of
-            // being locked to the hardcoded 120pt size, which caused clipping/spacing issues.
-            GeometryReader { geo in
-                ArtworkThumbnail(song: song, size: geo.size.width)
-                    .overlay(alignment: .bottomTrailing) {
-                        if isCurrent {
-                            Image(systemName: "waveform")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(4)
-                                .background(AppTheme.dynamicAccent, in: Circle())
-                                .padding(4)
-                        }
-                    }
-            }
-            .aspectRatio(1, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(song.displayName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
-                    .lineLimit(2)
-                Text(song.artistName)
-                    .font(.caption2)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 2)
-        }
-        .padding(6)
-        .background(AppTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
 // MARK: - Artists Tab
 
 private struct ArtistsTab: View {
     @EnvironmentObject private var library: LibraryManager
 
+    // Mirrors AlbumsTab's per-layout column count so the Artists grid can show
+    // 1 (list), 2, or 3 columns just like Albums/Folders.
+    @AppStorage("library_artists_columns") private var columns: Int = 1
+
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 12), count: columns)
+    }
+
     var body: some View {
-        List {
-            if library.artists.isEmpty {
-                EmptyStateView(icon: "person.crop.circle", title: "No artists", message: "Add music to see artists here.")
-                    .listRowBackground(Color.clear)
-            } else {
-                ForEach(library.artists, id: \.self) { artist in
-                    NavigationLink {
-                        ArtistDetailView(artist: artist)
-                    } label: {
-                        ArtistRow(artist: artist)
+        Group {
+            if columns == 1 {
+                List {
+                    if library.artists.isEmpty {
+                        EmptyStateView(icon: "person.crop.circle", title: "No artists", message: "Add music to see artists here.")
+                            .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(library.artists, id: \.self) { artist in
+                            NavigationLink {
+                                ArtistDetailView(artist: artist)
+                            } label: {
+                                ArtistRow(artist: artist)
+                            }
+                            .listRowBackground(AppTheme.surface.opacity(0.5))
+                        }
                     }
-                    .listRowBackground(AppTheme.surface.opacity(0.5))
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            } else {
+                ScrollView {
+                    if library.artists.isEmpty {
+                        EmptyStateView(icon: "person.crop.circle", title: "No artists", message: "Add music to see artists here.")
+                            .padding(.top, 60)
+                    } else {
+                        LazyVGrid(columns: gridColumns, spacing: 16) {
+                            ForEach(library.artists, id: \.self) { artist in
+                                NavigationLink {
+                                    ArtistDetailView(artist: artist)
+                                } label: {
+                                    ArtistGridCell(artist: artist)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                    }
+                }
+                .background(Color.clear.ignoresSafeArea())
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
+        .onAppear {
+            ArtistImageService.shared.prefetch(artists: library.artists)
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                Button {
+                    columns = 1
+                } label: {
+                    Image(systemName: "list.bullet")
+                        .foregroundStyle(columns == 1 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    columns = 2
+                } label: {
+                    Image(systemName: "square.grid.2x2")
+                        .foregroundStyle(columns == 2 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    columns = 3
+                } label: {
+                    Image(systemName: "square.grid.3x3")
+                        .foregroundStyle(columns == 3 ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
 
@@ -493,18 +512,7 @@ private struct ArtistRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            if let representative = artistSongs.first {
-                ArtworkThumbnail(song: representative, size: 40)
-            } else {
-                ZStack {
-                    Circle()
-                        .fill(AppTheme.elevatedSurface)
-                    Image(systemName: "person.fill")
-                        .foregroundStyle(AppTheme.dynamicAccent)
-                        .font(.system(size: 18))
-                }
-                .frame(width: 40, height: 40)
-            }
+            ArtistAvatar(artist: artist, size: 40)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(artist)
@@ -516,6 +524,56 @@ private struct ArtistRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Artist Grid Cell (2/3-column layout)
+
+private struct ArtistGridCell: View {
+    let artist: String
+    @EnvironmentObject private var library: LibraryManager
+
+    // Fade + slight scale-in entrance, played once when the cell first appears.
+    @State private var hasAppeared = false
+
+    private var artistSongs: [Song] {
+        library.songs(byArtist: artist)
+    }
+
+    private var songCount: Int { artistSongs.count }
+
+    private var albumCount: Int {
+        Set(artistSongs.map { $0.albumName }).count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            GeometryReader { geo in
+                ArtistAvatar(artist: artist, size: geo.size.width, cornerRadius: 8)
+            }
+            .frame(maxWidth: .infinity)
+            .aspectRatio(1, contentMode: .fit)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(artist)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .lineLimit(2)
+
+                Text("\(albumCount) \(albumCount == 1 ? "album" : "albums") · \(songCount) \(songCount == 1 ? "song" : "songs")")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 2)
+        }
+        .opacity(hasAppeared ? 1 : 0)
+        .scaleEffect(hasAppeared ? 1 : 0.96)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.22)) {
+                hasAppeared = true
+            }
+        }
     }
 }
 

@@ -619,7 +619,7 @@ struct StreamSearchView: View {
             guard let token = account.token else { return }
             Task { await streaming.fetchUserMusic(token: token, search: searchText) }
         } else if StreamingService.isPlaylistURL(searchText) {
-            Task { await streaming.resolvePlaylist(url: searchText) }
+            Task { await streaming.resolvePlaylist(url: searchText, existingSongs: library.allSongs) }
         } else {
             Task { await streaming.search(query: searchText, source: selectedSource) }
         }
@@ -677,7 +677,7 @@ struct StreamSearchView: View {
         downloadingTrackIDs.insert(track.id)
         Task {
             do {
-                let localURL = try await streaming.downloadToLibrary(track: track)
+                let localURL = try await streaming.downloadToLibrary(track: track, existingSongs: library.allSongs)
                 library.scanLocalDocuments()
                 downloadedTrackIDs.insert(track.id)
                 ToastCenter.shared.show("Downloaded \"\(track.title)\"", category: .download, icon: "checkmark.circle.fill")
@@ -725,7 +725,7 @@ struct StreamSearchView: View {
                     nextIndex += 1
                     group.addTask {
                         do {
-                            let localURL = try await streaming.downloadToLibrary(track: track)
+                            let localURL = try await streaming.downloadToLibrary(track: track, existingSongs: library.allSongs)
                             return (track, localURL, nil)
                         } catch {
                             appWarn("Download All: failed for \"\(track.title)\": \(error.localizedDescription)", category: "network")

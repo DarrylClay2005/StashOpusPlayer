@@ -68,6 +68,7 @@ struct SleepTimerSheet: View {
             // Cancel button
             Button {
                 sleepTimer.cancel()
+                ToastCenter.shared.show("Sleep timer cancelled", category: .info, icon: "moon.zzz")
                 dismiss()
             } label: {
                 Label("Cancel Timer", systemImage: "xmark.circle.fill")
@@ -111,6 +112,7 @@ struct SleepTimerSheet: View {
             // Start button
             Button {
                 sleepTimer.start()
+                ToastCenter.shared.show("Sleep timer started", category: .success, icon: "moon.zzz.fill")
                 dismiss()
             } label: {
                 Label("Start Timer", systemImage: "moon.zzz.fill")

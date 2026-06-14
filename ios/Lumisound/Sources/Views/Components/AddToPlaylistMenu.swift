@@ -47,6 +47,7 @@ struct SongContextMenuContent: View {
                 ForEach(library.playlists) { playlist in
                     Button {
                         library.addSong(id: song.id, toPlaylistID: playlist.id)
+                        ToastCenter.shared.show("Added to \"\(playlist.name)\"", category: .success, icon: "plus.rectangle.on.folder")
                     } label: {
                         Label(playlist.name, systemImage: "music.note.list")
                     }
@@ -65,6 +66,7 @@ struct SongContextMenuContent: View {
             if let newPlaylist = library.playlists.last(where: { $0.name == playlistName }) {
                 library.addSong(id: song.id, toPlaylistID: newPlaylist.id)
             }
+            ToastCenter.shared.show("Created playlist \"\(playlistName)\"", category: .success, icon: "folder.badge.plus")
         } label: {
             Label("New Playlist with Song", systemImage: "folder.badge.plus")
         }

@@ -75,8 +75,50 @@ struct AchievementsView: View {
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle("Achievements")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await account.fetchAchievements() }
-        .refreshable { await account.fetchAchievements() }
+        .task {
+            await account.fetchAchievements()
+            checkForNewBadges()
+        }
+        .refreshable {
+            await account.fetchAchievements()
+            checkForNewBadges()
+        }
+    }
+
+    // MARK: - New Badge Detection
+
+    /// Persists earned badge ids to `UserDefaults["earnedBadges"]` (a JSON-encoded
+    /// `Set<String>`) and fires a celebratory toast for any badge that's newly
+    /// unlocked since the last check. Other features (e.g. settings sync) may
+    /// also read/write this same key, so we merge rather than overwrite.
+    private func checkForNewBadges() {
+        guard let data = account.achievements else { return }
+        let currentBadges = Set(data.badges)
+
+        let defaults = UserDefaults.standard
+        var earned: Set<String> = []
+        if let stored = defaults.data(forKey: "earnedBadges"),
+           let decoded = try? JSONDecoder().decode(Set<String>.self, from: stored) {
+            earned = decoded
+        }
+
+        let newlyUnlocked = currentBadges.subtracting(earned)
+        guard !newlyUnlocked.isEmpty else { return }
+
+        let merged = earned.union(currentBadges)
+        if let encoded = try? JSONEncoder().encode(merged) {
+            defaults.set(encoded, forKey: "earnedBadges")
+        }
+
+        // Only toast for badges we recognize (skip silently for any future
+        // server-side badge ids this build doesn't know how to display).
+        for badge in Self.allBadges where newlyUnlocked.contains(badge.id) {
+            ToastCenter.shared.show(
+                "Achievement unlocked: \(badge.title)!",
+                category: .success,
+                icon: badge.icon
+            )
+        }
     }
 
     private func sectionHeader(_ text: String) -> some View {
@@ -140,5 +182,10 @@ struct AchievementsView: View {
         Badge(id: "streak_100", title: "100-Day Streak", icon: "calendar.badge.clock"),
         Badge(id: "night_owl", title: "Night Owl", icon: "moon.stars.fill"),
         Badge(id: "early_bird", title: "Early Bird", icon: "sunrise.fill"),
+        Badge(id: "marathon", title: "Marathon", icon: "figure.run.circle.fill"),
+        Badge(id: "crate_digger", title: "Crate Digger", icon: "shippingbox.fill"),
+        Badge(id: "globe_trotter", title: "Globe Trotter", icon: "globe"),
+        Badge(id: "completionist", title: "Completionist", icon: "checkmark.seal.fill"),
+        Badge(id: "shuffle_master", title: "Shuffle Master", icon: "shuffle"),
     ]
 }

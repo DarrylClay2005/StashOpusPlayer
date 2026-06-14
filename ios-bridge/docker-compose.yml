@@ -17,7 +17,7 @@ services:
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
       - IOS_BRIDGE_API_KEY=${IOS_BRIDGE_API_KEY:-}
       - PORT=8002
-      # Dedicated MariaDB credentials for the StashOpusPlayer iOS app
+      # Dedicated MariaDB credentials for the Lumisound iOS app
       - DB_HOST=127.0.0.1
       - DB_PORT=3306
       - DB_USER=stash

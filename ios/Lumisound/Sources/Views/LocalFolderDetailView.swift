@@ -94,7 +94,9 @@ struct LocalFolderDetailView: View {
                     }
                     .listSectionSeparator(.hidden)
 
-                    // Track list
+                    // Track list — uses the same SongRow component as the main
+                    // Songs tab so rows look/behave identically (artwork, context
+                    // menus, favorite/play targets, styling) everywhere.
                     Section {
                         if songs.isEmpty {
                             EmptyStateView(icon: "folder", title: "Empty folder", message: "No audio files found inside \"\(folderName)\".")
@@ -104,7 +106,7 @@ struct LocalFolderDetailView: View {
                                 Button {
                                     player.play(song: song, in: songs)
                                 } label: {
-                                    FolderTrackRow(song: song, isCurrent: player.currentSong?.id == song.id)
+                                    SongRow(song: song, isCurrent: player.currentSong?.id == song.id)
                                 }
                                 .buttonStyle(.plain)
                                 .listRowBackground(AppTheme.surface.opacity(0.5))
@@ -157,7 +159,7 @@ struct LocalFolderDetailView: View {
                                     Button {
                                         player.play(song: song, in: songs)
                                     } label: {
-                                        FolderTrackGridCell(song: song, isCurrent: player.currentSong?.id == song.id)
+                                        SongGridCell(song: song, isCurrent: player.currentSong?.id == song.id)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -248,115 +250,3 @@ private struct FolderDetailHeaderView: View {
     }
 }
 
-// MARK: - Track Grid Cell (2/3-column layout)
-
-private struct FolderTrackGridCell: View {
-    let song: Song
-    let isCurrent: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            GeometryReader { geo in
-                ArtworkThumbnail(song: song, size: geo.size.width)
-                    .overlay(alignment: .bottomTrailing) {
-                        if isCurrent {
-                            Image(systemName: "waveform")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(4)
-                                .background(AppTheme.dynamicAccent, in: Circle())
-                                .padding(4)
-                        }
-                    }
-            }
-            .aspectRatio(1, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(song.displayName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
-                    .lineLimit(2)
-                Text(song.artistName)
-                    .font(.caption2)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 2)
-        }
-        .padding(6)
-        .background(AppTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
-// MARK: - Track Row
-
-private struct FolderTrackRow: View {
-    let song: Song
-    let isCurrent: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                ArtworkThumbnail(song: song, size: 40)
-
-                if isCurrent {
-                    RoundedRectangle(cornerRadius: max(4, 40 * 0.1), style: .continuous)
-                        .fill(AppTheme.dynamicAccent.opacity(0.78))
-                    FolderWaveformIcon()
-                }
-            }
-            .frame(width: 40, height: 40)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(song.displayName)
-                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
-                    .fontWeight(isCurrent ? .semibold : .regular)
-                    .lineLimit(1)
-
-                if !song.artistName.isEmpty {
-                    Text(song.artistName)
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer(minLength: 0)
-
-            Text(song.durationText)
-                .font(.caption)
-                .foregroundStyle(AppTheme.textSecondary)
-                .monospacedDigit()
-        }
-        .contentShape(Rectangle())
-        .padding(.vertical, 4)
-    }
-}
-
-// MARK: - Animated waveform indicator (current track)
-
-private struct FolderWaveformIcon: View {
-    @State private var animating = false
-
-    private let heights: [CGFloat] = [0.45, 0.85, 0.60, 0.80, 0.50]
-    private let delays: [Double]   = [0.0,  0.15, 0.30, 0.10, 0.25]
-
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 2) {
-            ForEach(0..<5) { i in
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(AppTheme.textPrimary)
-                    .frame(width: 2.5, height: animating ? 12 * heights[i] : 3)
-                    .animation(
-                        .easeInOut(duration: 0.55)
-                            .repeatForever(autoreverses: true)
-                            .delay(delays[i]),
-                        value: animating
-                    )
-            }
-        }
-        .onAppear { animating = true }
-        .onDisappear { animating = false }
-    }
-}

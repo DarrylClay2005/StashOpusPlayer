@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -276,7 +276,7 @@ async def lifespan(app: FastAPI):
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="StashOpusPlayer iOS Bridge", version=VERSION, lifespan=lifespan)
+app = FastAPI(title="Lumisound iOS Bridge", version=VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -658,6 +658,167 @@ async def _youtube_api_key_for_user(user_id: str) -> str:
     return YOUTUBE_API_KEY
 
 
+def _youtube_data_api_get_raw(path: str, params: dict, api_key: str) -> tuple[int, dict]:
+    """Like _youtube_data_api_get, but never raises on HTTP error status —
+    returns (status_code, parsed_json_body) so callers can inspect the
+    `error.errors[].reason` field YouTube returns for quota/auth failures
+    (used by /youtube/validate-key and /youtube/key-exposure-check)."""
+    from urllib.parse import urlencode
+    import urllib.error
+
+    query = urlencode({**params, "key": api_key})
+    req = urllib.request.Request(f"https://www.googleapis.com/youtube/v3/{path}?{query}")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        body = exc.read()
+        try:
+            return exc.code, json.loads(body)
+        except (ValueError, json.JSONDecodeError):
+            return exc.code, {}
+
+
+_YOUTUBE_CHANNEL_URL_RE = re.compile(
+    r"(?:youtube\.com|youtu\.be)/(?:channel/(?P<id>UC[A-Za-z0-9_-]{22})"
+    r"|@(?P<handle>[A-Za-z0-9._-]+)"
+    r"|c/(?P<custom>[A-Za-z0-9._-]+)"
+    r"|user/(?P<user>[A-Za-z0-9._-]+))"
+)
+
+
+def _youtube_thumbnail_from_snippet(snippet: dict) -> str:
+    thumbnails = (snippet or {}).get("thumbnails") or {}
+    for size in ("high", "medium", "default"):
+        if size in thumbnails:
+            return thumbnails[size].get("url", "")
+    return ""
+
+
+async def _resolve_youtube_channel(query: str, api_key: str) -> dict:
+    """Resolves a channel URL/@handle/search term to
+    {channel_id, channel_title, channel_thumbnail} via the YouTube Data API.
+
+    - `youtube.com/channel/UC...` -> used directly via channels.list?id=
+    - `youtube.com/@handle` or a bare `@handle` -> channels.list?forHandle=
+    - `youtube.com/c/Name` or `youtube.com/user/Name` -> search.list?type=channel
+    - anything else (free-text search term) -> search.list?type=channel&q=
+    """
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No YouTube API key configured")
+
+    query = query.strip()
+    channel_id: Optional[str] = None
+    handle: Optional[str] = None
+    search_term: Optional[str] = None
+
+    match = _YOUTUBE_CHANNEL_URL_RE.search(query)
+    if match:
+        channel_id = match.group("id")
+        handle = match.group("handle")
+        search_term = match.group("custom") or match.group("user")
+    elif query.startswith("@"):
+        handle = query[1:]
+    elif query.startswith("UC") and len(query) == 24:
+        channel_id = query
+    else:
+        search_term = query
+
+    if channel_id:
+        _, data = await asyncio.to_thread(
+            _youtube_data_api_get_raw, "channels",
+            {"part": "snippet", "id": channel_id}, api_key,
+        )
+        items = data.get("items") or []
+        if not items:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        snippet = items[0].get("snippet") or {}
+        return {
+            "channel_id": channel_id,
+            "channel_title": snippet.get("title") or "",
+            "channel_thumbnail": _youtube_thumbnail_from_snippet(snippet),
+        }
+
+    if handle:
+        _, data = await asyncio.to_thread(
+            _youtube_data_api_get_raw, "channels",
+            {"part": "snippet", "forHandle": f"@{handle}"}, api_key,
+        )
+        items = data.get("items") or []
+        if items:
+            snippet = items[0].get("snippet") or {}
+            return {
+                "channel_id": items[0]["id"],
+                "channel_title": snippet.get("title") or "",
+                "channel_thumbnail": _youtube_thumbnail_from_snippet(snippet),
+            }
+        # forHandle can 404/empty for some handles — fall back to search below.
+        search_term = handle
+
+    if search_term:
+        _, data = await asyncio.to_thread(
+            _youtube_data_api_get_raw, "search",
+            {"part": "snippet", "type": "channel", "q": search_term, "maxResults": 1},
+            api_key,
+        )
+        items = data.get("items") or []
+        if not items:
+            raise HTTPException(status_code=404, detail="No channel found for that search")
+        snippet = items[0].get("snippet") or {}
+        return {
+            "channel_id": (items[0].get("id") or {}).get("channelId") or "",
+            "channel_title": snippet.get("title") or "",
+            "channel_thumbnail": _youtube_thumbnail_from_snippet(snippet),
+        }
+
+    raise HTTPException(status_code=400, detail="Could not parse a channel from that input")
+
+
+async def _channel_uploads_via_api(channel_id: str, max_results: int, api_key: str) -> list[dict]:
+    """Recent uploads for a channel via search.list?channelId=...&order=date.
+    Raises on any API error so the caller can fall back to yt-dlp."""
+    data = await asyncio.to_thread(
+        _youtube_data_api_get, "search",
+        {
+            "part": "snippet",
+            "channelId": channel_id,
+            "order": "date",
+            "type": "video",
+            "maxResults": max_results,
+        },
+        api_key,
+    )
+    tracks = []
+    for item in data.get("items") or []:
+        snippet = item.get("snippet") or {}
+        video_id = (item.get("id") or {}).get("videoId")
+        if not video_id:
+            continue
+        tracks.append({
+            "id": video_id,
+            "title": snippet.get("title") or "Unknown Title",
+            "artist": snippet.get("channelTitle") or "Unknown Artist",
+            "duration_seconds": 0,
+            "thumbnail_url": _youtube_thumbnail_from_snippet(snippet),
+            "source": "youtube",
+            "youtube_url": f"https://youtube.com/watch?v={video_id}",
+        })
+    return tracks
+
+
+async def _channel_uploads_via_ytdlp(channel_id: str, max_results: int) -> list[dict]:
+    """Fallback when no YouTube API key is configured or the API call fails:
+    scrape the channel's /videos tab with yt-dlp (flat-playlist, cookie-auth)."""
+    entries = await _run_ytdlp(
+        f"https://www.youtube.com/channel/{channel_id}/videos",
+        "--dump-json", "--flat-playlist", "--playlist-end", str(max_results),
+        "--cache-dir", YTDLP_CACHE_DIR,
+        *_ytdlp_cookie_args(),
+        timeout=30.0,
+    )
+    return [_parse_track(e, "youtube") for e in entries]
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
@@ -752,6 +913,40 @@ class SyncPushRequest(BaseModel):
     audio_settings_json: Optional[str] = None
     track_audio_settings_json: Optional[str] = None
     theme_color: Optional[str] = None
+    vinyl_disc_enabled: Optional[bool] = None
+    show_queue_preview: Optional[bool] = None
+    songs_per_row: Optional[int] = None
+    albums_per_row: Optional[int] = None
+    bg_animation: Optional[str] = None
+    bg_opacity: Optional[float] = None
+    preferred_audio_format: Optional[str] = None
+    download_path: Optional[str] = None
+    car_mode_enabled: Optional[bool] = None
+    library_artists_columns: Optional[int] = None
+    now_playing_artwork_style: Optional[str] = None
+    now_playing_seeker_style: Optional[str] = None
+    earned_badges_json: Optional[str] = None
+
+
+class FolderBackupTrack(BaseModel):
+    """One track inside a backed-up watched folder. `source_track_id` is the
+    `LUMISOUND_ID`-style identifier (e.g. "youtube:dQw4w9WgXcQ") used to
+    re-download the track on restore; tracks without one (local-only imports)
+    can't be auto-redownloaded and are reported back to the client as such."""
+    filename: str
+    title: Optional[str] = None
+    artist: Optional[str] = None
+    duration_seconds: Optional[float] = 0
+    source_track_id: Optional[str] = None
+
+
+class FolderBackupEntry(BaseModel):
+    folder_path: str  # relative to the app's Documents directory, e.g. "Imported Music/Live Sets"
+    tracks: list[FolderBackupTrack] = []
+
+
+class FolderBackupPushRequest(BaseModel):
+    folders: list[FolderBackupEntry] = []
 
 
 class SharePlaylistRequest(BaseModel):
@@ -796,6 +991,10 @@ class SubscribeChannelRequest(BaseModel):
     channel_name: Optional[str] = None
 
 
+class ResolveChannelRequest(BaseModel):
+    query: str
+
+
 class AddCollaboratorRequest(BaseModel):
     username: str
     role: str = "editor"  # 'editor' or 'viewer'
@@ -818,6 +1017,8 @@ class ScrobbleLinkRequest(BaseModel):
     lastfm_session_key: Optional[str] = None
     lastfm_username: Optional[str] = None
     listenbrainz_token: Optional[str] = None
+    librefm_session_key: Optional[str] = None
+    librefm_username: Optional[str] = None
     enabled: Optional[bool] = None
 
 
@@ -1031,6 +1232,13 @@ async def download_track(
     url: Optional[str] = Query(None, description="Full URL (required for soundcloud)"),
     format: str = Query("m4a", description="Audio format: mp3, m4a, flac, opus, best"),
     title: Optional[str] = Query(None, description="Safe filename hint (no extension)"),
+    existing_ids: Optional[str] = Query(
+        None,
+        description="Comma-separated 'source:id' manifest of tracks the client already "
+                     "has (Song.sourceTrackID values) — if this download's "
+                     "'source:id' is in the manifest, the bridge skips running "
+                     "yt-dlp entirely and returns 204.",
+    ),
 ):
     """
     Download audio with embedded metadata and thumbnail, stream the file bytes back,
@@ -1040,6 +1248,15 @@ async def download_track(
 
     source = source.lower()
     format = format.lower()
+
+    # Pre-download dedupe: the client already has a valid local copy of this
+    # exact source track (verified client-side via CorruptFileFinderService
+    # before even sending the request) — skip running yt-dlp entirely.
+    if existing_ids:
+        have = {s.strip() for s in existing_ids.split(",") if s.strip()}
+        if f"{source}:{id}" in have:
+            logger.info("download_track: skipping %s:%s — already in client manifest", source, id)
+            return Response(status_code=204)
 
     if source == "soundcloud":
         if not url:
@@ -1291,11 +1508,32 @@ async def track_metadata(
     return base
 
 
+def _filter_existing_tracks(tracks: list[dict], source: str, existing_ids: Optional[str]) -> list[dict]:
+    """Drops entries whose `f"{source}:{id}"` (the LUMISOUND_ID format embedded
+    in downloaded files and stored as `Song.sourceTrackID`) appears in
+    `existing_ids` — a comma-separated manifest the client sends listing tracks
+    it already has. Used by /api/resolve so a "Download All" pass doesn't even
+    list tracks the user already has, dedupe'd by the client across re-downloads
+    under different filenames."""
+    if not existing_ids:
+        return tracks
+    have = {s.strip() for s in existing_ids.split(",") if s.strip()}
+    if not have:
+        return tracks
+    return [t for t in tracks if f"{source}:{t.get('id')}" not in have]
+
+
 @app.get("/api/resolve")
 async def resolve_playlist(
     request: Request,
     url: str = Query(..., description="Playlist or album URL"),
     limit: int = Query(100, ge=1, le=1000, description="Max tracks to return"),
+    existing_ids: Optional[str] = Query(
+        None,
+        description="Comma-separated 'source:id' manifest of tracks the client already "
+                     "has (Song.sourceTrackID values) — matching entries are excluded "
+                     "from the result so 'Download All' skips them.",
+    ),
 ):
     await check_auth(request)
     await _reject_ssrf_targets(url)
@@ -1315,7 +1553,8 @@ async def resolve_playlist(
             if playlist_id:
                 try:
                     items = await _resolve_youtube_playlist_via_api(playlist_id, limit, api_key)
-                    return [_parse_track(item, source) for item in items]
+                    tracks = [_parse_track(item, source) for item in items]
+                    return _filter_existing_tracks(tracks, source, existing_ids)
                 except Exception as exc:
                     logger.warning("YouTube Data API resolve failed, falling back to yt-dlp: %s", exc)
 
@@ -1338,7 +1577,7 @@ async def resolve_playlist(
         raise HTTPException(status_code=404, detail="Could not resolve playlist")
 
     tracks = [_parse_track(e, source) for e in entries[:limit]]
-    return tracks
+    return _filter_existing_tracks(tracks, source, existing_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -2375,14 +2614,38 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
 
     # Settings
     await cur.execute(
-        "SELECT audio_settings_json, track_audio_settings_json, theme_color "
+        "SELECT audio_settings_json, track_audio_settings_json, theme_color, "
+        "vinyl_disc_enabled, show_queue_preview, songs_per_row, albums_per_row, "
+        "bg_animation, bg_opacity, preferred_audio_format, download_path, "
+        "car_mode_enabled, library_artists_columns, now_playing_artwork_style, "
+        "now_playing_seeker_style, earned_badges_json "
         "FROM ios_user_settings WHERE user_id = %s",
         (user_id,),
     )
     settings_row = await cur.fetchone()
-    audio_settings_json = settings_row[0] if settings_row else None
-    track_audio_settings_json = settings_row[1] if settings_row else None
-    theme_color = settings_row[2] if settings_row else "#EC4079"
+    if settings_row:
+        (audio_settings_json, track_audio_settings_json, theme_color,
+         vinyl_disc_enabled, show_queue_preview, songs_per_row, albums_per_row,
+         bg_animation, bg_opacity, preferred_audio_format, download_path,
+         car_mode_enabled, library_artists_columns, now_playing_artwork_style,
+         now_playing_seeker_style, earned_badges_json) = settings_row
+    else:
+        audio_settings_json = None
+        track_audio_settings_json = None
+        theme_color = "#EC4079"
+        vinyl_disc_enabled = True
+        show_queue_preview = True
+        songs_per_row = 1
+        albums_per_row = 2
+        bg_animation = "fade"
+        bg_opacity = 0.35
+        preferred_audio_format = "m4a"
+        download_path = None
+        car_mode_enabled = False
+        library_artists_columns = 2
+        now_playing_artwork_style = None
+        now_playing_seeker_style = None
+        earned_badges_json = None
 
     return {
         "favorites": favorites,
@@ -2390,6 +2653,19 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
         "audio_settings_json": audio_settings_json,
         "track_audio_settings_json": track_audio_settings_json,
         "theme_color": theme_color,
+        "vinyl_disc_enabled": bool(vinyl_disc_enabled) if vinyl_disc_enabled is not None else True,
+        "show_queue_preview": bool(show_queue_preview) if show_queue_preview is not None else True,
+        "songs_per_row": songs_per_row if songs_per_row is not None else 1,
+        "albums_per_row": albums_per_row if albums_per_row is not None else 2,
+        "bg_animation": bg_animation or "fade",
+        "bg_opacity": bg_opacity if bg_opacity is not None else 0.35,
+        "preferred_audio_format": preferred_audio_format or "m4a",
+        "download_path": download_path,
+        "car_mode_enabled": bool(car_mode_enabled) if car_mode_enabled is not None else False,
+        "library_artists_columns": library_artists_columns if library_artists_columns is not None else 2,
+        "now_playing_artwork_style": now_playing_artwork_style,
+        "now_playing_seeker_style": now_playing_seeker_style,
+        "earned_badges_json": earned_badges_json,
     }
 
 
@@ -2455,21 +2731,65 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
     await cur.execute(
         """
         INSERT INTO ios_user_settings
-            (user_id, audio_settings_json, track_audio_settings_json, theme_color)
-        VALUES (%s, %s, %s, %s)
+            (user_id, audio_settings_json, track_audio_settings_json, theme_color,
+             vinyl_disc_enabled, show_queue_preview, songs_per_row, albums_per_row,
+             bg_animation, bg_opacity, preferred_audio_format, download_path,
+             car_mode_enabled, library_artists_columns, now_playing_artwork_style,
+             now_playing_seeker_style, earned_badges_json)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             audio_settings_json = %s,
             track_audio_settings_json = %s,
-            theme_color = %s
+            theme_color = %s,
+            vinyl_disc_enabled = %s,
+            show_queue_preview = %s,
+            songs_per_row = %s,
+            albums_per_row = %s,
+            bg_animation = %s,
+            bg_opacity = %s,
+            preferred_audio_format = %s,
+            download_path = %s,
+            car_mode_enabled = %s,
+            library_artists_columns = %s,
+            now_playing_artwork_style = %s,
+            now_playing_seeker_style = %s,
+            earned_badges_json = %s
         """,
         (
             user_id,
             snapshot.get("audio_settings_json"),
             snapshot.get("track_audio_settings_json"),
             snapshot.get("theme_color") or "#EC4079",
+            snapshot.get("vinyl_disc_enabled", True),
+            snapshot.get("show_queue_preview", True),
+            snapshot.get("songs_per_row", 1),
+            snapshot.get("albums_per_row", 2),
+            snapshot.get("bg_animation") or "fade",
+            snapshot.get("bg_opacity", 0.35),
+            snapshot.get("preferred_audio_format") or "m4a",
+            snapshot.get("download_path"),
+            snapshot.get("car_mode_enabled", False),
+            snapshot.get("library_artists_columns", 2),
+            snapshot.get("now_playing_artwork_style"),
+            snapshot.get("now_playing_seeker_style"),
+            snapshot.get("earned_badges_json"),
+            # ON DUPLICATE KEY UPDATE values
             snapshot.get("audio_settings_json"),
             snapshot.get("track_audio_settings_json"),
             snapshot.get("theme_color") or "#EC4079",
+            snapshot.get("vinyl_disc_enabled", True),
+            snapshot.get("show_queue_preview", True),
+            snapshot.get("songs_per_row", 1),
+            snapshot.get("albums_per_row", 2),
+            snapshot.get("bg_animation") or "fade",
+            snapshot.get("bg_opacity", 0.35),
+            snapshot.get("preferred_audio_format") or "m4a",
+            snapshot.get("download_path"),
+            snapshot.get("car_mode_enabled", False),
+            snapshot.get("library_artists_columns", 2),
+            snapshot.get("now_playing_artwork_style"),
+            snapshot.get("now_playing_seeker_style"),
+            snapshot.get("earned_badges_json"),
         ),
     )
 
@@ -2594,28 +2914,71 @@ async def sync_push(
                         all_track_rows,
                     )
 
-            # Update settings
+            # Update settings — additive fields use IF(%s IS NULL, col, %s) so a
+            # client that doesn't yet send a given field (older app version)
+            # never clobbers what's already stored server-side.
             await cur.execute(
                 """
                 INSERT INTO ios_user_settings
-                    (user_id, audio_settings_json, track_audio_settings_json, theme_color)
-                VALUES (%s, %s, %s, %s)
+                    (user_id, audio_settings_json, track_audio_settings_json, theme_color,
+                     vinyl_disc_enabled, show_queue_preview, songs_per_row, albums_per_row,
+                     bg_animation, bg_opacity, preferred_audio_format, download_path,
+                     car_mode_enabled, library_artists_columns, now_playing_artwork_style,
+                     now_playing_seeker_style, earned_badges_json)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     audio_settings_json = IF(%s IS NULL, audio_settings_json, %s),
                     track_audio_settings_json = IF(%s IS NULL, track_audio_settings_json, %s),
-                    theme_color = IF(%s IS NULL, theme_color, %s)
+                    theme_color = IF(%s IS NULL, theme_color, %s),
+                    vinyl_disc_enabled = IF(%s IS NULL, vinyl_disc_enabled, %s),
+                    show_queue_preview = IF(%s IS NULL, show_queue_preview, %s),
+                    songs_per_row = IF(%s IS NULL, songs_per_row, %s),
+                    albums_per_row = IF(%s IS NULL, albums_per_row, %s),
+                    bg_animation = IF(%s IS NULL, bg_animation, %s),
+                    bg_opacity = IF(%s IS NULL, bg_opacity, %s),
+                    preferred_audio_format = IF(%s IS NULL, preferred_audio_format, %s),
+                    download_path = IF(%s IS NULL, download_path, %s),
+                    car_mode_enabled = IF(%s IS NULL, car_mode_enabled, %s),
+                    library_artists_columns = IF(%s IS NULL, library_artists_columns, %s),
+                    now_playing_artwork_style = IF(%s IS NULL, now_playing_artwork_style, %s),
+                    now_playing_seeker_style = IF(%s IS NULL, now_playing_seeker_style, %s),
+                    earned_badges_json = IF(%s IS NULL, earned_badges_json, %s)
                 """,
                 (
                     user_id,
                     body.audio_settings_json,
                     body.track_audio_settings_json,
                     body.theme_color or "#EC4079",
-                    body.audio_settings_json,
-                    body.audio_settings_json,
-                    body.track_audio_settings_json,
-                    body.track_audio_settings_json,
-                    body.theme_color,
-                    body.theme_color,
+                    body.vinyl_disc_enabled,
+                    body.show_queue_preview,
+                    body.songs_per_row,
+                    body.albums_per_row,
+                    body.bg_animation,
+                    body.bg_opacity,
+                    body.preferred_audio_format,
+                    body.download_path,
+                    body.car_mode_enabled,
+                    body.library_artists_columns,
+                    body.now_playing_artwork_style,
+                    body.now_playing_seeker_style,
+                    body.earned_badges_json,
+                    # ON DUPLICATE KEY UPDATE values (IF %s IS NULL, ..., %s)
+                    body.audio_settings_json, body.audio_settings_json,
+                    body.track_audio_settings_json, body.track_audio_settings_json,
+                    body.theme_color, body.theme_color,
+                    body.vinyl_disc_enabled, body.vinyl_disc_enabled,
+                    body.show_queue_preview, body.show_queue_preview,
+                    body.songs_per_row, body.songs_per_row,
+                    body.albums_per_row, body.albums_per_row,
+                    body.bg_animation, body.bg_animation,
+                    body.bg_opacity, body.bg_opacity,
+                    body.preferred_audio_format, body.preferred_audio_format,
+                    body.download_path, body.download_path,
+                    body.car_mode_enabled, body.car_mode_enabled,
+                    body.library_artists_columns, body.library_artists_columns,
+                    body.now_playing_artwork_style, body.now_playing_artwork_style,
+                    body.now_playing_seeker_style, body.now_playing_seeker_style,
+                    body.earned_badges_json, body.earned_badges_json,
                 ),
             )
 
@@ -2657,6 +3020,21 @@ async def list_backups(payload: dict = Depends(get_current_user)):
     }
 
 
+@app.delete("/user/backups")
+async def clear_backups(payload: dict = Depends(get_current_user)):
+    """Deletes all of this user's automatic sync backups. Does not affect
+    favorites/playlists/settings themselves — only the snapshot history."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM ios_user_backups WHERE user_id = %s", (user_id,))
+            deleted = cur.rowcount
+            await _log_sync(cur, user_id, "clear_backups", f"deleted {deleted} backups")
+
+    return {"status": "cleared", "deleted": deleted}
+
+
 @app.post("/user/backups/{backup_id}/restore")
 async def restore_backup(backup_id: str, payload: dict = Depends(get_current_user)):
     """Restores a previous sync snapshot, replacing the user's current
@@ -2681,6 +3059,86 @@ async def restore_backup(backup_id: str, payload: dict = Depends(get_current_use
             await _log_sync(cur, user_id, "restore", f"restored backup from {row[1].isoformat() if row[1] else backup_id}")
 
     return await sync_pull(payload)
+
+
+# ---------------------------------------------------------------------------
+# Folder Structure Backup (watched/imported-folder layout)
+#
+# Lets a reinstalled client recreate the folder structure its watched/imported
+# tracks originally lived in under Documents, and shows which tracks within
+# each folder can be auto-redownloaded via their `source_track_id`
+# (LUMISOUND_ID, e.g. "youtube:dQw4w9WgXcQ") vs. local-only imports that can
+# only have their empty folder recreated.
+# ---------------------------------------------------------------------------
+
+
+@app.put("/user/folder-backups")
+async def push_folder_backups(
+    body: FolderBackupPushRequest,
+    payload: dict = Depends(get_current_user),
+):
+    """Replaces this user's backed-up folder structure wholesale — one row per
+    watched folder, each holding the relative path and a JSON list of the
+    tracks (filename/title/artist/duration/source_track_id) that lived in it
+    at push time."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM ios_user_folder_backups WHERE user_id = %s", (user_id,)
+            )
+            if body.folders:
+                await cur.executemany(
+                    """
+                    INSERT INTO ios_user_folder_backups (id, user_id, folder_path, track_filenames_json)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    [
+                        (
+                            str(uuid.uuid4()),
+                            user_id,
+                            folder.folder_path,
+                            json.dumps([t.model_dump() for t in folder.tracks]),
+                        )
+                        for folder in body.folders
+                    ],
+                )
+            await _log_sync(cur, user_id, "folder_backup_push", f"{len(body.folders)} folder(s)")
+
+    return {"status": "synced", "folders": len(body.folders)}
+
+
+@app.get("/user/folder-backups")
+async def get_folder_backups(payload: dict = Depends(get_current_user)):
+    """Returns this user's backed-up folder structure, e.g. for a 'restore your
+    folders?' prompt after a reinstall. Empty list means no folder backup exists
+    (either never pushed, or the user never used watched folders)."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT folder_path, track_filenames_json, updated_at
+                FROM ios_user_folder_backups
+                WHERE user_id = %s
+                ORDER BY folder_path ASC
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    return {
+        "folders": [
+            {
+                "folder_path": r[0],
+                "tracks": json.loads(r[1]) if r[1] else [],
+                "updated_at": r[2].isoformat() if r[2] else None,
+            }
+            for r in rows
+        ]
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -4682,41 +5140,75 @@ async def _estimate_key(path: pathlib.Path) -> Optional[str]:
 LASTFM_API_KEY: str = os.getenv("LASTFM_API_KEY", "")
 LASTFM_API_SECRET: str = os.getenv("LASTFM_API_SECRET", "")
 
+# Libre.fm exposes a Last.fm-1.0/2.0-API-compatible "Audioscrobbler" endpoint at
+# a different base URL. Re-using the same auth/scrobble flow with a swapped
+# host gets Libre.fm support nearly for free. Libre.fm's public API key/secret
+# pair is published (it doesn't gate registration the way Last.fm does), but
+# we still allow overriding via env vars for self-hosted GNU FM instances.
+LIBREFM_API_KEY: str = os.getenv("LIBREFM_API_KEY", "lumisound")
+LIBREFM_API_SECRET: str = os.getenv("LIBREFM_API_SECRET", "lumisound")
+LIBREFM_API_BASE: str = os.getenv("LIBREFM_API_BASE", "https://libre.fm/2.0/")
+LIBREFM_AUTH_BASE: str = os.getenv("LIBREFM_AUTH_BASE", "https://libre.fm/api/auth/")
 
-def _lastfm_sign(params: dict) -> str:
-    sig_string = "".join(f"{k}{params[k]}" for k in sorted(params)) + LASTFM_API_SECRET
+
+def _audioscrobbler_sign(params: dict, secret: str) -> str:
+    sig_string = "".join(f"{k}{params[k]}" for k in sorted(params)) + secret
     return hashlib.md5(sig_string.encode("utf-8")).hexdigest()
 
 
-async def _lastfm_scrobble(session_key: str, artist: str, title: str, timestamp: int) -> None:
-    if not LASTFM_API_KEY or not LASTFM_API_SECRET:
-        logger.debug("_lastfm_scrobble: LASTFM_API_KEY/SECRET not configured, skipping")
+def _lastfm_sign(params: dict) -> str:
+    return _audioscrobbler_sign(params, LASTFM_API_SECRET)
+
+
+async def _audioscrobbler_scrobble(
+    base_url: str, api_key: str, api_secret: str,
+    session_key: str, artist: str, title: str, timestamp: int,
+) -> None:
+    """Submits a single scrobble to any Last.fm-1.0/2.0-compatible
+    "Audioscrobbler" endpoint (Last.fm itself, Libre.fm, or a self-hosted
+    GNU FM instance)."""
+    if not api_key or not api_secret:
+        logger.debug("_audioscrobbler_scrobble: %s not configured, skipping", base_url)
         return
     params = {
         "method": "track.scrobble",
-        "api_key": LASTFM_API_KEY,
+        "api_key": api_key,
         "sk": session_key,
         "artist": artist,
         "track": title,
         "timestamp": str(timestamp),
     }
-    params["api_sig"] = _lastfm_sign(params)
+    params["api_sig"] = _audioscrobbler_sign(params, api_secret)
     params["format"] = "json"
 
     def _post() -> None:
         try:
             data = urllib.parse.urlencode(params).encode("utf-8")
             req = urllib.request.Request(
-                "https://ws.audioscrobbler.com/2.0/",
+                base_url,
                 data=data,
                 headers={"User-Agent": "Lumisound-iOS-Bridge/1.0"},
                 method="POST",
             )
             urllib.request.urlopen(req, timeout=10)
         except Exception as exc:
-            logger.debug("_lastfm_scrobble request failed: %s", exc)
+            logger.debug("_audioscrobbler_scrobble request to %s failed: %s", base_url, exc)
 
     await asyncio.to_thread(_post)
+
+
+async def _lastfm_scrobble(session_key: str, artist: str, title: str, timestamp: int) -> None:
+    await _audioscrobbler_scrobble(
+        "https://ws.audioscrobbler.com/2.0/", LASTFM_API_KEY, LASTFM_API_SECRET,
+        session_key, artist, title, timestamp,
+    )
+
+
+async def _librefm_scrobble(session_key: str, artist: str, title: str, timestamp: int) -> None:
+    await _audioscrobbler_scrobble(
+        LIBREFM_API_BASE, LIBREFM_API_KEY, LIBREFM_API_SECRET,
+        session_key, artist, title, timestamp,
+    )
 
 
 async def _listenbrainz_scrobble(token: str, artist: str, title: str, duration_seconds: int) -> None:
@@ -4761,7 +5253,7 @@ async def _scrobble_track(user_id: str, title: str, artist: Optional[str], liste
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT lastfm_session_key, listenbrainz_token, enabled "
+                    "SELECT lastfm_session_key, listenbrainz_token, enabled, librefm_session_key "
                     "FROM ios_scrobble_links WHERE user_id = %s",
                     (user_id,),
                 )
@@ -4772,12 +5264,15 @@ async def _scrobble_track(user_id: str, title: str, artist: Optional[str], liste
 
     if not row or not row[2]:
         return
-    lastfm_key, listenbrainz_token, _enabled = row
+    lastfm_key, listenbrainz_token, _enabled, librefm_key = row
     artist_name = artist or "Unknown Artist"
+    # Submit to every linked service — not just the first one configured.
     if lastfm_key:
         await _lastfm_scrobble(lastfm_key, artist_name, title, int(time.time()))
     if listenbrainz_token:
         await _listenbrainz_scrobble(listenbrainz_token, artist_name, title, listen_seconds)
+    if librefm_key:
+        await _librefm_scrobble(librefm_key, artist_name, title, int(time.time()))
 
 
 # ---------------------------------------------------------------------------
@@ -4923,6 +5418,44 @@ async def get_discover_mix(
 # ---------------------------------------------------------------------------
 
 
+@app.post("/youtube/resolve-channel")
+async def resolve_youtube_channel(
+    body: ResolveChannelRequest,
+    payload: dict = Depends(get_current_user),
+):
+    """Resolves a YouTube channel URL/@handle/search term to a real
+    {channel_id, channel_title, channel_thumbnail} using the caller's
+    per-user (or server-wide) YouTube Data API key."""
+    user_id = payload["sub"]
+    api_key = await _youtube_api_key_for_user(user_id)
+    return await _resolve_youtube_channel(body.query, api_key)
+
+
+@app.get("/youtube/channel-uploads")
+async def youtube_channel_uploads(
+    channel_id: str = Query(..., description="YouTube channel ID (UC...)"),
+    limit: int = Query(10, ge=1, le=25),
+    payload: dict = Depends(get_current_user),
+):
+    """Recent uploads for a channel — YouTube Data API first, falling back to
+    yt-dlp (cookie-authenticated, flat-playlist) when no API key is configured
+    or the API call fails (quota/auth error)."""
+    user_id = payload["sub"]
+    api_key = await _youtube_api_key_for_user(user_id)
+
+    if api_key:
+        try:
+            return await _channel_uploads_via_api(channel_id, limit, api_key)
+        except Exception as exc:
+            logger.warning("channel_uploads: API failed for %r, falling back to yt-dlp: %s", channel_id, exc)
+
+    try:
+        return await _channel_uploads_via_ytdlp(channel_id, limit)
+    except Exception as exc:
+        logger.warning("channel_uploads: yt-dlp failed for %r: %s", channel_id, exc)
+        raise HTTPException(status_code=502, detail="Could not fetch channel uploads")
+
+
 @app.post("/user/subscriptions", status_code=201)
 async def create_subscription(
     body: SubscribeChannelRequest,
@@ -4930,16 +5463,47 @@ async def create_subscription(
 ):
     user_id = payload["sub"]
     await _reject_ssrf_targets(body.channel_url)
+
+    channel_id: Optional[str] = None
+    channel_thumbnail: Optional[str] = None
+    channel_name = body.channel_name
+    channel_url = body.channel_url
+
+    # Best-effort: resolve the input to a real channel_id/title/thumbnail via
+    # the YouTube Data API so the subscription list shows real channel art.
+    # Falls back to storing the raw URL/name as typed if no API key is
+    # configured or resolution fails (the existing yt-dlp-based check still
+    # works against the raw channel_url in that case).
+    api_key = await _youtube_api_key_for_user(user_id)
+    if api_key:
+        try:
+            resolved = await _resolve_youtube_channel(body.channel_url, api_key)
+            channel_id = resolved["channel_id"]
+            channel_thumbnail = resolved["channel_thumbnail"]
+            if not channel_name:
+                channel_name = resolved["channel_title"]
+            if channel_id:
+                channel_url = f"https://www.youtube.com/channel/{channel_id}"
+        except HTTPException as exc:
+            logger.info("create_subscription: channel resolution failed for %r: %s", body.channel_url, exc.detail)
+
     sub_id = str(uuid.uuid4())
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "INSERT INTO ios_artist_subscriptions (id, user_id, channel_url, channel_name) "
-                "VALUES (%s, %s, %s, %s)",
-                (sub_id, user_id, body.channel_url, body.channel_name),
+                "INSERT INTO ios_artist_subscriptions "
+                "(id, user_id, channel_url, channel_name, channel_id, channel_thumbnail) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (sub_id, user_id, channel_url, channel_name, channel_id, channel_thumbnail),
             )
-    return {"id": sub_id, "channel_url": body.channel_url, "channel_name": body.channel_name}
+    return {
+        "id": sub_id,
+        "channel_url": channel_url,
+        "channel_name": channel_name,
+        "channel_id": channel_id,
+        "channel_thumbnail": channel_thumbnail,
+    }
 
 
 @app.get("/user/subscriptions")
@@ -4949,7 +5513,8 @@ async def list_subscriptions(payload: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, channel_url, channel_name, last_video_id, last_checked_at, created_at "
+                "SELECT id, channel_url, channel_name, last_video_id, last_checked_at, created_at, "
+                "channel_id, channel_thumbnail "
                 "FROM ios_artist_subscriptions WHERE user_id = %s ORDER BY created_at DESC",
                 (user_id,),
             )
@@ -4963,6 +5528,8 @@ async def list_subscriptions(payload: dict = Depends(get_current_user)):
             "last_video_id": r[3],
             "last_checked_at": r[4].isoformat() if r[4] else None,
             "created_at": r[5].isoformat() if r[5] else None,
+            "channel_id": r[6],
+            "channel_thumbnail": r[7],
         }
         for r in rows
     ]
@@ -4991,28 +5558,42 @@ async def check_subscription(sub_id: str, payload: dict = Depends(get_current_us
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT channel_url, channel_name, last_video_id FROM ios_artist_subscriptions "
-                "WHERE id = %s AND user_id = %s",
+                "SELECT channel_url, channel_name, last_video_id, channel_id "
+                "FROM ios_artist_subscriptions WHERE id = %s AND user_id = %s",
                 (sub_id, user_id),
             )
             row = await cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Subscription not found")
-            channel_url, channel_name, last_video_id = row
+            channel_url, channel_name, last_video_id, channel_id = row
 
-    try:
-        entries = await _run_ytdlp(
-            channel_url,
-            "--dump-json", "--flat-playlist", "--playlist-end", "5",
-            "--cache-dir", YTDLP_CACHE_DIR,
-            *_ytdlp_cookie_args(),
-            timeout=30.0,
-        )
-    except Exception as exc:
-        logger.warning("check_subscription: yt-dlp failed for %r: %s", channel_url, exc)
-        raise HTTPException(status_code=502, detail="Could not resolve channel")
+    tracks: list[dict] = []
+    if channel_id:
+        api_key = await _youtube_api_key_for_user(user_id)
+        if api_key:
+            try:
+                tracks = await _channel_uploads_via_api(channel_id, 5, api_key)
+            except Exception as exc:
+                logger.warning("check_subscription: API failed for %r, falling back to yt-dlp: %s", channel_id, exc)
+        if not tracks:
+            try:
+                tracks = await _channel_uploads_via_ytdlp(channel_id, 5)
+            except Exception as exc:
+                logger.warning("check_subscription: yt-dlp failed for channel_id %r: %s", channel_id, exc)
 
-    tracks = [_parse_track(e, "youtube") for e in entries]
+    if not tracks:
+        try:
+            entries = await _run_ytdlp(
+                channel_url,
+                "--dump-json", "--flat-playlist", "--playlist-end", "5",
+                "--cache-dir", YTDLP_CACHE_DIR,
+                *_ytdlp_cookie_args(),
+                timeout=30.0,
+            )
+        except Exception as exc:
+            logger.warning("check_subscription: yt-dlp failed for %r: %s", channel_url, exc)
+            raise HTTPException(status_code=502, detail="Could not resolve channel")
+        tracks = [_parse_track(e, "youtube") for e in entries]
 
     new_tracks: list[dict] = []
     if last_video_id is not None:
@@ -5302,18 +5883,26 @@ async def get_scrobble_links(payload: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT lastfm_username, listenbrainz_token, enabled FROM ios_scrobble_links WHERE user_id = %s",
+                "SELECT lastfm_username, listenbrainz_token, enabled, librefm_username "
+                "FROM ios_scrobble_links WHERE user_id = %s",
                 (user_id,),
             )
             row = await cur.fetchone()
 
     if not row:
-        return {"lastfm_linked": False, "lastfm_username": None, "listenbrainz_linked": False, "enabled": True}
+        return {
+            "lastfm_linked": False, "lastfm_username": None,
+            "listenbrainz_linked": False,
+            "librefm_linked": False, "librefm_username": None,
+            "enabled": True,
+        }
 
     return {
         "lastfm_linked": bool(row[0]),
         "lastfm_username": row[0],
         "listenbrainz_linked": bool(row[1]),
+        "librefm_linked": bool(row[3]),
+        "librefm_username": row[3],
         "enabled": bool(row[2]),
     }
 
@@ -5328,15 +5917,19 @@ async def update_scrobble_links(body: ScrobbleLinkRequest, payload: dict = Depen
             await cur.execute(
                 """
                 INSERT INTO ios_scrobble_links
-                    (user_id, lastfm_session_key, lastfm_username, listenbrainz_token, enabled)
-                VALUES (%s, %s, %s, %s, %s)
+                    (user_id, lastfm_session_key, lastfm_username, listenbrainz_token,
+                     librefm_session_key, librefm_username, enabled)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     lastfm_session_key = IF(VALUES(lastfm_session_key) IS NULL, lastfm_session_key, VALUES(lastfm_session_key)),
                     lastfm_username = IF(VALUES(lastfm_username) IS NULL, lastfm_username, VALUES(lastfm_username)),
                     listenbrainz_token = IF(VALUES(listenbrainz_token) IS NULL, listenbrainz_token, VALUES(listenbrainz_token)),
+                    librefm_session_key = IF(VALUES(librefm_session_key) IS NULL, librefm_session_key, VALUES(librefm_session_key)),
+                    librefm_username = IF(VALUES(librefm_username) IS NULL, librefm_username, VALUES(librefm_username)),
                     enabled = VALUES(enabled)
                 """,
-                (user_id, body.lastfm_session_key, body.lastfm_username, body.listenbrainz_token, enabled),
+                (user_id, body.lastfm_session_key, body.lastfm_username, body.listenbrainz_token,
+                 body.librefm_session_key, body.librefm_username, enabled),
             )
 
     return {"status": "ok"}
@@ -5351,15 +5944,26 @@ async def delete_scrobble_links(payload: dict = Depends(get_current_user)):
             await cur.execute("DELETE FROM ios_scrobble_links WHERE user_id = %s", (user_id,))
 
 
-def _lastfm_api_get(params: dict) -> dict:
-    """Synchronous helper for signed Last.fm API GET requests."""
+def _audioscrobbler_api_get(base_url: str, params: dict, secret: str) -> dict:
+    """Synchronous helper for signed Audioscrobbler-compatible API GET requests
+    (Last.fm, Libre.fm, or any GNU FM instance)."""
     signed = dict(params)
-    signed["api_sig"] = _lastfm_sign(signed)
+    signed["api_sig"] = _audioscrobbler_sign(signed, secret)
     signed["format"] = "json"
-    url = "https://ws.audioscrobbler.com/2.0/?" + urllib.parse.urlencode(signed)
+    url = base_url + "?" + urllib.parse.urlencode(signed)
     req = urllib.request.Request(url, headers={"User-Agent": "Lumisound-iOS-Bridge/1.0"})
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _lastfm_api_get(params: dict) -> dict:
+    """Synchronous helper for signed Last.fm API GET requests."""
+    return _audioscrobbler_api_get("https://ws.audioscrobbler.com/2.0/", params, LASTFM_API_SECRET)
+
+
+def _librefm_api_get(params: dict) -> dict:
+    """Synchronous helper for signed Libre.fm API GET requests."""
+    return _audioscrobbler_api_get(LIBREFM_API_BASE, params, LIBREFM_API_SECRET)
 
 
 @app.post("/user/scrobble/lastfm/request-token")
@@ -5427,6 +6031,62 @@ async def lastfm_link_session(body: LastfmLinkRequest, payload: dict = Depends(g
     return {"lastfm_username": username}
 
 
+@app.post("/user/scrobble/librefm/request-token")
+async def librefm_request_token(payload: dict = Depends(get_current_user)):
+    """Step 1 of the Libre.fm desktop auth flow (same protocol as Last.fm,
+    different host): fetch an unauthorized token and the URL the user must
+    open to approve it."""
+    try:
+        data = await asyncio.to_thread(
+            _librefm_api_get, {"method": "auth.gettoken", "api_key": LIBREFM_API_KEY}
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Libre.fm request failed: {exc}")
+
+    token = data.get("token")
+    if not token:
+        raise HTTPException(status_code=502, detail="Libre.fm did not return a token")
+
+    auth_url = f"{LIBREFM_AUTH_BASE}?api_key={LIBREFM_API_KEY}&token={token}"
+    return {"token": token, "auth_url": auth_url}
+
+
+@app.post("/user/scrobble/librefm/link")
+async def librefm_link_session(body: LastfmLinkRequest, payload: dict = Depends(get_current_user)):
+    """Step 2: exchange an approved Libre.fm token for a session key and store it."""
+    try:
+        data = await asyncio.to_thread(
+            _librefm_api_get,
+            {"method": "auth.getsession", "api_key": LIBREFM_API_KEY, "token": body.token},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Libre.fm request failed: {exc}")
+
+    session = data.get("session")
+    if not session or not session.get("key"):
+        raise HTTPException(status_code=400, detail="Libre.fm did not approve this token")
+
+    session_key = session["key"]
+    username = session.get("name")
+
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_scrobble_links (user_id, librefm_session_key, librefm_username, enabled)
+                VALUES (%s, %s, %s, TRUE)
+                ON DUPLICATE KEY UPDATE
+                    librefm_session_key = VALUES(librefm_session_key),
+                    librefm_username = VALUES(librefm_username)
+                """,
+                (user_id, session_key, username),
+            )
+
+    return {"librefm_username": username}
+
+
 # ---------------------------------------------------------------------------
 # Listening Achievements & Streaks (Feature: achievements)
 # ---------------------------------------------------------------------------
@@ -5457,6 +6117,48 @@ async def get_achievements(payload: dict = Depends(get_current_user)):
                 (user_id,),
             )
             hour_counts = dict(await cur.fetchall())
+
+            # "Marathon": busiest single calendar day, by total listen_seconds.
+            await cur.execute(
+                "SELECT COALESCE(MAX(daily), 0) FROM ("
+                "  SELECT SUM(listen_seconds) AS daily FROM ios_play_history "
+                "  WHERE user_id = %s GROUP BY DATE(played_at)"
+                ") t",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+            max_day_seconds = row[0] or 0
+
+            # "Globe Trotter" / "Completionist": artist diversity & depth.
+            await cur.execute(
+                "SELECT COUNT(DISTINCT artist) FROM ios_play_history WHERE user_id = %s AND artist IS NOT NULL",
+                (user_id,),
+            )
+            distinct_artists = (await cur.fetchone())[0] or 0
+
+            await cur.execute(
+                "SELECT COALESCE(MAX(cnt), 0) FROM ("
+                "  SELECT COUNT(DISTINCT title) AS cnt FROM ios_play_history "
+                "  WHERE user_id = %s AND artist IS NOT NULL GROUP BY artist"
+                ") t",
+                (user_id,),
+            )
+            max_tracks_per_artist = (await cur.fetchone())[0] or 0
+
+            # "Crate Digger": tracks imported/added to the user's library.
+            await cur.execute(
+                "SELECT COUNT(*) FROM ios_user_library WHERE user_id = %s",
+                (user_id,),
+            )
+            library_track_count = (await cur.fetchone())[0] or 0
+
+            # "Shuffle Master": breadth of distinct tracks ever played.
+            await cur.execute(
+                "SELECT COUNT(DISTINCT COALESCE(local_song_id, track_url, title)) "
+                "FROM ios_play_history WHERE user_id = %s",
+                (user_id,),
+            )
+            distinct_tracks_played = (await cur.fetchone())[0] or 0
 
     # Streaks: consecutive calendar days with at least one play.
     current_streak = 0
@@ -5490,6 +6192,21 @@ async def get_achievements(payload: dict = Depends(get_current_user)):
         badges.append("night_owl")
     if any(hour_counts.get(h, 0) for h in range(5, 9)):
         badges.append("early_bird")
+    # "Marathon": 3+ hours of listening recorded on a single calendar day.
+    if max_day_seconds >= 3 * 3600:
+        badges.append("marathon")
+    # "Crate Digger": 100+ tracks imported/scanned into the library.
+    if library_track_count >= 100:
+        badges.append("crate_digger")
+    # "Globe Trotter": 25+ distinct artists played.
+    if distinct_artists >= 25:
+        badges.append("globe_trotter")
+    # "Completionist": deeply explored at least one artist's catalog.
+    if max_tracks_per_artist >= 15:
+        badges.append("completionist")
+    # "Shuffle Master": wide variety — 200+ distinct tracks played.
+    if distinct_tracks_played >= 200:
+        badges.append("shuffle_master")
 
     return {
         "total_plays": total_plays,
@@ -5801,6 +6518,69 @@ async def delete_youtube_api_key(payload: dict = Depends(get_current_user)):
                 "UPDATE ios_user_settings SET youtube_api_key = NULL WHERE user_id = %s",
                 (user_id,),
             )
+
+
+@app.post("/youtube/validate-key")
+async def validate_youtube_api_key(payload: dict = Depends(get_current_user)):
+    """Validates the caller's stored YouTube Data API key with a minimal
+    (1 quota unit) videos.list call. The key is read server-side only and
+    never echoed back."""
+    user_id = payload["sub"]
+    api_key = await _youtube_api_key_for_user(user_id)
+    if not api_key:
+        return {"status": "invalid"}
+
+    status_code, data = await asyncio.to_thread(
+        _youtube_data_api_get_raw, "videos",
+        {"part": "id", "chart": "mostPopular", "maxResults": 1}, api_key,
+    )
+
+    if 200 <= status_code < 300:
+        return {"status": "valid"}
+
+    reason = ""
+    errors = (data.get("error") or {}).get("errors") or []
+    if errors:
+        reason = errors[0].get("reason", "")
+
+    if reason == "quotaExceeded" or status_code == 403 and "quota" in reason.lower():
+        return {"status": "quota_exceeded"}
+    if reason in ("keyInvalid", "badRequest") or status_code in (400, 403):
+        return {"status": "invalid"}
+    return {"status": "invalid"}
+
+
+@app.get("/youtube/key-exposure-check")
+async def youtube_key_exposure_check(payload: dict = Depends(get_current_user)):
+    """Best-effort heuristic: calls the YouTube Data API with the user's
+    stored key and inspects the error `reason` for signals that the key may
+    have been leaked/abused (invalid, referrer-restricted, or throttled by
+    quota exhaustion). Real signal based on actual API responses — not a
+    no-op."""
+    user_id = payload["sub"]
+    api_key = await _youtube_api_key_for_user(user_id)
+    if not api_key:
+        return {"exposed": False, "detail": "No YouTube API key configured"}
+
+    status_code, data = await asyncio.to_thread(
+        _youtube_data_api_get_raw, "videos",
+        {"part": "id", "chart": "mostPopular", "maxResults": 1}, api_key,
+    )
+
+    if 200 <= status_code < 300:
+        return {"exposed": False, "detail": ""}
+
+    errors = (data.get("error") or {}).get("errors") or []
+    reason = errors[0].get("reason", "") if errors else ""
+
+    if reason == "keyInvalid":
+        return {"exposed": True, "detail": "API key is invalid or was revoked — possibly after being leaked."}
+    if reason == "ipRefererBlocked":
+        return {"exposed": True, "detail": "API key is restricted to specific referrers/IPs and was rejected from this server — check your key's application restrictions."}
+    if reason == "quotaExceeded":
+        return {"exposed": True, "detail": "API key has exhausted its daily quota — if this happens shortly after setup, it may indicate the key was leaked and is being used elsewhere."}
+
+    return {"exposed": False, "detail": ""}
 
 
 # ---------------------------------------------------------------------------

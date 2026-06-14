@@ -46,8 +46,13 @@ struct MiniPlayerBar: View {
                 // competition entirely; button taps now always go to the buttons.
                 HStack(spacing: 12) {
                     artworkThumbnail
+                        .id(player.currentSong?.id)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
                     songInfo
+                        .id(player.currentSong?.id)
+                        .transition(.opacity)
                 }
+                .animation(.easeInOut(duration: 0.25), value: player.currentSong?.id)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     selectedTab = 1

@@ -26,7 +26,7 @@ struct SubscriptionsView: View {
     var body: some View {
         List {
             Section {
-                TextField("Channel or playlist URL", text: $channelURL)
+                TextField("Channel URL, @handle, or name", text: $channelURL)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
@@ -56,7 +56,7 @@ struct SubscriptionsView: View {
             } header: {
                 sectionHeader("Follow a Channel")
             } footer: {
-                Text("Lumisound periodically checks followed channels for new uploads and notifies you when they appear.")
+                Text("Enter a YouTube channel URL, @handle, or channel name. Lumisound periodically checks followed channels for new uploads and notifies you when they appear.")
             }
             .listRowBackground(AppTheme.surface)
 
@@ -78,6 +78,8 @@ struct SubscriptionsView: View {
                 ForEach(subscriptions) { sub in
                     Section {
                         HStack {
+                            channelThumbnail(for: sub)
+
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(sub.channelName ?? sub.channelUrl)
                                     .foregroundStyle(AppTheme.textPrimary)
@@ -205,6 +207,28 @@ struct SubscriptionsView: View {
             } catch {
                 streaming.errorMessage = error.localizedDescription
             }
+        }
+    }
+
+    @ViewBuilder
+    private func channelThumbnail(for sub: ArtistSubscription) -> some View {
+        if let thumb = sub.channelThumbnail, let url = URL(string: thumb), !thumb.isEmpty {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().aspectRatio(contentMode: .fill)
+                default:
+                    Image(systemName: "person.crop.circle")
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+            .frame(width: 36, height: 36)
+            .clipShape(Circle())
+        } else {
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: 28))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: 36, height: 36)
         }
     }
 

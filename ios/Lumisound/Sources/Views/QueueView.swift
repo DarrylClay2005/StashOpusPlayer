@@ -228,6 +228,7 @@ struct QueueView: View {
         let allIndices = IndexSet(player.queue.indices)
         if !allIndices.isEmpty {
             player.removeFromQueue(at: allIndices)
+            ToastCenter.shared.show("Queue cleared", category: .info, icon: "trash")
         }
         editMode = .inactive
     }

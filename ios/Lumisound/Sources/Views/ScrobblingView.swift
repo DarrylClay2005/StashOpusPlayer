@@ -19,7 +19,18 @@ struct ScrobblingView: View {
     @State private var pendingLastfmToken: String?
     @State private var lastfmAuthURL: URL?
     @State private var isLastfmBusy = false
+
+    @State private var pendingLibrefmToken: String?
+    @State private var librefmAuthURL: URL?
+    @State private var isLibrefmBusy = false
+
     @State private var errorText: String?
+
+    private var anyServiceLinked: Bool {
+        (links?.lastfmLinked ?? false)
+            || (links?.listenbrainzLinked ?? false)
+            || (links?.librefmLinked ?? false)
+    }
 
     var body: some View {
         List {
@@ -36,7 +47,7 @@ struct ScrobblingView: View {
                 ))
                 .tint(AppTheme.dynamicAccent)
                 .foregroundStyle(AppTheme.textPrimary)
-                .disabled(links == nil || (!(links?.lastfmLinked ?? false) && !(links?.listenbrainzLinked ?? false)))
+                .disabled(links == nil || !anyServiceLinked)
             } header: {
                 sectionHeader("Scrobbling")
             } footer: {
@@ -122,6 +133,51 @@ struct ScrobblingView: View {
             }
             .listRowBackground(AppTheme.surface)
 
+            Section {
+                if links?.librefmLinked == true {
+                    LabeledContent("Libre.fm") {
+                        Text(links?.librefmUsername ?? "Linked")
+                            .font(AppTheme.monoFont(size: 14))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    .foregroundStyle(AppTheme.textPrimary)
+                } else if let librefmAuthURL {
+                    Link(destination: librefmAuthURL) {
+                        Label("Open Libre.fm to Authorize", systemImage: "safari")
+                    }
+                    .foregroundStyle(AppTheme.dynamicAccent)
+
+                    Button {
+                        finishLibrefmLink()
+                    } label: {
+                        if isLibrefmBusy {
+                            ProgressView()
+                        } else {
+                            Text("I've Authorized — Finish Linking")
+                        }
+                    }
+                    .disabled(isLibrefmBusy)
+                    .foregroundStyle(AppTheme.dynamicAccent)
+                } else {
+                    Button {
+                        startLibrefmLink()
+                    } label: {
+                        if isLibrefmBusy {
+                            ProgressView()
+                        } else {
+                            Label("Connect Libre.fm", systemImage: "link")
+                        }
+                    }
+                    .disabled(isLibrefmBusy)
+                    .foregroundStyle(AppTheme.dynamicAccent)
+                }
+            } header: {
+                sectionHeader("Libre.fm")
+            } footer: {
+                Text("Libre.fm is a free, open-source alternative to Last.fm using the same Audioscrobbler protocol.")
+            }
+            .listRowBackground(AppTheme.surface)
+
             if let errorText {
                 Section {
                     Text(errorText)
@@ -131,7 +187,7 @@ struct ScrobblingView: View {
                 .listRowBackground(Color.clear)
             }
 
-            if (links?.lastfmLinked ?? false) || (links?.listenbrainzLinked ?? false) {
+            if anyServiceLinked {
                 Section {
                     Button(role: .destructive) {
                         unlink()
@@ -184,6 +240,37 @@ struct ScrobblingView: View {
                 errorText = account.errorMessage ?? "Last.fm hasn't approved this link yet. Authorize it in Safari, then try again."
             }
             isLastfmBusy = false
+        }
+    }
+
+    private func startLibrefmLink() {
+        isLibrefmBusy = true
+        errorText = nil
+        Task {
+            if let result = await account.librefmRequestToken(), let url = URL(string: result.authUrl) {
+                pendingLibrefmToken = result.token
+                librefmAuthURL = url
+            } else {
+                errorText = account.errorMessage ?? "Failed to start Libre.fm linking."
+            }
+            isLibrefmBusy = false
+        }
+    }
+
+    private func finishLibrefmLink() {
+        guard let token = pendingLibrefmToken else { return }
+        isLibrefmBusy = true
+        errorText = nil
+        Task {
+            if let username = await account.librefmLinkSession(token: token) {
+                _ = username
+                pendingLibrefmToken = nil
+                librefmAuthURL = nil
+                links = await account.fetchScrobbleLinks()
+            } else {
+                errorText = account.errorMessage ?? "Libre.fm hasn't approved this link yet. Authorize it in Safari, then try again."
+            }
+            isLibrefmBusy = false
         }
     }
 

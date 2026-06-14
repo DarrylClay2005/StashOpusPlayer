@@ -432,3 +432,54 @@ CREATE TABLE IF NOT EXISTS ios_discord_rpc_config (
 -- Feature: musical key estimation (Krumhansl-Schmuckler chroma analysis)
 -- alongside BPM/loudness, for harmonic-mixing-aware automixing/crossfade.
 ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS musical_key VARCHAR(16) NULL;
+
+-- Per-folder backup of the user's "watched folders" (MusicFolderService) tree
+-- structure: which relative path under Documents each watched folder lived
+-- at, and which tracks (by source track ID / title+artist+duration, since
+-- on-device file paths aren't portable across installs) it contained. Pushed
+-- alongside /user/sync so a reinstall can recreate the same folder layout and
+-- prompt the user to redownload tracks back into their original folders.
+-- Replaced wholesale on each push (one row per folder), like
+-- ios_user_playlists/ios_playlist_tracks.
+CREATE TABLE IF NOT EXISTS ios_user_folder_backups (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    folder_path VARCHAR(1024) NOT NULL,
+    track_filenames_json MEDIUMTEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_user_id (user_id),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Feature: Libre.fm scrobbling (Last.fm-API-compatible, different base URL).
+-- Stored separately from the lastfm_* columns since a user may link both
+-- independently.
+ALTER TABLE ios_scrobble_links ADD COLUMN IF NOT EXISTS librefm_session_key VARCHAR(64) NULL;
+
+-- Expanded per-user sync settings: visual/layout preferences that previously
+-- lived only in ios_user_settings_expanded (unused by /user/sync) are now
+-- also mirrored onto ios_user_settings so they round-trip through the normal
+-- 8-minute auto-sync / manual sync (GET+POST /user/sync).
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS vinyl_disc_enabled BOOLEAN DEFAULT TRUE;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS show_queue_preview BOOLEAN DEFAULT TRUE;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS songs_per_row INT DEFAULT 1;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS albums_per_row INT DEFAULT 2;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS bg_animation VARCHAR(20) DEFAULT 'fade';
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS bg_opacity FLOAT DEFAULT 0.35;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS preferred_audio_format VARCHAR(10) DEFAULT 'm4a';
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS download_path TEXT NULL;
+
+-- New sync fields (Feature: expanded sync payload).
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS car_mode_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS library_artists_columns INT DEFAULT 2;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS now_playing_artwork_style VARCHAR(32) NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS now_playing_seeker_style VARCHAR(32) NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS earned_badges_json MEDIUMTEXT NULL;
+
+-- Feature: Discover subscriptions — resolve a user-entered channel
+-- URL/handle/search term to a real YouTube channel_id + thumbnail at
+-- subscribe time, so the subscription list can show real channel art
+-- instead of just the raw URL the user typed.
+ALTER TABLE ios_artist_subscriptions ADD COLUMN IF NOT EXISTS channel_id VARCHAR(64) NULL;
+ALTER TABLE ios_artist_subscriptions ADD COLUMN IF NOT EXISTS channel_thumbnail TEXT NULL;
+ALTER TABLE ios_scrobble_links ADD COLUMN IF NOT EXISTS librefm_username VARCHAR(255) NULL;

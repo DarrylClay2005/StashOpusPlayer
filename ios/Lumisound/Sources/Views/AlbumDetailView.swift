@@ -77,7 +77,9 @@ struct AlbumDetailView: View {
                     }
                     .listSectionSeparator(.hidden)
 
-                    // Tracks
+                    // Tracks — uses the same SongRow component as the main Songs
+                    // tab so rows look/behave identically (artwork, context menus,
+                    // favorite/play targets, styling) everywhere.
                     Section {
                         if songs.isEmpty {
                             EmptyStateView(icon: "square.stack", title: "No tracks", message: "This album has no tracks.")
@@ -87,7 +89,11 @@ struct AlbumDetailView: View {
                                 Button {
                                     player.play(song: song, in: songs)
                                 } label: {
-                                    AlbumTrackRow(song: song, isCurrent: player.currentSong?.id == song.id)
+                                    SongRow(
+                                        song: song,
+                                        isCurrent: player.currentSong?.id == song.id,
+                                        subtitle: song.year.isEmpty ? nil : song.year
+                                    )
                                 }
                                 .buttonStyle(.plain)
                                 .listRowBackground(AppTheme.surface.opacity(0.5))
@@ -128,7 +134,12 @@ struct AlbumDetailView: View {
                                     Button {
                                         player.play(song: song, in: songs)
                                     } label: {
-                                        AlbumTrackGridCell(song: song, isCurrent: player.currentSong?.id == song.id)
+                                        SongGridCell(
+                                            song: song,
+                                            isCurrent: player.currentSong?.id == song.id,
+                                            subtitle: song.durationText,
+                                            trackNumber: song.trackNumber
+                                        )
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -224,105 +235,3 @@ private struct AlbumHeaderView: View {
     }
 }
 
-// MARK: - Album Track Row (compact, uses track number instead of artwork)
-
-private struct AlbumTrackRow: View {
-    let song: Song
-    let isCurrent: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            // Track number / playing indicator
-            ZStack {
-                if isCurrent {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(AppTheme.dynamicAccent)
-                    Image(systemName: "waveform")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.textPrimary)
-                } else {
-                    Text(song.trackNumber > 0 ? "\(song.trackNumber)" : "–")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .monospacedDigit()
-                }
-            }
-            .frame(width: 32, height: 32)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(song.displayName)
-                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
-                    .fontWeight(isCurrent ? .semibold : .regular)
-                    .lineLimit(1)
-
-                if !song.year.isEmpty {
-                    Text(song.year)
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-            }
-
-            Spacer(minLength: 0)
-
-            Text(song.durationText)
-                .font(.caption)
-                .foregroundStyle(AppTheme.textSecondary)
-                .monospacedDigit()
-        }
-        .contentShape(Rectangle())
-        .padding(.vertical, 4)
-    }
-}
-
-// MARK: - Album Track Grid Cell (2/3-column layout)
-
-private struct AlbumTrackGridCell: View {
-    let song: Song
-    let isCurrent: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            GeometryReader { geo in
-                ArtworkThumbnail(song: song, size: geo.size.width)
-                    .overlay(alignment: .bottomTrailing) {
-                        if isCurrent {
-                            Image(systemName: "waveform")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(4)
-                                .background(AppTheme.dynamicAccent, in: Circle())
-                                .padding(4)
-                        }
-                    }
-                    .overlay(alignment: .topLeading) {
-                        if song.trackNumber > 0 {
-                            Text("\(song.trackNumber)")
-                                .font(.caption2.weight(.bold))
-                                .monospacedDigit()
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(.black.opacity(0.5), in: Capsule())
-                                .padding(4)
-                        }
-                    }
-            }
-            .aspectRatio(1, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(song.displayName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
-                    .lineLimit(2)
-                Text(song.durationText)
-                    .font(.caption2)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .monospacedDigit()
-            }
-            .padding(.horizontal, 2)
-        }
-        .padding(6)
-        .background(AppTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}

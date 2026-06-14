@@ -34,6 +34,7 @@ struct LumisoundApp: App {
                     .environmentObject(moodService)
                     .environmentObject(cacheManager)
                     .opacity(showLaunch ? 0 : 1)
+                    .animation(.easeInOut(duration: 0.4), value: showLaunch)
 
                 if showLaunch {
                     LaunchView(isLoading: $showLaunch)
@@ -42,6 +43,7 @@ struct LumisoundApp: App {
                         .transition(.opacity)
                 }
             }
+            .animation(.easeInOut(duration: 0.4), value: showLaunch)
             .preferredColorScheme(.dark)
             .task {
                     // Configure background logger (idempotent — safe if .task fires multiple times)
@@ -58,8 +60,9 @@ struct LumisoundApp: App {
                     // Wire mood service to library so it can access songs.
                     moodService.libraryManager = libraryManager
 
-                    // Auto-scan for corrupt files once per day (non-blocking).
-                    CorruptFileFinderService.shared.runDailyCheckIfNeeded()
+                    // Auto-scan for corrupt files immediately, then every 5 minutes
+                    // for the rest of the session (non-blocking, all users).
+                    CorruptFileFinderService.shared.startPeriodicScanning()
 
                     // Scan previously added watched folders.
                     libraryManager.scanWatchedFolders(using: folderService)
