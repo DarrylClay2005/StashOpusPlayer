@@ -569,26 +569,62 @@ def _parse_iso8601_duration(duration: str) -> int:
     return hours * 3600 + minutes * 60 + seconds
 
 
+# Per-key cooldown: once a key comes back quotaExceeded, skip further Data API
+# calls with that key until this many seconds have passed, going straight to
+# the yt-dlp fallback instead of wasting calls (and time) on a doomed request.
+_YOUTUBE_QUOTA_COOLDOWN_SECONDS = 3600
+_youtube_quota_exceeded_until: dict[str, float] = {}
+
+
+def _youtube_quota_is_cooling_down(api_key: str) -> bool:
+    until = _youtube_quota_exceeded_until.get(api_key)
+    return until is not None and time.monotonic() < until
+
+
+def _youtube_mark_quota_exceeded(api_key: str) -> None:
+    _youtube_quota_exceeded_until[api_key] = time.monotonic() + _YOUTUBE_QUOTA_COOLDOWN_SECONDS
+
+
 def _youtube_data_api_get(path: str, params: dict, api_key: str) -> dict:
     """Synchronous GET against the YouTube Data API v3 — call via asyncio.to_thread.
 
     The target host is a hardcoded Google domain (not derived from user input),
     so this does not need the SSRF guard used for user-supplied playlist URLs.
+
+    On a 403 quotaExceeded response, records a cooldown for *api_key* (see
+    _youtube_quota_is_cooling_down) before re-raising.
     """
     from urllib.parse import urlencode
+    import urllib.error
 
     query = urlencode({**params, "key": api_key})
     req = urllib.request.Request(f"https://www.googleapis.com/youtube/v3/{path}?{query}")
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            try:
+                body = json.loads(exc.read())
+            except (ValueError, json.JSONDecodeError):
+                body = {}
+            reasons = [e.get("reason") for e in (body.get("error") or {}).get("errors", [])]
+            if "quotaExceeded" in reasons:
+                _youtube_mark_quota_exceeded(api_key)
+        raise
 
 
 async def _resolve_youtube_playlist_via_api(playlist_id: str, limit: int, api_key: str) -> list[dict]:
     """Enumerate a YouTube playlist via playlistItems.list (paginated via
     nextPageToken — no ~205-entry cap, unlike yt-dlp's flat-playlist scrape).
 
-    Raises on any API error so the caller can fall back to yt-dlp.
+    Raises on any API error so the caller can fall back to yt-dlp. If *api_key*
+    is currently in a quota-exceeded cooldown (see _youtube_mark_quota_exceeded),
+    raises immediately without making a network call.
     """
+    if _youtube_quota_is_cooling_down(api_key):
+        raise RuntimeError(f"YouTube Data API key is in quota-exceeded cooldown")
+
     items: list[dict] = []
     page_token: Optional[str] = None
     while len(items) < limit:
