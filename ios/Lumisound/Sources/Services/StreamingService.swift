@@ -387,14 +387,14 @@ final class StreamingService: ObservableObject {
         request.timeoutInterval = 20
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse,
-               !(200..<300).contains(httpResponse.statusCode) {
-                errorMessage = "Streaming service is unavailable right now. Please try again later."
-                searchResults = []
-                return
+            let tracks = try await NetworkRetry.withRetry {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse,
+                   !(200..<300).contains(httpResponse.statusCode) {
+                    throw StreamingError.httpError(httpResponse.statusCode)
+                }
+                return try JSONDecoder().decode([StreamTrack].self, from: data)
             }
-            let tracks = try JSONDecoder().decode([StreamTrack].self, from: data)
             searchResults = tracks
             appLog("Search returned \(tracks.count) result(s) for \"\(query)\"", category: "network")
         } catch {
@@ -712,22 +712,22 @@ final class StreamingService: ObservableObject {
         }
         request.timeoutInterval = 20
 
+        struct ServerLibraryResponse: Decodable {
+            let tracks: [ServerTrack]
+            let total: Int
+            let dir: String?
+            let configured: Bool?
+        }
+
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse,
-               !(200..<300).contains(httpResponse.statusCode) {
-                appWarn("searchServerLibrary: HTTP \(httpResponse.statusCode) for \"\(query)\"", category: "network")
-                errorMessage = "Streaming service is unavailable right now. Please try again later."
-                serverTracks = []
-                return
+            let decoded = try await NetworkRetry.withRetry {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse,
+                   !(200..<300).contains(httpResponse.statusCode) {
+                    throw StreamingError.httpError(httpResponse.statusCode)
+                }
+                return try JSONDecoder().decode(ServerLibraryResponse.self, from: data)
             }
-            struct ServerLibraryResponse: Decodable {
-                let tracks: [ServerTrack]
-                let total: Int
-                let dir: String?
-                let configured: Bool?
-            }
-            let decoded = try JSONDecoder().decode(ServerLibraryResponse.self, from: data)
             serverTracks = decoded.tracks
             appLog("searchServerLibrary: \(serverTracks.count) result(s) for \"\(query)\"", category: "network")
         } catch {

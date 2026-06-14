@@ -161,16 +161,13 @@ struct BugReportView: View {
         submitError = nil
         defer { isSubmitting = false }
 
-        let device = UIDevice.current
-        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
-
         let body = BugReportPayload(
             category: category.rawValue,
             description: description.trimmingCharacters(in: .whitespacesAndNewlines),
             contactEmail: contactEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? nil : contactEmail.trimmingCharacters(in: .whitespacesAndNewlines),
-            appVersion: appVersion,
-            deviceInfo: "\(device.model), iOS \(device.systemVersion)",
+            appVersion: DeviceInfo.appVersion,
+            deviceInfo: DeviceInfo.summary,
             recentLogs: includeLogs ? await AppLogger.shared.recentActivitySummary() : nil
         )
 

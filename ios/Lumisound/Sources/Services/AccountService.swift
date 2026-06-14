@@ -2251,27 +2251,34 @@ final class AccountService: ObservableObject {
             request.httpBody = data
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        // Only idempotent GETs are retried — a retried POST/PUT/DELETE could
+        // double-apply a mutation if the original request actually reached the
+        // server but the response was lost to a transient network blip.
+        let attempts = method == "GET" ? 3 : 1
 
-        if let http = response as? HTTPURLResponse {
-            if http.statusCode == 401 {
-                // Only auto-logout on 401 when the user was already logged in.
-                // A 401 on /auth/login means wrong password — not an expired token.
-                if isLoggedIn && path != "/auth/login" {
-                    handleUnauthorized()
+        return try await NetworkRetry.withRetry(maxAttempts: attempts) {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            if let http = response as? HTTPURLResponse {
+                if http.statusCode == 401 {
+                    // Only auto-logout on 401 when the user was already logged in.
+                    // A 401 on /auth/login means wrong password — not an expired token.
+                    if self.isLoggedIn && path != "/auth/login" {
+                        self.handleUnauthorized()
+                    }
+                    throw AccountError(statusCode: 401, message: "Session expired. Please sign in again.")
                 }
-                throw AccountError(statusCode: 401, message: "Session expired. Please sign in again.")
-            }
-            if !(200..<300).contains(http.statusCode) {
-                // Try to extract detail from FastAPI error body
-                if let detail = try? JSONDecoder().decode(APIErrorBody.self, from: data) {
-                    throw AccountError(statusCode: http.statusCode, message: detail.detail)
+                if !(200..<300).contains(http.statusCode) {
+                    // Try to extract detail from FastAPI error body
+                    if let detail = try? JSONDecoder().decode(APIErrorBody.self, from: data) {
+                        throw AccountError(statusCode: http.statusCode, message: detail.detail)
+                    }
+                    throw AccountError(statusCode: http.statusCode, message: "Server error (HTTP \(http.statusCode))")
                 }
-                throw AccountError(statusCode: http.statusCode, message: "Server error (HTTP \(http.statusCode))")
             }
+
+            return data
         }
-
-        return data
     }
 }
 

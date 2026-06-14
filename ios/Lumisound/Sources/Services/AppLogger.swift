@@ -23,6 +23,14 @@ final class AppLogger: ObservableObject {
         let line: Int
         let timestamp: String   // ISO 8601
         var extra: [String: String]
+        // Device/account context — lets server-side log queries be filtered or
+        // grouped per device model, OS version, app build, and (when logged in)
+        // per-user, so issues reported by one user's device don't get conflated
+        // with another's.
+        var deviceModel: String = DeviceInfo.modelIdentifier
+        var osVersion: String = DeviceInfo.osVersion
+        var appVersion: String = DeviceInfo.appVersion
+        var userId: String? = nil
     }
 
     // MARK: - Private state (all @MainActor)
@@ -154,6 +162,12 @@ final class AppLogger: ObservableObject {
     // MARK: - Private
 
     private func _append(_ entry: LogEntry) {
+        var entry = entry
+        // Read at append time (MainActor) rather than at the nonisolated call
+        // site — `currentUser` can only be read safely here, and using the
+        // value at flush time would tag entries with whoever is logged in
+        // *now* rather than who triggered them.
+        entry.userId = AccountService.shared?.currentUser?.id
         buffer.append(entry)
         if buffer.count > maxBuffer {
             buffer.removeFirst(buffer.count - maxBuffer)

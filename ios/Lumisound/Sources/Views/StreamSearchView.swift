@@ -15,6 +15,7 @@ struct StreamSearchView: View {
     @State private var loadingTrackID:   String? = nil
     @State private var downloadingTrackIDs: Set<String> = []
     @State private var downloadedTrackIDs: Set<String> = []
+    @State private var failedTrackIDs: Set<String> = []
     @State private var healthOK: Bool? = nil
     @State private var showHealthToast   = false
 
@@ -291,6 +292,15 @@ struct StreamSearchView: View {
                                         .font(AppTheme.monoFont(size: 13))
                                         .foregroundStyle(AppTheme.textSecondary)
                                 }
+                            } else if !failedTrackIDs.isEmpty {
+                                // Only the tracks that failed last time are retried — no
+                                // full search/resolve refresh, unlike the generic error
+                                // banner's "Retry" which re-resolves the whole playlist.
+                                Button("Retry Failed (\(failedTrackIDs.count))") {
+                                    handleRetryFailedDownloads()
+                                }
+                                .font(AppTheme.bodyFont(size: 13).weight(.semibold))
+                                .foregroundStyle(AppTheme.warning)
                             } else {
                                 Button("Download All") {
                                     handleDownloadAll()
@@ -686,6 +696,7 @@ struct StreamSearchView: View {
     }
 
     private func triggerSearch() {
+        failedTrackIDs.removeAll()
         if selectedSource == "server" {
             Task { await streaming.searchServerLibrary(query: searchText) }
         } else if selectedSource == "my" {
@@ -754,6 +765,9 @@ struct StreamSearchView: View {
                 let localURL = try await streaming.downloadToLibrary(track: track, existingSongs: library.allSongs)
                 library.scanLocalDocuments()
                 downloadedTrackIDs.insert(track.id)
+                failedTrackIDs.remove(track.id)
+                appLog("Download succeeded: \"\(track.title)\"", category: "download",
+                       extra: ["title": track.title, "artist": track.artist, "source": track.source, "trackId": track.id])
                 ToastCenter.shared.show("Downloaded \"\(track.title)\"", category: .download, icon: "checkmark.circle.fill")
                 if autoCloudBackup, account.isLoggedIn, let token = account.token {
                     Task {
@@ -765,6 +779,9 @@ struct StreamSearchView: View {
                 }
             } catch {
                 streaming.errorMessage = "Download failed: \(error.localizedDescription)"
+                failedTrackIDs.insert(track.id)
+                appWarn("Download failed: \"\(track.title)\": \(error.localizedDescription)", category: "download",
+                        extra: ["title": track.title, "artist": track.artist, "source": track.source, "trackId": track.id, "error": error.localizedDescription])
                 ToastCenter.shared.show("Failed to download \"\(track.title)\"", category: .error)
             }
             downloadingTrackIDs.remove(track.id)
@@ -775,46 +792,85 @@ struct StreamSearchView: View {
         guard !isDownloadingAll else { return }
         let tracks = streaming.searchResults
         guard !tracks.isEmpty else { return }
+        failedTrackIDs.removeAll()
+        runDownloadPipeline(tracks: tracks)
+    }
+
+    /// Re-runs the download pipeline for only the tracks that failed last
+    /// time (`failedTrackIDs`) — no call to `triggerSearch()`/`resolvePlaylist`,
+    /// so `streaming.searchResults` and the rest of the list stay untouched
+    /// and the UI doesn't refresh wholesale.
+    private func handleRetryFailedDownloads() {
+        guard !isDownloadingAll else { return }
+        let tracks = streaming.searchResults.filter { failedTrackIDs.contains($0.id) }
+        guard !tracks.isEmpty else { return }
+        failedTrackIDs.removeAll()
+        runDownloadPipeline(tracks: tracks)
+    }
+
+    /// Bounded-concurrency download pipeline shared by "Download All" and
+    /// "Retry Failed". Before downloading, refreshes the local library scan
+    /// (recursively, including any subfolders) and skips any track that
+    /// already matches a locally-imported song by title+artist — covering
+    /// manually-imported files or ones from a different source that the
+    /// `sourceTrackID`-based check inside `downloadToLibrary` wouldn't catch.
+    private func runDownloadPipeline(tracks: [StreamTrack]) {
         isDownloadingAll = true
         downloadAllDone = 0
         downloadAllTotal = tracks.count
 
-        // Bounded-concurrency pipeline: up to `maxConcurrent` downloads run at once
-        // instead of paying a full network round-trip between every track — large
-        // playlists finish much faster. Matches the bridge's yt-dlp process semaphore
-        // (_YTDLP_SEMAPHORE) so the client can keep it fully saturated without
-        // overwhelming it. Child tasks only do the async work and report back; every
-        // @State mutation happens in the `for await` loop below, which runs on the
-        // @MainActor — same race-free guarantee the old sequential loop relied on.
+        // Matches the bridge's yt-dlp process semaphore (_YTDLP_SEMAPHORE) so the
+        // client can keep it fully saturated without overwhelming it.
         let maxConcurrent = 10
 
         Task { @MainActor in
+            // Make sure `library.allSongs` reflects every file on disk — including
+            // subfolders the user created or moved files into — before deciding
+            // what's already imported.
+            await library.scanLocalDocumentsAsync()
+
+            var toDownload: [StreamTrack] = []
+            var skipped = 0
+            for track in tracks {
+                if library.isAlreadyImported(title: track.title, artist: track.artist, duration: track.duration) {
+                    skipped += 1
+                    downloadedTrackIDs.insert(track.id)
+                    downloadAllDone += 1
+                } else {
+                    toDownload.append(track)
+                }
+            }
+
             var failed: [String] = []
             var nextIndex = 0
 
             await withTaskGroup(of: (track: StreamTrack, localURL: URL?, errorDescription: String?).self) { group in
                 func launchNext() {
-                    guard nextIndex < tracks.count else { return }
-                    let track = tracks[nextIndex]
+                    guard nextIndex < toDownload.count else { return }
+                    let track = toDownload[nextIndex]
                     nextIndex += 1
                     group.addTask {
                         do {
                             let localURL = try await streaming.downloadToLibrary(track: track, existingSongs: library.allSongs)
+                            appLog("Download All: succeeded for \"\(track.title)\"", category: "download",
+                                   extra: ["title": track.title, "artist": track.artist, "source": track.source, "trackId": track.id])
                             return (track, localURL, nil)
                         } catch {
-                            appWarn("Download All: failed for \"\(track.title)\": \(error.localizedDescription)", category: "network")
+                            appWarn("Download All: failed for \"\(track.title)\": \(error.localizedDescription)", category: "download",
+                                    extra: ["title": track.title, "artist": track.artist, "source": track.source, "trackId": track.id, "error": error.localizedDescription])
                             return (track, nil, error.localizedDescription)
                         }
                     }
                 }
 
-                for _ in 0..<min(maxConcurrent, tracks.count) {
+                for _ in 0..<min(maxConcurrent, toDownload.count) {
                     launchNext()
                 }
 
                 for await result in group {
                     if let localURL = result.localURL {
                         downloadedTrackIDs.insert(result.track.id)
+                        failedTrackIDs.remove(result.track.id)
                         if autoCloudBackup, account.isLoggedIn, let token = account.token {
                             Task {
                                 try? await streaming.uploadTrack(
@@ -825,6 +881,7 @@ struct StreamSearchView: View {
                         }
                     } else {
                         failed.append(result.track.title)
+                        failedTrackIDs.insert(result.track.id)
                     }
                     downloadAllDone += 1
                     launchNext()
@@ -833,12 +890,18 @@ struct StreamSearchView: View {
 
             library.scanLocalDocuments()
             isDownloadingAll = false
-            let succeeded = tracks.count - failed.count
+            let succeeded = toDownload.count - failed.count
+
             if failed.isEmpty {
-                ToastCenter.shared.show("Downloaded \(succeeded) tracks", category: .download)
+                if skipped > 0 {
+                    ToastCenter.shared.show("Downloaded \(succeeded), skipped \(skipped) already imported", category: .download)
+                } else {
+                    ToastCenter.shared.show("Downloaded \(succeeded) tracks", category: .download)
+                }
             } else {
                 streaming.errorMessage = "\(failed.count) track(s) failed to download."
-                ToastCenter.shared.show("Downloaded \(succeeded), \(failed.count) failed", category: .warning)
+                let skippedSuffix = skipped > 0 ? ", skipped \(skipped)" : ""
+                ToastCenter.shared.show("Downloaded \(succeeded), \(failed.count) failed\(skippedSuffix)", category: .warning)
             }
         }
     }

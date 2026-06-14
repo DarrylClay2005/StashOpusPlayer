@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
@@ -219,7 +220,8 @@ async def cleanup_orphan_temp_dirs() -> None:
 
 
 async def _auth_attempts_janitor() -> None:
-    """Periodically evict stale IP entries from _auth_attempts so it never grows unbounded."""
+    """Periodically evict stale IP entries from _auth_attempts, and expired
+    entries from _session_cache, so neither grows unbounded."""
     while True:
         await asyncio.sleep(300)  # every 5 minutes
         now = time.time()
@@ -231,6 +233,11 @@ async def _auth_attempts_janitor() -> None:
             _auth_attempts.pop(ip, None)
         if stale:
             logger.debug("auth janitor: evicted %d stale IP entries", len(stale))
+
+        mono_now = time.monotonic()
+        expired_sessions = [tok for tok, until in list(_session_cache.items()) if mono_now > until]
+        for tok in expired_sessions:
+            _session_cache.pop(tok, None)
 
 
 _APP_LOGS_RETENTION_DAYS = 14
@@ -285,6 +292,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Compresses large JSON responses (e.g. /user/sync, /api/library/server,
+# /user/export) — pure win for mobile clients on cellular, no new dependency.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+# Latency visibility: previously there was no per-request timing anywhere on
+# the server. Slow requests (>2s) are logged at WARNING so they show up
+# alongside other stability signals without flooding logs on every request.
+_SLOW_REQUEST_THRESHOLD = 2.0
+
+
+@app.middleware("http")
+async def _log_slow_requests(request: Request, call_next):
+    start = time.monotonic()
+    response = await call_next(request)
+    elapsed = time.monotonic() - start
+    if elapsed > _SLOW_REQUEST_THRESHOLD:
+        logger.warning("slow request: %s %s took %.2fs (status %d)", request.method, request.url.path, elapsed, response.status_code)
+    return response
+
 # ---------------------------------------------------------------------------
 # Simple in-memory search cache  (TTL = 5 minutes)
 # ---------------------------------------------------------------------------
@@ -337,6 +363,15 @@ async def check_auth(request: Request) -> None:
 
 _security = HTTPBearer(auto_error=False)
 
+# Short-TTL cache of "this token_id's session is still valid" results, keyed
+# by token_id. get_current_user runs on every authenticated request (sync,
+# playback-state, etc. poll frequently), so without this each one pays a DB
+# point-lookup just to confirm the session wasn't revoked. A revoked session
+# can stay "valid" here for up to this TTL — an acceptable tradeoff given
+# logout/account-deletion are not security-critical-instant operations.
+_SESSION_CACHE_TTL = 60
+_session_cache: dict[str, float] = {}
+
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
@@ -355,15 +390,20 @@ async def get_current_user(
     # primary key, so this is a single indexed point lookup per request.
     token_id = payload.get("jti")
     if token_id:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "SELECT 1 FROM ios_user_sessions WHERE token_id = %s AND expires_at > NOW()",
-                    (token_id,),
-                )
-                if not await cur.fetchone():
-                    raise HTTPException(status_code=401, detail="Session has been revoked")
+        now = time.monotonic()
+        cached_until = _session_cache.get(token_id)
+        if cached_until is None or now > cached_until:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT 1 FROM ios_user_sessions WHERE token_id = %s AND expires_at > NOW()",
+                        (token_id,),
+                    )
+                    if not await cur.fetchone():
+                        _session_cache.pop(token_id, None)
+                        raise HTTPException(status_code=401, detail="Session has been revoked")
+            _session_cache[token_id] = now + _SESSION_CACHE_TTL
 
     return payload
 
@@ -1670,6 +1710,15 @@ async def resolve_playlist(
                 except Exception as exc:
                     logger.warning("YouTube Data API resolve failed, falling back to yt-dlp: %s", exc)
 
+    # yt-dlp fallback (non-YouTube-API-key path, or YouTube Data API failed
+    # above) — cache the resolved tracks so repeat resolves of the same
+    # playlist within _CACHE_TTL skip the ~120s-capped yt-dlp subprocess
+    # entirely, same as the YouTube-Data-API path above.
+    ytdlp_cache_key = f"resolve_ytdlp:{url}:{limit}"
+    cached = _cache_get(ytdlp_cache_key)
+    if cached is not None:
+        return _filter_existing_tracks(cached, source, existing_ids)
+
     # SoundCloud flat-playlist entries are sparse (often missing artist/duration/
     # thumbnails) — use full --dump-json for complete metadata, same as /api/search.
     # Note: unlike _ytdlp_listing_args (used for /api/search), resolve wants
@@ -1689,6 +1738,7 @@ async def resolve_playlist(
         raise HTTPException(status_code=404, detail="Could not resolve playlist")
 
     tracks = [_parse_track(e, source) for e in entries[:limit]]
+    _cache_set(ytdlp_cache_key, tracks)
     return _filter_existing_tracks(tracks, source, existing_ids)
 
 
@@ -1842,6 +1892,7 @@ async def logout(payload: dict = Depends(get_current_user)):
                 await cur.execute(
                     "DELETE FROM ios_user_sessions WHERE token_id = %s", (token_id,)
                 )
+        _session_cache.pop(token_id, None)
 
 
 @app.get("/auth/sessions")
@@ -1890,6 +1941,7 @@ async def revoke_session(token_id: str, payload: dict = Depends(get_current_user
                 "DELETE FROM ios_user_sessions WHERE token_id = %s AND user_id = %s",
                 (token_id, user_id),
             )
+    _session_cache.pop(token_id, None)
 
 
 class ChangePasswordRequest(BaseModel):
@@ -5048,6 +5100,10 @@ async def ingest_logs(request: Request):
                 int(e.get("line", 0)),
                 _parse_log_timestamp(e.get("timestamp")),
                 json.dumps(e.get("extra", {})),
+                str(e["deviceModel"])[:50] if e.get("deviceModel") else None,
+                str(e["osVersion"])[:20] if e.get("osVersion") else None,
+                str(e["appVersion"])[:20] if e.get("appVersion") else None,
+                str(e["userId"])[:36] if e.get("userId") else None,
             )
             for e in entries[:100]
             if isinstance(e, dict)
@@ -5058,8 +5114,9 @@ async def ingest_logs(request: Request):
                 async with conn.cursor() as cur:
                     await cur.executemany(
                         "INSERT IGNORE INTO ios_app_logs "
-                        "(level, category, message, file, line, timestamp, extra) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        "(level, category, message, file, line, timestamp, extra, "
+                        "device_model, os_version, app_version, user_id) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                         rows,
                     )
     except Exception:

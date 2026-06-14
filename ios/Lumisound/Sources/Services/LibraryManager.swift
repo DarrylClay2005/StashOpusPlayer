@@ -243,53 +243,67 @@ final class LibraryManager: ObservableObject {
     /// adds any not already tracked. Picks up files placed via Finder, Files app,
     /// iTunes file sharing, or any subdirectory the user created inside the app folder.
     func scanLocalDocuments() {
-        appLog("Scanning local documents directory", category: "library")
         beginScan()
         Task {
             defer { endScan() }
-            let fm = FileManager.default
-            guard let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-
-            var candidates: [URL] = []
-
-            // Walk the full Documents tree recursively — covers root, Imported Music/,
-            // and any nested folders the user may have created (e.g. by artist or album).
-            let enumerator = fm.enumerator(
-                at: docsDir,
-                includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            )
-            while let url = enumerator?.nextObject() as? URL {
-                // Skip directories themselves; only process regular files.
-                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
-                if DocumentImportService.supportedExtensions.contains(url.pathExtension.lowercased()) {
-                    candidates.append(url)
-                }
-            }
-
-            guard !candidates.isEmpty else { return }
-
-            // Evict songs whose backing files no longer exist (e.g. moved by the user
-            // via Files app into an organised subfolder). Without this, the old path
-            // stays in existingURLs and the new path is never picked up as "new".
-            let fm2 = FileManager.default
-            importedSongs = importedSongs.filter { song in
-                guard let url = song.url else { return false }
-                return fm2.fileExists(atPath: url.path)
-            }
-
-            // Only process files we haven't seen before.
-            let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
-            let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
-            guard !newURLs.isEmpty else { return }
-
-            let newSongs = await resolveSongs(for: newURLs)
-
-            appLog("Local scan complete: \(newSongs.count) song(s)", category: "library")
-            importedSongs.append(contentsOf: newSongs)
-            importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
-            rebuildAllSongs()
+            await performLocalDocumentsScan()
         }
+    }
+
+    /// Awaitable variant of `scanLocalDocuments()` — used by callers (e.g.
+    /// "Download All") that need `allSongs` to reflect every locally-imported
+    /// file, including any sitting in subfolders the user created or moved
+    /// files into, *before* deciding what still needs to be downloaded.
+    func scanLocalDocumentsAsync() async {
+        beginScan()
+        defer { endScan() }
+        await performLocalDocumentsScan()
+    }
+
+    private func performLocalDocumentsScan() async {
+        appLog("Scanning local documents directory", category: "library")
+        let fm = FileManager.default
+        guard let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+
+        var candidates: [URL] = []
+
+        // Walk the full Documents tree recursively — covers root, Imported Music/,
+        // and any nested folders the user may have created (e.g. by artist or album).
+        let enumerator = fm.enumerator(
+            at: docsDir,
+            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        )
+        while let url = enumerator?.nextObject() as? URL {
+            // Skip directories themselves; only process regular files.
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+            if DocumentImportService.supportedExtensions.contains(url.pathExtension.lowercased()) {
+                candidates.append(url)
+            }
+        }
+
+        guard !candidates.isEmpty else { return }
+
+        // Evict songs whose backing files no longer exist (e.g. moved by the user
+        // via Files app into an organised subfolder). Without this, the old path
+        // stays in existingURLs and the new path is never picked up as "new".
+        let fm2 = FileManager.default
+        importedSongs = importedSongs.filter { song in
+            guard let url = song.url else { return false }
+            return fm2.fileExists(atPath: url.path)
+        }
+
+        // Only process files we haven't seen before.
+        let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
+        let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
+        guard !newURLs.isEmpty else { return }
+
+        let newSongs = await resolveSongs(for: newURLs)
+
+        appLog("Local scan complete: \(newSongs.count) song(s)", category: "library")
+        importedSongs.append(contentsOf: newSongs)
+        importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
+        rebuildAllSongs()
     }
 
     /// Scans all user-selected folders tracked by `MusicFolderService` and adds
@@ -671,6 +685,25 @@ final class LibraryManager: ObservableObject {
 
     func artwork(for song: Song) -> UIImage? {
         artwork.artwork(for: song)
+    }
+
+    /// True if `allSongs` already contains a song matching `title`/`artist`
+    /// (normalized — case/diacritic/punctuation-insensitive, same rules as
+    /// `DuplicateFinderService`), and within `DuplicateFinderService
+    /// .durationTolerance` of `duration` when one is provided. Used by
+    /// "Download All" to skip tracks that already exist locally under any
+    /// filename or source — including manually-imported files or ones that
+    /// predate the `LUMISOUND_ID`/`sourceTrackID` tagging — so re-downloads
+    /// aren't queued just because the track lacks a matching source ID.
+    func isAlreadyImported(title: String, artist: String, duration: TimeInterval? = nil) -> Bool {
+        let key = DuplicateFinderService.normalize(title) + "|" + DuplicateFinderService.normalize(artist)
+        guard key != "|" else { return false }
+        return allSongs.contains { song in
+            let songKey = DuplicateFinderService.normalize(song.title) + "|" + DuplicateFinderService.normalize(song.artist)
+            guard songKey == key else { return false }
+            guard let duration, duration > 0 else { return true }
+            return abs(song.duration - duration) <= DuplicateFinderService.durationTolerance
+        }
     }
 
     /// Permanently removes a locally-imported/downloaded song: deletes its

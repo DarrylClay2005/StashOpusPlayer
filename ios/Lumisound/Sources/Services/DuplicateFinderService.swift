@@ -146,7 +146,7 @@ final class DuplicateFinderService: ObservableObject {
     /// Lowercases, strips diacritics/punctuation, and collapses whitespace so
     /// e.g. "Daft Punk - One More Time (Radio Edit)" and "daft punk one more
     /// time radio edit" match.
-    nonisolated private static func normalize(_ text: String) -> String {
+    nonisolated static func normalize(_ text: String) -> String {
         let folded = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
         let alphanumeric = folded.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0 == " " }
         return String(String.UnicodeScalarView(alphanumeric))

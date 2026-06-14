@@ -174,10 +174,19 @@ CREATE TABLE IF NOT EXISTS ios_app_logs (
     line INT,
     timestamp TIMESTAMP NULL,
     extra JSON,
+    device_model VARCHAR(50) NULL,
+    os_version VARCHAR(20) NULL,
+    app_version VARCHAR(20) NULL,
+    user_id VARCHAR(36) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_level (level),
-    INDEX idx_created (created_at)
+    INDEX idx_created (created_at),
+    INDEX idx_user (user_id)
 );
+ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS device_model VARCHAR(50) NULL;
+ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS os_version VARCHAR(20) NULL;
+ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS app_version VARCHAR(20) NULL;
+ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(36) NULL;
 
 -- Collaborative playlist sharing (snapshot-based, bridge side)
 CREATE TABLE IF NOT EXISTS ios_shared_playlists (
