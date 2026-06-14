@@ -430,6 +430,33 @@ def _ytdlp_cookie_args() -> list[str]:
     return args
 
 
+def _source_from_url(url: str) -> str:
+    """Classify a track/playlist URL as 'soundcloud' or 'youtube' (default)."""
+    return "soundcloud" if "soundcloud.com" in url else "youtube"
+
+
+def _ytdlp_listing_args(target: str, source: str) -> list[str]:
+    """Build yt-dlp args for listing (searching or resolving) tracks from
+    *target* — either a `<prefix>search<n>:<query>` search term (for
+    /api/search) or a playlist/track URL (for /api/resolve).
+
+    SoundCloud listings are sparse under --flat-playlist (often missing
+    thumbnails/artist), so we use full --dump-json there. YouTube listings use
+    --flat-playlist plus cookies/extractor-args for pagination beyond ~100
+    entries (see _ytdlp_cookie_args).
+    """
+    if source == "soundcloud":
+        return [target, "--dump-json", "--no-playlist"]
+    return [
+        target,
+        "--dump-json",
+        "--flat-playlist",
+        "--no-playlist",
+        "--cache-dir", YTDLP_CACHE_DIR,
+        *_ytdlp_cookie_args(),
+    ]
+
+
 async def _run_ytdlp(*args: str, timeout: float = 30.0) -> list[dict]:
     """
     Run yt-dlp with the given arguments.
@@ -850,24 +877,7 @@ async def search(
 
     prefix = "ytsearch" if source == "youtube" else "scsearch"
     search_url = f"{prefix}{limit}:{q}"
-
-    # SoundCloud flat-playlist entries are sparse (often missing thumbnails and artist).
-    # Use full --dump-json (no --flat-playlist) for SoundCloud so we get complete metadata.
-    if source == "soundcloud":
-        base_args = [
-            search_url,
-            "--dump-json",
-            "--no-playlist",
-        ]
-    else:
-        base_args = [
-            search_url,
-            "--dump-json",
-            "--flat-playlist",
-            "--no-playlist",
-            "--cache-dir", YTDLP_CACHE_DIR,
-            *_ytdlp_cookie_args(),
-        ]
+    base_args = _ytdlp_listing_args(search_url, source)
 
     try:
         entries = await _run_ytdlp(*base_args, timeout=30.0)
@@ -1143,7 +1153,7 @@ async def track_metadata(
         raise HTTPException(status_code=404, detail="Track not found")
 
     entry = entries[0]
-    source = "soundcloud" if "soundcloud.com" in url else "youtube"
+    source = _source_from_url(url)
     base = _parse_track(entry, source)
     base["description"] = entry.get("description") or ""
     return base
@@ -1158,7 +1168,7 @@ async def resolve_playlist(
     await check_auth(request)
     await _reject_ssrf_targets(url)
 
-    source = "soundcloud" if "soundcloud.com" in url else "youtube"
+    source = _source_from_url(url)
 
     if source == "youtube" and YOUTUBE_API_KEY:
         playlist_id = _extract_youtube_playlist_id(url)
@@ -1171,6 +1181,9 @@ async def resolve_playlist(
 
     # SoundCloud flat-playlist entries are sparse (often missing artist/duration/
     # thumbnails) — use full --dump-json for complete metadata, same as /api/search.
+    # Note: unlike _ytdlp_listing_args (used for /api/search), resolve wants
+    # full playlist mode here — no --no-playlist/--cache-dir, since the target
+    # *is* the playlist we're enumerating.
     if source == "soundcloud":
         args = ["--dump-json", url]
     else:

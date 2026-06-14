@@ -304,20 +304,36 @@ struct StreamSearchView: View {
                         .background(AppTheme.surface)
                     }
 
-                    List(Array(streaming.searchResults.enumerated()), id: \.element.id) { index, track in
-                        StreamTrackRow(
-                            track: track,
-                            isLoading: loadingTrackID == track.id,
-                            isDownloading: downloadingTrackIDs.contains(track.id),
-                            isDownloaded: downloadedTrackIDs.contains(track.id),
-                            onPlay: { handlePlay(track: track) },
-                            onAddToQueue: { handleAddToQueue(track: track) },
-                            onDownload: { handleDownload(track: track) }
-                        )
-                        .listRowBackground(AppTheme.surface)
-                        .listRowSeparatorTint(AppTheme.background)
-                        // Staggered fade-in when results first appear
-                        .modifier(StaggeredFadeInModifier(index: index, token: resultsAnimationToken))
+                    List {
+                        // Group results into per-source sections (YouTube / SoundCloud)
+                        // so the user can clearly tell which platform each result came
+                        // from. Most single-source searches will only populate one
+                        // section, but playlist resolves can mix sources.
+                        ForEach(groupedResults, id: \.source) { group in
+                            Section {
+                                ForEach(Array(group.tracks.enumerated()), id: \.element.id) { localIndex, track in
+                                    let globalIndex = (streaming.searchResults.firstIndex(where: { $0.id == track.id }) ?? localIndex)
+                                    StreamTrackRow(
+                                        track: track,
+                                        isLoading: loadingTrackID == track.id,
+                                        isDownloading: downloadingTrackIDs.contains(track.id),
+                                        isDownloaded: downloadedTrackIDs.contains(track.id),
+                                        onPlay: { handlePlay(track: track) },
+                                        onAddToQueue: { handleAddToQueue(track: track) },
+                                        onDownload: { handleDownload(track: track) }
+                                    )
+                                    .listRowBackground(AppTheme.surface)
+                                    .listRowSeparatorTint(AppTheme.background)
+                                    // Staggered fade-in when results first appear
+                                    .modifier(StaggeredFadeInModifier(index: globalIndex, token: resultsAnimationToken))
+                                }
+                            } header: {
+                                Text(sourceLabel(group.source))
+                                    .font(AppTheme.bodyFont(size: 12).weight(.semibold))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .kerning(0.8)
+                            }
+                        }
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
@@ -540,6 +556,23 @@ struct StreamSearchView: View {
     }
 
     // MARK: — Helpers
+
+    /// Groups `streaming.searchResults` into per-source sections, preserving the
+    /// order in which each source's first result appears (so a single-source
+    /// search shows one section, and a mixed-source playlist resolve shows
+    /// "YouTube" / "SoundCloud" sections in result order).
+    private var groupedResults: [(source: String, tracks: [StreamTrack])] {
+        var order: [String] = []
+        var buckets: [String: [StreamTrack]] = [:]
+        for track in streaming.searchResults {
+            if buckets[track.source] == nil {
+                buckets[track.source] = []
+                order.append(track.source)
+            }
+            buckets[track.source]?.append(track)
+        }
+        return order.map { ($0, buckets[$0] ?? []) }
+    }
 
     private func sourceLabel(_ src: String) -> String {
         switch src {
@@ -798,15 +831,16 @@ private struct StreamTrackRow: View {
                         .aspectRatio(contentMode: .fill)
                 case .failure, .empty:
                     Image(systemName: sourceIcon)
-                        .font(.system(size: 20))
+                        .font(.system(size: 22))
                         .foregroundStyle(AppTheme.textSecondary)
                 @unknown default:
                     Color.clear
                 }
             }
-            .frame(width: 44, height: 44)
+            .frame(width: 52, height: 52)
             .background(AppTheme.elevatedSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipped()
 
             // Title + artist
             VStack(alignment: .leading, spacing: 2) {
