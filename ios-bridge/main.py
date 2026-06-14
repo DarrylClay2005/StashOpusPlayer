@@ -1169,14 +1169,15 @@ async def resolve_playlist(
             except Exception as exc:
                 logger.warning("YouTube Data API resolve failed, falling back to yt-dlp: %s", exc)
 
+    # SoundCloud flat-playlist entries are sparse (often missing artist/duration/
+    # thumbnails) — use full --dump-json for complete metadata, same as /api/search.
+    if source == "soundcloud":
+        args = ["--dump-json", url]
+    else:
+        args = ["--dump-json", "--flat-playlist", *_ytdlp_cookie_args(), url]
+
     try:
-        entries = await _run_ytdlp(
-            "--dump-json",
-            "--flat-playlist",
-            *_ytdlp_cookie_args(),
-            url,
-            timeout=120.0,
-        )
+        entries = await _run_ytdlp(*args, timeout=120.0)
     except asyncio.TimeoutError:
         raise HTTPException(status_code=408, detail="Playlist resolve timed out")
     except Exception as exc:
@@ -2835,7 +2836,12 @@ async def _ffprobe_tags(path: str) -> dict:
         if codec_name in ("png", "mjpeg"):
             has_artwork = True
 
-    tags: dict = audio_stream.get("tags") or {}
+    # For MP4/M4A containers, ffprobe reports title/artist/album/etc. under
+    # format.tags (the moov/udta/meta atom), not streams[].tags — stream tags
+    # there are just language/handler_name. Other containers (FLAC, Opus/OGG
+    # Vorbis comments) may put them on the stream instead, so merge both,
+    # preferring format-level tags.
+    tags: dict = {**(audio_stream.get("tags") or {}), **(data.get("format", {}).get("tags") or {})}
     # ffprobe stores tags in varying case depending on container
     tags_lower = {k.lower(): v for k, v in tags.items()}
 

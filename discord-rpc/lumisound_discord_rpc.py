@@ -275,6 +275,9 @@ def build_activity(state: dict, large_image: Optional[str]) -> Optional[dict]:
             pass
 
     activity: dict = {
+        # ActivityType 2 = "Listening to ..." instead of the default 0
+        # ("Playing ..."), which made Lumisound show up like a game.
+        "type": 2,
         "details": (state.get("title") or "")[:128],
     }
     if state.get("artist"):

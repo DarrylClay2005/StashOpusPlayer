@@ -30,6 +30,8 @@ secrets.txt
 local.properties
 cookies.txt
 ios-bridge/cookies.txt
+.env
+ios-bridge/.env
 
 # Logs
 *.log
