@@ -64,7 +64,7 @@ struct BackgroundSettingsView: View {
                         .frame(height: 120)
                         .clipped()
                         .cornerRadius(10)
-                        .blur(radius: bg.isBlurred ? 8 : 0, opaque: true)
+                        .blur(radius: bg.blurRadius / 2, opaque: true)
                         .opacity(bg.opacity)
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
@@ -322,9 +322,17 @@ struct BackgroundSettingsView: View {
                             .onChange(of: bg.opacity) { _ in bg.saveSettings() }
                     }
 
-                    Toggle("Blur Background", isOn: $bg.isBlurred)
-                        .tint(AppTheme.dynamicAccent)
-                        .onChange(of: bg.isBlurred) { _ in bg.saveSettings() }
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Blur")
+                            Spacer()
+                            Text(bg.blurRadius == 0 ? "Off" : String(format: "%.0f", bg.blurRadius))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        Slider(value: $bg.blurRadius, in: 0...40)
+                            .tint(AppTheme.dynamicAccent)
+                            .onChange(of: bg.blurRadius) { _ in bg.saveSettings() }
+                    }
                 }
             }
         }

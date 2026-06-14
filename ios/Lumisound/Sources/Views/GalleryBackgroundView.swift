@@ -25,7 +25,7 @@ struct GalleryBackgroundView: View {
                         .scaledToFill()
                         .frame(width: geo.size.width, height: geo.size.height)
                         .clipped()
-                        .blur(radius: bg.isBlurred ? 16 : 0, opaque: true)
+                        .blur(radius: bg.blurRadius, opaque: true)
                         .opacity(bg.opacity)
                         .id(bg.currentIndex)
                         .transition(transitionForAnimation(bg.animation))

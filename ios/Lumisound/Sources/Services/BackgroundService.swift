@@ -55,7 +55,13 @@ final class BackgroundService: ObservableObject {
     @Published var opacity: Double = 0.35 {
         didSet { saveSettings() }
     }
-    @Published var isBlurred: Bool = true {
+    /// Gaussian blur radius applied to the background image, 0-40. Replaces
+    /// the old on/off `isBlurred` toggle — the Help screen has always
+    /// described this as "a blur slider" with a 20-40 range, but the control
+    /// was actually a binary switch with a fixed radius of 16 (8 in the
+    /// settings preview). `loadSettings()` migrates any previously-saved
+    /// `isBlurred` bool into an equivalent radius (16 or 0) on first load.
+    @Published var blurRadius: Double = 16.0 {
         didSet { saveSettings() }
     }
 
@@ -105,7 +111,9 @@ final class BackgroundService: ObservableObject {
         static let shuffleInterval       = "bgService.shuffleInterval"
         static let animation             = "bgService.animation"
         static let opacity               = "bgService.opacity"
-        static let isBlurred             = "bgService.isBlurred"
+        static let blurRadius            = "bgService.blurRadius"
+        /// Legacy on/off blur switch — read once during migration in `loadSettings()`.
+        static let isBlurredLegacy       = "bgService.isBlurred"
         static let imageFilenames        = "bg_image_filenames_v1"  // [String] of filenames
     }
 
@@ -275,7 +283,12 @@ final class BackgroundService: ObservableObject {
         guard !images.isEmpty else { return }
         let next = (currentIndex + 1) % images.count
         appLog("advance: index → \(next)/\(images.count)", category: "background")
-        withAnimation(.easeInOut(duration: 8.0)) {
+        // Cap the crossfade so it always finishes before the next shuffle
+        // tick fires — at the fastest preset (5s) an 8s transition would
+        // still be mid-animation when the next `advance()` lands, causing
+        // the incoming image to jump/cut instead of completing its fade.
+        let duration = min(8.0, shuffleIntervalSeconds * 0.6)
+        withAnimation(.easeInOut(duration: duration)) {
             currentIndex = next
         }
     }
@@ -288,7 +301,7 @@ final class BackgroundService: ObservableObject {
         defaults.set(shuffleIntervalSeconds, forKey: Keys.shuffleInterval)
         defaults.set(animation.rawValue, forKey: Keys.animation)
         defaults.set(opacity, forKey: Keys.opacity)
-        defaults.set(isBlurred, forKey: Keys.isBlurred)
+        defaults.set(blurRadius, forKey: Keys.blurRadius)
     }
 
     func loadSettings() {
@@ -310,8 +323,13 @@ final class BackgroundService: ObservableObject {
             opacity = savedOpacity
         }
 
-        if let savedBlur = defaults.object(forKey: Keys.isBlurred) as? Bool {
-            isBlurred = savedBlur
+        if let savedRadius = defaults.object(forKey: Keys.blurRadius) as? Double {
+            blurRadius = savedRadius
+        } else if let legacyBlur = defaults.object(forKey: Keys.isBlurredLegacy) as? Bool {
+            // One-time migration from the old on/off toggle.
+            blurRadius = legacyBlur ? 16.0 : 0.0
+            defaults.removeObject(forKey: Keys.isBlurredLegacy)
+            defaults.set(blurRadius, forKey: Keys.blurRadius)
         }
 
         // Load persisted images from disk; this also starts shuffling if enabled

@@ -186,12 +186,12 @@ struct SettingsHelpView: View {
             HelpTopic(
                 icon: "slider.horizontal.3",
                 title: "Blur & Opacity Controls",
-                body: "A blur slider softens the background image so it does not compete with text and controls in the foreground. A separate opacity slider lets you fade the image towards the app's base colour. Combining a moderate blur (around 20–40) with a slight opacity reduction (0.7–0.9) gives a frosted-glass effect that looks good across many photos."
+                body: "A blur slider softens the background image so it does not compete with text and controls in the foreground. A separate opacity slider lets you fade the image towards the app's base colour. Combining a moderate blur (around 20–40) with a slight opacity reduction (around 0.3–0.5) gives a frosted-glass effect that looks good across many photos."
             ),
             HelpTopic(
                 icon: "timer",
                 title: "Shuffle Interval",
-                body: "When multiple gallery images are loaded, the interval slider controls how long each image is displayed before transitioning to the next one. The interval ranges from 10 seconds up to several minutes. A shorter interval creates a livelier animated backdrop; a longer interval keeps the background stable so it is less distracting during focused listening sessions."
+                body: "When multiple gallery images are loaded, the interval picker controls how long each image is displayed before transitioning to the next one, from every 5 seconds up to every 5 minutes. A shorter interval creates a livelier animated backdrop; a longer interval keeps the background stable so it is less distracting during focused listening sessions."
             ),
         ]),
         HelpCategory(icon: "magnifyingglass", title: "Streaming", topics: [
