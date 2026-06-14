@@ -93,6 +93,13 @@ final class CacheManagerService: ObservableObject {
         artworkCacheCount = 0
     }
 
+    /// Clears the artwork cache and temp download files together. Does not
+    /// touch imported music — that's the user's actual library.
+    func clearAll() {
+        clearArtworkCache()
+        clearTempFiles()
+    }
+
     /// Deletes all `dl_*` temporary directories inside `FileManager.temporaryDirectory`.
     func clearTempFiles() {
         let tmpDir = FileManager.default.temporaryDirectory

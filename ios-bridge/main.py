@@ -844,29 +844,42 @@ async def _resolve_youtube_channel(query: str, api_key: str) -> dict:
 
 
 async def _channel_uploads_via_api(channel_id: str, max_results: int, api_key: str) -> list[dict]:
-    """Recent uploads for a channel via search.list?channelId=...&order=date.
-    Raises on any API error so the caller can fall back to yt-dlp."""
+    """Recent uploads for a channel via the channel's "uploads" playlist
+    (channels.list?part=contentDetails + playlistItems.list), which costs
+    ~1-2 quota units total — versus search.list?order=date, which costs 100
+    units per call regardless of maxResults. Raises on any API error so the
+    caller can fall back to yt-dlp."""
     data = await asyncio.to_thread(
-        _youtube_data_api_get, "search",
-        {
-            "part": "snippet",
-            "channelId": channel_id,
-            "order": "date",
-            "type": "video",
-            "maxResults": max_results,
-        },
+        _youtube_data_api_get, "channels",
+        {"part": "contentDetails,snippet", "id": channel_id},
+        api_key,
+    )
+    items = data.get("items") or []
+    if not items:
+        raise RuntimeError(f"Channel {channel_id} not found")
+    uploads_playlist_id = (
+        (items[0].get("contentDetails") or {}).get("relatedPlaylists") or {}
+    ).get("uploads")
+    channel_title = (items[0].get("snippet") or {}).get("title") or "Unknown Artist"
+    if not uploads_playlist_id:
+        return []
+
+    data = await asyncio.to_thread(
+        _youtube_data_api_get, "playlistItems",
+        {"part": "snippet", "playlistId": uploads_playlist_id, "maxResults": max_results},
         api_key,
     )
     tracks = []
     for item in data.get("items") or []:
         snippet = item.get("snippet") or {}
-        video_id = (item.get("id") or {}).get("videoId")
-        if not video_id:
+        video_id = (snippet.get("resourceId") or {}).get("videoId")
+        title = snippet.get("title") or ""
+        if not video_id or title in ("Deleted video", "Private video"):
             continue
         tracks.append({
             "id": video_id,
-            "title": snippet.get("title") or "Unknown Title",
-            "artist": snippet.get("channelTitle") or "Unknown Artist",
+            "title": title or "Unknown Title",
+            "artist": snippet.get("videoOwnerChannelTitle") or channel_title,
             "duration_seconds": 0,
             "thumbnail_url": _youtube_thumbnail_from_snippet(snippet),
             "source": "youtube",

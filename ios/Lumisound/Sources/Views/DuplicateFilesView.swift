@@ -8,6 +8,7 @@ struct DuplicateFilesView: View {
     @StateObject private var service = DuplicateFinderService.shared
 
     @State private var pendingDeletion: (songID: String, title: String)?
+    @State private var showDeleteAllConfirm = false
 
     // MARK: Body
 
@@ -75,6 +76,28 @@ struct DuplicateFilesView: View {
             }
             .listRowBackground(AppTheme.surface)
 
+            // Delete all duplicates
+            if !service.allDuplicatesToRemove.isEmpty {
+                Section {
+                    Button(role: .destructive) {
+                        showDeleteAllConfirm = true
+                    } label: {
+                        Label(
+                            "Delete All \(service.allDuplicatesToRemove.count) Duplicate\(service.allDuplicatesToRemove.count == 1 ? "" : "s")",
+                            systemImage: "trash"
+                        )
+                        .foregroundStyle(AppTheme.error)
+                    }
+                } header: {
+                    sectionHeader("Actions")
+                } footer: {
+                    Text("Keeps the longest copy in each group and deletes the rest. Apple Music copies are never deleted.")
+                        .font(AppTheme.bodyFont(size: 12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .listRowBackground(AppTheme.surface)
+            }
+
             // Duplicate groups
             if !service.duplicateGroups.isEmpty {
                 ForEach(service.duplicateGroups) { group in
@@ -135,6 +158,21 @@ struct DuplicateFilesView: View {
             }
         } message: {
             Text("This permanently deletes the downloaded file from your device. This action cannot be undone.")
+        }
+        .confirmationDialog(
+            "Delete All Duplicates?",
+            isPresented: $showDeleteAllConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete \(service.allDuplicatesToRemove.count) File\(service.allDuplicatesToRemove.count == 1 ? "" : "s")", role: .destructive) {
+                for song in service.allDuplicatesToRemove {
+                    library.removeImportedSong(id: song.id)
+                    service.removeSongFromGroups(songID: song.id)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Keeps the longest copy in each group and permanently deletes \(service.allDuplicatesToRemove.count) other \(service.allDuplicatesToRemove.count == 1 ? "copy" : "copies"). This action cannot be undone.")
         }
     }
 

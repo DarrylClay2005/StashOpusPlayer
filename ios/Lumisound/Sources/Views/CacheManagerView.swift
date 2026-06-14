@@ -5,6 +5,7 @@ struct CacheManagerView: View {
     @EnvironmentObject private var cacheManager: CacheManagerService
     @State private var showClearArtworkConfirm = false
     @State private var showClearTempConfirm = false
+    @State private var showClearAllConfirm = false
     @State private var savedBytes: Int64 = 0
     @State private var showSavedBanner = false
 
@@ -107,6 +108,26 @@ struct CacheManagerView: View {
             }
             .listRowBackground(AppTheme.surface)
 
+            // MARK: Clear All
+            let clearableSize = cacheManager.artworkCacheSize + cacheManager.tempFilesSize
+            if clearableSize > 0 {
+                Section {
+                    Button(role: .destructive) {
+                        showClearAllConfirm = true
+                    } label: {
+                        Label("Clear All Cache", systemImage: "trash")
+                            .foregroundStyle(AppTheme.error)
+                    }
+                } header: {
+                    sectionHeader("Actions")
+                } footer: {
+                    Text("Clears artwork cache and temp downloads in one tap (\(CacheManagerService.formattedSize(clearableSize))). Your downloaded music is never affected.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .listRowBackground(AppTheme.surface)
+            }
+
             // MARK: Saved banner
             if showSavedBanner {
                 Section {
@@ -162,6 +183,20 @@ struct CacheManagerView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Partial download folders will be deleted. Do not clear while a download is in progress.")
+        }
+        .confirmationDialog(
+            "Clear All Cache?",
+            isPresented: $showClearAllConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Clear All", role: .destructive) {
+                let freed = cacheManager.artworkCacheSize + cacheManager.tempFilesSize
+                cacheManager.clearAll()
+                flashSavedBanner(bytes: freed)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Album art will be re-downloaded as you browse, and any partial download folders will be deleted. Your downloaded music is not affected.")
         }
     }
 

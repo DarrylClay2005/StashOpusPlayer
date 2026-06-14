@@ -56,6 +56,19 @@ final class DuplicateFinderService: ObservableObject {
         isScanning = false
     }
 
+    /// Songs that "Delete All Duplicates" would remove: for each group, the
+    /// longest removable (downloaded, not Apple Music) copy is kept and every
+    /// other removable copy is queued for deletion. Apple Music copies are
+    /// never included since they can't be removed from here.
+    var allDuplicatesToRemove: [Song] {
+        duplicateGroups.flatMap { group -> [Song] in
+            let removable = group.songs.filter { $0.persistentID == nil && $0.url != nil }
+            guard removable.count > 1 else { return [] }
+            let sorted = removable.sorted { $0.duration > $1.duration }
+            return Array(sorted.dropFirst())
+        }
+    }
+
     /// Removes a single song from `duplicateGroups` (e.g. after it's been
     /// deleted from the library), dropping any group that's left with fewer
     /// than two songs.
