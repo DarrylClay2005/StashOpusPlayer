@@ -477,6 +477,20 @@ struct NowPlayingView: View {
                     isPlaying: player.isPlaying,
                     onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
                 )
+            case .digital:
+                DigitalScrubberView(
+                    position: progress.position,
+                    duration: progress.duration,
+                    isPlaying: player.isPlaying,
+                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
+                )
+            case .pill:
+                PillScrubberView(
+                    position: progress.position,
+                    duration: progress.duration,
+                    isPlaying: player.isPlaying,
+                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
+                )
             }
 
             seekerStylePicker
