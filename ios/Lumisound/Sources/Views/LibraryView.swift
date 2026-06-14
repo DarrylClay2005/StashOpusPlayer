@@ -533,9 +533,6 @@ private struct ArtistGridCell: View {
     let artist: String
     @EnvironmentObject private var library: LibraryManager
 
-    // Fade + slight scale-in entrance, played once when the cell first appears.
-    @State private var hasAppeared = false
-
     private var artistSongs: [Song] {
         library.songs(byArtist: artist)
     }
@@ -566,13 +563,6 @@ private struct ArtistGridCell: View {
                     .lineLimit(1)
             }
             .padding(.horizontal, 2)
-        }
-        .opacity(hasAppeared ? 1 : 0)
-        .scaleEffect(hasAppeared ? 1 : 0.96)
-        .onAppear {
-            withAnimation(.easeOut(duration: 0.22)) {
-                hasAppeared = true
-            }
         }
     }
 }

@@ -44,15 +44,6 @@ struct SongRow: View {
 
     @AppStorage("library_cardStyle") private var cardStyleRaw: String = SongCardStyle.compact.rawValue
 
-    // Tap/press feedback — brief scale-down + opacity dip while pressed, spring
-    // back on release. Driven by a simultaneous zero-distance drag gesture so it
-    // doesn't compete with/consume the tap handled by the enclosing Button or
-    // `.onTapGesture` at call sites.
-    @State private var isPressed = false
-
-    // Per-row fade + slide entrance, played once when the row first appears.
-    @State private var hasAppeared = false
-
     private var style: SongCardStyle {
         SongCardStyle(rawValue: cardStyleRaw) ?? .compact
     }
@@ -71,21 +62,6 @@ struct SongRow: View {
             }
         }
         .contentShape(Rectangle())
-        .scaleEffect(isPressed ? 0.97 : 1.0)
-        .opacity(isPressed ? 0.85 : 1.0)
-        .animation(.spring(response: 0.25, dampingFraction: 0.6), value: isPressed)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in if !isPressed { isPressed = true } }
-                .onEnded { _ in isPressed = false }
-        )
-        .opacity(hasAppeared ? 1 : 0)
-        .offset(y: hasAppeared ? 0 : 6)
-        .onAppear {
-            withAnimation(.easeOut(duration: 0.22)) {
-                hasAppeared = true
-            }
-        }
         // Animate the "now playing" highlight (accent text/background/border)
         // transitioning in or out, instead of snapping instantly.
         .animation(.easeInOut(duration: 0.25), value: isCurrent)
@@ -252,13 +228,6 @@ struct SongGridCell: View {
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
 
-    // Tap/press feedback, mirroring `SongRow` — scale-down + opacity dip while
-    // pressed via a simultaneous zero-distance drag gesture, spring back on release.
-    @State private var isPressed = false
-
-    // Per-cell fade + slide entrance, played once when the cell first appears.
-    @State private var hasAppeared = false
-
     private var resolvedSubtitle: String {
         subtitle ?? song.artistName
     }
@@ -309,21 +278,6 @@ struct SongGridCell: View {
         }
         .padding(6)
         .background(AppTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .scaleEffect(isPressed ? 0.96 : 1.0)
-        .opacity(isPressed ? 0.85 : 1.0)
-        .animation(.spring(response: 0.25, dampingFraction: 0.6), value: isPressed)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in if !isPressed { isPressed = true } }
-                .onEnded { _ in isPressed = false }
-        )
-        .opacity(hasAppeared ? 1 : 0)
-        .scaleEffect(hasAppeared ? 1 : 0.96)
-        .onAppear {
-            withAnimation(.easeOut(duration: 0.22)) {
-                hasAppeared = true
-            }
-        }
         // Animate the "now playing" highlight (accent text/badge) transitioning
         // in or out, instead of snapping instantly.
         .animation(.easeInOut(duration: 0.25), value: isCurrent)
