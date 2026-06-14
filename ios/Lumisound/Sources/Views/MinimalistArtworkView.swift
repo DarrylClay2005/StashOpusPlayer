@@ -43,6 +43,10 @@ struct MinimalistArtworkView: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(.white.opacity(0.10), lineWidth: 1)
+            )
             .scaleEffect(breathe ? 1.022 : 1.0)
             .shadow(
                 color: AppTheme.dynamicAccent.opacity(shadowPulse ? 0.45 : 0.18),
@@ -51,6 +55,10 @@ struct MinimalistArtworkView: View {
             )
             .animation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true), value: breathe)
             .animation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true), value: shadowPulse)
+
+            ArtworkReflectionView(song: song, size: artSize, cornerRadius: 16)
+                .environmentObject(library)
+                .padding(.top, 4)
 
             // Thin progress line with animated fill
             GeometryReader { geo in

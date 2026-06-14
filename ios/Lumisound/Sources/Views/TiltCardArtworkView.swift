@@ -15,36 +15,55 @@ struct TiltCardArtworkView: View {
     @State private var tiltY: Double = 0
 
     var body: some View {
-        Group {
-            if let song {
-                ArtworkThumbnail(song: song, size: 290)
-                    .environmentObject(library)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            } else {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [AppTheme.surface, AppTheme.elevatedSurface],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+        VStack(spacing: 6) {
+            Group {
+                if let song {
+                    ArtworkThumbnail(song: song, size: 290)
+                        .environmentObject(library)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [AppTheme.surface, AppTheme.elevatedSurface],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .frame(width: 290, height: 290)
-                    .overlay {
-                        Image(systemName: "music.note")
-                            .font(.system(size: 78, weight: .semibold))
-                            .foregroundStyle(AppTheme.dynamicAccent)
-                    }
+                        .frame(width: 290, height: 290)
+                        .overlay {
+                            Image(systemName: "music.note")
+                                .font(.system(size: 78, weight: .semibold))
+                                .foregroundStyle(AppTheme.dynamicAccent)
+                        }
+                }
             }
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.white.opacity(0.15), lineWidth: 1)
+            )
+            // Specular highlight — a soft diagonal sheen that slides across the
+            // card opposite the tilt direction, like light catching glass.
+            .overlay(
+                LinearGradient(
+                    colors: [.clear, .white.opacity(0.16), .clear],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .rotationEffect(.degrees(20))
+                .offset(x: tiltY * 6, y: -tiltX * 6)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .allowsHitTesting(false)
+            )
+            .shadow(color: .black.opacity(0.45), radius: 22, x: -tiltY * 1.4, y: tiltX * 1.4 + 14)
+            .rotation3DEffect(.degrees(tiltX), axis: (x: 1, y: 0, z: 0), perspective: 0.4)
+            .rotation3DEffect(.degrees(tiltY), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
+
+            ArtworkReflectionView(song: song, size: 290, cornerRadius: 18)
+                .environmentObject(library)
+                .rotation3DEffect(.degrees(tiltY * 0.3), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(0.15), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.45), radius: 22, x: -tiltY * 1.4, y: tiltX * 1.4 + 14)
-        .rotation3DEffect(.degrees(tiltX), axis: (x: 1, y: 0, z: 0), perspective: 0.4)
-        .rotation3DEffect(.degrees(tiltY), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
-        .frame(width: 300, height: 300)
+        .frame(width: 300)
         .onAppear { updateAnimations(playing: isPlaying) }
         .onChange(of: isPlaying) { playing in updateAnimations(playing: playing) }
     }

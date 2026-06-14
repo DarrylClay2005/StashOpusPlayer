@@ -287,13 +287,19 @@ struct NowPlayingView: View {
     private var artworkSection: some View {
         VStack(spacing: 14) {
             // ── Artwork display ──────────────────────────────────────────
-            artworkDisplay
-                .scaleEffect(artworkScale)
-                .opacity(artworkOpacity)
-                .animation(.spring(response: 0.4, dampingFraction: 0.65), value: artworkScale)
-                .animation(.easeInOut(duration: 0.2), value: artworkOpacity)
-                .id(artworkAnimationID)
-                .modifier(PulseModifier(isPlaying: player.isPlaying))
+            ZStack {
+                AmbientArtworkBackground(song: player.currentSong)
+                    .environmentObject(library)
+
+                artworkDisplay
+                    .scaleEffect(artworkScale)
+                    .opacity(artworkOpacity)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.65), value: artworkScale)
+                    .animation(.easeInOut(duration: 0.2), value: artworkOpacity)
+                    .id(artworkAnimationID)
+                    .modifier(PulseModifier(isPlaying: player.isPlaying))
+            }
+            .frame(maxWidth: .infinity)
 
             // ── Style picker (horizontal scroll, 8 chips) ────────────────
             ScrollView(.horizontal, showsIndicators: false) {
@@ -340,28 +346,37 @@ struct NowPlayingView: View {
             VinylDiscView(song: player.currentSong, isPlaying: player.isPlaying)
 
         case .albumArt:
-            Group {
-                if let song = player.currentSong {
-                    ArtworkThumbnail(song: song, size: 300)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .shadow(color: AppTheme.dynamicAccent.opacity(0.3), radius: 24, x: 0, y: 12)
-                } else {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [AppTheme.surface, AppTheme.elevatedSurface],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+            VStack(spacing: 4) {
+                Group {
+                    if let song = player.currentSong {
+                        ArtworkThumbnail(song: song, size: 300)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(.white.opacity(0.12), lineWidth: 1)
                             )
-                        )
-                        .frame(width: 300, height: 300)
-                        .overlay {
-                            Image(systemName: "music.note")
-                                .font(.system(size: 80, weight: .semibold))
-                                .foregroundStyle(AppTheme.dynamicAccent)
-                        }
-                        .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 10)
+                            .shadow(color: AppTheme.dynamicAccent.opacity(0.3), radius: 24, x: 0, y: 12)
+                    } else {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [AppTheme.surface, AppTheme.elevatedSurface],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 300, height: 300)
+                            .overlay {
+                                Image(systemName: "music.note")
+                                    .font(.system(size: 80, weight: .semibold))
+                                    .foregroundStyle(AppTheme.dynamicAccent)
+                            }
+                            .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 10)
+                    }
                 }
+
+                ArtworkReflectionView(song: player.currentSong, size: 300, cornerRadius: 16)
+                    .environmentObject(library)
             }
             .modifier(FloatModifier(isPlaying: player.isPlaying, amount: 6, speed: 2.8))
 
