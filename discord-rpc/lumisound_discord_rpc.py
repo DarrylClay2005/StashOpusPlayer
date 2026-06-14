@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import socket
 import struct
 import sys
@@ -36,6 +37,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+IS_WINDOWS = platform.system() == "Windows"
+
 OP_HANDSHAKE = 0
 OP_FRAME = 1
 OP_CLOSE = 2
@@ -43,6 +46,11 @@ OP_PING = 3
 OP_PONG = 4
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "lumisound-discord-rpc" / "config.json"
+
+# The hosted Lumisound bridge. Almost everyone uses this — `bridge_url` only
+# needs to be set in config.json for people running their own ios-bridge
+# instance, so the bare minimum config is just `{"access_token": "..."}`.
+DEFAULT_BRIDGE_URL = "https://lumisound-bridge.xenusanimations.studio"
 
 
 def log(msg: str) -> None:
@@ -56,9 +64,13 @@ def log(msg: str) -> None:
 
 
 def _candidate_ipc_paths() -> list[str]:
-    """Discord's RPC socket is a Unix socket named discord-ipc-{0..9}, placed
-    in one of several possible runtime directories depending on how Discord
-    was installed (native package, Flatpak, Snap)."""
+    """Discord's RPC endpoint is named discord-ipc-{0..9} — a Unix socket on
+    Linux/macOS, or a named pipe (`\\\\.\\pipe\\discord-ipc-{0..9}`) on
+    Windows, placed in one of several possible locations depending on how
+    Discord was installed (native package, Flatpak, Snap)."""
+    if IS_WINDOWS:
+        return [rf"\\.\pipe\discord-ipc-{i}" for i in range(10)]
+
     bases = []
     for var in ("XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"):
         val = os.environ.get(var)
@@ -84,13 +96,31 @@ class DiscordIPCError(Exception):
 
 
 class DiscordIPC:
-    """Minimal client for Discord's local Rich Presence IPC protocol."""
+    """Minimal client for Discord's local Rich Presence IPC protocol.
+
+    On Linux/macOS this is a Unix domain socket; on Windows it's a named
+    pipe opened as a regular file handle (`\\\\.\\pipe\\discord-ipc-N`),
+    which supports the same read/write framing.
+    """
 
     def __init__(self, client_id: str):
         self.client_id = client_id
         self.sock: Optional[socket.socket] = None
+        self.pipe = None  # Windows named-pipe file handle
 
     def connect(self) -> None:
+        if IS_WINDOWS:
+            for path in _candidate_ipc_paths():
+                try:
+                    pipe = open(path, "r+b", buffering=0)
+                except OSError:
+                    continue
+                self.pipe = pipe
+                self._handshake()
+                log(f"Connected to Discord IPC at {path}")
+                return
+            raise DiscordIPCError("No Discord IPC pipe found — is Discord running?")
+
         for path in _candidate_ipc_paths():
             if not os.path.exists(path):
                 continue
@@ -106,15 +136,26 @@ class DiscordIPC:
             return
         raise DiscordIPCError("No Discord IPC socket found — is Discord running?")
 
-    def _send(self, opcode: int, payload: dict) -> None:
-        if not self.sock:
+    def _write(self, data: bytes) -> None:
+        if self.pipe:
+            self.pipe.write(data)
+        elif self.sock:
+            self.sock.sendall(data)
+        else:
             raise DiscordIPCError("Not connected")
+
+    def _read(self, n: int) -> bytes:
+        if self.pipe:
+            return self.pipe.read(n)
+        if self.sock:
+            return self.sock.recv(n)
+        raise DiscordIPCError("Not connected")
+
+    def _send(self, opcode: int, payload: dict) -> None:
         data = json.dumps(payload).encode("utf-8")
-        self.sock.sendall(struct.pack("<II", opcode, len(data)) + data)
+        self._write(struct.pack("<II", opcode, len(data)) + data)
 
     def _recv(self) -> tuple[int, dict]:
-        if not self.sock:
-            raise DiscordIPCError("Not connected")
         header = self._recv_exact(8)
         opcode, length = struct.unpack("<II", header)
         body = self._recv_exact(length)
@@ -127,12 +168,16 @@ class DiscordIPC:
         chunks = []
         remaining = n
         while remaining > 0:
-            chunk = self.sock.recv(remaining)
+            chunk = self._read(remaining)
             if not chunk:
                 raise DiscordIPCError("Discord IPC connection closed")
             chunks.append(chunk)
             remaining -= len(chunk)
         return b"".join(chunks)
+
+    @property
+    def connected(self) -> bool:
+        return self.sock is not None or self.pipe is not None
 
     def _handshake(self) -> None:
         self._send(OP_HANDSHAKE, {"v": 1, "client_id": self.client_id})
@@ -163,6 +208,13 @@ class DiscordIPC:
                 pass
             self.sock.close()
             self.sock = None
+        if self.pipe:
+            try:
+                self._send(OP_CLOSE, {})
+            except OSError:
+                pass
+            self.pipe.close()
+            self.pipe = None
 
 
 # ---------------------------------------------------------------------------
@@ -299,16 +351,20 @@ def build_activity(state: dict, large_image: Optional[str]) -> Optional[dict]:
 def load_config(config_path: Path) -> dict:
     if not config_path.exists():
         log(f"No config found at {config_path}")
-        log("Copy config.example.json there and fill in your details.")
+        log("Copy config.example.json there and fill in your details, or run install.sh with your Rich Presence token.")
         sys.exit(1)
-    return json.loads(config_path.read_text())
+    config = json.loads(config_path.read_text())
+    if not config.get("access_token") and not (config.get("username") and config.get("password")):
+        log(f"{config_path} needs an \"access_token\" (Lumisound -> Account -> Generate Rich Presence Token).")
+        sys.exit(1)
+    return config
 
 
 def main() -> None:
     config_path = Path(os.environ.get("LUMISOUND_RPC_CONFIG", DEFAULT_CONFIG_PATH))
     config = load_config(config_path)
 
-    bridge_url = config["bridge_url"]
+    bridge_url = config.get("bridge_url") or DEFAULT_BRIDGE_URL
     poll_interval = config.get("poll_interval_seconds", 5)
     bridge = BridgeClient(bridge_url, config_path, config)
 
@@ -346,11 +402,11 @@ def main() -> None:
         # spurious IPC reconnect (and a "Cleared"/"Now playing" flicker)
         # every time the bridge had an unrelated network hiccup.
         try:
-            if ipc.sock is None:
+            if not ipc.connected:
                 ipc.connect()
         except (DiscordIPCError, OSError) as exc:
             log(f"Discord IPC error: {exc}")
-            if ipc.sock:
+            if ipc.connected:
                 ipc.close()
             last_activity_signature = None
             time.sleep(poll_interval)
@@ -387,7 +443,7 @@ def main() -> None:
             # restarted and replaced its socket file. Drop our handle so
             # the next loop iteration reconnects.
             log(f"Discord IPC error: {exc}")
-            if ipc.sock:
+            if ipc.connected:
                 ipc.close()
             last_activity_signature = None
 

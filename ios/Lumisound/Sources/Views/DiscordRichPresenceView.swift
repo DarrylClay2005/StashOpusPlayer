@@ -12,9 +12,10 @@ import SwiftUI
 //      configure locally.
 //
 // Rich Presence itself is still set locally by the daemon over Discord's
-// IPC socket — there is no server-side API to set it remotely — but with
-// both of these steps done, the daemon needs only `bridge_url` and the
-// token in its config file.
+// IPC (a Unix socket on Linux/macOS, a named pipe on Windows) — there is no
+// server-side API to set it remotely — but with both of these steps done,
+// the daemon needs only the token in its config file (`bridge_url` defaults
+// to the hosted Lumisound bridge).
 
 struct DiscordRichPresenceView: View {
     @EnvironmentObject private var account: AccountService
@@ -76,7 +77,7 @@ struct DiscordRichPresenceView: View {
             } header: {
                 sectionHeader("Setup Token")
             } footer: {
-                Text("Generate a token for the local Discord Rich Presence daemon so it can show what you're playing without storing your password. Paste it into the daemon's config as \"access_token\". You can revoke it any time from Active Sessions (\"Discord RPC Bridge\").")
+                Text("Generate a token for the local Discord Rich Presence daemon — it only allows reading your own playback state, not your password, and can be revoked any time from Active Sessions (\"Discord RPC Bridge\"). The daemon must run on a computer with Discord open, since Rich Presence is set over Discord's local connection — it can't be driven remotely. Run \"./install.sh <token>\" (or install-macos.sh / install-windows.ps1) from the discord-rpc folder on GitHub — that's the only thing you need to do locally.")
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }

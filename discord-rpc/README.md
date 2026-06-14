@@ -1,87 +1,103 @@
 # Lumisound Discord Rich Presence
 
-A small local daemon that mirrors your Lumisound "now playing" state to your
+A small daemon that mirrors your Lumisound "now playing" state to your
 Discord profile via Rich Presence.
 
-This only works on a machine running the Discord desktop client, because
-Rich Presence is set over a local IPC socket (`discord-ipc-*` under
-`$XDG_RUNTIME_DIR`) — it can't be driven remotely from the iOS app.
+## Why this can't be fully server-side
 
-## 1. Create a Discord application
+Discord's Rich Presence (the "Playing/Listening to..." card on a profile) is
+only settable over Discord's **local IPC** — a Unix socket (or, on Windows, a
+named pipe) that the Discord desktop client opens on the machine it's running
+on. There is no Discord API that lets a remote server set another account's
+Rich Presence directly; the only first-party way is this local connection.
 
-1. Go to https://discord.com/developers/applications and click **New
-   Application**. Give it a name (e.g. "Lumisound") — this name is what
-   shows up in the Rich Presence card.
-2. (Optional) Under **Rich Presence > Art Assets**, upload an image and name
-   it (e.g. `lumisound_logo`).
-3. Copy the **Application ID** (Client ID) from the General Information page.
+So **something has to run next to your Discord desktop client** — there's no
+way around that part. What Lumisound *does* centralize is everything else:
+your Discord Application Client ID, Rich Presence art, and the on/off toggle
+all live on the Lumisound server (`/user/discord-rpc-config`, set from
+**Account → Discord Rich Presence**) and the daemon fetches them
+automatically. The only thing you need locally is **one token** and **one
+command/script** — see below.
 
-## 2. Register it in Lumisound
+## 1. Get your Rich Presence token
 
 In the app, go to **Account → Discord Rich Presence** and:
 
-1. Tap **Generate Rich Presence Token** — this is the only credential the
-   local daemon needs. It only allows reading your own playback state, not
-   your password, and can be revoked any time from **Account → Active
-   Sessions** ("Discord RPC Bridge") without changing your password.
-2. Enter the **Application Client ID** from step 1 (and optionally the art
-   asset name from step 1) and save. This is stored server-side
-   (`/user/discord-rpc-config`) — the daemon fetches it automatically, so
-   there's nothing to copy into a config file.
+1. Tap **Generate Rich Presence Token** — this only allows reading your own
+   playback state, not your password, and can be revoked any time from
+   **Account → Active Sessions** ("Discord RPC Bridge") without changing your
+   password.
+2. Enter a **Discord Application Client ID** (create one for free at
+   https://discord.com/developers/applications — only the name/icon matter)
+   and optionally a Rich Presence art asset name, then save. This is stored
+   server-side, so the daemon picks it up automatically — nothing to copy
+   into a config file.
 
-## 3. Configure the daemon
+## 2. Run the daemon
 
-```sh
-mkdir -p ~/.config/lumisound-discord-rpc
-cp config.example.json ~/.config/lumisound-discord-rpc/config.json
-```
+Pick your platform. Each script needs **just the token from step 1** —
+everything else has a sensible default (the hosted Lumisound bridge) or comes
+from your server-side registration.
 
-Edit `~/.config/lumisound-discord-rpc/config.json`:
-
-- `bridge_url`: base URL of your ios-bridge instance.
-- `access_token`: the token from step 2.
-- `poll_interval_seconds`: how often to refresh (default 5). Discord's local
-  IPC rate-limits `SET_ACTIVITY` to about 1 call every 4 seconds, so 5s is
-  close to the practical minimum for near-real-time updates.
-
-Everything else (Discord Application client ID, art asset name, on/off) is
-read from your account's server-side registration on every restart. You can
-still set `discord_client_id` / `large_image` locally to override the
-registered values, and `username` / `password` instead of `access_token` if
-you'd rather log in directly — but the token + app registration above is the
-recommended path, since each person just runs their own copy of this daemon
-on their own machine with their own token.
-
-## 3. Run it
-
-Directly, for testing:
+### Linux (systemd --user service)
 
 ```sh
-python3 lumisound_discord_rpc.py
+./install.sh <rpc_token>
 ```
 
-Or as a systemd user service (keeps running across logins/reboots):
-
-```sh
-mkdir -p ~/.config/systemd/user
-cp lumisound-discord-rpc.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now lumisound-discord-rpc.service
-```
-
-Check status / logs:
+Manage it with:
 
 ```sh
 systemctl --user status lumisound-discord-rpc.service
 journalctl --user -u lumisound-discord-rpc.service -f
 ```
 
+### macOS (LaunchAgent, starts at login)
+
+```sh
+./install-macos.sh <rpc_token>
+```
+
+Manage it with:
+
+```sh
+launchctl list | grep lumisound
+tail -f ~/.config/lumisound-discord-rpc/daemon.log
+```
+
+### Windows (Scheduled Task, starts at login)
+
+Requires Python 3 from https://www.python.org/downloads/ (check "Add
+python.exe to PATH"). In PowerShell:
+
+```powershell
+.\install-windows.ps1 -Token "<rpc_token>"
+```
+
+Manage it with:
+
+```powershell
+Get-ScheduledTask -TaskName LumisoundDiscordRPC
+```
+
+### Manual / any platform
+
+```sh
+mkdir -p ~/.config/lumisound-discord-rpc
+echo '{"access_token": "<rpc_token>"}' > ~/.config/lumisound-discord-rpc/config.json
+python3 lumisound_discord_rpc.py
+```
+
+If you're self-hosting the ios-bridge instead of using the hosted one, add
+`"bridge_url": "https://your-bridge-host.example.com"` to `config.json` (or
+pass it as the second argument to the install scripts).
+
 ## How it works
 
 The daemon polls `GET /user/playback-state` on the bridge. Whenever
 Lumisound's iOS app reports a track via the existing playback-state sync,
-this daemon picks it up and calls `SET_ACTIVITY` over Discord's local IPC
-socket, showing:
+this daemon picks it up and calls `SET_ACTIVITY` over Discord's local IPC,
+showing:
 
 - **Details**: track title
 - **State**: `by <artist>`

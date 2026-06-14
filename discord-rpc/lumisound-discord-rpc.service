@@ -4,7 +4,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/run/current-system/sw/bin/python3 %h/Documents/Projects/Lumisound/discord-rpc/lumisound_discord_rpc.py
+ExecStart=/usr/bin/env python3 __SCRIPT_PATH__
 Restart=on-failure
 RestartSec=10
 

@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 # Sets up the Lumisound Discord Rich Presence daemon as a systemd --user service.
 #
+# This is the only thing most people need to run. Everything else (Discord
+# Application client ID, art asset, on/off) comes from your account's
+# server-side registration in Lumisound -> Account -> Discord Rich Presence.
+#
 # Usage:
-#   ./install.sh <discord_client_id> <bridge_url> <username> <password> [large_image]
+#   ./install.sh <rpc_token> [bridge_url]
 #
 # Example:
-#   ./install.sh 1234567890123456 https://lumisound.example.com alice mypassword lumisound_logo
+#   ./install.sh eyJhbGciOi...   # token from "Generate Rich Presence Token"
 
 set -euo pipefail
 
-if [ "$#" -lt 4 ]; then
-    echo "Usage: $0 <discord_client_id> <bridge_url> <username> <password> [large_image]" >&2
+if [ "$#" -lt 1 ]; then
+    echo "Usage: $0 <rpc_token> [bridge_url]" >&2
+    echo "Get <rpc_token> from Lumisound -> Account -> Discord Rich Presence -> Generate Rich Presence Token." >&2
     exit 1
 fi
 
-DISCORD_CLIENT_ID="$1"
-BRIDGE_URL="$2"
-USERNAME="$3"
-PASSWORD="$4"
-LARGE_IMAGE="${5:-}"
+ACCESS_TOKEN="$1"
+BRIDGE_URL="${2:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$HOME/.config/lumisound-discord-rpc"
@@ -27,21 +29,18 @@ SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 
 mkdir -p "$CONFIG_DIR" "$SYSTEMD_USER_DIR"
 
-python3 - "$CONFIG_FILE" "$DISCORD_CLIENT_ID" "$BRIDGE_URL" "$USERNAME" "$PASSWORD" "$LARGE_IMAGE" <<'EOF'
+python3 - "$CONFIG_FILE" "$ACCESS_TOKEN" "$BRIDGE_URL" <<'EOF'
 import json
 import sys
 
-config_file, client_id, bridge_url, username, password, large_image = sys.argv[1:7]
+config_file, access_token, bridge_url = sys.argv[1:4]
 
 config = {
-    "discord_client_id": client_id,
-    "bridge_url": bridge_url,
-    "username": username,
-    "password": password,
-    "poll_interval_seconds": 15,
+    "access_token": access_token,
+    "poll_interval_seconds": 5,
 }
-if large_image:
-    config["large_image"] = large_image
+if bridge_url:
+    config["bridge_url"] = bridge_url
 
 with open(config_file, "w") as f:
     json.dump(config, f, indent=2)
@@ -50,7 +49,9 @@ EOF
 chmod 600 "$CONFIG_FILE"
 echo "Wrote $CONFIG_FILE"
 
-cp "$SCRIPT_DIR/lumisound-discord-rpc.service" "$SYSTEMD_USER_DIR/"
+# Point the service at this checkout (works wherever it was cloned to).
+sed "s#__SCRIPT_PATH__#$SCRIPT_DIR/lumisound_discord_rpc.py#" \
+    "$SCRIPT_DIR/lumisound-discord-rpc.service" > "$SYSTEMD_USER_DIR/lumisound-discord-rpc.service"
 echo "Installed $SYSTEMD_USER_DIR/lumisound-discord-rpc.service"
 
 systemctl --user daemon-reload
