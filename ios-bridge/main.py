@@ -1658,9 +1658,14 @@ async def resolve_playlist(
         if api_key:
             playlist_id = _extract_youtube_playlist_id(url)
             if playlist_id:
+                cache_key = f"resolve:{playlist_id}:{limit}"
+                cached = _cache_get(cache_key)
+                if cached is not None:
+                    return _filter_existing_tracks(cached, source, existing_ids)
                 try:
                     items = await _resolve_youtube_playlist_via_api(playlist_id, limit, api_key)
                     tracks = [_parse_track(item, source) for item in items]
+                    _cache_set(cache_key, tracks)
                     return _filter_existing_tracks(tracks, source, existing_ids)
                 except Exception as exc:
                     logger.warning("YouTube Data API resolve failed, falling back to yt-dlp: %s", exc)
