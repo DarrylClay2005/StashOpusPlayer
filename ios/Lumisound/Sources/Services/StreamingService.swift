@@ -943,7 +943,19 @@ final class StreamingService: ObservableObject {
         var startRequest = request
         startRequest.timeoutInterval = 30
 
-        let (startData, startResponse) = try await URLSession.shared.data(for: startRequest)
+        let startData: Data
+        let startResponse: URLResponse
+        do {
+            (startData, startResponse) = try await URLSession.shared.data(for: startRequest)
+        } catch {
+            // A raw URLError (e.g. .timedOut) here isn't a StreamingError, so the
+            // outer retry loop's `catch let error as StreamingError` wouldn't see
+            // it — the whole downloadToLibrary call would abort with no retry at
+            // all. Map it to .incompleteDownload so a flaky/slow start request
+            // (the bridge under load) gets retried like any other transient failure.
+            appWarn("downloadToLibrary: network error starting job for \"\(track.title)\": \(error.localizedDescription) — will retry", category: "network")
+            throw StreamingError.incompleteDownload
+        }
         guard let startHTTP = startResponse as? HTTPURLResponse else {
             throw StreamingError.invalidURL
         }
@@ -994,7 +1006,18 @@ final class StreamingService: ObservableObject {
                 appWarn("downloadToLibrary: job poll timed out for \"\(track.title)\"", category: "network")
                 throw StreamingError.incompleteDownload
             }
-            let (data, resp) = try await URLSession.shared.data(for: statusRequest)
+            let data: Data
+            let resp: URLResponse
+            do {
+                (data, resp) = try await URLSession.shared.data(for: statusRequest)
+            } catch {
+                // A single slow/timed-out status poll (the bridge can be briefly
+                // CPU-busy under load) shouldn't abort the whole job — wait and
+                // poll again rather than letting a raw URLError escape uncaught.
+                appWarn("downloadToLibrary: network error polling status for \"\(track.title)\": \(error.localizedDescription) — retrying poll", category: "network")
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                continue pollLoop
+            }
             guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
                   let status = try? JSONDecoder().decode(StatusPayload.self, from: data) else {
                 throw StreamingError.incompleteDownload
@@ -1029,10 +1052,19 @@ final class StreamingService: ObservableObject {
         resultRequest.url = resultURL
         resultRequest.timeoutInterval = 120
 
-        let (downloadedURL, response) = try await BackgroundDownloadManager.run(
-            named: "lumisound.download.\(safeName)"
-        ) {
-            try await URLSession.shared.download(for: resultRequest)
+        let downloadedURL: URL
+        let response: URLResponse
+        do {
+            (downloadedURL, response) = try await BackgroundDownloadManager.run(
+                named: "lumisound.download.\(safeName)"
+            ) {
+                try await URLSession.shared.download(for: resultRequest)
+            }
+        } catch {
+            // Same as the start/poll requests: a raw URLError here would otherwise
+            // escape uncaught and abort the whole pipeline instead of retrying.
+            appWarn("downloadToLibrary: network error fetching result for \"\(track.title)\": \(error.localizedDescription) — will retry", category: "network")
+            throw StreamingError.incompleteDownload
         }
         if let httpResponse = response as? HTTPURLResponse {
             switch httpResponse.statusCode {
