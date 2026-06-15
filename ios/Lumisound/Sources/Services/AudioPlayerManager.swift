@@ -1092,9 +1092,14 @@ final class AudioPlayerManager: ObservableObject {
                 }
             }
         } catch {
-            isPlaying = false
-            errorMessage = error.localizedDescription
-            appError("Playback error for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
+            // AVAudioFile couldn't open this "native format" file — most often a
+            // corrupted/truncated download (e.g. a track saved despite a failed
+            // yt-dlp run) that AVAssetReader chokes on with a cryptic coreaudio
+            // error. AVPlayer's codec pipeline is more tolerant and can often play
+            // (or at least cleanly fail) these files, so fall back to it instead of
+            // leaving playback stalled on a silent "errorMessage only" dead end.
+            appWarn("AVAudioFile open failed for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription) — falling back to AVPlayer", category: "audio")
+            scheduleWithOpusPlayer(url: url, startTime: startTime)
         }
     }
 
