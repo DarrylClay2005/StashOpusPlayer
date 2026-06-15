@@ -14,6 +14,12 @@ struct StreamTrack: Identifiable, Codable, Hashable {
 
     var duration: TimeInterval { TimeInterval(durationSeconds) }
 
+    /// The `LUMISOUND_ID`-style identifier embedded in downloaded files'
+    /// metadata (see `_estimate_bpm`/download tagging in the bridge), used to
+    /// match this search result against an already-downloaded `Song` by
+    /// `Song.sourceTrackID` regardless of filename/title differences.
+    var sourceTrackID: String { "\(source):\(id)" }
+
     var durationText: String {
         let m = durationSeconds / 60
         let s = durationSeconds % 60
