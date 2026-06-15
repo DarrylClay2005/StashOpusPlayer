@@ -1453,7 +1453,14 @@ async def download_track(
                 stderr=asyncio.subprocess.PIPE,
             )
             try:
-                _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=300.0)
+                # Kept well under the Cloudflare Tunnel's ~100s edge timeout (the
+                # source of the "HTTP 524" errors reported by the app): a stuck
+                # yt-dlp process that ran the full previous 300s timeout always
+                # produced a 524 before this endpoint could even respond, and
+                # burned the entire client retry budget on one attempt. Failing
+                # fast here leaves time for `max_attempts` retries to land a
+                # response inside the client's window.
+                _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=75.0)
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.communicate()  # reap the zombie (Fix 7)
@@ -1523,7 +1530,11 @@ async def download_track(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await asyncio.wait_for(proc.communicate(), timeout=60.0)
+        # A stream-copy remux of an already-downloaded file should be near
+        # instant; bounded tightly so a stuck ffmpeg can't push this request
+        # past the Cloudflare Tunnel's ~100s edge timeout (see download timeout
+        # comment above).
+        await asyncio.wait_for(proc.communicate(), timeout=20.0)
         if proc.returncode == 0 and tagged_file.exists() and tagged_file.stat().st_size > 0:
             output_file.unlink(missing_ok=True)
             output_file = tagged_file

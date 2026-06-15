@@ -953,6 +953,13 @@ final class StreamingService: ObservableObject {
             case 404:
                 appWarn("downloadToLibrary: not found for \"\(track.title)\"", category: "network")
                 throw StreamingError.notFound(track.title)
+            case 502, 503, 504, 524:
+                // Transient gateway/tunnel errors (Cloudflare "524 A timeout
+                // occurred" is the common one) — the bridge's yt-dlp pipeline is
+                // just slow/overloaded, not permanently broken. Retry like
+                // .incompleteDownload instead of failing the whole download.
+                appWarn("downloadToLibrary: gateway error \(httpResponse.statusCode) for \"\(track.title)\" — will retry", category: "network")
+                throw StreamingError.incompleteDownload
             default:
                 appError("downloadToLibrary: HTTP \(httpResponse.statusCode) for \"\(track.title)\"", category: "network")
                 throw StreamingError.httpError(httpResponse.statusCode)
