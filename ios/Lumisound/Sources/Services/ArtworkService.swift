@@ -194,6 +194,20 @@ final class ArtworkService {
                 return resized
             }
 
+            // Tracks downloaded via the bridge are tagged with the original
+            // YouTube/SoundCloud thumbnail URL (LUMISOUND_THUMBNAIL) since
+            // --embed-thumbnail isn't available. If the disk cache entry seeded
+            // at download time was ever cleared, recover the same thumbnail here
+            // instead of falling through to a guess-based iTunes Search lookup.
+            if let thumbnailURL = await fetchEmbeddedThumbnailURL(url: url),
+               let image = await fetchRemoteImage(url: thumbnailURL) {
+                appLog("Artwork: recovered embedded LUMISOUND_THUMBNAIL for \"\(song.displayName)\"", category: "artwork")
+                let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
+                setMemoryCache(resized, forKey: key)
+                saveToDisk(image: resized, key: key)
+                return resized
+            }
+
             // For local video files, extract the first frame as artwork.
             if Self.videoExtensions.contains(url.pathExtension.lowercased()) {
                 appLog("Artwork: extracting video frame for \"\(song.displayName)\"", category: "artwork")
@@ -361,6 +375,27 @@ final class ArtworkService {
             }
 
             return nil as UIImage?
+        }.value
+    }
+
+    /// Reads the `LUMISOUND_THUMBNAIL` metadata tag (embedded by the bridge at
+    /// download time — see `_do_download_job`'s `tag_cmd`) and returns it as a URL.
+    private func fetchEmbeddedThumbnailURL(url: URL) async -> URL? {
+        return await Task.detached(priority: .utility) {
+            let asset = AVURLAsset(url: url)
+            guard let allMeta = try? await asset.load(.metadata) else { return nil as URL? }
+            // Surfaces under different identifier forms depending on container —
+            // check both the identifier and key, matching the LUMISOUND_ID lookup
+            // in DocumentImportService.
+            for item in allMeta {
+                let idRaw = item.identifier?.rawValue.lowercased() ?? ""
+                let keyRaw = (item.key as? String)?.lowercased() ?? ""
+                guard idRaw.contains("lumisound_thumbnail") || keyRaw.contains("lumisound_thumbnail") else { continue }
+                if let value = try? await item.load(.stringValue), let url = URL(string: value) {
+                    return url
+                }
+            }
+            return nil as URL?
         }.value
     }
 

@@ -37,6 +37,16 @@ final class AppLogger: ObservableObject {
 
     private var buffer: [LogEntry] = []
     private let maxBuffer = 1_000
+
+    /// Separate from `buffer`: holds the last `maxRecentEntries` log entries for
+    /// `recentActivitySummary()`, independent of the flush-to-bridge cycle.
+    /// `buffer` is drained (set to `[]`) every 30s by `flush()`, so by the time a
+    /// user notices a problem, navigates to Settings → Report a Bug, and fills out
+    /// the form, `buffer` is almost always empty — "include recent activity log"
+    /// had nothing to attach. This buffer is never cleared by `flush()`, only
+    /// trimmed to its cap, so it always reflects what actually just happened.
+    private var recentEntries: [LogEntry] = []
+    private let maxRecentEntries = 50
     private var flushTimer: Timer?
     private var bridgeURL: String = ""
     private var isConfigured = false
@@ -151,7 +161,7 @@ final class AppLogger: ObservableObject {
             lines.append("Recent activity:")
             lines.append(contentsOf: breadcrumbs)
         }
-        let recentLogs = buffer.suffix(50)
+        let recentLogs = recentEntries.suffix(50)
         if !recentLogs.isEmpty {
             lines.append("Recent logs:")
             lines.append(contentsOf: recentLogs.map { "[\($0.level)][\($0.category)] \($0.message)" })
@@ -171,6 +181,11 @@ final class AppLogger: ObservableObject {
         buffer.append(entry)
         if buffer.count > maxBuffer {
             buffer.removeFirst(buffer.count - maxBuffer)
+        }
+
+        recentEntries.append(entry)
+        if recentEntries.count > maxRecentEntries {
+            recentEntries.removeFirst(recentEntries.count - maxRecentEntries)
         }
         #if DEBUG
         let extra = entry.extra.isEmpty ? "" : " \(entry.extra)"

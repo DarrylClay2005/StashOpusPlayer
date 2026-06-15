@@ -1625,8 +1625,16 @@ async def _do_download_job(
         "-map_metadata", "0",
         "-c", "copy",
         "-metadata", f"LUMISOUND_ID={source_id}",
-        str(tagged_file),
     ]
+    # --embed-thumbnail is omitted above (no AtomicParsley for M4A), so the only
+    # record of this track's artwork is the `thumbnail` query param. Embed it as
+    # a metadata tag too: if the app's artwork disk cache is ever cleared (or the
+    # in-flight prefetch from `thumbnail` fails), ArtworkService can still recover
+    # the YouTube thumbnail URL straight from the file itself instead of falling
+    # back to an iTunes Search guess that often doesn't match OST/remix titles.
+    if thumbnail:
+        tag_cmd += ["-metadata", f"LUMISOUND_THUMBNAIL={thumbnail}"]
+    tag_cmd.append(str(tagged_file))
     try:
         proc = await asyncio.create_subprocess_exec(
             *tag_cmd,
