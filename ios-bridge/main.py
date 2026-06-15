@@ -168,7 +168,17 @@ _FFPROBE_CACHE = _FfprobeCache(_ffprobe_cache_path)
 # yt-dlp concurrency limit (Fix 3)
 # ---------------------------------------------------------------------------
 
-_YTDLP_SEMAPHORE = asyncio.Semaphore(10)  # max 10 concurrent yt-dlp processes — matches the iOS client's "Download All" pipeline width
+# Each yt-dlp invocation (plus its ffmpeg post-processing for format conversion)
+# can hold 50-150MB RSS. The container is capped at 512MB (deploy.resources.limits
+# in docker-compose.yml), and the host is itself memory-constrained. At 10 the
+# combined peak regularly exceeded the cgroup limit and the kernel OOM-killer was
+# killing the uvicorn process itself (visible in `journalctl -k` as
+# "Memory cgroup out of memory: Killed process ... (uvicorn)"), taking the whole
+# bridge down until the watchdog restarted it ~5 min later and causing a burst of
+# "HTTP 502" download failures for every in-flight request. Lower this instead of
+# the memory limit — the iOS client's "Download All" already queues more requests
+# than this and just waits its turn.
+_YTDLP_SEMAPHORE = asyncio.Semaphore(4)  # max 4 concurrent yt-dlp processes
 
 # ---------------------------------------------------------------------------
 # Rate limiter for auth endpoints (Fix 2)
