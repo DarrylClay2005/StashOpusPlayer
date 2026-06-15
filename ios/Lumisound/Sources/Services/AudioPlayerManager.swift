@@ -49,7 +49,7 @@ final class AudioPlayerManager: ObservableObject {
     @Published private(set) var isPlaying = false {
         didSet {
             guard isPlaying != oldValue else { return }
-            WidgetDataService.shared.updatePlayState(isPlaying: isPlaying)
+            WidgetDataService.shared.updatePlayState(isPlaying: isPlaying, position: position, duration: duration)
             pushPlaybackStateToBridge()
         }
     }
@@ -289,6 +289,9 @@ final class AudioPlayerManager: ObservableObject {
         }
         DarwinWidgetBridge.shared.addObserver(name: DarwinWidgetBridge.skipNext) { [weak self] in
             Task { @MainActor [weak self] in self?.skipToNext() }
+        }
+        DarwinWidgetBridge.shared.addObserver(name: DarwinWidgetBridge.skipPrevious) { [weak self] in
+            Task { @MainActor [weak self] in self?.skipToPrevious() }
         }
     }
 
@@ -1594,8 +1597,21 @@ final class AudioPlayerManager: ObservableObject {
         guard let nextFile = try? AVAudioFile(forReading: nextURL) else { return }
 
         gaplessScheduled = true
-        let gen = scheduleGeneration &+ 1
-        scheduleGeneration = gen
+        // Reuse the current generation rather than bumping it: this segment is
+        // appended to the SAME engine session as the currently-playing segment,
+        // whose completion handler captured this same `scheduleGeneration` value
+        // and hasn't fired yet. Bumping here would make that still-pending
+        // completion's generation check fail when the current track ends,
+        // silently dropping `handleTrackEnded()` for that transition — the
+        // audio keeps playing gaplessly into this track, but `currentSong`/
+        // `currentIndex`/Now Playing/widgets never advance, and the *next*
+        // gapless segment never gets scheduled (since that scheduling only
+        // happens inside `handleTrackEnded`). The queue then appears "stuck"
+        // one track behind what's audibly playing. Only an explicit
+        // stop()/reschedule (skip, seek, new track) should invalidate
+        // in-flight completions, and those call sites already bump
+        // `scheduleGeneration` themselves.
+        let gen = scheduleGeneration
         activeNode.scheduleFile(nextFile, at: nil) { [weak self] in
             Task { @MainActor in
                 guard let self, self.scheduleGeneration == gen else { return }
@@ -2382,7 +2398,7 @@ final class AudioPlayerManager: ObservableObject {
             info[MPMediaItemPropertyArtwork] = artwork
             MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         }
-        WidgetDataService.shared.update(song: song, isPlaying: isPlaying, artwork: image)
+        WidgetDataService.shared.update(song: song, isPlaying: isPlaying, artwork: image, position: position, duration: duration)
     }
 
     private func configureRemoteCommands() {

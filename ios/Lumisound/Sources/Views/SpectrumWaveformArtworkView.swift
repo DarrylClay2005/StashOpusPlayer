@@ -13,6 +13,7 @@ struct SpectrumWaveformArtworkView: View {
     @State private var pulseRadius: CGFloat = 0
     @State private var pulseOpacity: Double = 0
     @State private var glowPulse = false
+    @State private var palette: ArtworkPalette?
 
     private let barCount      = 36
     private let artSize:     CGFloat = 180
@@ -33,8 +34,17 @@ struct SpectrumWaveformArtworkView: View {
         ZStack {
             // Beat pulse ring — expands outward from center
             Circle()
-                .stroke(AppTheme.dynamicAccent.opacity(pulseOpacity), lineWidth: 2)
+                .stroke(ringAccent.opacity(pulseOpacity), lineWidth: 2)
                 .frame(width: artSize + pulseRadius, height: artSize + pulseRadius)
+                .allowsHitTesting(false)
+
+            // A faint, flipped echo of the spectrum bars beneath everything —
+            // the same "reflective" idea used by the Album Art style, but
+            // applied to the radial spectrum itself for a glassy floor.
+            spectrumBars
+                .scaleEffect(y: -1)
+                .opacity(isPlaying ? 0.18 : 0.08)
+                .blur(radius: 2)
                 .allowsHitTesting(false)
 
             // Spectrum bars radially arranged
@@ -68,6 +78,33 @@ struct SpectrumWaveformArtworkView: View {
         .onDisappear {
             stopTimer()
         }
+        .task(id: song?.id) {
+            await loadPalette()
+        }
+        .animation(.easeInOut(duration: 1.2), value: palette)
+    }
+
+    /// The accent color used for the bars and glow — drawn from the
+    /// artwork's dominant palette when available, falling back to the app's
+    /// accent so the placeholder state still looks intentional.
+    private var ringAccent: Color {
+        palette?.primary ?? AppTheme.dynamicAccent
+    }
+
+    private func loadPalette() async {
+        guard let song else {
+            palette = nil
+            return
+        }
+        var image = library.artwork(for: song)
+        if image == nil {
+            image = await ArtworkService.shared.loadArtwork(for: song)
+        }
+        guard let image else {
+            palette = nil
+            return
+        }
+        palette = ArtworkColorExtractor.palette(from: image)
     }
 
     // MARK: Spectrum bars
@@ -82,9 +119,9 @@ struct SpectrumWaveformArtworkView: View {
             // of re-bridging Color → UIColor → CGColor for every one of the 36
             // bars below — at the ~12.5Hz this redraws while playing, that
             // bridging added up to real, easily-avoided CPU cost.
-            let startRGBA = rgbaComponents(of: AppTheme.dynamicAccent.opacity(0.9))
-            let midRGBA   = rgbaComponents(of: AppTheme.dynamicAccent)
-            let endRGBA   = rgbaComponents(of: AppTheme.accentSoft.opacity(0.7))
+            let startRGBA = rgbaComponents(of: ringAccent.opacity(0.9))
+            let midRGBA   = rgbaComponents(of: ringAccent)
+            let endRGBA   = rgbaComponents(of: (palette?.secondary ?? AppTheme.accentSoft).opacity(0.7))
 
             ForEach(0..<barCount, id: \.self) { i in
                 let angle = (Double(i) / Double(barCount)) * 2 * .pi - .pi / 2
@@ -140,11 +177,11 @@ struct SpectrumWaveformArtworkView: View {
         }
         .overlay(
             Circle()
-                .strokeBorder(AppTheme.dynamicAccent.opacity(glowPulse ? 0.8 : 0.3), lineWidth: 2)
+                .strokeBorder(ringAccent.opacity(glowPulse ? 0.8 : 0.3), lineWidth: 2)
                 .animation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true), value: glowPulse)
         )
         .shadow(
-            color: AppTheme.dynamicAccent.opacity(glowPulse ? 0.55 : 0.25),
+            color: ringAccent.opacity(glowPulse ? 0.55 : 0.25),
             radius: glowPulse ? 20 : 10, x: 0, y: 0
         )
         .animation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true), value: glowPulse)

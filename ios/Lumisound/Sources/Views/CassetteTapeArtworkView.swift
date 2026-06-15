@@ -105,7 +105,24 @@ struct CassetteTapeArtworkView: View {
                 .frame(width: vuWidth, height: 3)
                 .animation(.easeInOut(duration: 0.08), value: vuWidth)
                 .offset(y: 82)
+
+            // Tape grain — a faint speckle texture over the whole housing
+            // for an analog, worn-tape feel.
+            FilmGrainOverlay()
+                .frame(width: 300, height: 188)
+                .blendMode(.overlay)
+                .opacity(0.10)
+                .allowsHitTesting(false)
         }
+        // Warm sepia color grade — a soft amber wash over the whole unit,
+        // like an old cassette deck under incandescent light.
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(red: 0.55, green: 0.32, blue: 0.08).opacity(0.10))
+                .frame(width: 300, height: 188)
+                .blendMode(.overlay)
+                .allowsHitTesting(false)
+        )
         .frame(width: 300, height: 200)
         .offset(y: floating ? -6 : 0)
         .animation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true), value: floating)

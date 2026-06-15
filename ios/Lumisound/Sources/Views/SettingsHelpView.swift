@@ -171,6 +171,11 @@ struct SettingsHelpView: View {
                 title: "Refresh",
                 body: "The refresh button in the top-right of the Library tab re-scans your Documents folder, watched folders, and (if you've granted access) your Apple Music library for new or changed files. If you're signed in, it also pulls your latest favourites, playlists, and settings from the server — useful after making changes on another device."
             ),
+            HelpTopic(
+                icon: "wand.and.stars",
+                title: "Automatic Metadata Lookup",
+                body: "Whenever new tracks are scanned in, Lumisound reads the title, artist, album, genre, and year embedded in the file, and fills in anything still missing using online lookups (iTunes, MusicBrainz, and Deezer). Lumisound also periodically re-checks any imported track that's still missing artist, album, genre, or year — for example after deleting and reinstalling the app and copying your music back from a backup folder — so those tracks fill in automatically the next time the app is open, without needing a manual rescan."
+            ),
         ]),
         HelpCategory(icon: "photo.on.rectangle", title: "Background Gallery", topics: [
             HelpTopic(
@@ -192,6 +197,11 @@ struct SettingsHelpView: View {
                 icon: "timer",
                 title: "Shuffle Interval",
                 body: "When multiple gallery images are loaded, the interval picker controls how long each image is displayed before transitioning to the next one, from every 5 seconds up to every 5 minutes. A shorter interval creates a livelier animated backdrop; a longer interval keeps the background stable so it is less distracting during focused listening sessions."
+            ),
+            HelpTopic(
+                icon: "icloud",
+                title: "Synced Per Account",
+                body: "Whether the gallery is on or off, the animation style, blur, opacity, and shuffle interval are all saved to your account along with your favourites and playlists. Signing in on another device, or signing into a different account on this device, applies your saved background settings immediately. Your gallery images themselves are also backed up automatically while signed in (see Account → After Reinstall)."
             ),
         ]),
         HelpCategory(icon: "magnifyingglass", title: "Streaming", topics: [
@@ -220,7 +230,7 @@ struct SettingsHelpView: View {
             HelpTopic(
                 icon: "arrow.down.from.cloud",
                 title: "Pull Sync",
-                body: "A pull sync downloads your saved state from the server and merges it into what's already on the device — favourites and playlists missing locally are added, but nothing local is ever removed or overwritten by an older server copy, so the two sides simply converge. Pull happens automatically when you log in and on every app launch while you are signed in. You can also trigger a manual pull from the Account screen, or from the Library tab's refresh button."
+                body: "A pull sync downloads your saved state from the server and merges it into what's already on the device — favourites and playlists missing locally are added, but nothing local is ever removed or overwritten by an older server copy, so the two sides simply converge. Pull happens automatically the moment you sign in or create an account, and again on every app launch while you are signed in — so switching accounts on the same device immediately loads that account's library state, badges, and Appearance settings. You can also trigger a manual pull from the Account screen, or from the Library tab's refresh button."
             ),
             HelpTopic(
                 icon: "arrow.counterclockwise",
@@ -231,6 +241,16 @@ struct SettingsHelpView: View {
                 icon: "clock.arrow.circlepath",
                 title: "Backup History",
                 body: "Every time your data syncs to the server, the server automatically saves a snapshot of your favourites, playlists, and settings beforehand. If something ever goes wrong with a sync, open Account → Backup History to see recent snapshots and restore one — your current state is backed up first, so a restore can always be undone."
+            ),
+            HelpTopic(
+                icon: "icloud.and.arrow.up",
+                title: "Cloud Backup (Uploaded Tracks)",
+                body: "Library → Cloud Backup uploads your locally-imported tracks to your account's cloud storage so they survive a reinstall — open Cloud Backup after signing back in to restore them. Use the trash icon in the Uploaded Tracks header to delete everything you've previously uploaded; you'll be asked to confirm, and the count of tracks to be removed is shown in the confirmation. This only removes the cloud copies — your local files are untouched."
+            ),
+            HelpTopic(
+                icon: "ladybug",
+                title: "Report a Bug",
+                body: "Account → Report a Bug lets you describe an issue, pick a category, and optionally leave a contact email. Your device model, iOS version, and the app version are filled in automatically so the developer can reproduce issues faster — you don't need to look these up yourself. Recent log entries are attached automatically to help with diagnosis. Tap Send to submit; you'll see a confirmation once it's received."
             ),
             HelpTopic(
                 icon: "sparkles",
@@ -300,8 +320,8 @@ struct SettingsHelpView: View {
         HelpCategory(icon: "play.circle.fill", title: "Now Playing", topics: [
             HelpTopic(
                 icon: "circle.fill",
-                title: "Vinyl Disc vs Album Art",
-                body: "The artwork style picker at the top of the Now Playing screen lets you switch between two visual modes. Vinyl Disc renders a spinning record with concentric groove rings and the album art printed in the centre; it rotates while the song plays and stops when paused. Album Art mode shows the full square artwork in a plain card with a drop shadow. Your choice is saved and persists between sessions."
+                title: "Artwork Styles",
+                body: "The artwork style picker at the top of the Now Playing screen lets you switch between 12 visual presets for the album art: Vinyl Disc (spinning record with the artwork printed in the centre, stops when paused), Album Art (a reflective, flipped-mirror card beneath the artwork), Polaroid (instant-photo frame with film grain and a curled corner), Floating Cards (palette-derived glow blobs drifting behind layered cards), Minimalist (trimmed reflection with a clean typography block), Glassmorphism (frosted glass panel), Retro CRT (scanlines and a CRT glow), Spectrum (animated bars with a colour-matched reflection), Cassette (spinning tape reels with a sepia, grainy texture), Neon Glow (layered neon tube outline that pulses with playback), Aura Glow (a slowly rotating colour aura pulled from the artwork), and Tilt Card (drag the artwork for a 3D tilt with a synced reflection). Your choice is saved and persists between sessions."
             ),
             HelpTopic(
                 icon: "waveform.badge.clock",
@@ -317,6 +337,11 @@ struct SettingsHelpView: View {
                 icon: "list.number",
                 title: "Up Next Queue",
                 body: "The Up Next panel shows the next 10 songs in the queue as a horizontal scroll of artwork thumbnails. The first thumbnail has an accent-coloured border to indicate it plays next. Tap any thumbnail to jump straight to that song. The badge on the panel header shows total queue length and a shuffle icon appears when shuffle is enabled."
+            ),
+            HelpTopic(
+                icon: "quote.bubble",
+                title: "Lyrics",
+                body: "Tap the lyrics icon on the Now Playing screen to show synced lyrics, if available, in a scrolling panel above the playtime counter. The current line is highlighted and the view auto-scrolls to follow playback; scrolling only animates while a track is playing, and pausing or resuming snaps the view back to the correct line instantly without overshooting."
             ),
         ]),
         HelpCategory(icon: "apps.iphone", title: "Widgets", topics: [

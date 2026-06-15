@@ -36,6 +36,9 @@ struct SyncData: Codable {
     var albumsPerRow: Int?
     var bgAnimation: String?
     var bgOpacity: Double?
+    var bgEnabled: Bool?
+    var bgBlurRadius: Double?
+    var bgShuffleInterval: Double?
     var preferredAudioFormat: String?
     var downloadPath: String?
     var carModeEnabled: Bool?
@@ -56,6 +59,9 @@ struct SyncData: Codable {
         case albumsPerRow           = "albums_per_row"
         case bgAnimation            = "bg_animation"
         case bgOpacity              = "bg_opacity"
+        case bgEnabled              = "bg_enabled"
+        case bgBlurRadius           = "bg_blur_radius"
+        case bgShuffleInterval      = "bg_shuffle_interval"
         case preferredAudioFormat   = "preferred_audio_format"
         case downloadPath           = "download_path"
         case carModeEnabled         = "car_mode_enabled"
@@ -860,6 +866,12 @@ final class AccountService: ObservableObject {
         let bgAnimation = defaults.string(forKey: "bgService.animation")
         let bgOpacity: Double? = defaults.object(forKey: "bgService.opacity") != nil
             ? defaults.double(forKey: "bgService.opacity") : nil
+        let bgEnabled: Bool? = defaults.object(forKey: "bgService.isEnabled") != nil
+            ? defaults.bool(forKey: "bgService.isEnabled") : nil
+        let bgBlurRadius: Double? = defaults.object(forKey: "bgService.blurRadius") != nil
+            ? defaults.double(forKey: "bgService.blurRadius") : nil
+        let bgShuffleInterval: Double? = defaults.object(forKey: "bgService.shuffleInterval") != nil
+            ? defaults.double(forKey: "bgService.shuffleInterval") : nil
         let preferredAudioFormat = defaults.string(forKey: StreamingService.preferredFormatKey)
         let downloadPath = defaults.string(forKey: StreamingService.downloadPathKey)
 
@@ -890,6 +902,9 @@ final class AccountService: ObservableObject {
             albumsPerRow: albumsPerRow,
             bgAnimation: bgAnimation,
             bgOpacity: bgOpacity,
+            bgEnabled: bgEnabled,
+            bgBlurRadius: bgBlurRadius,
+            bgShuffleInterval: bgShuffleInterval,
             preferredAudioFormat: preferredAudioFormat,
             downloadPath: downloadPath,
             carModeEnabled: carModeEnabled,
@@ -1035,6 +1050,25 @@ final class AccountService: ObservableObject {
                let bgOpacity = sync.bgOpacity {
                 defaults.set(bgOpacity, forKey: "bgService.opacity")
             }
+            if defaults.object(forKey: "bgService.isEnabled") == nil,
+               let bgEnabled = sync.bgEnabled {
+                defaults.set(bgEnabled, forKey: "bgService.isEnabled")
+            }
+            if defaults.object(forKey: "bgService.blurRadius") == nil,
+               let bgBlurRadius = sync.bgBlurRadius {
+                defaults.set(bgBlurRadius, forKey: "bgService.blurRadius")
+            }
+            if defaults.object(forKey: "bgService.shuffleInterval") == nil,
+               let bgShuffleInterval = sync.bgShuffleInterval {
+                defaults.set(bgShuffleInterval, forKey: "bgService.shuffleInterval")
+            }
+            // Re-apply the (possibly just-updated) gallery background settings to
+            // the live BackgroundService instance — without this, a value written
+            // to UserDefaults above sits unused until the next app launch, and the
+            // very next `didSet` on the running instance (e.g. opening the
+            // background settings screen) immediately pushes its still-old
+            // in-memory value back to the server, overwriting what was just pulled.
+            BackgroundService.shared?.loadSettings()
             if defaults.string(forKey: StreamingService.preferredFormatKey) == nil,
                let preferredAudioFormat = sync.preferredAudioFormat {
                 defaults.set(preferredAudioFormat, forKey: StreamingService.preferredFormatKey)

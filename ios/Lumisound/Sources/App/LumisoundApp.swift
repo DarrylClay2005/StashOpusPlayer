@@ -40,6 +40,7 @@ struct LumisoundApp: App {
                     LaunchView(isLoading: $showLaunch)
                         .environmentObject(account)
                         .environmentObject(libraryManager)
+                        .environmentObject(player)
                         .transition(.opacity)
                 }
             }
@@ -63,6 +64,11 @@ struct LumisoundApp: App {
                     // Auto-scan for corrupt files immediately, then every 5 minutes
                     // for the rest of the session (non-blocking, all users).
                     CorruptFileFinderService.shared.startPeriodicScanning()
+
+                    // Periodically retry online metadata lookups for imported
+                    // tracks still missing artist/album/genre/year (e.g. after
+                    // restoring files from a backup).
+                    libraryManager.startPeriodicMetadataReenrichment()
 
                     // Scan previously added watched folders.
                     libraryManager.scanWatchedFolders(using: folderService)

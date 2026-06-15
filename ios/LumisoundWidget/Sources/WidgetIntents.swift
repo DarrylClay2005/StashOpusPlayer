@@ -6,6 +6,7 @@ import Foundation
 enum WidgetNotificationNames {
     static let togglePlayback = "com.lumisound.ios.widget.togglePlayback"
     static let skipNext       = "com.lumisound.ios.widget.skipNext"
+    static let skipPrevious   = "com.lumisound.ios.widget.skipPrevious"
 }
 
 // MARK: - Toggle Playback
@@ -17,6 +18,19 @@ struct TogglePlaybackIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         postDarwin(name: WidgetNotificationNames.togglePlayback)
+        return .result()
+    }
+}
+
+// MARK: - Skip Previous
+
+struct SkipPreviousIntent: AppIntent {
+    static let title: LocalizedStringResource = "Skip to Previous"
+    static let description = IntentDescription("Skip to the previous track in Lumisound.")
+    static let openAppWhenRun: Bool = false
+
+    func perform() async throws -> some IntentResult {
+        postDarwin(name: WidgetNotificationNames.skipPrevious)
         return .result()
     }
 }

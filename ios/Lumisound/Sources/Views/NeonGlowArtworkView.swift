@@ -69,7 +69,11 @@ struct NeonGlowArtworkView: View {
                         }
                 }
             }
-            .overlay(
+            // Neon-tube bloom — several copies of the same stroked ring at
+            // increasing blur radii and decreasing opacity, stacked behind
+            // the crisp tube outline. This is what gives true neon signage
+            // its glowing "halo" rather than a single flat shadow.
+            ForEach([18, 12, 6], id: \.self) { radius in
                 Circle()
                     .stroke(
                         LinearGradient(
@@ -83,13 +87,35 @@ struct NeonGlowArtworkView: View {
                         ),
                         lineWidth: 3
                     )
-            )
-            .shadow(
-                color: Color(hue: glowPhase, saturation: 1, brightness: 1)
-                    .opacity(isPlaying ? 0.55 : 0.20),
-                radius: isPlaying ? 24 : 10, x: 0, y: 0
-            )
+                    .frame(width: 210, height: 210)
+                    .blur(radius: CGFloat(radius))
+                    .opacity((isPlaying ? 0.5 : 0.2) * (1 - Double(radius) / 24))
+                    .allowsHitTesting(false)
+            }
+
+            // Crisp neon-tube outline on top of the bloom
+            Circle()
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            Color(hue: glowPhase, saturation: 1, brightness: 1),
+                            Color(hue: (glowPhase + 0.5).truncatingRemainder(dividingBy: 1),
+                                  saturation: 1, brightness: 1)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 3
+                )
+                .frame(width: 210, height: 210)
         }
+        .overlay(
+            Circle()
+                .stroke(.white.opacity(isPlaying ? 0.5 : 0.2), lineWidth: 1)
+                .frame(width: 210, height: 210)
+                .blur(radius: 1)
+                .animation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true), value: isPlaying)
+        )
         .frame(width: 310, height: 310)
         .onChange(of: isPlaying) { playing in
             updateAnimations(playing: playing)

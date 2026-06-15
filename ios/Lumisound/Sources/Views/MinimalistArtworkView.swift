@@ -56,9 +56,30 @@ struct MinimalistArtworkView: View {
             .animation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true), value: breathe)
             .animation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true), value: shadowPulse)
 
+            // A narrow reflective sliver — just enough to echo the Album Art
+            // look without competing with the typography below.
             ArtworkReflectionView(song: song, size: artSize, cornerRadius: 16)
                 .environmentObject(library)
+                .frame(height: 22, alignment: .top)
+                .clipped()
                 .padding(.top, 4)
+
+            // Typography hierarchy — title leads, artist trails in a quieter
+            // weight, with generous negative space around both.
+            VStack(alignment: .leading, spacing: 2) {
+                Text(song?.displayName ?? "Nothing Playing")
+                    .font(.system(size: 20, weight: .semibold, design: .default))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .lineLimit(1)
+                if let artist = song?.artistName, !artist.isEmpty {
+                    Text(artist)
+                        .font(.system(size: 14, weight: .regular, design: .default))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(width: artSize, alignment: .leading)
+            .padding(.top, 22)
 
             // Thin progress line with animated fill
             GeometryReader { geo in
@@ -79,7 +100,7 @@ struct MinimalistArtworkView: View {
                 }
             }
             .frame(width: artSize, height: 3)
-            .padding(.top, 10)
+            .padding(.top, 14)
         }
         .onChange(of: isPlaying) { playing in
             updateAnimations(playing: playing)

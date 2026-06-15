@@ -15,6 +15,12 @@ struct WidgetBackgroundModifier: ViewModifier {
     }
 }
 
+private func formatTime(_ seconds: TimeInterval) -> String {
+    guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+    let total = Int(seconds)
+    return String(format: "%d:%02d", total / 60, total % 60)
+}
+
 // MARK: - Timeline Entry
 
 struct LumisoundEntry: TimelineEntry {
@@ -23,6 +29,21 @@ struct LumisoundEntry: TimelineEntry {
     let artist: String
     let isPlaying: Bool
     let artwork: UIImage?
+    /// Playback position (seconds) as of `anchorDate`.
+    let position: TimeInterval
+    let duration: TimeInterval
+    /// The moment `position`/`isPlaying` were captured by the main app —
+    /// lets `Text(timerInterval:)` keep ticking live between timeline reloads.
+    let anchorDate: Date
+
+    /// Date range covering the full track, anchored so "now" maps to the
+    /// correct elapsed position — feeds `Text(timerInterval:)` for a
+    /// live-updating elapsed time without further widget reloads.
+    var trackRange: ClosedRange<Date> {
+        let start = anchorDate.addingTimeInterval(-position)
+        let end = start.addingTimeInterval(max(duration, position))
+        return start...max(start, end)
+    }
 }
 
 // MARK: - Timeline Provider
@@ -31,7 +52,8 @@ struct LumisoundWidgetProvider: TimelineProvider {
     private let appGroupID = "group.com.lumisound.ios"
 
     func placeholder(in context: Context) -> LumisoundEntry {
-        LumisoundEntry(date: Date(), title: "Track Title", artist: "Artist", isPlaying: false, artwork: nil)
+        LumisoundEntry(date: Date(), title: "Track Title", artist: "Artist", isPlaying: false,
+                        artwork: nil, position: 0, duration: 0, anchorDate: Date())
     }
 
     func getSnapshot(in context: Context, completion: @escaping (LumisoundEntry) -> Void) {
@@ -48,13 +70,61 @@ struct LumisoundWidgetProvider: TimelineProvider {
         let title     = ud?.string(forKey: "widget_track_title") ?? ""
         let artist    = ud?.string(forKey: "widget_track_artist") ?? ""
         let isPlaying = ud?.bool(forKey: "widget_is_playing") ?? false
+        let position  = ud?.double(forKey: "widget_position") ?? 0
+        let duration  = ud?.double(forKey: "widget_duration") ?? 0
+        let anchor    = ud?.double(forKey: "widget_anchor_date")
+        let anchorDate = anchor.map { Date(timeIntervalSinceReferenceDate: $0) } ?? Date()
         var artwork: UIImage? = nil
         if let relPath = ud?.string(forKey: "widget_artwork_path"),
            let container = FileManager.default.containerURL(
                forSecurityApplicationGroupIdentifier: appGroupID) {
             artwork = UIImage(contentsOfFile: container.appendingPathComponent(relPath).path)
         }
-        return LumisoundEntry(date: Date(), title: title, artist: artist, isPlaying: isPlaying, artwork: artwork)
+        return LumisoundEntry(date: Date(), title: title, artist: artist, isPlaying: isPlaying,
+                               artwork: artwork, position: position, duration: duration, anchorDate: anchorDate)
+    }
+}
+
+// MARK: - Shared progress bar
+
+/// A thin progress bar that ticks live while playing (via `Text(timerInterval:)`'s
+/// underlying timer reference, recomputed from `entry.trackRange`) and stays
+/// static at `position` when paused.
+struct WidgetProgressBar: View {
+    let entry: LumisoundEntry
+    var tint: Color = .white
+
+    var body: some View {
+        GeometryReader { geo in
+            let fraction = entry.duration > 0 ? min(1, max(0, entry.position / entry.duration)) : 0
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.25))
+                Capsule().fill(tint)
+                    .frame(width: geo.size.width * fraction)
+            }
+        }
+        .frame(height: 3)
+    }
+}
+
+/// Elapsed / remaining time labels. Uses `Text(timerInterval:)` while playing so
+/// the displayed time advances on its own between the (infrequent) widget reloads.
+struct WidgetTimeLabel: View {
+    let entry: LumisoundEntry
+    var font: Font = .system(size: 10)
+
+    var body: some View {
+        if entry.isPlaying, entry.duration > 0 {
+            Text(timerInterval: entry.trackRange, countsDown: false, showsHours: false)
+                .font(font)
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.75))
+        } else {
+            Text(formatTime(entry.position))
+                .font(font)
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.75))
+        }
     }
 }
 
@@ -100,6 +170,9 @@ struct WidgetSmallView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(1)
+                if !entry.title.isEmpty {
+                    WidgetProgressBar(entry: entry)
+                }
             }
             .padding(8)
         }
@@ -153,8 +226,29 @@ struct WidgetMediumView: View {
 
                     Spacer()
 
+                    if !entry.title.isEmpty {
+                        WidgetProgressBar(entry: entry)
+                        HStack {
+                            WidgetTimeLabel(entry: entry)
+                            Spacer()
+                            Text(formatTime(entry.duration))
+                                .font(.system(size: 10))
+                                .monospacedDigit()
+                                .foregroundStyle(.white.opacity(0.75))
+                        }
+                    }
+
+                    Spacer()
+
                     if #available(iOS 17.0, *) {
                         HStack(spacing: 22) {
+                            Button(intent: SkipPreviousIntent()) {
+                                Image(systemName: "backward.fill")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.85))
+                            }
+                            .buttonStyle(.plain)
+
                             Button(intent: TogglePlaybackIntent()) {
                                 Image(systemName: entry.isPlaying ? "pause.fill" : "play.fill")
                                     .font(.system(size: 22, weight: .semibold))
@@ -164,7 +258,7 @@ struct WidgetMediumView: View {
 
                             Button(intent: SkipNextIntent()) {
                                 Image(systemName: "forward.fill")
-                                    .font(.system(size: 20, weight: .medium))
+                                    .font(.system(size: 18, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.85))
                             }
                             .buttonStyle(.plain)
@@ -179,6 +273,101 @@ struct WidgetMediumView: View {
                 Spacer(minLength: 0)
             }
             .padding(14)
+        }
+    }
+}
+
+// MARK: - Large Widget View
+
+struct WidgetLargeView: View {
+    let entry: LumisoundEntry
+
+    var body: some View {
+        ZStack {
+            if let img = entry.artwork {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .blur(radius: 40)
+                    .overlay(Color.black.opacity(0.65))
+            } else {
+                Color.black
+            }
+
+            VStack(spacing: 16) {
+                if let img = entry.artwork {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 160, height: 160)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .shadow(radius: 12)
+                } else {
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color.gray.opacity(0.35))
+                        .frame(width: 160, height: 160)
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .foregroundStyle(.white.opacity(0.6))
+                                .font(.system(size: 44))
+                        )
+                }
+
+                VStack(spacing: 2) {
+                    Text(entry.title.isEmpty ? "Nothing Playing" : entry.title)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(entry.artist)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
+                }
+
+                if !entry.title.isEmpty {
+                    VStack(spacing: 4) {
+                        WidgetProgressBar(entry: entry)
+                        HStack {
+                            WidgetTimeLabel(entry: entry)
+                            Spacer()
+                            Text(formatTime(entry.duration))
+                                .font(.system(size: 10))
+                                .monospacedDigit()
+                                .foregroundStyle(.white.opacity(0.75))
+                        }
+                    }
+                }
+
+                if #available(iOS 17.0, *) {
+                    HStack(spacing: 36) {
+                        Button(intent: SkipPreviousIntent()) {
+                            Image(systemName: "backward.fill")
+                                .font(.system(size: 22, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(intent: TogglePlaybackIntent()) {
+                            Image(systemName: entry.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 30, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(intent: SkipNextIntent()) {
+                            Image(systemName: "forward.fill")
+                                .font(.system(size: 22, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } else {
+                    Image(systemName: entry.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .padding(18)
         }
     }
 }
@@ -219,6 +408,55 @@ struct WidgetCircularView: View {
     }
 }
 
+// MARK: - Rectangular Lock Screen Widget View
+
+struct WidgetRectangularView: View {
+    let entry: LumisoundEntry
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let img = entry.artwork {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 36, height: 36)
+                    .overlay(Image(systemName: "music.note").font(.system(size: 14)))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.title.isEmpty ? "Nothing Playing" : entry.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                Text(entry.artist)
+                    .font(.system(size: 11))
+                    .opacity(0.7)
+                    .lineLimit(1)
+                if !entry.title.isEmpty {
+                    WidgetProgressBar(entry: entry, tint: .cyan)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Inline Lock Screen Widget View
+
+struct WidgetInlineView: View {
+    let entry: LumisoundEntry
+
+    var body: some View {
+        if entry.title.isEmpty {
+            Text("Lumisound: Nothing Playing")
+        } else {
+            Text("\(entry.isPlaying ? "▶" : "⏸") \(entry.title) — \(entry.artist)")
+        }
+    }
+}
+
 // MARK: - Entry View (dispatches to family-specific view)
 
 struct LumisoundWidgetEntryView: View {
@@ -229,8 +467,14 @@ struct LumisoundWidgetEntryView: View {
         switch family {
         case .accessoryCircular:
             WidgetCircularView(entry: entry)
+        case .accessoryRectangular:
+            WidgetRectangularView(entry: entry)
+        case .accessoryInline:
+            WidgetInlineView(entry: entry)
         case .systemMedium:
             WidgetMediumView(entry: entry)
+        case .systemLarge:
+            WidgetLargeView(entry: entry)
         default:
             WidgetSmallView(entry: entry)
         }
@@ -253,7 +497,10 @@ struct LumisoundWidget: Widget {
         .supportedFamilies([
             .systemSmall,
             .systemMedium,
+            .systemLarge,
             .accessoryCircular,
+            .accessoryRectangular,
+            .accessoryInline,
         ])
     }
 }

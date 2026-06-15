@@ -1373,9 +1373,11 @@ struct NowPlayingView: View {
                     } else {
                         LyricsView(
                             lines: lyricsLines,
-                            currentPosition: progress.position
+                            currentPosition: progress.position,
+                            isPlaying: player.isPlaying
                         )
                         .frame(height: 260)
+                        .clipped()
                     }
                 }
                 .padding(.top, 8)

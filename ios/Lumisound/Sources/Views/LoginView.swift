@@ -6,6 +6,8 @@ struct LoginView: View {
     var startOnRegister: Bool = false
 
     @EnvironmentObject var account: AccountService
+    @EnvironmentObject var libraryManager: LibraryManager
+    @EnvironmentObject var player: AudioPlayerManager
     @Environment(\.dismiss) var dismiss
 
     @State private var isRegistering = false
@@ -270,6 +272,16 @@ struct LoginView: View {
                 )
             } else {
                 await account.login(username: trimmedUsername, password: password)
+            }
+
+            // Immediately pull this user's server-side data (library state,
+            // gallery background settings, badges, etc.) instead of waiting
+            // for the next app launch — matters most when switching accounts
+            // within the same session.
+            if account.isLoggedIn {
+                await account.pullSync(library: libraryManager, player: player)
+                account.startAutoPushTimer(library: libraryManager)
+                await account.loadAvatar(forceRefresh: true)
             }
         }
     }

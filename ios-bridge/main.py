@@ -74,6 +74,10 @@ SUPPORTED_AUDIO_EXTS: frozenset[str] = frozenset({
 # richGridRenderer/lockupViewModel grid UI's continuation simply stops being
 # returned by YouTube's browse API after ~2 pages).
 YOUTUBE_API_KEY: str = os.getenv("YOUTUBE_API_KEY", "")
+# Optional: a Discord webhook URL (https://discord.com/api/webhooks/...) that
+# new in-app bug reports are posted to, so they're seen immediately instead of
+# sitting unnoticed in ios_bug_reports. No-op if unset.
+BUG_REPORT_WEBHOOK_URL: str = os.getenv("BUG_REPORT_WEBHOOK_URL", "")
 VERSION = "1.0.0"
 
 # ---------------------------------------------------------------------------
@@ -5072,6 +5076,22 @@ async def submit_bug_report(
                     body.recent_logs[:50_000] if body.recent_logs else None,
                 ),
             )
+
+    if BUG_REPORT_WEBHOOK_URL:
+        embed = {
+            "embeds": [{
+                "title": f"New Bug Report — {body.category}",
+                "description": body.description[:4000],
+                "color": 0xEC4079,
+                "fields": [
+                    {"name": "Device", "value": body.device_info or "unknown", "inline": True},
+                    {"name": "App Version", "value": body.app_version or "unknown", "inline": True},
+                    {"name": "User", "value": user_id or "anonymous", "inline": True},
+                ] + ([{"name": "Contact", "value": body.contact_email, "inline": True}] if body.contact_email else []),
+                "footer": {"text": f"Report ID: {report_id}"},
+            }],
+        }
+        await _post_discord_webhook(BUG_REPORT_WEBHOOK_URL, embed)
 
     return {"id": report_id, "status": "received"}
 

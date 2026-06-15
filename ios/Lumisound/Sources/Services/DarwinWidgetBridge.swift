@@ -8,6 +8,7 @@ final class DarwinWidgetBridge {
 
     static let togglePlayback = "com.lumisound.ios.widget.togglePlayback"
     static let skipNext       = "com.lumisound.ios.widget.skipNext"
+    static let skipPrevious   = "com.lumisound.ios.widget.skipPrevious"
 
     private var callbacks: [String: [() -> Void]] = [:]
     /// Names already registered with the Darwin notify center. CFNotificationCenter

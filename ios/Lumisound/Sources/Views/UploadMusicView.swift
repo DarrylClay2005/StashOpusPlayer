@@ -27,6 +27,8 @@ struct UploadMusicView: View {
     @State private var deletingID: String?   = nil
     @State private var showDeleteConfirm     = false
     @State private var pendingDeleteTrack: UserMusicMetadataTrack? = nil
+    @State private var showDeleteAllConfirm  = false
+    @State private var isDeletingAll         = false
 
     @State private var restoringFilename: String? = nil
     @State private var showLoginSheet       = false
@@ -87,6 +89,18 @@ struct UploadMusicView: View {
                 Button("Cancel", role: .cancel) {}
             } message: { track in
                 Text("Remove \"\(track.title ?? track.filename)\" from cloud storage? This cannot be undone.")
+            }
+            .confirmationDialog(
+                "Delete all uploaded tracks?",
+                isPresented: $showDeleteAllConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete All (\(streaming.userMusicMetadata.count))", role: .destructive) {
+                    Task { await deleteAllTracks() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently removes all \(streaming.userMusicMetadata.count) uploaded track\(streaming.userMusicMetadata.count == 1 ? "" : "s") from cloud storage. Your local files are not affected. This cannot be undone.")
             }
         }
     }
@@ -282,11 +296,23 @@ struct UploadMusicView: View {
 
                 Spacer()
 
-                if streaming.isLoadingUserMusicMetadata {
+                if isDeletingAll {
+                    ProgressView()
+                        .tint(AppTheme.error)
+                        .scaleEffect(0.8)
+                } else if streaming.isLoadingUserMusicMetadata {
                     ProgressView()
                         .tint(AppTheme.dynamicAccent)
                         .scaleEffect(0.8)
                 } else {
+                    if !streaming.userMusicMetadata.isEmpty {
+                        Button {
+                            showDeleteAllConfirm = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .foregroundStyle(AppTheme.error)
+                        }
+                    }
                     Button {
                         guard let tok = token else { return }
                         Task { try? await streaming.fetchUserMusicMetadata(token: tok) }
@@ -549,6 +575,24 @@ struct UploadMusicView: View {
         } catch {
             errorMessage = "Delete failed: \(error.localizedDescription)"
         }
+    }
+
+    private func deleteAllTracks() async {
+        guard let tok = token else { return }
+        isDeletingAll = true
+        defer { isDeletingAll = false }
+
+        for track in streaming.userMusicMetadata {
+            do {
+                try await streaming.deleteUserMusic(path: track.filename, token: tok)
+            } catch {
+                errorMessage = "Delete failed for \(track.title ?? track.filename): \(error.localizedDescription)"
+                // Continue with remaining tracks
+            }
+        }
+
+        try? await streaming.fetchUserMusicMetadata(token: tok)
+        await streaming.fetchUserMusic(token: tok)
     }
 
     private func restoreTrack(_ track: UserMusicMetadataTrack) async {

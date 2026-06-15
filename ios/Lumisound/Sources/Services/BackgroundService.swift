@@ -36,6 +36,13 @@ enum BackgroundAnimation: String, CaseIterable, Codable, Identifiable {
 @MainActor
 final class BackgroundService: ObservableObject {
 
+    /// Weak ref to the single `@StateObject` instance, set in `init()` —
+    /// lets `AccountService.pullSync` push freshly-pulled per-user gallery
+    /// settings into the live, already-running instance (see `loadSettings()`),
+    /// rather than only writing to `UserDefaults` where they'd sit unused
+    /// until the next app launch.
+    static weak var shared: BackgroundService?
+
     // MARK: Published State
 
     @Published var isEnabled: Bool = false {
@@ -90,6 +97,7 @@ final class BackgroundService: ObservableObject {
     // MARK: Init — register for foreground notification
 
     init() {
+        Self.shared = self
         foregroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.willEnterForegroundNotification,
             object: nil,

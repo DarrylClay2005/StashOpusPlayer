@@ -13,6 +13,18 @@ struct TiltCardArtworkView: View {
 
     @State private var tiltX: Double = 0
     @State private var tiltY: Double = 0
+    @State private var dragTiltX: Double = 0
+    @State private var dragTiltY: Double = 0
+
+    /// Combined ambient + drag-driven tilt, clamped to a believable range
+    /// so a fast drag can't flip the card past perspective limits.
+    private var totalTiltX: Double {
+        max(-22, min(22, tiltX + dragTiltX))
+    }
+
+    private var totalTiltY: Double {
+        max(-22, min(22, tiltY + dragTiltY))
+    }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -51,17 +63,36 @@ struct TiltCardArtworkView: View {
                     endPoint: .bottomTrailing
                 )
                 .rotationEffect(.degrees(20))
-                .offset(x: tiltY * 6, y: -tiltX * 6)
+                .offset(x: totalTiltY * 6, y: -totalTiltX * 6)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .allowsHitTesting(false)
             )
-            .shadow(color: .black.opacity(0.45), radius: 22, x: -tiltY * 1.4, y: tiltX * 1.4 + 14)
-            .rotation3DEffect(.degrees(tiltX), axis: (x: 1, y: 0, z: 0), perspective: 0.4)
-            .rotation3DEffect(.degrees(tiltY), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
+            .shadow(color: .black.opacity(0.45), radius: 22, x: -totalTiltY * 1.4, y: totalTiltX * 1.4 + 14)
+            .rotation3DEffect(.degrees(totalTiltX), axis: (x: 1, y: 0, z: 0), perspective: 0.4)
+            .rotation3DEffect(.degrees(totalTiltY), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
+            // Drag to tilt — grab the card and tip it in 3D space; it springs
+            // back to the ambient animation on release.
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        dragTiltX = max(-16, min(16, Double(-value.translation.height) / 10))
+                        dragTiltY = max(-16, min(16, Double(value.translation.width) / 10))
+                    }
+                    .onEnded { _ in
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
+                            dragTiltX = 0
+                            dragTiltY = 0
+                        }
+                    }
+            )
 
+            // Reflective surface beneath — tilts in sync with the card above
+            // so the "glass shelf" perspective stays consistent with whatever
+            // angle the user (or the ambient animation) leaves the card at.
             ArtworkReflectionView(song: song, size: 290, cornerRadius: 18)
                 .environmentObject(library)
-                .rotation3DEffect(.degrees(tiltY * 0.3), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
+                .rotation3DEffect(.degrees(totalTiltX * 0.5), axis: (x: 1, y: 0, z: 0), perspective: 0.4)
+                .rotation3DEffect(.degrees(totalTiltY * 0.5), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
         }
         .frame(width: 300)
         .onAppear { updateAnimations(playing: isPlaying) }

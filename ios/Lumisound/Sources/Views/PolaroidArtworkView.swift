@@ -35,19 +35,46 @@ struct PolaroidArtworkView: View {
                 .frame(width: photoSize * 1.4)
                 .offset(x: glareOffset)
                 .allowsHitTesting(false)
+
+                // Film grain — a tiled noise texture that gives the photo a
+                // subtle analog feel without any per-frame cost.
+                FilmGrainOverlay()
+                    .frame(width: photoSize, height: photoSize)
+                    .blendMode(.overlay)
+                    .opacity(0.18)
+                    .allowsHitTesting(false)
+
+                // Vintage color cast — a faint warm vignette over the photo
+                RadialGradient(
+                    colors: [.clear, Color(red: 0.55, green: 0.4, blue: 0.18).opacity(0.22)],
+                    center: .center,
+                    startRadius: photoSize * 0.35,
+                    endRadius: photoSize * 0.72
+                )
+                .allowsHitTesting(false)
             }
             .frame(width: photoSize, height: photoSize)
             .clipped()
 
-            // Polaroid bottom strip with title
+            // Polaroid bottom strip with handwritten-style caption
             ZStack {
                 Color.white
-                Text(song?.displayName ?? "Nothing Playing")
-                    .font(.system(size: 14, weight: .regular, design: .serif))
-                    .foregroundStyle(Color.black.opacity(0.75))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 10)
+                VStack(spacing: 1) {
+                    Text(song?.displayName ?? "Nothing Playing")
+                        .font(.custom("Bradley Hand", size: 18))
+                        .foregroundStyle(Color.black.opacity(0.78))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    if let artist = song?.artistName, !artist.isEmpty {
+                        Text(artist)
+                            .font(.custom("Bradley Hand", size: 13))
+                            .foregroundStyle(Color.black.opacity(0.5))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                }
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 10)
             }
             .frame(width: frameWidth, height: bottomPad)
         }
@@ -55,6 +82,20 @@ struct PolaroidArtworkView: View {
         .background(Color.white)
         .padding(10)
         .background(Color.white)
+        // Corner curl — a faint triangular shadow lifting the bottom-right
+        // corner, like an aging print peeling slightly off its backing.
+        .overlay(alignment: .bottomTrailing) {
+            CornerCurlShape()
+                .fill(
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.18)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 38, height: 38)
+                .allowsHitTesting(false)
+        }
         // Rocking rotation — oscillates between -5° and -1° while playing, static -3° when paused
         .rotationEffect(.degrees(rocking ? -1.2 : -4.8))
         .animation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true), value: rocking)
@@ -148,5 +189,61 @@ struct FloatModifier: ViewModifier {
                     }
                 }
             }
+    }
+}
+
+// MARK: - FilmGrainOverlay
+
+/// A static, tiled speckle pattern drawn once with `Canvas` to suggest
+/// photo-paper grain. Deterministic (seeded) so it doesn't shimmer or cost
+/// anything per-frame — drawn a single time and left in place.
+struct FilmGrainOverlay: View {
+    var body: some View {
+        Canvas { context, size in
+            var generator = SeededRandom(seed: 1_337)
+            let dotCount = Int((size.width * size.height) / 14)
+            for _ in 0..<dotCount {
+                let x = generator.nextDouble() * size.width
+                let y = generator.nextDouble() * size.height
+                let alpha = 0.05 + generator.nextDouble() * 0.18
+                let dotSize = generator.nextDouble() < 0.5 ? 0.6 : 1.1
+                let rect = CGRect(x: x, y: y, width: dotSize, height: dotSize)
+                context.fill(Path(ellipseIn: rect), with: .color(.white.opacity(alpha)))
+            }
+        }
+        .drawingGroup()
+    }
+}
+
+/// A tiny deterministic PRNG (xorshift) used to lay out grain dots without
+/// pulling in `GameplayKit` or reseeding `SystemRandomNumberGenerator` on
+/// every redraw.
+private struct SeededRandom {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        state = seed == 0 ? 0xdead_beef : seed
+    }
+
+    mutating func nextDouble() -> Double {
+        state ^= state << 13
+        state ^= state >> 7
+        state ^= state << 17
+        return Double(state % 1_000_000) / 1_000_000
+    }
+}
+
+// MARK: - CornerCurlShape
+
+/// A simple right-triangle shape used as a faint shadow to suggest a lifted
+/// photo corner.
+struct CornerCurlShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
