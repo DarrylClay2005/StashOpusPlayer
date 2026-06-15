@@ -873,9 +873,10 @@ struct StreamSearchView: View {
         downloadAllDone = 0
         downloadAllTotal = tracks.count
 
-        // Matches the bridge's yt-dlp process semaphore (_YTDLP_SEMAPHORE) so the
-        // client can keep it fully saturated without overwhelming it.
-        let maxConcurrent = 10
+        // Matches the bridge's yt-dlp process semaphore (_YTDLP_SEMAPHORE = 4) so the
+        // client keeps it saturated without piling up extra jobs that just sit
+        // "pending" behind the semaphore (each holding its own /tmp/dl_* dir).
+        let maxConcurrent = 4
 
         Task { @MainActor in
             // Make sure `library.allSongs` reflects every file on disk — including

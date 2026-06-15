@@ -3917,6 +3917,7 @@ async def _measure_loudness(path: pathlib.Path) -> Optional[float]:
         "-af", "loudnorm=print_format=json",
         "-f", "null", "-",
     ]
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -3925,6 +3926,13 @@ async def _measure_loudness(path: pathlib.Path) -> Optional[float]:
         )
         _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=60.0)
     except Exception as exc:
+        # On timeout, `proc.communicate()` is cancelled but ffmpeg itself keeps
+        # running as an orphan — without killing it here, a backlog of stuck
+        # ffmpeg processes piles up and starves the host's CPU, slowing down
+        # everything else (including download jobs).
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            await proc.communicate()
         logger.warning("_measure_loudness: ffmpeg failed for %s: %s", path.name, exc)
         return None
 
@@ -5712,6 +5720,7 @@ async def _estimate_bpm(path: pathlib.Path) -> Optional[float]:
         "-ac", "1", "-ar", "11025",
         "-f", "s16le", "-",
     ]
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -5720,6 +5729,11 @@ async def _estimate_bpm(path: pathlib.Path) -> Optional[float]:
         )
         raw, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
     except Exception as exc:
+        # See _measure_loudness: kill the orphaned ffmpeg on timeout so it
+        # doesn't keep consuming CPU after we give up on it.
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            await proc.communicate()
         logger.warning("_estimate_bpm: ffmpeg decode failed for %s: %s", path.name, exc)
         return None
 
@@ -5843,6 +5857,7 @@ async def _estimate_key(path: pathlib.Path) -> Optional[str]:
         "-ac", "1", "-ar", str(sample_rate),
         "-f", "s16le", "-",
     ]
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -5851,6 +5866,11 @@ async def _estimate_key(path: pathlib.Path) -> Optional[str]:
         )
         raw, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
     except Exception as exc:
+        # See _measure_loudness: kill the orphaned ffmpeg on timeout so it
+        # doesn't keep consuming CPU after we give up on it.
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            await proc.communicate()
         logger.warning("_estimate_key: ffmpeg decode failed for %s: %s", path.name, exc)
         return None
 
