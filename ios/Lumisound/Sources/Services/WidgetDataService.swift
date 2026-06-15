@@ -26,6 +26,21 @@ final class WidgetDataService {
 
     private init() {}
 
+    /// Whether the shared App Group container is reachable from this process.
+    ///
+    /// Unlike `UserDefaults(suiteName:)` (which always returns a usable, but
+    /// possibly sandbox-local and unshared, object even without the
+    /// entitlement), `containerURL(forSecurityApplicationGroupIdentifier:)`
+    /// reliably returns `nil` when the App Group isn't actually provisioned
+    /// for this build. If this is `false`, the widget extension's process is
+    /// in the same boat — neither UserDefaults nor artwork files are actually
+    /// shared, so widgets stay on their placeholder. This is most often seen
+    /// on sideloaded builds whose resigning certificate/provisioning profile
+    /// doesn't include the `group.com.lumisound.ios` App Group.
+    var isAppGroupAvailable: Bool {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) != nil
+    }
+
     /// Full update: writes track metadata, play state, playback position, and
     /// artwork (if available). Called when the current song changes and artwork
     /// has been loaded, and on play/pause so the widget's live progress display

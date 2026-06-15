@@ -460,54 +460,59 @@ final class LibraryManager: ObservableObject {
     /// Scans all user-selected folders tracked by `MusicFolderService` and adds
     /// any new audio files not already in the library.
     func scanWatchedFolders(using folderService: MusicFolderService) {
+        Task { await scanWatchedFoldersAsync(using: folderService) }
+    }
+
+    /// Awaitable variant of `scanWatchedFolders(using:)` — used by callers
+    /// (e.g. the duplicate finder) that need `allSongs` to reflect every
+    /// watched-folder file before deciding what to do next.
+    func scanWatchedFoldersAsync(using folderService: MusicFolderService) async {
         appLog("scanWatchedFolders: starting", category: "library")
         beginScan()
-        Task {
-            defer { endScan() }
-            let urls = folderService.resolveAll()
-            guard !urls.isEmpty else {
-                appLog("scanWatchedFolders: no accessible watched folders", category: "library")
-                return
-            }
-            // Keep security-scoped access open until after makeSong reads the files.
-            defer { for url in urls { url.stopAccessingSecurityScopedResource() } }
+        defer { endScan() }
+        let urls = folderService.resolveAll()
+        guard !urls.isEmpty else {
+            appLog("scanWatchedFolders: no accessible watched folders", category: "library")
+            return
+        }
+        // Keep security-scoped access open until after makeSong reads the files.
+        defer { for url in urls { url.stopAccessingSecurityScopedResource() } }
 
-            var candidates: [URL] = []
-            let fm = FileManager.default
+        var candidates: [URL] = []
+        let fm = FileManager.default
 
-            for baseURL in urls {
-                let enumerator = fm.enumerator(
-                    at: baseURL,
-                    includingPropertiesForKeys: [.isRegularFileKey],
-                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
-                )
-                while let url = enumerator?.nextObject() as? URL {
-                    guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
-                    if DocumentImportService.supportedExtensions.contains(url.pathExtension.lowercased()) {
-                        candidates.append(url)
-                    }
+        for baseURL in urls {
+            let enumerator = fm.enumerator(
+                at: baseURL,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            )
+            while let url = enumerator?.nextObject() as? URL {
+                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+                if DocumentImportService.supportedExtensions.contains(url.pathExtension.lowercased()) {
+                    candidates.append(url)
                 }
             }
+        }
 
-            guard !candidates.isEmpty else { return }
+        guard !candidates.isEmpty else { return }
 
-            let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
-            let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
-            guard !newURLs.isEmpty else { return }
+        let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
+        let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
+        guard !newURLs.isEmpty else { return }
 
-            let newSongs = await resolveSongs(for: newURLs)
+        let newSongs = await resolveSongs(for: newURLs)
 
-            appLog("scanWatchedFolders: \(newSongs.count) song(s) from \(urls.count) folder(s)", category: "library")
-            importedSongs.append(contentsOf: newSongs)
-            importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
-            rebuildAllSongs()
+        appLog("scanWatchedFolders: \(newSongs.count) song(s) from \(urls.count) folder(s)", category: "library")
+        importedSongs.append(contentsOf: newSongs)
+        importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
+        rebuildAllSongs()
 
-            // Push the updated folder structure (new tracks in watched folders)
-            // to the server so it survives a reinstall — debounced, all
-            // logged-in users, no opt-in toggle.
-            if !newSongs.isEmpty {
-                AccountService.shared?.scheduleFolderBackupPush(folderService: folderService, library: self)
-            }
+        // Push the updated folder structure (new tracks in watched folders)
+        // to the server so it survives a reinstall — debounced, all
+        // logged-in users, no opt-in toggle.
+        if !newSongs.isEmpty {
+            AccountService.shared?.scheduleFolderBackupPush(folderService: folderService, library: self)
         }
     }
 
@@ -867,7 +872,22 @@ final class LibraryManager: ObservableObject {
     func removeImportedSong(id songID: String) {
         guard let song = importedSongs.first(where: { $0.id == songID }) else { return }
         if let url = song.url {
-            try? FileManager.default.removeItem(at: url)
+            // Songs from user-watched folders (MusicFolderService) live outside the
+            // app sandbox and are only reachable via a security-scoped bookmark —
+            // without this, `removeItem` silently fails (the `try?` swallows an
+            // error), the song disappears from the library list, but the file
+            // stays on disk. This call is a harmless no-op for files already
+            // inside the app's own Documents directory (e.g. "Imported Music"
+            // and its subfolders).
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                appWarn("removeImportedSong: failed to delete file at \(url.path): \(error.localizedDescription)", category: "library")
+                ToastCenter.shared.show("Couldn't delete \"\(song.displayName)\" from disk", category: .error)
+                return
+            }
         }
         importedSongs.removeAll { $0.id == songID }
         favoriteSongIDs.remove(songID)

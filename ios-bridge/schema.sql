@@ -438,6 +438,11 @@ CREATE TABLE IF NOT EXISTS ios_discord_rpc_config (
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
+-- Feature: enhanced Discord Rich Presence — small "play/pause" status icon
+-- asset and an optional "Listen on <source>" button linking to the track.
+ALTER TABLE ios_discord_rpc_config ADD COLUMN IF NOT EXISTS small_image VARCHAR(255);
+ALTER TABLE ios_discord_rpc_config ADD COLUMN IF NOT EXISTS show_buttons BOOLEAN DEFAULT TRUE;
+
 -- Feature: musical key estimation (Krumhansl-Schmuckler chroma analysis)
 -- alongside BPM/loudness, for harmonic-mixing-aware automixing/crossfade.
 ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS musical_key VARCHAR(16) NULL;

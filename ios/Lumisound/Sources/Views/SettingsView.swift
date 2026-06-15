@@ -885,6 +885,17 @@ struct SettingsView: View {
             }
             .disabled(updater.isChecking)
 
+            if !WidgetDataService.shared.isAppGroupAvailable {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Widgets Unavailable", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                    Text("This build can't share data with its Lock Screen and Home Screen widgets, so they'll stay on their placeholder. This usually means the App Group entitlement (group.com.lumisound.ios) wasn't preserved when this app was signed — re-signing tools need to include that App Group in the provisioning profile for widgets to work.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .padding(.vertical, 2)
+            }
+
             // Open Source Libraries
             VStack(alignment: .leading, spacing: 6) {
                 Text("Open Source Libraries")

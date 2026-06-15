@@ -419,11 +419,15 @@ struct DiscordRpcConfig: Decodable {
     let enabled: Bool
     let discordClientId: String?
     let largeImage: String?
+    let smallImage: String?
+    let showButtons: Bool
 
     enum CodingKeys: String, CodingKey {
         case configured, enabled
         case discordClientId = "discord_client_id"
         case largeImage = "large_image"
+        case smallImage = "small_image"
+        case showButtons = "show_buttons"
     }
 }
 
@@ -1900,15 +1904,17 @@ final class AccountService: ObservableObject {
 
     /// Registers (or updates) the Discord Application client ID and optional
     /// art asset name used by the local Discord Rich Presence daemon.
-    func setDiscordRpcConfig(clientId: String, largeImage: String?, enabled: Bool) async -> Bool {
+    func setDiscordRpcConfig(clientId: String, largeImage: String?, smallImage: String?, showButtons: Bool, enabled: Bool) async -> Bool {
         guard isLoggedIn else { return false }
         struct Body: Encodable {
             let discord_client_id: String
             let large_image: String?
+            let small_image: String?
+            let show_buttons: Bool
             let enabled: Bool
         }
         do {
-            _ = try await makeRequest("/user/discord-rpc-config", method: "PUT", body: Body(discord_client_id: clientId, large_image: largeImage, enabled: enabled))
+            _ = try await makeRequest("/user/discord-rpc-config", method: "PUT", body: Body(discord_client_id: clientId, large_image: largeImage, small_image: smallImage, show_buttons: showButtons, enabled: enabled))
             return true
         } catch let err as AccountError {
             errorMessage = err.message

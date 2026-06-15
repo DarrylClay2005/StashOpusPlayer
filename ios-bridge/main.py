@@ -1175,6 +1175,8 @@ class YoutubeApiKeyRequest(BaseModel):
 class DiscordRpcConfigRequest(BaseModel):
     discord_client_id: str
     large_image: Optional[str] = None
+    small_image: Optional[str] = None
+    show_buttons: bool = True
     enabled: bool = True
 
 
@@ -6916,15 +6918,22 @@ async def get_discord_rpc_config(payload: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT discord_client_id, large_image, enabled FROM ios_discord_rpc_config WHERE user_id = %s",
+                "SELECT discord_client_id, large_image, enabled, small_image, show_buttons "
+                "FROM ios_discord_rpc_config WHERE user_id = %s",
                 (user_id,),
             )
             row = await cur.fetchone()
 
     if not row:
-        return {"configured": False, "enabled": False, "discord_client_id": None, "large_image": None}
+        return {
+            "configured": False, "enabled": False, "discord_client_id": None,
+            "large_image": None, "small_image": None, "show_buttons": True,
+        }
 
-    return {"configured": True, "enabled": bool(row[2]), "discord_client_id": row[0], "large_image": row[1]}
+    return {
+        "configured": True, "enabled": bool(row[2]), "discord_client_id": row[0],
+        "large_image": row[1], "small_image": row[3], "show_buttons": bool(row[4]),
+    }
 
 
 @app.put("/user/discord-rpc-config")
@@ -6938,11 +6947,12 @@ async def set_discord_rpc_config(body: DiscordRpcConfigRequest, payload: dict = 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "INSERT INTO ios_discord_rpc_config (user_id, discord_client_id, large_image, enabled) "
-                "VALUES (%s, %s, %s, %s) "
+                "INSERT INTO ios_discord_rpc_config (user_id, discord_client_id, large_image, small_image, show_buttons, enabled) "
+                "VALUES (%s, %s, %s, %s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE discord_client_id = VALUES(discord_client_id), "
-                "large_image = VALUES(large_image), enabled = VALUES(enabled)",
-                (user_id, body.discord_client_id, body.large_image, body.enabled),
+                "large_image = VALUES(large_image), small_image = VALUES(small_image), "
+                "show_buttons = VALUES(show_buttons), enabled = VALUES(enabled)",
+                (user_id, body.discord_client_id, body.large_image, body.small_image, body.show_buttons, body.enabled),
             )
     return {"status": "ok"}
 

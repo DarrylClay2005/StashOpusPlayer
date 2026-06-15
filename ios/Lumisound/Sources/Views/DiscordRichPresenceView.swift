@@ -27,6 +27,8 @@ struct DiscordRichPresenceView: View {
     @State private var config: DiscordRpcConfig?
     @State private var clientIdText = ""
     @State private var largeImageText = ""
+    @State private var smallImageText = ""
+    @State private var showButtons = true
     @State private var enabled = true
     @State private var isSaving = false
     @State private var errorText: String?
@@ -88,9 +90,18 @@ struct DiscordRichPresenceView: View {
                     .keyboardType(.numberPad)
                     .foregroundStyle(AppTheme.textPrimary)
 
-                TextField("Rich Presence art asset name (optional)", text: $largeImageText)
+                TextField("Large image art asset name (optional)", text: $largeImageText)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                TextField("Small status icon asset name (optional)", text: $smallImageText)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Toggle("Show \"Listen on...\" Button", isOn: $showButtons)
+                    .tint(AppTheme.dynamicAccent)
                     .foregroundStyle(AppTheme.textPrimary)
 
                 Toggle("Enabled", isOn: $enabled)
@@ -111,7 +122,7 @@ struct DiscordRichPresenceView: View {
             } header: {
                 sectionHeader("Daemon Configuration")
             } footer: {
-                Text("Saved here, the local Rich Presence daemon fetches this automatically — you don't need to put your Discord Application Client ID in a config file. Find it on your application's page at discord.com/developers/applications.")
+                Text("Saved here, the local Rich Presence daemon fetches this automatically — you don't need to put your Discord Application Client ID in a config file. Find it on your application's page at discord.com/developers/applications. Asset names must be uploaded as \"Rich Presence Art Assets\" on that page. The button (if enabled) links to the track on YouTube/SoundCloud. While paused, the small status icon (if set) switches to a \"Paused\" label and the elapsed-time counter is hidden.")
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }
@@ -150,6 +161,8 @@ struct DiscordRichPresenceView: View {
         if let config, config.configured {
             clientIdText = config.discordClientId ?? ""
             largeImageText = config.largeImage ?? ""
+            smallImageText = config.smallImage ?? ""
+            showButtons = config.showButtons
             enabled = config.enabled
         }
     }
@@ -157,11 +170,18 @@ struct DiscordRichPresenceView: View {
     private func save() {
         let trimmedId = clientIdText.trimmingCharacters(in: .whitespaces)
         guard !trimmedId.isEmpty else { return }
-        let trimmedImage = largeImageText.trimmingCharacters(in: .whitespaces)
+        let trimmedLargeImage = largeImageText.trimmingCharacters(in: .whitespaces)
+        let trimmedSmallImage = smallImageText.trimmingCharacters(in: .whitespaces)
         isSaving = true
         errorText = nil
         Task {
-            if await account.setDiscordRpcConfig(clientId: trimmedId, largeImage: trimmedImage.isEmpty ? nil : trimmedImage, enabled: enabled) {
+            if await account.setDiscordRpcConfig(
+                clientId: trimmedId,
+                largeImage: trimmedLargeImage.isEmpty ? nil : trimmedLargeImage,
+                smallImage: trimmedSmallImage.isEmpty ? nil : trimmedSmallImage,
+                showButtons: showButtons,
+                enabled: enabled
+            ) {
                 didSave = true
                 config = await account.fetchDiscordRpcConfig()
             } else {
@@ -177,6 +197,8 @@ struct DiscordRichPresenceView: View {
                 config = await account.fetchDiscordRpcConfig()
                 clientIdText = ""
                 largeImageText = ""
+                smallImageText = ""
+                showButtons = true
                 enabled = true
                 didSave = false
             }

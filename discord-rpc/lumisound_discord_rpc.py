@@ -302,12 +302,21 @@ class BridgeClient:
 # ---------------------------------------------------------------------------
 
 
-def build_activity(state: dict, large_image: Optional[str]) -> Optional[dict]:
+_BUTTON_LABELS = {
+    "youtube": "Listen on YouTube",
+    "soundcloud": "Listen on SoundCloud",
+}
+
+
+def build_activity(
+    state: dict,
+    large_image: Optional[str],
+    small_image: Optional[str] = None,
+    show_buttons: bool = True,
+) -> Optional[dict]:
     """Translates a /user/playback-state response into a Discord SET_ACTIVITY
-    payload, or None if nothing should be shown (paused or stale)."""
+    payload, or None if nothing should be shown (stale/no track)."""
     if not state or not state.get("title"):
-        return None
-    if not state.get("is_playing", True):
         return None
 
     updated_at = state.get("updated_at")
@@ -326,6 +335,8 @@ def build_activity(state: dict, large_image: Optional[str]) -> Optional[dict]:
         except ValueError:
             pass
 
+    is_playing = state.get("is_playing", True)
+
     activity: dict = {
         # ActivityType 2 = "Listening to ..." instead of the default 0
         # ("Playing ..."), which made Lumisound show up like a game.
@@ -335,15 +346,30 @@ def build_activity(state: dict, large_image: Optional[str]) -> Optional[dict]:
     if state.get("artist"):
         activity["state"] = f"by {state['artist']}"[:128]
 
-    # Only set "start" — if "end" is also set, Discord renders a countdown to
-    # "end" (counting DOWN from the track's remaining time) instead of an
-    # elapsed-time counter counting UP from 0:00.
-    position = state.get("position_seconds") or 0
-    now = time.time()
-    activity["timestamps"] = {"start": int(now - position)}
+    if is_playing:
+        # Only set "start" — if "end" is also set, Discord renders a countdown
+        # to "end" (counting DOWN from the track's remaining time) instead of
+        # an elapsed-time counter counting UP from 0:00.
+        position = state.get("position_seconds") or 0
+        now = time.time()
+        activity["timestamps"] = {"start": int(now - position)}
+    # When paused, omit timestamps entirely rather than showing a frozen
+    # elapsed counter that keeps ticking — the small_text/small_image (if
+    # configured) is the only indicator of paused state.
 
+    assets: dict = {}
     if large_image:
-        activity["assets"] = {"large_image": large_image, "large_text": "Lumisound"}
+        assets["large_image"] = large_image
+        assets["large_text"] = "Lumisound"
+    if small_image:
+        assets["small_image"] = small_image
+        assets["small_text"] = "Playing" if is_playing else "Paused"
+    if assets:
+        activity["assets"] = assets
+
+    if show_buttons and state.get("track_url"):
+        label = _BUTTON_LABELS.get(state.get("source"), "Open Track")
+        activity["buttons"] = [{"label": label, "url": state["track_url"]}]
 
     return activity
 
@@ -374,6 +400,8 @@ def main() -> None:
     # bit: the local daemon only needs bridge_url + access_token.
     client_id = config.get("discord_client_id")
     large_image = config.get("large_image")
+    small_image = config.get("small_image")
+    show_buttons = config.get("show_buttons", True)
 
     if not client_id:
         log("No discord_client_id in local config — fetching registration from bridge")
@@ -387,6 +415,9 @@ def main() -> None:
             sys.exit(0)
         client_id = rpc_config["discord_client_id"]
         large_image = large_image or rpc_config.get("large_image")
+        small_image = small_image or rpc_config.get("small_image")
+        if "show_buttons" not in config:
+            show_buttons = rpc_config.get("show_buttons", True)
         log(f"Using registered Discord Application Client ID {client_id}")
 
     ipc = DiscordIPC(client_id)
@@ -425,18 +456,19 @@ def main() -> None:
             continue
 
         # --- Update Rich Presence ---------------------------------------
-        activity = build_activity(state, large_image)
+        activity = build_activity(state, large_image, small_image, show_buttons)
         try:
             # Discord's rate limit (5 SET_ACTIVITY calls per 20s) is well
             # above our poll interval, so we re-send every poll (timestamps
             # need refreshing anyway) but only log when the track changes.
-            signature = (activity.get("details"), activity.get("state")) if activity else None
+            signature = (activity.get("details"), activity.get("state"), "timestamps" in activity) if activity else None
             ipc.set_activity(activity)
             if signature != last_activity_signature:
                 if activity:
-                    log(f"Now playing: {activity.get('details')} {activity.get('state', '')}")
+                    status = "Now playing" if "timestamps" in activity else "Paused"
+                    log(f"{status}: {activity.get('details')} {activity.get('state', '')}")
                 else:
-                    log("Cleared Rich Presence (paused/idle)")
+                    log("Cleared Rich Presence (idle)")
                 last_activity_signature = signature
         except (DiscordIPCError, OSError) as exc:
             # The IPC socket died under us — usually because Discord was

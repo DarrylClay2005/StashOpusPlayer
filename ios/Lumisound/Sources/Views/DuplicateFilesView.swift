@@ -5,6 +5,7 @@ import SwiftUI
 struct DuplicateFilesView: View {
 
     @EnvironmentObject private var library: LibraryManager
+    @EnvironmentObject private var folderService: MusicFolderService
     @StateObject private var service = DuplicateFinderService.shared
 
     @State private var pendingDeletion: (songID: String, title: String)?
@@ -53,7 +54,17 @@ struct DuplicateFilesView: View {
                 }
 
                 Button {
-                    Task { await service.runScan(songs: library.allSongs) }
+                    Task {
+                        // Rescan the full Documents tree (covers "Imported Music"
+                        // and any subfolders the user created or moved files
+                        // into) plus any user-watched folders before diffing for
+                        // duplicates — without this, files sitting in a subfolder
+                        // that haven't been picked up yet wouldn't appear in
+                        // `library.allSongs` and so could never be flagged.
+                        await library.scanLocalDocumentsAsync()
+                        await library.scanWatchedFoldersAsync(using: folderService)
+                        await service.runScan(songs: library.allSongs)
+                    }
                 } label: {
                     HStack {
                         Label("Scan Now", systemImage: "arrow.clockwise")
@@ -70,7 +81,7 @@ struct DuplicateFilesView: View {
             } header: {
                 sectionHeader("Status")
             } footer: {
-                Text("Finds tracks that appear more than once in your library — either downloaded from the same source more than once, or matching by title and artist (e.g. once from Apple Music and once from a download).")
+                Text("Scans your entire Documents folder — including \"Imported Music\" and any subfolders — plus any watched folders, then finds tracks that appear more than once: either downloaded from the same source more than once, or matching by title and artist (e.g. once from Apple Music and once from a download). Deleting a copy removes its file from disk, wherever it lives.")
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }

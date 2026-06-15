@@ -762,6 +762,20 @@ struct StreamSearchView: View {
         downloadingTrackIDs.insert(track.id)
         Task {
             do {
+                // Rescan the full Documents tree (including subfolders the user has
+                // created or moved files into) so `isAlreadyImported` reflects reality
+                // before we decide whether to download — without this, a track sitting
+                // in a subfolder of "Imported Music" would pass the sourceTrackID-only
+                // check inside `downloadToLibrary` (which only looks at the top-level
+                // download directory) and get re-downloaded as a duplicate.
+                await library.scanLocalDocumentsAsync()
+                if library.isAlreadyImported(title: track.title, artist: track.artist, duration: track.duration) {
+                    downloadedTrackIDs.insert(track.id)
+                    failedTrackIDs.remove(track.id)
+                    downloadingTrackIDs.remove(track.id)
+                    ToastCenter.shared.show("\"\(track.title)\" is already in your library", category: .info, icon: "checkmark.circle")
+                    return
+                }
                 let localURL = try await streaming.downloadToLibrary(track: track, existingSongs: library.allSongs)
                 library.scanLocalDocuments()
                 downloadedTrackIDs.insert(track.id)
