@@ -74,10 +74,15 @@ SUPPORTED_AUDIO_EXTS: frozenset[str] = frozenset({
 # richGridRenderer/lockupViewModel grid UI's continuation simply stops being
 # returned by YouTube's browse API after ~2 pages).
 YOUTUBE_API_KEY: str = os.getenv("YOUTUBE_API_KEY", "")
-# Optional: a Discord webhook URL (https://discord.com/api/webhooks/...) that
-# new in-app bug reports are posted to, so they're seen immediately instead of
-# sitting unnoticed in ios_bug_reports. No-op if unset.
-BUG_REPORT_WEBHOOK_URL: str = os.getenv("BUG_REPORT_WEBHOOK_URL", "")
+# Discord webhook URL that new in-app bug reports are posted to, so they're
+# seen immediately instead of sitting unnoticed in ios_bug_reports. This is a
+# standalone admin/developer channel — entirely separate from any per-user
+# "Now Playing" or Discord Rich Presence webhooks. Overridable via env var;
+# defaults to the developer's bug-report channel.
+BUG_REPORT_WEBHOOK_URL: str = os.getenv(
+    "BUG_REPORT_WEBHOOK_URL",
+    "https://discord.com/api/webhooks/1515883701353971763/0BPMmzjkq2E3zaCXaJtyiJmedW2Xqid-ohyBFxpJHDw7i4WrNJW-HIwMtujuj7Hxe9-U",
+)
 VERSION = "1.0.0"
 
 # ---------------------------------------------------------------------------
