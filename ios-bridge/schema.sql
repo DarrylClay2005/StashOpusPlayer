@@ -279,6 +279,11 @@ CREATE TABLE IF NOT EXISTS ios_playback_state (
 -- playing vs. paused (a stale "now playing" row alone isn't enough).
 ALTER TABLE ios_playback_state ADD COLUMN IF NOT EXISTS is_playing BOOLEAN DEFAULT TRUE;
 
+-- Feature: surface the current track's BPM/tempo (from on-device analysis or
+-- embedded tags) to other surfaces — widget "Continue Listening" and the local
+-- Discord Rich Presence daemon, which can show it in the activity details line.
+ALTER TABLE ios_playback_state ADD COLUMN IF NOT EXISTS bpm FLOAT NULL;
+
 -- Feature: server-side loudness normalization (ReplayGain-style)
 ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS loudness_lufs FLOAT NULL;
 
@@ -446,6 +451,11 @@ ALTER TABLE ios_discord_rpc_config ADD COLUMN IF NOT EXISTS show_buttons BOOLEAN
 -- Feature: musical key estimation (Krumhansl-Schmuckler chroma analysis)
 -- alongside BPM/loudness, for harmonic-mixing-aware automixing/crossfade.
 ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS musical_key VARCHAR(16) NULL;
+
+-- Feature: trending-by-energy — records each played track's BPM (from
+-- on-device analysis or embedded tags) so /social/trending-by-energy can
+-- rank trending tracks by average tempo, not just play count.
+ALTER TABLE ios_play_history ADD COLUMN IF NOT EXISTS bpm FLOAT NULL;
 
 -- Per-folder backup of the user's "watched folders" (MusicFolderService) tree
 -- structure: which relative path under Documents each watched folder lived

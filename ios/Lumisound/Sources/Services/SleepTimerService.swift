@@ -27,6 +27,11 @@ final class SleepTimerService: ObservableObject {
     // stays decoupled from AudioPlayerManager's concrete type.
     var getVolume: (() -> Float)?
     var setVolume: ((Float) -> Void)?
+    /// Closures to read/write the player's playback speed (`audioSettings.speed`).
+    /// Used for the tempo "wind-down" that accompanies the volume fade — gently
+    /// slowing playback toward a sleep-friendly tempo over the same window.
+    var getRate: (() -> Float)?
+    var setRate: ((Float) -> Void)?
     /// Called after the fade reaches zero — should pause/stop playback.
     var onExpire: (() -> Void)?
 
@@ -84,12 +89,20 @@ final class SleepTimerService: ObservableObject {
 
     /// Volume level captured just before the fade starts so it can be restored on cancel.
     private var volumeBeforeFade: Float = 1.0
+    /// Playback speed captured just before the fade starts so it can be restored on cancel.
+    private var rateBeforeFade: Float = 1.0
+    /// Target playback speed for the tempo wind-down — 15% slower than whatever
+    /// speed the user was already playing at, floored at 0.7x so very slow
+    /// custom speeds don't get dragged into "barely audible" territory.
+    private var fadeTargetRate: Float = 1.0
     /// Counts how many fade steps have fired.
     private var fadeStep: Int = 0
 
     private func beginFade() {
         guard !isFading else { return }
         volumeBeforeFade = getVolume?() ?? 1.0
+        rateBeforeFade = getRate?() ?? 1.0
+        fadeTargetRate = max(0.7, rateBeforeFade * 0.85)
         fadeStep = 0
         isFading = true
 
@@ -112,6 +125,12 @@ final class SleepTimerService: ObservableObject {
         let newVolume = volumeBeforeFade * (1.0 - clipped)
         setVolume?(newVolume)
 
+        // Tempo wind-down: ease playback speed from its current value toward
+        // `fadeTargetRate` in lockstep with the volume fade, so the music both
+        // quiets down AND slows down as the sleep timer approaches zero.
+        let newRate = rateBeforeFade + (fadeTargetRate - rateBeforeFade) * clipped
+        setRate?(newRate)
+
         if fadeStep >= Self.fadeStepCount {
             t.invalidate()
             fadeTimer = nil
@@ -125,6 +144,11 @@ final class SleepTimerService: ObservableObject {
             // `volumeBeforeFade` would silently discard that manual adjustment.
             if (getVolume?() ?? 0) < 0.01 {
                 setVolume?(volumeBeforeFade)
+            }
+            // Same logic for speed: restore the pre-fade tempo unless the user
+            // already changed it mid-fade (current value no longer near the target).
+            if let currentRate = getRate?(), abs(currentRate - fadeTargetRate) < 0.01 {
+                setRate?(rateBeforeFade)
             }
             didExpire = true
             appLog("SleepTimer: fade complete — playback stopped", category: "general")
@@ -144,6 +168,7 @@ final class SleepTimerService: ObservableObject {
         isFading = false
         if restoreVolume {
             setVolume?(volumeBeforeFade)
+            setRate?(rateBeforeFade)
         }
     }
 }

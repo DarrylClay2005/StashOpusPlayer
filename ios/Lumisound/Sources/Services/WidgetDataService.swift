@@ -52,6 +52,11 @@ final class WidgetDataService {
         }
         ud.set(song?.displayName ?? "", forKey: "widget_track_title")
         ud.set(song?.artistName ?? "", forKey: "widget_track_artist")
+        if let bpm = song?.bpm, bpm > 0 {
+            ud.set(bpm, forKey: "widget_track_bpm")
+        } else {
+            ud.removeObject(forKey: "widget_track_bpm")
+        }
         ud.set(isPlaying, forKey: "widget_is_playing")
         ud.set(position, forKey: "widget_position")
         ud.set(duration, forKey: "widget_duration")

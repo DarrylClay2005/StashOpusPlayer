@@ -197,6 +197,7 @@ final class LibraryManager: ObservableObject {
         await scanWatchedFoldersAsync(using: folderService)
 
         var updatedCount = 0
+        var artworkFilledCount = 0
         let total = importedSongs.count
 
         for index in importedSongs.indices {
@@ -209,6 +210,16 @@ final class LibraryManager: ObservableObject {
             }
             if current.artist.isEmpty || current.album.isEmpty || current.genre.isEmpty || current.year.isEmpty {
                 current = await MetadataFetchService.shared.enrich(song: current)
+            }
+
+            // refreshTags/enrich never touch artwork — fill in any tracks that
+            // are still missing cached artwork (e.g. imported before
+            // embedded-artwork extraction existed, or whose video frame
+            // extraction previously failed transiently).
+            if ArtworkService.shared.artwork(for: current) == nil {
+                if await ArtworkService.shared.loadArtwork(for: current) != nil {
+                    artworkFilledCount += 1
+                }
             }
 
             guard index < importedSongs.count, importedSongs[index].id == song.id else { continue }
@@ -234,8 +245,8 @@ final class LibraryManager: ObservableObject {
         await EnrichmentCacheStore.shared.persist()
         rebuildAllSongs()
 
-        appLog("Force metadata sync: updated \(updatedCount) of \(total) song(s)", category: "library")
-        lastScanResult = "Force metadata sync: updated \(updatedCount) of \(total) song(s)"
+        appLog("Force metadata sync: updated \(updatedCount) of \(total) song(s), filled artwork for \(artworkFilledCount)", category: "library")
+        lastScanResult = "Force metadata sync: updated \(updatedCount) of \(total) song(s), artwork filled for \(artworkFilledCount)"
     }
 
     // MARK: - Tempo (BPM)

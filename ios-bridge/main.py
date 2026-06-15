@@ -1000,6 +1000,7 @@ class LogPlayRequest(BaseModel):
     track_url: Optional[str] = None
     local_song_id: Optional[str] = None
     listen_seconds: Optional[int] = 0
+    bpm: Optional[float] = None
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -1100,6 +1101,7 @@ class PlaybackStateRequest(BaseModel):
     position_seconds: float = 0
     duration_seconds: float = 0
     is_playing: bool = True
+    bpm: Optional[float] = None
 
 
 class PlaylistSourceRequest(BaseModel):
@@ -2540,8 +2542,8 @@ async def log_history(
             await cur.execute(
                 """
                 INSERT INTO ios_play_history
-                    (id, user_id, track_url, local_song_id, title, artist, listen_seconds)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (id, user_id, track_url, local_song_id, title, artist, listen_seconds, bpm)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     history_id,
@@ -2551,6 +2553,7 @@ async def log_history(
                     body.title,
                     body.artist,
                     body.listen_seconds or 0,
+                    body.bpm,
                 ),
             )
 
@@ -2558,7 +2561,7 @@ async def log_history(
     # accounts and post a "Now Playing" embed to a linked Discord webhook.
     # Neither should ever block or fail the history write itself.
     asyncio.create_task(_scrobble_track(user_id, body.title, body.artist, body.listen_seconds or 0))
-    asyncio.create_task(_notify_now_playing_discord(user_id, body.title, body.artist))
+    asyncio.create_task(_notify_now_playing_discord(user_id, body.title, body.artist, body.bpm))
 
     return {"id": history_id, "status": "logged"}
 
@@ -3414,6 +3417,55 @@ async def social_discover(
     }
 
 
+@app.get("/social/trending-by-energy")
+async def trending_by_energy(
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(20, ge=1, le=100),
+    min_bpm: float = Query(120.0, ge=0, description="Minimum average BPM to qualify as high-energy"),
+    payload: dict = Depends(get_current_user),
+):
+    """High-energy trending tracks — like `/social/discover`, but ranked by
+    average BPM (from on-device analysis logged with each play) among
+    recently-played tracks that meet `min_bpm`. Powers a "Trending Workout
+    Tracks"-style feed."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT h.title, h.artist,
+                       COUNT(*) AS play_count,
+                       COUNT(DISTINCT h.user_id) AS listener_count,
+                       AVG(h.bpm) AS avg_bpm
+                FROM ios_play_history h
+                JOIN ios_users u ON u.id = h.user_id
+                WHERE u.share_listening_activity = TRUE AND u.is_active = TRUE
+                  AND h.played_at >= NOW() - INTERVAL %s DAY
+                  AND h.title IS NOT NULL AND h.title != ''
+                  AND h.bpm IS NOT NULL
+                GROUP BY h.title, h.artist
+                HAVING AVG(h.bpm) >= %s
+                ORDER BY avg_bpm DESC, play_count DESC, listener_count DESC
+                LIMIT %s
+                """,
+                (days, min_bpm, limit),
+            )
+            rows = await cur.fetchall()
+
+    return {
+        "tracks": [
+            {
+                "title": r[0],
+                "artist": r[1],
+                "play_count": r[2],
+                "listener_count": r[3],
+                "avg_bpm": round(r[4], 1) if r[4] is not None else None,
+            }
+            for r in rows
+        ]
+    }
+
+
 # ---------------------------------------------------------------------------
 # Collaborative Playlist Endpoints
 # ---------------------------------------------------------------------------
@@ -3718,6 +3770,23 @@ async def _measure_loudness(path: pathlib.Path) -> Optional[float]:
     except (ValueError, KeyError, TypeError) as exc:
         logger.warning("_measure_loudness: could not parse loudnorm output for %s: %s", path.name, exc)
         return None
+
+
+# Target integrated loudness (LUFS) tracks are normalized toward — matches the
+# streaming-industry-standard "ReplayGain 2.0" / Spotify/YouTube target, so
+# tracks measured by `_measure_loudness` play back at a consistent volume
+# instead of the wide swings typical of unmastered uploads.
+_TARGET_LUFS = -14.0
+
+
+def _loudness_gain_db(loudness_lufs: Optional[float]) -> Optional[float]:
+    """Returns the gain (in dB) a client should apply during playback to bring
+    `loudness_lufs` to `_TARGET_LUFS`, clamped to +/-12dB to avoid extreme
+    corrections on misdetected/silent tracks."""
+    if loudness_lufs is None:
+        return None
+    gain = _TARGET_LUFS - loudness_lufs
+    return round(max(-12.0, min(12.0, gain)), 2)
 
 
 # ---------------------------------------------------------------------------
@@ -4191,6 +4260,7 @@ async def upload_user_music(
         "path": rel,
         "id": _stable_id(abs_path),
         "loudness_lufs": loudness_lufs,
+        "gain_db": _loudness_gain_db(loudness_lufs),
         "bpm": bpm,
         "musical_key": musical_key,
         "metadata_id": content_hash,
@@ -4203,7 +4273,12 @@ async def stream_user_music(
     path: str = Query(..., description="Relative path within user's music dir"),
     user: dict = Depends(get_current_user),
 ):
-    """Streams an audio file from the authenticated user's personal music directory."""
+    """Streams an audio file from the authenticated user's personal music directory.
+
+    The response carries an `X-Loudness-Gain-Db` header (Feature: loudness) —
+    the dB adjustment the client should apply during playback to bring this
+    track to the standard loudness target, computed from the file's analyzed
+    `loudness_lufs`. Absent for tracks that haven't been analyzed yet."""
     user_id = user["sub"]
     music_dir = _user_music_dir(user_id)
     if music_dir is None:
@@ -4216,7 +4291,24 @@ async def stream_user_music(
         raise HTTPException(status_code=404, detail="File not found")
 
     ext = full_path.suffix.lstrip(".").lower()
-    return FileResponse(path=str(full_path), media_type=_audio_media_type(ext), filename=full_path.name)
+    headers: dict[str, str] = {}
+    try:
+        rel_path = str(full_path.relative_to(music_dir))
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT loudness_lufs FROM ios_user_music_metadata WHERE user_id = %s AND filename = %s",
+                    (user_id, rel_path),
+                )
+                row = await cur.fetchone()
+        gain_db = _loudness_gain_db(row[0]) if row else None
+        if gain_db is not None:
+            headers["X-Loudness-Gain-Db"] = str(gain_db)
+    except Exception as exc:
+        logger.warning("stream_user_music: loudness lookup failed for %s: %s", path, exc)
+
+    return FileResponse(path=str(full_path), media_type=_audio_media_type(ext), filename=full_path.name, headers=headers)
 
 
 @app.get("/user/music/artwork")
@@ -4324,24 +4416,45 @@ _USER_MUSIC_METADATA_COLS = [
 @app.get("/user/music/metadata")
 async def list_user_music_metadata(
     limit: int = Query(200, ge=1, le=500),
+    min_bpm: Optional[float] = Query(None, ge=0, description="Only tracks with bpm >= this value"),
+    max_bpm: Optional[float] = Query(None, ge=0, description="Only tracks with bpm <= this value"),
+    key: Optional[str] = Query(None, description="Only tracks with this musical_key (e.g. 'A minor')"),
     user: dict = Depends(get_current_user),
 ):
-    """Returns rich metadata rows for all uploaded tracks belonging to this user."""
+    """Returns rich metadata rows for all uploaded tracks belonging to this user.
+
+    `min_bpm`/`max_bpm`/`key` allow filtering by tempo/musical key for
+    tempo-aware browsing and harmonic mixing workflows.
+    """
     user_id = user["sub"]
     pool = await get_pool()
+
+    where = ["user_id = %s"]
+    params: list = [user_id]
+    if min_bpm is not None:
+        where.append("bpm >= %s")
+        params.append(min_bpm)
+    if max_bpm is not None:
+        where.append("bpm <= %s")
+        params.append(max_bpm)
+    if key:
+        where.append("musical_key = %s")
+        params.append(key)
+    params.append(limit)
+
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                """
+                f"""
                 SELECT id, user_id, filename, original_filename, title, artist, album,
                        genre, year, duration_seconds, file_size_bytes, bitrate, sample_rate,
                        mime_type, has_artwork, uploaded_at, loudness_lufs, bpm, musical_key
                 FROM ios_user_music_metadata
-                WHERE user_id = %s
+                WHERE {' AND '.join(where)}
                 ORDER BY uploaded_at DESC
                 LIMIT %s
                 """,
-                (user_id, limit),
+                params,
             )
             rows = await cur.fetchall()
 
@@ -4359,11 +4472,182 @@ async def list_user_music_metadata(
             d["artwork_url"] = f"/user/music/artwork?path={encoded}"
         else:
             d["artwork_url"] = None
+        # Gain (dB) the client should apply to bring this track to the
+        # standard loudness target — see _loudness_gain_db (Feature: loudness).
+        d["gain_db"] = _loudness_gain_db(d["loudness_lufs"])
         # Remove server-internal field from public response
         d.pop("user_id", None)
         result.append(d)
 
     return {"tracks": result, "total": len(result)}
+
+
+@app.post("/user/music/metadata/backfill")
+async def backfill_user_music_metadata(
+    limit: int = Query(5, ge=1, le=20, description="Max number of tracks to analyze in this call"),
+    user: dict = Depends(get_current_user),
+):
+    """Runs loudness/BPM/musical-key analysis for uploaded tracks that are
+    missing one or more of these fields — e.g. tracks uploaded before this
+    analysis existed. Processes up to `limit` tracks per call; call repeatedly
+    (e.g. from a settings screen) until `remaining` is 0."""
+    user_id = user["sub"]
+    music_dir = _user_music_dir(user_id)
+    if music_dir is None:
+        return {"processed": 0, "remaining": 0}
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, filename FROM ios_user_music_metadata
+                WHERE user_id = %s
+                  AND (loudness_lufs IS NULL OR bpm IS NULL OR musical_key IS NULL)
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    pending: list[tuple[str, pathlib.Path]] = []
+    for metadata_id, filename in rows:
+        full_path = (music_dir / filename).resolve()
+        if full_path.is_relative_to(music_dir) and full_path.exists():
+            pending.append((metadata_id, full_path))
+
+    batch = pending[:limit]
+    processed = 0
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            for metadata_id, full_path in batch:
+                async with _UPLOAD_ANALYSIS_SEMAPHORE:
+                    loudness_lufs = await _measure_loudness(full_path)
+                    bpm = await _estimate_bpm(full_path)
+                    musical_key = await _estimate_key(full_path)
+                await cur.execute(
+                    """
+                    UPDATE ios_user_music_metadata
+                    SET loudness_lufs = IF(loudness_lufs IS NULL, %s, loudness_lufs),
+                        bpm = IF(bpm IS NULL, %s, bpm),
+                        musical_key = IF(musical_key IS NULL, %s, musical_key)
+                    WHERE id = %s AND user_id = %s
+                    """,
+                    (loudness_lufs, bpm, musical_key, metadata_id, user_id),
+                )
+                processed += 1
+
+    return {"processed": processed, "remaining": max(0, len(pending) - processed)}
+
+
+@app.get("/user/music/recommendations")
+async def music_recommendations(
+    id: str = Query(..., description="metadata id of the seed track"),
+    limit: int = Query(10, ge=1, le=50),
+    user: dict = Depends(get_current_user),
+):
+    """Harmonic-mixing recommendations: other uploaded tracks in a
+    Camelot-compatible musical key and/or similar tempo to the seed track,
+    ranked for smooth manual or automix transitions."""
+    user_id = user["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT bpm, musical_key FROM ios_user_music_metadata WHERE id = %s AND user_id = %s",
+                (id, user_id),
+            )
+            seed = await cur.fetchone()
+            if not seed:
+                raise HTTPException(status_code=404, detail="Track not found")
+            seed_bpm, seed_key = seed
+
+            await cur.execute(
+                """
+                SELECT id, filename, title, artist, album, bpm, musical_key
+                FROM ios_user_music_metadata
+                WHERE user_id = %s AND id != %s
+                  AND bpm IS NOT NULL AND musical_key IS NOT NULL
+                """,
+                (user_id, id),
+            )
+            rows = await cur.fetchall()
+
+    seed_camelot = _camelot_code(seed_key)
+    candidates = []
+    for mid, filename, title, artist, album, bpm, musical_key in rows:
+        bpm_ratio = None
+        if seed_bpm and bpm:
+            # Compare at 1x, half- and double-time so e.g. a 90 BPM and a
+            # 180 BPM track (which mix fine half/double-time) score well.
+            for factor in (1.0, 0.5, 2.0):
+                ratio = (bpm * factor) / seed_bpm
+                ratio = ratio if ratio <= 1 else 1 / ratio
+                bpm_ratio = ratio if bpm_ratio is None else max(bpm_ratio, ratio)
+
+        key_compatible = _camelot_compatible(seed_camelot, _camelot_code(musical_key))
+        bpm_compatible = bpm_ratio is not None and bpm_ratio >= 0.92
+        if not key_compatible and not bpm_compatible:
+            continue
+
+        candidates.append({
+            "id": mid,
+            "filename": filename,
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "bpm": bpm,
+            "musical_key": musical_key,
+            "key_compatible": key_compatible,
+            "bpm_ratio": round(bpm_ratio, 3) if bpm_ratio is not None else None,
+        })
+
+    candidates.sort(key=lambda c: (not c["key_compatible"], -(c["bpm_ratio"] or 0)))
+    return {"seed_bpm": seed_bpm, "seed_key": seed_key, "tracks": candidates[:limit]}
+
+
+@app.get("/user/music/smart-playlists")
+async def smart_playlists(user: dict = Depends(get_current_user)):
+    """Auto-generated tempo-based playlists (Energetic/Focus/Chill/Sleep),
+    derived from each uploaded track's analyzed BPM. Bucket thresholds mirror
+    the on-device MoodPlaylistService so server- and client-side groupings
+    stay consistent."""
+    user_id = user["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, filename, title, artist, album, bpm
+                FROM ios_user_music_metadata
+                WHERE user_id = %s AND bpm IS NOT NULL AND bpm > 0
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    buckets: dict[str, list[dict]] = {"energetic": [], "focus": [], "chill": [], "sleep": []}
+    for mid, filename, title, artist, album, bpm in rows:
+        track = {"id": mid, "filename": filename, "title": title, "artist": artist, "album": album, "bpm": bpm}
+        if bpm >= 120:
+            buckets["energetic"].append(track)
+        elif bpm >= 90:
+            buckets["focus"].append(track)
+        elif bpm >= 60:
+            buckets["chill"].append(track)
+        else:
+            buckets["sleep"].append(track)
+
+    for tracks in buckets.values():
+        tracks.sort(key=lambda t: t["bpm"], reverse=True)
+
+    return {
+        "playlists": [
+            {"name": "Workout", "key": "energetic", "tracks": buckets["energetic"]},
+            {"name": "Focus", "key": "focus", "tracks": buckets["focus"]},
+            {"name": "Cooldown", "key": "chill", "tracks": buckets["chill"]},
+            {"name": "Sleep", "key": "sleep", "tracks": buckets["sleep"]},
+        ]
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -4645,7 +4929,7 @@ async def get_playback_state(payload: dict = Depends(get_current_user)):
             await cur.execute(
                 """
                 SELECT song_id, title, artist, track_url, source,
-                       position_seconds, duration_seconds, updated_at, is_playing
+                       position_seconds, duration_seconds, updated_at, is_playing, bpm
                 FROM ios_playback_state WHERE user_id = %s
                 """,
                 (user_id,),
@@ -4665,6 +4949,7 @@ async def get_playback_state(payload: dict = Depends(get_current_user)):
         "duration_seconds": row[6],
         "updated_at": row[7].isoformat() if row[7] else None,
         "is_playing": bool(row[8]),
+        "bpm": row[9],
     }
 
 
@@ -4680,17 +4965,18 @@ async def update_playback_state(
             await cur.execute(
                 """
                 INSERT INTO ios_playback_state
-                    (user_id, song_id, title, artist, track_url, source, position_seconds, duration_seconds, is_playing)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (user_id, song_id, title, artist, track_url, source, position_seconds, duration_seconds, is_playing, bpm)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     song_id = VALUES(song_id), title = VALUES(title), artist = VALUES(artist),
                     track_url = VALUES(track_url), source = VALUES(source),
                     position_seconds = VALUES(position_seconds), duration_seconds = VALUES(duration_seconds),
-                    is_playing = VALUES(is_playing)
+                    is_playing = VALUES(is_playing), bpm = VALUES(bpm)
                 """,
                 (
                     user_id, body.song_id, body.title, body.artist, body.track_url,
                     body.source, body.position_seconds, body.duration_seconds, body.is_playing,
+                    body.bpm,
                 ),
             )
 
@@ -5419,6 +5705,59 @@ async def _estimate_key(path: pathlib.Path) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Camelot wheel mapping (Feature: harmonic-mixing recommendations)
+# ---------------------------------------------------------------------------
+
+# Maps "<pitch class> major"/"<pitch class> minor" (as returned by
+# `_estimate_key`) to its Camelot wheel position (e.g. "8B"). Two tracks mix
+# harmonically if their Camelot codes are identical, adjacent on the wheel
+# (+/-1, same letter), or relative major/minor (same number, other letter).
+_CAMELOT_MAJOR = {
+    "C": "8B", "G": "9B", "D": "10B", "A": "11B", "E": "12B", "B": "1B",
+    "F#": "2B", "C#": "3B", "G#": "4B", "D#": "5B", "A#": "6B", "F": "7B",
+}
+_CAMELOT_MINOR = {
+    "A": "8A", "E": "9A", "B": "10A", "F#": "11A", "C#": "12A", "G#": "1A",
+    "D#": "2A", "A#": "3A", "F": "4A", "C": "5A", "G": "6A", "D": "7A",
+}
+
+
+def _camelot_code(musical_key: Optional[str]) -> Optional[str]:
+    """Converts a key string like "A minor" / "C# major" to its Camelot
+    wheel code (e.g. "8A" / "3B"), or None if unparseable."""
+    if not musical_key:
+        return None
+    parts = musical_key.strip().split()
+    if len(parts) != 2:
+        return None
+    pitch, mode = parts[0], parts[1].lower()
+    if mode == "major":
+        return _CAMELOT_MAJOR.get(pitch)
+    if mode == "minor":
+        return _CAMELOT_MINOR.get(pitch)
+    return None
+
+
+def _camelot_compatible(a: Optional[str], b: Optional[str]) -> bool:
+    """True if Camelot codes `a` and `b` mix harmonically: identical,
+    adjacent on the wheel (+/-1 with the same letter, wrapping 1<->12), or
+    relative major/minor (same number, opposite letter)."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    try:
+        num_a, letter_a = int(a[:-1]), a[-1]
+        num_b, letter_b = int(b[:-1]), b[-1]
+    except ValueError:
+        return False
+    if letter_a == letter_b:
+        diff = abs(num_a - num_b) % 12
+        return diff in (1, 11)
+    return num_a == num_b
+
+
+# ---------------------------------------------------------------------------
 # Scrobbling: Last.fm / ListenBrainz (Feature: scrobbling)
 # ---------------------------------------------------------------------------
 
@@ -5602,7 +5941,7 @@ async def _post_discord_webhook(webhook_url: str, payload: dict) -> None:
     await asyncio.to_thread(_post)
 
 
-async def _notify_now_playing_discord(user_id: str, title: str, artist: Optional[str]) -> None:
+async def _notify_now_playing_discord(user_id: str, title: str, artist: Optional[str], bpm: Optional[float] = None) -> None:
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -5619,10 +5958,14 @@ async def _notify_now_playing_discord(user_id: str, title: str, artist: Optional
     if not row or not row[1]:
         return
 
+    description = f"**{title}**" + (f"\nby {artist}" if artist else "")
+    if bpm and bpm > 0:
+        description += f"\n{round(bpm)} BPM"
+
     embed = {
         "embeds": [{
             "title": "Now Playing",
-            "description": f"**{title}**" + (f"\nby {artist}" if artist else ""),
+            "description": description,
             "color": 0xEC4079,
         }],
     }

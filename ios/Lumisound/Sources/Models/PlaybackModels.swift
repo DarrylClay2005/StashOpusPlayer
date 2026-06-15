@@ -91,4 +91,8 @@ struct AudioSettings: Codable, Equatable {
     var bassBoostEnabled: Bool = false
     var bassBoostGain: Float = 0.0  // 0–15 dB extra on 32 Hz and 64 Hz bands
     var activeEffectID: String = "none"
+    /// When true, the EQ preset automatically switches to match each track's
+    /// tempo (see `EQPreset.auto(forBPM:)`) instead of staying on whatever
+    /// preset the user last picked manually.
+    var autoEQEnabled: Bool = false
 }

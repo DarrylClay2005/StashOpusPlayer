@@ -56,6 +56,8 @@ struct LumisoundApp: App {
                     // Wire the sleep-timer fade to the player's volume control.
                     sleepTimer.getVolume = { player.audioSettings.volume }
                     sleepTimer.setVolume = { player.audioSettings.volume = $0 }
+                    sleepTimer.getRate   = { player.audioSettings.speed }
+                    sleepTimer.setRate   = { player.audioSettings.speed = $0 }
                     sleepTimer.onExpire  = { player.pause() }
 
                     // Wire mood service to library so it can access songs.
@@ -155,12 +157,21 @@ struct LumisoundApp: App {
                     guard player.autoRadioEnabled else { return }
                     Task {
                         appLog("Auto-radio: seeding from \"\(seed.displayName)\" by \(seed.artistName)", category: "audio")
+                        // BPM-aware query: bias the related-tracks search toward
+                        // results that match the seed's tempo feel, so a fast/energetic
+                        // seed doesn't get followed by a string of ballads (or vice versa).
+                        let seedBPM = await libraryManager.bpm(for: seed)
+                        let tempoHint = autoRadioTempoHint(for: seedBPM)
+                        let query = [seed.artistName, seed.displayName, tempoHint]
+                            .compactMap { $0 }
+                            .filter { !$0.isEmpty }
+                            .joined(separator: " ")
                         // Uses `relatedTracks`, not `search` — the latter publishes
                         // into `searchResults`/`isSearching`/`errorMessage`, which
                         // would silently overwrite whatever the user has up in the
                         // Stream Search tab right as their queue runs out.
                         let tracks = await streaming.relatedTracks(
-                            query: "\(seed.artistName) \(seed.displayName)",
+                            query: query,
                             source: "youtube",
                             limit: 5
                         )
@@ -186,5 +197,19 @@ struct LumisoundApp: App {
                     Task { await account.loadAvatar(forceRefresh: true) }
                 }
         }
+    }
+}
+
+/// Maps a tempo to a short search-query keyword so Auto-Radio's related-tracks
+/// search is biased toward results with a similar energy level as the seed
+/// track. Returns `nil` for unknown or "normal"-tempo (90-120 BPM) seeds, where
+/// no extra hint is needed — the artist/title alone is descriptive enough.
+private func autoRadioTempoHint(for bpm: Double?) -> String? {
+    guard let bpm, bpm > 0 else { return nil }
+    switch bpm {
+    case ..<60:    return "ambient"
+    case 60..<90:  return "chill"
+    case 90..<120: return nil
+    default:       return "energetic"
     }
 }

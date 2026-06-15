@@ -64,7 +64,18 @@ final class DuplicateFinderService: ObservableObject {
         duplicateGroups.flatMap { group -> [Song] in
             let removable = group.songs.filter { $0.persistentID == nil && $0.url != nil }
             guard removable.count > 1 else { return [] }
-            let sorted = removable.sorted { $0.duration > $1.duration }
+            let sorted = removable.sorted { a, b in
+                if abs(a.duration - b.duration) > 0.01 {
+                    return a.duration > b.duration
+                }
+                // Tiebreaker for same-duration copies: prefer to keep the one
+                // with a known BPM. A successful BPM analysis means the file
+                // decoded cleanly end-to-end, while a copy that previously
+                // failed analysis (nil bpm) may be truncated or corrupt.
+                let aHasBPM = a.bpm != nil
+                let bHasBPM = b.bpm != nil
+                return aHasBPM && !bHasBPM
+            }
             return Array(sorted.dropFirst())
         }
     }

@@ -422,20 +422,31 @@ struct SettingsView: View {
 
             // EQ Preset picker
             if player.audioSettings.equalizerEnabled {
-                HStack {
-                    Label("EQ Preset", systemImage: "waveform")
+                // Auto EQ toggle — when on, the preset switches automatically per-track
+                // based on tempo (see EQPreset.auto(forBPM:)), so the manual picker
+                // below is hidden to avoid implying a fixed preset is in effect.
+                Toggle(isOn: $player.audioSettings.autoEQEnabled) {
+                    Label("Auto EQ (by tempo)", systemImage: "wand.and.stars")
                         .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    Picker("", selection: $player.audioSettings.eqPreset) {
-                        ForEach(EQPreset.allCases) { preset in
-                            Text(preset.displayName)
-                                .tag(preset)
+                }
+                .tint(AppTheme.dynamicAccent)
+
+                if !player.audioSettings.autoEQEnabled {
+                    HStack {
+                        Label("EQ Preset", systemImage: "waveform")
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer()
+                        Picker("", selection: $player.audioSettings.eqPreset) {
+                            ForEach(EQPreset.allCases) { preset in
+                                Text(preset.displayName)
+                                    .tag(preset)
+                            }
                         }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(AppTheme.dynamicAccent)
-                    .onChange(of: player.audioSettings.eqPreset) { newPreset in
-                        player.applyEQPreset(newPreset)
+                        .pickerStyle(.menu)
+                        .tint(AppTheme.dynamicAccent)
+                        .onChange(of: player.audioSettings.eqPreset) { newPreset in
+                            player.applyEQPreset(newPreset)
+                        }
                     }
                 }
             }

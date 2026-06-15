@@ -2166,7 +2166,7 @@ final class AccountService: ObservableObject {
         return (try? Data(contentsOf: url)).flatMap { UIImage(data: $0) }
     }
 
-    func logPlay(song: Song, listenSeconds: Int) async {
+    func logPlay(song: Song, listenSeconds: Int, bpm: Double? = nil) async {
         guard isLoggedIn else { return }
         struct Body: Encodable {
             let title: String
@@ -2174,6 +2174,7 @@ final class AccountService: ObservableObject {
             let track_url: String?
             let local_song_id: String?
             let listen_seconds: Int
+            let bpm: Double?
         }
         do {
             _ = try await makeRequest(
@@ -2184,7 +2185,8 @@ final class AccountService: ObservableObject {
                     artist: song.artist.isEmpty ? nil : song.artist,
                     track_url: song.url?.absoluteString,
                     local_song_id: song.id,
-                    listen_seconds: listenSeconds
+                    listen_seconds: listenSeconds,
+                    bpm: bpm
                 )
             )
             appLog("logPlay: \"\(song.title)\" \(listenSeconds)s", category: "account")
@@ -2200,7 +2202,7 @@ final class AccountService: ObservableObject {
     /// shouldn't spam logs or interrupt playback if the network is down.
     private var playbackStatePushTask: Task<Void, Never>?
 
-    func pushPlaybackState(song: Song?, position: TimeInterval, duration: TimeInterval, isPlaying: Bool) {
+    func pushPlaybackState(song: Song?, position: TimeInterval, duration: TimeInterval, isPlaying: Bool, bpm: Double? = nil) {
         guard isLoggedIn else { return }
         struct Body: Encodable {
             let song_id: String?
@@ -2211,6 +2213,7 @@ final class AccountService: ObservableObject {
             let position_seconds: Double
             let duration_seconds: Double
             let is_playing: Bool
+            let bpm: Double?
         }
         let body = Body(
             song_id: song?.id,
@@ -2220,7 +2223,8 @@ final class AccountService: ObservableObject {
             source: nil,
             position_seconds: position,
             duration_seconds: duration,
-            is_playing: isPlaying
+            is_playing: isPlaying,
+            bpm: bpm
         )
         playbackStatePushTask?.cancel()
         playbackStatePushTask = Task { [weak self] in

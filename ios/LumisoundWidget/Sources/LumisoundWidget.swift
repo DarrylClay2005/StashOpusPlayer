@@ -27,6 +27,7 @@ struct LumisoundEntry: TimelineEntry {
     let date: Date
     let title: String
     let artist: String
+    let bpm: Double?
     let isPlaying: Bool
     let artwork: UIImage?
     /// Playback position (seconds) as of `anchorDate`.
@@ -52,7 +53,7 @@ struct LumisoundWidgetProvider: TimelineProvider {
     private let appGroupID = "group.com.lumisound.ios"
 
     func placeholder(in context: Context) -> LumisoundEntry {
-        LumisoundEntry(date: Date(), title: "Track Title", artist: "Artist", isPlaying: false,
+        LumisoundEntry(date: Date(), title: "Track Title", artist: "Artist", bpm: nil, isPlaying: false,
                         artwork: nil, position: 0, duration: 0, anchorDate: Date())
     }
 
@@ -69,6 +70,8 @@ struct LumisoundWidgetProvider: TimelineProvider {
         let ud = UserDefaults(suiteName: appGroupID)
         let title     = ud?.string(forKey: "widget_track_title") ?? ""
         let artist    = ud?.string(forKey: "widget_track_artist") ?? ""
+        let rawBPM    = ud?.double(forKey: "widget_track_bpm") ?? 0
+        let bpm: Double? = rawBPM > 0 ? rawBPM : nil
         let isPlaying = ud?.bool(forKey: "widget_is_playing") ?? false
         let position  = ud?.double(forKey: "widget_position") ?? 0
         let duration  = ud?.double(forKey: "widget_duration") ?? 0
@@ -80,7 +83,7 @@ struct LumisoundWidgetProvider: TimelineProvider {
                forSecurityApplicationGroupIdentifier: appGroupID) {
             artwork = UIImage(contentsOfFile: container.appendingPathComponent(relPath).path)
         }
-        return LumisoundEntry(date: Date(), title: title, artist: artist, isPlaying: isPlaying,
+        return LumisoundEntry(date: Date(), title: title, artist: artist, bpm: bpm, isPlaying: isPlaying,
                                artwork: artwork, position: position, duration: duration, anchorDate: anchorDate)
     }
 }
@@ -219,10 +222,18 @@ struct WidgetMediumView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
-                    Text(entry.artist)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(entry.artist)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(1)
+                        if let bpm = entry.bpm {
+                            Text("\(Int(bpm.rounded())) BPM")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.cyan.opacity(0.9))
+                                .lineLimit(1)
+                        }
+                    }
 
                     Spacer()
 
@@ -318,10 +329,18 @@ struct WidgetLargeView: View {
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
-                    Text(entry.artist)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(entry.artist)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(1)
+                        if let bpm = entry.bpm {
+                            Text("\(Int(bpm.rounded())) BPM")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.cyan.opacity(0.9))
+                                .lineLimit(1)
+                        }
+                    }
                 }
 
                 if !entry.title.isEmpty {

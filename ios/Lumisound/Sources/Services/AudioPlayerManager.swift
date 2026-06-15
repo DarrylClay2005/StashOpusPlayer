@@ -134,6 +134,14 @@ final class AudioPlayerManager: ObservableObject {
 
     private let primaryNode = AVAudioPlayerNode()
     private let secondaryNode = AVAudioPlayerNode()
+    // Per-node pitch-preserving time stretchers, sitting between each player
+    // node and `crossfadeMixer`. `.rate` is 1.0 (transparent passthrough)
+    // outside of crossfades; `beginCrossfade` nudges these toward each
+    // other's tempo for "beatmatched" overlaps. Separate from the shared
+    // `timePitch` below, which applies the user's global speed/pitch settings
+    // to the final mixed output.
+    private let primaryBeatMatch = AVAudioUnitTimePitch()
+    private let secondaryBeatMatch = AVAudioUnitTimePitch()
     // Dedicated mixer so both player nodes can connect to a single effects chain.
     private let crossfadeMixer = AVAudioMixerNode()
 
@@ -420,6 +428,7 @@ final class AudioPlayerManager: ObservableObject {
         } else {
             prepareCurrent()
         }
+        applyAutoEQIfNeeded(bpm: currentSong?.bpm ?? bpmCache[currentSong?.id ?? ""])
     }
 
     func play(song: Song, in songs: [Song]) {
@@ -601,10 +610,56 @@ final class AudioPlayerManager: ObservableObject {
         var rest = queue
         let current = rest.remove(at: currentIndex)
         rest.shuffle()
-        queue = [current] + rest
+        let anchorBPM = current.bpm ?? bpmCache[current.id]
+        queue = [current] + smartTempoOrder(rest, anchorBPM: anchorBPM)
         currentIndex = queue.firstIndex(where: { $0.id == currentSongID }) ?? 0
         gaplessScheduled = false
         pendingNextIndex = nil
+    }
+
+    /// Reorders an already-randomly-shuffled list so tracks with a known BPM
+    /// form smoother tempo transitions: each step greedily picks the remaining
+    /// known-BPM track closest to the previous track's tempo, avoiding jarring
+    /// energetic→sleep whiplash between consecutive songs. Tracks with no
+    /// known BPM (not yet analyzed) keep their shuffled relative order and are
+    /// interleaved back in at roughly their original positions, so the queue
+    /// doesn't degrade into two separate "known" / "unknown" blocks.
+    private func smartTempoOrder(_ songs: [Song], anchorBPM: Double?) -> [Song] {
+        guard songs.count > 2 else { return songs }
+
+        var withBPM: [(offset: Int, song: Song, bpm: Double)] = []
+        var withoutBPM: [(offset: Int, song: Song)] = []
+        for (offset, song) in songs.enumerated() {
+            if let bpm = song.bpm ?? bpmCache[song.id] {
+                withBPM.append((offset, song, bpm))
+            } else {
+                withoutBPM.append((offset, song))
+            }
+        }
+        guard withBPM.count > 1 else { return songs }
+
+        var remaining = withBPM
+        var ordered: [Song] = []
+        var lastBPM = anchorBPM ?? remaining[0].bpm
+
+        while !remaining.isEmpty {
+            let reference = lastBPM ?? remaining[0].bpm
+            let nearestIndex = remaining.indices.min(by: {
+                abs(remaining[$0].bpm - reference) < abs(remaining[$1].bpm - reference)
+            })!
+            let chosen = remaining.remove(at: nearestIndex)
+            ordered.append(chosen.song)
+            lastBPM = chosen.bpm
+        }
+
+        guard !withoutBPM.isEmpty else { return ordered }
+        var result = ordered
+        for entry in withoutBPM {
+            let fraction = Double(entry.offset) / Double(max(songs.count - 1, 1))
+            let insertIndex = min(Int((fraction * Double(result.count)).rounded()), result.count)
+            result.insert(entry.song, at: insertIndex)
+        }
+        return result
     }
 
     /// Restores the queue order captured before shuffle was turned on.
@@ -1498,6 +1553,32 @@ final class AudioPlayerManager: ObservableObject {
         // correct physical nodes for the rest of this function and the timer below.
         let outgoing = usingPrimaryNode ? primaryNode : secondaryNode
         let incoming = usingPrimaryNode ? secondaryNode : primaryNode
+        let outgoingBeatMatch = usingPrimaryNode ? primaryBeatMatch : secondaryBeatMatch
+        let incomingBeatMatch = usingPrimaryNode ? secondaryBeatMatch : primaryBeatMatch
+
+        // True beatmatching: nudge both tracks' tempos toward their midpoint for
+        // the duration of the overlap, then ease the incoming track back to its
+        // native tempo as the fade completes. Only attempted when both BPMs are
+        // known and the required adjustment is modest (±8%) — outside that range
+        // the tempo change would be audible/unpleasant, so both rates stay at 1.0
+        // (a plain volume crossfade, as before).
+        let outgoingBPM = currentSong.flatMap { bpmCache[$0.id] }
+        let incomingBPM = bpmCache[nextSong.id]
+        var incomingRate: Float = 1.0
+        if let oBPM = outgoingBPM, let iBPM = incomingBPM, oBPM > 0, iBPM > 0 {
+            let target = (oBPM + iBPM) / 2
+            let oRatio = target / oBPM
+            let iRatio = target / iBPM
+            if (0.92...1.08).contains(oRatio), (0.92...1.08).contains(iRatio) {
+                outgoingBeatMatch.rate = Float(oRatio)
+                incomingRate = Float(iRatio)
+            } else {
+                outgoingBeatMatch.rate = 1.0
+            }
+        } else {
+            outgoingBeatMatch.rate = 1.0
+        }
+        incomingBeatMatch.rate = incomingRate
 
         incoming.volume = 0
         let gen = scheduleGeneration &+ 1
@@ -1538,6 +1619,7 @@ final class AudioPlayerManager: ObservableObject {
         // carrying over the outgoing track's (likely mismatched) computed gain.
         resetReplayGainForNewTrack()
         updateNowPlaying()
+        applyAutoEQIfNeeded(bpm: incomingBPM ?? nextSong.bpm)
 
         // The track that just became current was prewarmed before this fade
         // started; warm the one after it now so its tempo is ready for the
@@ -1581,6 +1663,11 @@ final class AudioPlayerManager: ObservableObject {
                 let clipped = min(max(progress, 0), 1)
                 outgoing.volume = (1 - clipped) * self.audioSettings.volume
                 incoming.volume = clipped * self.audioSettings.volume
+                // Ease the incoming track from its beatmatched rate back to its
+                // native tempo (1.0) over the course of the fade, so by the time
+                // the outgoing track is fully silent, the new track is playing
+                // at its own correct speed.
+                incomingBeatMatch.rate = incomingRate + (1.0 - incomingRate) * clipped
                 if step >= steps {
                     t.invalidate()
                     self.crossfadeTimer = nil
@@ -1596,6 +1683,9 @@ final class AudioPlayerManager: ObservableObject {
     private func finishCrossfade(outgoing: AVAudioPlayerNode) {
         outgoing.stop()
         outgoing.volume = audioSettings.volume
+        // Reset the abandoned node's beatmatch rate to neutral so it's ready
+        // for reuse on the next crossfade.
+        (outgoing === primaryNode ? primaryBeatMatch : secondaryBeatMatch).rate = 1.0
         isCrossfading = false
     }
 
@@ -1613,6 +1703,8 @@ final class AudioPlayerManager: ObservableObject {
             let abandoned = usingPrimaryNode ? secondaryNode : primaryNode
             abandoned.stop()
             abandoned.volume = audioSettings.volume
+            (abandoned === primaryNode ? primaryBeatMatch : secondaryBeatMatch).rate = 1.0
+            (activeNode === primaryNode ? primaryBeatMatch : secondaryBeatMatch).rate = 1.0
             activeNode.volume = audioSettings.volume
             isCrossfading = false
         }
@@ -1647,9 +1739,19 @@ final class AudioPlayerManager: ObservableObject {
                 // UI can display tempo once it's known.
                 if self.currentSong?.id == song.id {
                     self.currentSong?.bpm = bpm
+                    self.applyAutoEQIfNeeded(bpm: bpm)
                 }
             }
         }
+    }
+
+    /// If "Auto EQ" is enabled, switches the EQ preset to match `bpm` (see
+    /// `EQPreset.auto(forBPM:)`). No-op if Auto EQ is off, `bpm` is unknown, or
+    /// the suggested preset is already active.
+    private func applyAutoEQIfNeeded(bpm: Double?) {
+        guard audioSettings.autoEQEnabled else { return }
+        guard let preset = EQPreset.auto(forBPM: bpm), audioSettings.eqPreset != preset else { return }
+        applyEQPreset(preset)
     }
 
     // MARK: - Gapless Playback
@@ -1918,16 +2020,22 @@ final class AudioPlayerManager: ObservableObject {
         guard !isEngineConfigured else { return }
         engine.attach(primaryNode)
         engine.attach(secondaryNode)
+        engine.attach(primaryBeatMatch)
+        engine.attach(secondaryBeatMatch)
         engine.attach(crossfadeMixer)
         engine.attach(timePitch)
         engine.attach(equalizer)
         engine.attach(limiter)
         configureLimiter()
 
-        // Both player nodes connect to separate mixer inputs so their volumes
-        // can be ramped independently during a crossfade.
-        engine.connect(primaryNode,   to: crossfadeMixer, fromBus: 0, toBus: 0, format: nil)
-        engine.connect(secondaryNode, to: crossfadeMixer, fromBus: 0, toBus: 1, format: nil)
+        // Both player nodes connect to separate mixer inputs (via their own
+        // beatmatch time-stretch units) so their volumes can be ramped
+        // independently during a crossfade, and their tempos can be nudged
+        // toward each other for a "beatmatched" overlap.
+        engine.connect(primaryNode, to: primaryBeatMatch, format: nil)
+        engine.connect(primaryBeatMatch, to: crossfadeMixer, fromBus: 0, toBus: 0, format: nil)
+        engine.connect(secondaryNode, to: secondaryBeatMatch, format: nil)
+        engine.connect(secondaryBeatMatch, to: crossfadeMixer, fromBus: 0, toBus: 1, format: nil)
         engine.connect(crossfadeMixer, to: timePitch, format: nil)
         engine.connect(timePitch, to: equalizer, format: nil)
         engine.connect(equalizer, to: limiter, format: nil)
@@ -2363,7 +2471,8 @@ final class AudioPlayerManager: ObservableObject {
             song: currentSong,
             position: position,
             duration: duration,
-            isPlaying: isPlaying
+            isPlaying: isPlaying,
+            bpm: currentSong.flatMap { $0.bpm ?? bpmCache[$0.id] }
         )
     }
 
@@ -2384,7 +2493,11 @@ final class AudioPlayerManager: ObservableObject {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled, let self else { return }
             guard self.currentSong?.id == song.id else { return }
-            await AccountService.shared?.logPlay(song: song, listenSeconds: Int(self.position))
+            await AccountService.shared?.logPlay(
+                song: song,
+                listenSeconds: Int(self.position),
+                bpm: song.bpm ?? self.bpmCache[song.id]
+            )
         }
     }
 

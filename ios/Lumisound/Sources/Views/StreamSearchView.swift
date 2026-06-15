@@ -193,6 +193,18 @@ struct StreamSearchView: View {
         }
         .onChange(of: streaming.searchResults.count) { _ in
             resultsAnimationToken = UUID()
+            refreshDownloadedStatus()
+        }
+        .onChange(of: streaming.serverTracks.count) { _ in
+            refreshDownloadedStatus()
+        }
+        // `library.allSongs` only settles after the initial scan (and after any
+        // subfolder/Force Metadata rescan) completes — re-check downloaded status
+        // whenever it changes so subfolder-imported tracks correctly flip their
+        // download icon to "already downloaded" instead of staying stuck on
+        // "not downloaded" forever.
+        .onChange(of: library.allSongs.count) { _ in
+            refreshDownloadedStatus()
         }
         // Playback failures (expired CDN URL, YouTube bot-detection, network errors, etc.)
         // surface only on `player.errorMessage`, which previously had no visible home
@@ -217,6 +229,7 @@ struct StreamSearchView: View {
             if trendingQueries.isEmpty {
                 Task { trendingQueries = await streaming.searchTrending() }
             }
+            refreshDownloadedStatus()
         }
         // fileImporter must be at this level (NavigationStack content root), NOT inside
         // a nested List or conditional branch — SwiftUI can't present the picker from deep hierarchy.
@@ -757,6 +770,33 @@ struct StreamSearchView: View {
         }
     }
 
+    /// Re-derives `downloadedTrackIDs`/`downloadedServerTrackIDs` from the
+    /// current `library.allSongs` (which includes everything found by recursive
+    /// subfolder scans, not just top-level "Imported Music"). Previously these
+    /// sets were ONLY mutated as a side effect of an in-session download, so
+    /// tracks that were already on disk (in a subfolder, restored from backup,
+    /// imported manually, etc.) permanently showed the "not downloaded" icon
+    /// and could be re-downloaded as duplicates.
+    private func refreshDownloadedStatus() {
+        guard !library.allSongs.isEmpty else { return }
+        let localSourceIDs = Set(library.allSongs.compactMap { $0.sourceTrackID })
+
+        for track in streaming.searchResults {
+            guard !downloadedTrackIDs.contains(track.id) else { continue }
+            if localSourceIDs.contains(track.sourceTrackID)
+                || library.isAlreadyImported(title: track.title, artist: track.artist, duration: track.duration) {
+                downloadedTrackIDs.insert(track.id)
+            }
+        }
+
+        for track in streaming.serverTracks {
+            guard !downloadedServerTrackIDs.contains(track.id) else { continue }
+            if library.isAlreadyImported(title: track.title, artist: track.artist, duration: track.duration) {
+                downloadedServerTrackIDs.insert(track.id)
+            }
+        }
+    }
+
     private func handleDownload(track: StreamTrack) {
         guard !downloadingTrackIDs.contains(track.id) else { return }
         downloadingTrackIDs.insert(track.id)
@@ -961,6 +1001,17 @@ struct StreamSearchView: View {
         downloadingServerTrackIDs.insert(track.id)
 
         Task {
+            // Same duplicate guard as `handleDownload`/`runDownloadPipeline`: rescan
+            // first (picks up subfolder-imported files), then skip the download
+            // entirely if a matching track is already in the library.
+            await library.scanLocalDocumentsAsync()
+            if library.isAlreadyImported(title: track.title, artist: track.artist, duration: track.duration) {
+                downloadedServerTrackIDs.insert(track.id)
+                downloadingServerTrackIDs.remove(track.id)
+                ToastCenter.shared.show("\"\(track.title)\" is already in your library", category: .info, icon: "checkmark.circle")
+                return
+            }
+
             do {
                 let importDir = streaming.downloadDirectory
                 try? FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)

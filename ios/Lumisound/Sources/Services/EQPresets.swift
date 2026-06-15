@@ -17,6 +17,21 @@ enum EQPreset: String, CaseIterable, Codable, Identifiable {
     var id: String { rawValue }
     var displayName: String { rawValue }
 
+    /// Suggests an EQ preset based on a track's tempo, for "Auto EQ" mode.
+    /// Slower tracks lean toward presets that favor warmth/clarity over punch
+    /// (Classical/Acoustic), mid-tempo toward Pop, and fast/high-energy tracks
+    /// toward Electronic's boosted sub-bass and highs. Returns `nil` when `bpm`
+    /// is unknown, leaving the current preset untouched.
+    static func auto(forBPM bpm: Double?) -> EQPreset? {
+        guard let bpm, bpm > 0 else { return nil }
+        switch bpm {
+        case ..<70:    return .classical
+        case 70..<100: return .acoustic
+        case 100..<130: return .pop
+        default:       return .electronic
+        }
+    }
+
     // Returns 10 band gain values (dB) for frequencies:
     // 32Hz, 64Hz, 125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz, 16kHz
     var bands: [Float] {
