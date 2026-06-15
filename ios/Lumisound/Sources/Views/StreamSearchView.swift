@@ -922,6 +922,10 @@ struct StreamSearchView: View {
                 try await streaming.deleteUserMusic(path: track.serverPath, token: token)
                 await streaming.fetchUserMusic(token: token)
                 ToastCenter.shared.show("Deleted \"\(track.title)\" from cloud", category: .info, icon: "trash")
+            } catch StreamingError.httpError(404) {
+                // Already gone on the server — treat as a successful delete.
+                await streaming.fetchUserMusic(token: token)
+                ToastCenter.shared.show("Deleted \"\(track.title)\" from cloud", category: .info, icon: "trash")
             } catch {
                 streaming.errorMessage = "Delete failed: \(error.localizedDescription)"
                 ToastCenter.shared.show("Failed to delete \"\(track.title)\"", category: .error)

@@ -1577,8 +1577,19 @@ enum StreamingError: LocalizedError {
             return "Stream URL fetch timed out. Try again."
         case .notFound(let title):
             return "Could not find a stream URL for \"\(title)\"."
-        case .httpError:
-            return "Streaming service is unavailable right now. Please try again later."
+        case .httpError(let code):
+            switch code {
+            case 401, 403:
+                return "You're not signed in or don't have permission for this. Try signing in again."
+            case 404:
+                return "Not found on the server — it may have already been removed."
+            case 413:
+                return "File is too large for the server to accept."
+            case 500...599:
+                return "Server error (HTTP \(code)). Please try again later."
+            default:
+                return "Request failed (HTTP \(code)). Please try again later."
+            }
         case .incompleteDownload:
             return "Download was incomplete. Please try again."
         case .corruptDownload:

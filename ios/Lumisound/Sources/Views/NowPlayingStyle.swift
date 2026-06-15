@@ -22,15 +22,15 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         switch self {
         case .vinylDisc:        return "Vinyl Disc"
         case .albumArt:         return "Album Art"
-        case .polaroid:         return "Polaroid"
+        case .polaroid:         return "Origami"
         case .floatingCards:    return "Floating Cards"
-        case .minimalist:       return "Minimalist"
+        case .minimalist:       return "Editorial"
         case .glassmorphism:    return "Glassmorphism"
         case .retroCRT:         return "Retro CRT"
-        case .spectrumWaveform: return "Spectrum"
-        case .cassetteTape:     return "Cassette"
-        case .neonGlow:         return "Neon Glow"
-        case .auraGlow:         return "Aura Glow"
+        case .spectrumWaveform: return "Pulse Field"
+        case .cassetteTape:     return "Ticket Stub"
+        case .neonGlow:         return "Prism Beams"
+        case .auraGlow:         return "Liquid Aura"
         case .tiltCard:         return "Tilt Card"
         }
     }
@@ -39,15 +39,15 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         switch self {
         case .vinylDisc:        return "opticaldisc"
         case .albumArt:         return "photo"
-        case .polaroid:         return "camera.on.rectangle"
+        case .polaroid:         return "square.on.square"
         case .floatingCards:    return "rectangle.on.rectangle"
-        case .minimalist:       return "square"
+        case .minimalist:       return "newspaper"
         case .glassmorphism:    return "sparkles.rectangle.stack"
         case .retroCRT:         return "tv.inset.filled"
-        case .spectrumWaveform: return "waveform.path.ecg"
-        case .cassetteTape:     return "recordingtape"
-        case .neonGlow:         return "sparkles"
-        case .auraGlow:         return "circle.hexagongrid.fill"
+        case .spectrumWaveform: return "circle.grid.3x3.fill"
+        case .cassetteTape:     return "ticket.fill"
+        case .neonGlow:         return "sun.max.fill"
+        case .auraGlow:         return "drop.fill"
         case .tiltCard:         return "rotate.3d"
         }
     }

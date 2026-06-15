@@ -48,18 +48,6 @@ struct AmbientArtworkBackground: View {
     }
 
     private func loadPalette() async {
-        guard let song else {
-            palette = nil
-            return
-        }
-        var image = library.artwork(for: song)
-        if image == nil {
-            image = await ArtworkService.shared.loadArtwork(for: song)
-        }
-        guard let image else {
-            palette = nil
-            return
-        }
-        palette = ArtworkColorExtractor.palette(from: image)
+        palette = await ArtworkPaletteLoader.palette(for: song, library: library)
     }
 }

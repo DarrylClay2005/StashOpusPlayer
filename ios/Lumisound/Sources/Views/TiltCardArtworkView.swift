@@ -15,6 +15,7 @@ struct TiltCardArtworkView: View {
     @State private var tiltY: Double = 0
     @State private var dragTiltX: Double = 0
     @State private var dragTiltY: Double = 0
+    @State private var palette: ArtworkPalette?
 
     /// Combined ambient + drag-driven tilt, clamped to a believable range
     /// so a fast drag can't flip the card past perspective limits.
@@ -27,6 +28,45 @@ struct TiltCardArtworkView: View {
     }
 
     var body: some View {
+        VStack(spacing: 6) {
+            // Ambient glow — a soft palette-colored blur behind the card that
+            // drifts opposite the tilt, suggesting the card is casting
+            // colored light onto the surface behind it.
+            ZStack {
+                if let palette {
+                    Circle()
+                        .fill(palette.primary)
+                        .frame(width: 300, height: 300)
+                        .blur(radius: 70)
+                        .opacity(0.35)
+                        .offset(x: -totalTiltY * 1.5, y: totalTiltX * 1.5)
+                    Circle()
+                        .fill(palette.secondary)
+                        .frame(width: 240, height: 240)
+                        .blur(radius: 60)
+                        .opacity(0.25)
+                        .offset(x: totalTiltY * 1.2, y: -totalTiltX * 1.2)
+                }
+
+                cardStack
+            }
+
+            // Reflective surface beneath — tilts in sync with the card above
+            // so the "glass shelf" perspective stays consistent with whatever
+            // angle the user (or the ambient animation) leaves the card at.
+            ArtworkReflectionView(song: song, size: 290, cornerRadius: 18)
+                .environmentObject(library)
+                .rotation3DEffect(.degrees(totalTiltX * 0.5), axis: (x: 1, y: 0, z: 0), perspective: 0.4)
+                .rotation3DEffect(.degrees(totalTiltY * 0.5), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
+        }
+        .frame(width: 300)
+        .onAppear { updateAnimations(playing: isPlaying) }
+        .onChange(of: isPlaying) { playing in updateAnimations(playing: playing) }
+        .task(id: song?.id) { await loadPalette() }
+        .animation(.easeInOut(duration: 1.2), value: palette)
+    }
+
+    private var cardStack: some View {
         VStack(spacing: 6) {
             Group {
                 if let song {
@@ -53,6 +93,26 @@ struct TiltCardArtworkView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(.white.opacity(0.15), lineWidth: 1)
+            )
+            // Holographic foil sheen — a rainbow-tinted gradient (built from
+            // the artwork's palette) that slides and shifts hue with the
+            // tilt direction, like light catching a foil-printed card.
+            .overlay(
+                AngularGradient(
+                    colors: [
+                        (palette?.primary ?? .white).opacity(0.5),
+                        (palette?.secondary ?? .white).opacity(0.3),
+                        .clear,
+                        (palette?.primary ?? .white).opacity(0.4),
+                    ],
+                    center: .center
+                )
+                .hueRotation(.degrees((totalTiltX + totalTiltY) * 3))
+                .blendMode(.colorDodge)
+                .opacity(0.35)
+                .offset(x: totalTiltY * 6, y: -totalTiltX * 6)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .allowsHitTesting(false)
             )
             // Specular highlight — a soft diagonal sheen that slides across the
             // card opposite the tilt direction, like light catching glass.
@@ -85,18 +145,12 @@ struct TiltCardArtworkView: View {
                         }
                     }
             )
-
-            // Reflective surface beneath — tilts in sync with the card above
-            // so the "glass shelf" perspective stays consistent with whatever
-            // angle the user (or the ambient animation) leaves the card at.
-            ArtworkReflectionView(song: song, size: 290, cornerRadius: 18)
-                .environmentObject(library)
-                .rotation3DEffect(.degrees(totalTiltX * 0.5), axis: (x: 1, y: 0, z: 0), perspective: 0.4)
-                .rotation3DEffect(.degrees(totalTiltY * 0.5), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
         }
         .frame(width: 300)
-        .onAppear { updateAnimations(playing: isPlaying) }
-        .onChange(of: isPlaying) { playing in updateAnimations(playing: playing) }
+    }
+
+    private func loadPalette() async {
+        palette = await ArtworkPaletteLoader.palette(for: song, library: library)
     }
 
     private func updateAnimations(playing: Bool) {

@@ -572,6 +572,12 @@ struct UploadMusicView: View {
             try? await streaming.fetchUserMusicMetadata(token: tok)
             // Also refresh the basic music list
             await streaming.fetchUserMusic(token: tok)
+        } catch StreamingError.httpError(404) {
+            // The file (and its metadata row) is already gone on the server —
+            // that's the state we wanted, so just refresh the list silently
+            // instead of surfacing a "Delete failed" error.
+            try? await streaming.fetchUserMusicMetadata(token: tok)
+            await streaming.fetchUserMusic(token: tok)
         } catch {
             errorMessage = "Delete failed: \(error.localizedDescription)"
         }
@@ -585,6 +591,8 @@ struct UploadMusicView: View {
         for track in streaming.userMusicMetadata {
             do {
                 try await streaming.deleteUserMusic(path: track.filename, token: tok)
+            } catch StreamingError.httpError(404) {
+                // Already gone — nothing to do.
             } catch {
                 errorMessage = "Delete failed for \(track.title ?? track.filename): \(error.localizedDescription)"
                 // Continue with remaining tracks

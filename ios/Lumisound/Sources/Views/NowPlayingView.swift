@@ -381,7 +381,7 @@ struct NowPlayingView: View {
             .modifier(FloatModifier(isPlaying: player.isPlaying, amount: 6, speed: 2.8))
 
         case .polaroid:
-            PolaroidArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+            OrigamiArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
         case .floatingCards:
@@ -389,7 +389,7 @@ struct NowPlayingView: View {
                 .environmentObject(library)
 
         case .minimalist:
-            MinimalistArtworkView(
+            EditorialArtworkView(
                 song: player.currentSong,
                 isPlaying: player.isPlaying,
                 progress: progress.duration > 0 ? progress.position / progress.duration : 0
@@ -405,19 +405,19 @@ struct NowPlayingView: View {
                 .environmentObject(library)
 
         case .spectrumWaveform:
-            SpectrumWaveformArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+            PulseFieldArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
         case .cassetteTape:
-            CassetteTapeArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+            TicketStubArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
         case .neonGlow:
-            NeonGlowArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+            PrismBeamsArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
         case .auraGlow:
-            AuraGlowArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+            LiquidAuraArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
         case .tiltCard:

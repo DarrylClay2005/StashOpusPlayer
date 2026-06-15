@@ -1321,6 +1321,7 @@ async def _get_raw_url(
             "-f", attempt_flag,
             "--get-url",
             "--no-playlist",
+            *_ytdlp_cookie_args(),
             target_url,
         ]
         logger.info("Running (raw): %s", " ".join(cmd))
@@ -1435,6 +1436,7 @@ async def download_track(
             # which is not in the Docker image. The iOS ArtworkService handles artwork
             # display separately via the thumbnailURL field from search results.
             "-o", output_template,
+            *_ytdlp_cookie_args(),
             *extra_args,
             target_url,
         ]
@@ -1650,6 +1652,7 @@ async def track_metadata(
         entries = await _run_ytdlp(
             "--dump-json",
             "--no-playlist",
+            *_ytdlp_cookie_args(),
             url,
             timeout=20.0,
         )
@@ -4252,7 +4255,18 @@ async def delete_user_music(
     filepath: str,
     user: dict = Depends(get_current_user),
 ):
-    """Deletes a file from the authenticated user's personal music directory."""
+    """Deletes a file (and its metadata row) from the authenticated user's
+    personal music directory.
+
+    Treats "file already gone" as success rather than a 404: the Cloud Backup
+    list is driven by `ios_user_music_metadata`, which previously was never
+    cleaned up on delete, so a successful delete left a stale row behind. The
+    next delete attempt on that same row (or a retry after a flaky first
+    request) then hit this 404 — surfaced to the user as a misleading
+    "Streaming service is unavailable" error even though the file was already
+    gone, i.e. the desired end state. Now any leftover metadata row is removed
+    here too, and a missing file with no metadata row is the only real 404.
+    """
     user_id = user["sub"]
     music_dir = _user_music_dir(user_id)
     if music_dir is None:
@@ -4261,22 +4275,37 @@ async def delete_user_music(
     full_path = (music_dir / filepath).resolve()
     if not full_path.is_relative_to(music_dir):
         raise HTTPException(status_code=403, detail="Access denied")
-    if not full_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
 
-    try:
-        full_path.unlink()
-        # Remove empty parent directories up to the user root
-        parent = full_path.parent
-        while parent != music_dir and parent.exists():
-            try:
-                parent.rmdir()  # only removes if empty
-                parent = parent.parent
-            except OSError:
-                break
-    except Exception as exc:
-        logger.error("delete_user_music: failed for user %s path %s: %s", user_id, filepath, exc)
-        raise HTTPException(status_code=500, detail="Failed to delete file")
+    file_existed = full_path.exists()
+
+    if file_existed:
+        try:
+            full_path.unlink()
+            # Remove empty parent directories up to the user root
+            parent = full_path.parent
+            while parent != music_dir and parent.exists():
+                try:
+                    parent.rmdir()  # only removes if empty
+                    parent = parent.parent
+                except OSError:
+                    break
+        except Exception as exc:
+            logger.error("delete_user_music: failed for user %s path %s: %s", user_id, filepath, exc)
+            raise HTTPException(status_code=500, detail="Failed to delete file")
+
+    # Clean up the metadata row regardless — keeps the Cloud Backup list in
+    # sync with what's actually on disk.
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM ios_user_music_metadata WHERE user_id = %s AND filename = %s",
+                (user_id, filepath),
+            )
+            row_deleted = cur.rowcount > 0
+
+    if not file_existed and not row_deleted:
+        raise HTTPException(status_code=404, detail="File not found")
 
 
 # ---------------------------------------------------------------------------

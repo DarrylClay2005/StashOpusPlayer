@@ -70,6 +70,11 @@ struct LumisoundApp: App {
                     // restoring files from a backup).
                     libraryManager.startPeriodicMetadataReenrichment()
 
+                    // Every 3 minutes, re-read embedded tags for a small rotating
+                    // batch of imported tracks so externally-updated metadata
+                    // (e.g. a bridge re-tag) surfaces without a full rescan.
+                    libraryManager.startPeriodicMetadataRefresh()
+
                     // Scan previously added watched folders.
                     libraryManager.scanWatchedFolders(using: folderService)
 

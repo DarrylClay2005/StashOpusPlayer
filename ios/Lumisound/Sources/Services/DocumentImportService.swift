@@ -351,6 +351,121 @@ struct DocumentImportService {
         return song
     }
 
+    /// Lightweight, local-only re-read of a track's embedded tags — used by the
+    /// periodic background metadata refresh. Unlike `makeSong`, this skips the
+    /// `AVAudioFile`/bitrate probe, the video-artwork-frame extraction, and the
+    /// online iTunes/MusicBrainz/Deezer enrichment chain, so it's cheap enough to
+    /// run on a small rotating batch of tracks every few minutes. Returns `nil`
+    /// if nothing changed (the common case), so callers can skip persistence work.
+    func refreshTags(for url: URL, current: Song) async -> Song? {
+        let asset = AVURLAsset(url: url)
+        let commonMetadata = (try? await asset.load(.commonMetadata)) ?? []
+        let metadata = (try? await asset.load(.metadata)) ?? []
+
+        var title = current.title
+        var artist = current.artist
+        var album = current.album
+        var genre = current.genre
+        var trackNumber = current.trackNumber
+        var year = current.year
+        var sourceTrackID = current.sourceTrackID
+
+        for item in commonMetadata {
+            switch item.commonKey?.rawValue {
+            case "title":
+                title = item.stringValue ?? title
+            case "artist":
+                artist = item.stringValue ?? artist
+            case "album":
+                album = item.stringValue ?? album
+            default:
+                break
+            }
+        }
+
+        for item in metadata {
+            let idRaw = item.identifier?.rawValue.lowercased() ?? ""
+            let keyRaw = (item.key as? String)?.lowercased() ?? ""
+
+            if sourceTrackID == nil, idRaw.contains("lumisound_id") || keyRaw.contains("lumisound_id") {
+                sourceTrackID = item.stringValue
+            }
+
+            if genre.isEmpty, idRaw.contains("genre") {
+                genre = item.stringValue ?? genre
+            }
+
+            if trackNumber == 0, idRaw.contains("tracknumber") || idRaw.hasSuffix("/track") {
+                if let raw = item.stringValue {
+                    let part = raw.split(separator: "/").first.map(String.init) ?? raw
+                    trackNumber = Int(part.trimmingCharacters(in: .whitespaces)) ?? 0
+                } else if let num = try? await item.load(.numberValue) {
+                    trackNumber = num.intValue
+                }
+            }
+
+            if year.isEmpty,
+               idRaw.contains("year") || idRaw.contains("date") || idRaw.contains("recordingyear")
+            {
+                if let raw = item.stringValue {
+                    year = String(raw.prefix(4))
+                } else if let num = try? await item.load(.numberValue) {
+                    year = "\(num.intValue)"
+                }
+            }
+        }
+
+        let fileExt = url.pathExtension.lowercased()
+        let opusExtensions: Set<String> = ["opus", "ogg"]
+        if opusExtensions.contains(fileExt), title == url.deletingPathExtension().lastPathComponent {
+            let vorbis = Self.readVorbisComments(url: url)
+            if let v = vorbis["TITLE"],  !v.isEmpty { title  = v }
+            if let v = vorbis["ARTIST"], !v.isEmpty { artist = v }
+            if let v = vorbis["ALBUM"],  !v.isEmpty { album  = v }
+            if let v = vorbis["GENRE"],  !v.isEmpty { genre  = v }
+            if let v = vorbis["DATE"] ?? vorbis["YEAR"], !v.isEmpty { year = String(v.prefix(4)) }
+            if trackNumber == 0, let v = vorbis["TRACKNUMBER"] ?? vorbis["TRACK"], !v.isEmpty {
+                trackNumber = Int(v.split(separator: "/").first.map(String.init) ?? v) ?? 0
+            }
+            if sourceTrackID == nil, let v = vorbis["LUMISOUND_ID"], !v.isEmpty {
+                sourceTrackID = v
+            }
+        }
+
+        if title == url.deletingPathExtension().lastPathComponent && title.contains(" - ") {
+            let parts = title.components(separatedBy: " - ")
+            if parts.count >= 2 {
+                if artist.isEmpty { artist = parts[0].trimmingCharacters(in: .whitespaces) }
+                title = parts.dropFirst().joined(separator: " - ").trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        if album.isEmpty {
+            let parentName = url.deletingLastPathComponent().lastPathComponent
+            let skipFolders: Set<String> = ["Imported Music", "Documents", ""]
+            if !skipFolders.contains(parentName) {
+                album = parentName
+            }
+        }
+
+        guard title != current.title || artist != current.artist || album != current.album
+            || genre != current.genre || year != current.year || trackNumber != current.trackNumber
+            || sourceTrackID != current.sourceTrackID
+        else {
+            return nil
+        }
+
+        var refreshed = current
+        refreshed.title = title
+        refreshed.artist = artist
+        refreshed.album = album
+        refreshed.genre = genre
+        refreshed.year = year
+        refreshed.trackNumber = trackNumber
+        refreshed.sourceTrackID = sourceTrackID
+        return refreshed
+    }
+
     // MARK: - Online Metadata Enrichment
 
     /// Returns a song with missing fields filled from the enrichment cache or the iTunes/MusicBrainz/Deezer chain.
