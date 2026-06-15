@@ -7,6 +7,7 @@ import SwiftUI
 /// "use cached artwork if available, otherwise fetch it" + extraction logic
 /// that was previously duplicated verbatim across nine artwork views.
 enum ArtworkPaletteLoader {
+    @MainActor
     static func palette(for song: Song?, library: LibraryManager) async -> ArtworkPalette? {
         guard let song else { return nil }
         var image = library.artwork(for: song)
