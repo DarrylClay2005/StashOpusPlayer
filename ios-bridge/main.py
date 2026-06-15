@@ -18,7 +18,7 @@ import urllib.request
 import uuid
 import zipfile
 from collections import defaultdict
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlencode, urlsplit
@@ -180,6 +180,15 @@ _FFPROBE_CACHE = _FfprobeCache(_ffprobe_cache_path)
 # the memory limit — the iOS client's "Download All" already queues more requests
 # than this and just waits its turn.
 _YTDLP_SEMAPHORE = asyncio.Semaphore(4)  # max 4 concurrent yt-dlp processes
+
+# Formats other than m4a/best require yt-dlp to transcode after downloading
+# (`-x --audio-format ...`), which is CPU-bound ffmpeg work rather than the
+# mostly-network-bound stream copy used for m4a/best. Running 4 of those
+# concurrently — on top of the upload-analysis ffmpeg processes — saturates
+# the host and pushes jobs past _YTDLP_TIMEOUT_TRANSCODE even for short
+# tracks. Cap transcoding jobs to a smaller pool, acquired in addition to
+# _YTDLP_SEMAPHORE.
+_TRANSCODE_SEMAPHORE = asyncio.Semaphore(2)
 
 # ---------------------------------------------------------------------------
 # /api/download job tracking
@@ -1549,25 +1558,37 @@ async def _do_download_job(
         ]
         logger.info("Download cmd (attempt %d/%d): %s", attempt, max_attempts, " ".join(cmd))
 
-        async with _YTDLP_SEMAPHORE:
+        # `-x`/`--extract-audio` means yt-dlp transcodes after downloading
+        # (mp3/flac/wav/opus) — much more CPU-bound and slower than the m4a/best
+        # stream copy, so it gets its own concurrency cap and a longer timeout.
+        is_transcode = "-x" in extra_args or "--extract-audio" in extra_args
+        ytdlp_timeout = 240.0 if is_transcode else 90.0
+
+        async with AsyncExitStack() as stack:
+            await stack.enter_async_context(_YTDLP_SEMAPHORE)
+            if is_transcode:
+                await stack.enter_async_context(_TRANSCODE_SEMAPHORE)
+
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             try:
-                # Kept well under the Cloudflare Tunnel's ~100s edge timeout (the
-                # source of the "HTTP 524" errors reported by the app): a stuck
-                # yt-dlp process that ran the full previous 300s timeout always
-                # produced a 524 before this endpoint could even respond, and
-                # burned the entire client retry budget on one attempt. Failing
-                # fast here leaves time for `max_attempts` retries to land a
-                # response inside the client's window.
-                _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=75.0)
+                # /api/download is async (see _DOWNLOAD_JOBS comment above) — this
+                # no longer needs to fit inside the Cloudflare Tunnel's ~100s edge
+                # timeout, since the HTTP request already returned with a job_id.
+                # Still bounded so a truly stuck process doesn't hold its semaphore
+                # slot (and tmp dir) forever.
+                _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=ytdlp_timeout)
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.communicate()  # reap the zombie (Fix 7)
                 shutil.rmtree(tmp_dir, ignore_errors=True)
+                logger.warning(
+                    "yt-dlp timed out after %.0fs (attempt %d/%d, transcode=%s): %s",
+                    ytdlp_timeout, attempt, max_attempts, is_transcode, safe_title,
+                )
                 raise HTTPException(status_code=408, detail="Download timed out")
 
         if proc.returncode != 0:
@@ -1654,7 +1675,10 @@ async def _do_download_job(
         # instant; bounded tightly so a stuck ffmpeg can't push this request
         # past the Cloudflare Tunnel's ~100s edge timeout (see download timeout
         # comment above).
-        await asyncio.wait_for(proc.communicate(), timeout=20.0)
+        # 60s rather than the ~instant stream-copy itself would need: under
+        # concurrent transcode load (_TRANSCODE_SEMAPHORE) the host's ffmpeg
+        # queue can back this up well past 20s even though this remux is cheap.
+        await asyncio.wait_for(proc.communicate(), timeout=60.0)
         # Re-verify after tagging: the remux can introduce corruption that
         # `_verify_downloaded_audio`'s earlier pass on `output_file` (run before
         # tagging) wouldn't have caught — exactly the kind of file the client's
