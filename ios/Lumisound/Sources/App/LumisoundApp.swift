@@ -61,6 +61,10 @@ struct LumisoundApp: App {
                     // Wire mood service to library so it can access songs.
                     moodService.libraryManager = libraryManager
 
+                    // Wire player to library so it can resolve track BPM for
+                    // beat-aware crossfades.
+                    player.libraryManager = libraryManager
+
                     // Auto-scan for corrupt files immediately, then every 5 minutes
                     // for the rest of the session (non-blocking, all users).
                     CorruptFileFinderService.shared.startPeriodicScanning()

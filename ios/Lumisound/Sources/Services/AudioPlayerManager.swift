@@ -109,6 +109,12 @@ final class AudioPlayerManager: ObservableObject {
     /// whenever the per-track settings map changes.
     var onTrackAudioSettingsChanged: (() -> Void)?
 
+    /// Wired up by `LumisoundApp` at launch so the player can resolve BPM for
+    /// the current/next track (via `LibraryManager.bpm(for:)`) to drive
+    /// beat-aware crossfades. `weak` since `LibraryManager` owns the player's
+    /// environment lifetime, not the other way around.
+    weak var libraryManager: LibraryManager?
+
     @Published var errorMessage: String?
 
     // Auto-Radio
@@ -209,6 +215,11 @@ final class AudioPlayerManager: ObservableObject {
     private var crossfadeTimer: Timer?
     // Fires crossfadeDuration seconds before a track ends so we begin fading early.
     private var crossfadeStartTimer: Timer?
+
+    /// BPM lookups resolved via `libraryManager?.bpm(for:)`, keyed by song ID.
+    /// Populated ahead of time by `prewarmBPM` so `beginCrossfade` can read a
+    /// tempo synchronously without blocking the fade on analysis.
+    private var bpmCache: [String: Double] = [:]
 
     // Gapless: the next file pre-loaded and scheduled on the active node.
     private var gaplessScheduled = false
@@ -948,6 +959,11 @@ final class AudioPlayerManager: ObservableObject {
                 }
             }
 
+            // Warm the BPM cache for this track and the one queued after it so
+            // `beginCrossfade` can read a tempo synchronously once it fires.
+            prewarmBPM(for: currentSong)
+            prewarmBPM(for: peekNextSong())
+
             // Schedule crossfade to begin crossfadeDuration seconds before the track ends,
             // so the incoming track fades in while the current track is still playing.
             if audioSettings.crossfadeEnabled && audioSettings.crossfadeDuration > 0 {
@@ -1068,6 +1084,11 @@ final class AudioPlayerManager: ObservableObject {
                     self.handleTrackEnded()
                 }
             }
+
+            // Warm the BPM cache for this track and the one queued after it so
+            // `beginCrossfade` can read a tempo synchronously once it fires.
+            prewarmBPM(for: currentSong)
+            prewarmBPM(for: peekNextSong())
 
             // Crossfade timer — same logic as scheduleCurrent.
             if audioSettings.crossfadeEnabled && audioSettings.crossfadeDuration > 0 {
@@ -1464,7 +1485,12 @@ final class AudioPlayerManager: ObservableObject {
         }
 
         isCrossfading = true
-        let fadeDuration = audioSettings.crossfadeDuration
+        // Snap to the outgoing track's beat grid (if known) so the fade starts
+        // and ends on a downbeat instead of an arbitrary fraction of a second.
+        let fadeDuration = smartFadeDuration(
+            base: audioSettings.crossfadeDuration,
+            bpm: currentSong.flatMap { bpmCache[$0.id] }
+        )
 
         // The outgoing node is the one currently playing; incoming is the opposite.
         // Captured as `let` — the upcoming `usingPrimaryNode` flip changes what
@@ -1512,6 +1538,11 @@ final class AudioPlayerManager: ObservableObject {
         // carrying over the outgoing track's (likely mismatched) computed gain.
         resetReplayGainForNewTrack()
         updateNowPlaying()
+
+        // The track that just became current was prewarmed before this fade
+        // started; warm the one after it now so its tempo is ready for the
+        // next crossfade.
+        prewarmBPM(for: peekNextSong())
 
         // Arm the crossfade-start timer for the track that just became current —
         // mirroring the setup `scheduleCurrent` does for the very first track.
@@ -1584,6 +1615,40 @@ final class AudioPlayerManager: ObservableObject {
             abandoned.volume = audioSettings.volume
             activeNode.volume = audioSettings.volume
             isCrossfading = false
+        }
+    }
+
+    /// Adjusts `base` (the user's configured crossfade duration) to the nearest
+    /// whole number of beats at `bpm`, so the fade starts and ends on a
+    /// downbeat instead of an arbitrary fraction of a second. Falls back to
+    /// `base` unchanged if `bpm` isn't known yet, and clamps the result to
+    /// within ±50% of `base` so a very slow track doesn't balloon a short
+    /// crossfade into a multi-second one (or vice versa for a fast track).
+    private func smartFadeDuration(base: TimeInterval, bpm: Double?) -> TimeInterval {
+        guard base > 0, let bpm, bpm > 0 else { return base }
+        let beatLength = 60.0 / bpm
+        let beats = max(1, (base / beatLength).rounded())
+        let snapped = beats * beatLength
+        return min(max(snapped, base * 0.5), base * 1.5)
+    }
+
+    /// Kicks off (cached) BPM analysis for `song` so its tempo is available by
+    /// the time `beginCrossfade` needs it. Fire-and-forget — `bpmCache` is
+    /// populated asynchronously and read synchronously from `beginCrossfade`.
+    private func prewarmBPM(for song: Song?) {
+        guard let song, bpmCache[song.id] == nil, song.url != nil else { return }
+        Task { [weak self] in
+            guard let self, let library = self.libraryManager,
+                  let bpm = await library.bpm(for: song)
+            else { return }
+            await MainActor.run {
+                self.bpmCache[song.id] = bpm
+                // Surface the result on `currentSong` too, so the Now Playing
+                // UI can display tempo once it's known.
+                if self.currentSong?.id == song.id {
+                    self.currentSong?.bpm = bpm
+                }
+            }
         }
     }
 

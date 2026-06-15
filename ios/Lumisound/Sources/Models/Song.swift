@@ -25,6 +25,12 @@ struct Song: Identifiable, Hashable, Codable {
     /// Not persisted across launches — tokens expire and are re-acquired on next login.
     var httpHeaders: [String: String]?
 
+    /// Estimated tempo in beats per minute, lazily computed by `BPMAnalyzerService`
+    /// and cached here so the library, "smarter" crossfade, and other tempo-aware
+    /// features don't need to re-decode the file on every access. `nil` until
+    /// analysis has run for this track.
+    var bpm: Double?
+
     init(
         id: String = UUID().uuidString,
         title: String,
@@ -40,7 +46,8 @@ struct Song: Identifiable, Hashable, Codable {
         bitrate: Int = 0,
         sampleRate: Int = 0,
         sourceTrackID: String? = nil,
-        httpHeaders: [String: String]? = nil
+        httpHeaders: [String: String]? = nil,
+        bpm: Double? = nil
     ) {
         self.id = id
         self.title = title
@@ -57,6 +64,7 @@ struct Song: Identifiable, Hashable, Codable {
         self.sampleRate = sampleRate
         self.sourceTrackID = sourceTrackID
         self.httpHeaders = httpHeaders
+        self.bpm = bpm
     }
 
     var displayName: String {

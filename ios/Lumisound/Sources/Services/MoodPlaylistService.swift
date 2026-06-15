@@ -44,10 +44,11 @@ final class MoodPlaylistService: ObservableObject {
         defer { isAnalyzing = false }
 
         // Run expensive AVAsset metadata reads at background priority.
+        let library = libraryManager
         let classified: [(Song, MoodBucket)] = await Task.detached(priority: .background) {
             var results: [(Song, MoodBucket)] = []
             for song in songs {
-                let mood = await Self.classify(song: song)
+                let mood = await Self.classify(song: song, library: library)
                 results.append((song, mood))
             }
             return results
@@ -76,9 +77,20 @@ final class MoodPlaylistService: ObservableObject {
 
     // MARK: - Classification Logic (nonisolated so it can run off main actor)
 
-    private static func classify(song: Song) async -> MoodBucket {
-        // 1. Try BPM from AVAsset metadata.
-        if let url = song.url, let bpm = await fetchBPM(from: url) {
+    private static func classify(song: Song, library: LibraryManager?) async -> MoodBucket {
+        // 1. Already-analyzed tempo (from `BPMAnalyzerService`, via the library),
+        //    then an embedded BPM/TBPM tag, then on-device analysis as a final
+        //    fallback — so tracks with neither a tag nor a prior analysis still
+        //    get a tempo-based bucket instead of falling through to genre/title
+        //    keyword matching.
+        var bpm = song.bpm
+        if bpm == nil, let url = song.url {
+            bpm = await fetchBPM(from: url)
+        }
+        if bpm == nil {
+            bpm = await library?.bpm(for: song)
+        }
+        if let bpm {
             switch bpm {
             case ..<60:   return .sleep
             case 60..<90: return .chill

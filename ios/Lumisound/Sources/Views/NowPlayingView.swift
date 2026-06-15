@@ -437,13 +437,25 @@ struct NowPlayingView: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .contentTransition(.opacity)
-                MarqueeText(
-                    text: player.currentSong?.artistName ?? "Choose a song from the Library",
-                    font: .body,
-                    color: AppTheme.textSecondary
-                )
-                .frame(height: 20)
-                .contentTransition(.opacity)
+                HStack(spacing: 6) {
+                    MarqueeText(
+                        text: player.currentSong?.artistName ?? "Choose a song from the Library",
+                        font: .body,
+                        color: AppTheme.textSecondary
+                    )
+                    .frame(height: 20)
+                    .contentTransition(.opacity)
+
+                    if let bpm = player.currentSong?.bpm {
+                        Text("\(Int(bpm.rounded())) BPM")
+                            .font(AppTheme.monoFont(size: 11))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(AppTheme.elevatedSurface, in: Capsule())
+                            .fixedSize()
+                    }
+                }
             }
             .animation(.easeInOut(duration: 0.25), value: player.currentSong?.id)
             Spacer(minLength: 8)

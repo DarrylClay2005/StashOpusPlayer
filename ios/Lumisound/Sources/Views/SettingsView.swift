@@ -14,6 +14,7 @@ struct SettingsView: View {
     @EnvironmentObject private var streaming: StreamingService
     @EnvironmentObject private var account: AccountService
     @EnvironmentObject private var cacheManager: CacheManagerService
+    @EnvironmentObject private var folderService: MusicFolderService
 
     @State private var showLogin = false
 
@@ -248,8 +249,28 @@ struct SettingsView: View {
                     .foregroundStyle(AppTheme.textPrimary)
             }
 
+            // Force metadata sync
+            Button {
+                Task { await library.forceMetadataSync(using: folderService) }
+            } label: {
+                HStack {
+                    Label("Force Metadata Sync", systemImage: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                    Spacer()
+                    if library.isForcingMetadataSync {
+                        ProgressView()
+                            .tint(AppTheme.dynamicAccent)
+                    }
+                }
+            }
+            .disabled(library.isForcingMetadataSync)
+
         } header: {
             sectionHeader("Library")
+        } footer: {
+            Text("Re-scans your entire Documents folder — including \"Imported Music\" and any subfolders — plus any watched folders, then re-reads embedded tags and re-runs online metadata lookups for every imported track. Use this if tags look stale or after manually adding files outside the app.")
+                .font(AppTheme.bodyFont(size: 12))
+                .foregroundStyle(AppTheme.textSecondary)
         }
         .listRowBackground(AppTheme.surface)
     }

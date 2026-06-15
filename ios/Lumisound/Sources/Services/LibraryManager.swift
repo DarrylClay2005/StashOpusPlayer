@@ -61,6 +61,9 @@ final class LibraryManager: ObservableObject {
     private var isReenrichingMetadata = false
     private var metadataRefreshTimer: Timer?
     private var isRefreshingMetadata = false
+    /// Set while `forceMetadataSync` is running, so the Settings button can
+    /// show a spinner and avoid overlapping runs.
+    @Published private(set) var isForcingMetadataSync = false
     /// Rotating cursor into `importedSongs` for `refreshNextMetadataBatch()` —
     /// advances by `metadataRefreshBatchSize` each tick so every track gets
     /// re-read eventually without ever doing a full-library pass in one go.
@@ -173,6 +176,95 @@ final class LibraryManager: ObservableObject {
         appLog("Periodic metadata re-enrichment: updated \(updatedCount) song(s)", category: "library")
         ScanCacheService.shared.persist()
         await EnrichmentCacheStore.shared.persist()
+        rebuildAllSongs()
+    }
+
+    // MARK: - Force Metadata Sync
+
+    /// Immediately rescans the whole local library (the Documents tree,
+    /// including "Imported Music" and any subfolders, plus any watched
+    /// folders) and then re-reads embedded tags and re-runs online
+    /// enrichment for *every* imported track — not just a rotating batch or
+    /// tracks with missing fields. For use from a "Force Metadata Sync"
+    /// button in Settings; the periodic timers cover the lazy/background case.
+    func forceMetadataSync(using folderService: MusicFolderService) async {
+        guard !isForcingMetadataSync else { return }
+        isForcingMetadataSync = true
+        defer { isForcingMetadataSync = false }
+
+        appLog("Force metadata sync: rescanning Documents + watched folders", category: "library")
+        await scanLocalDocumentsAsync()
+        await scanWatchedFoldersAsync(using: folderService)
+
+        var updatedCount = 0
+        let total = importedSongs.count
+
+        for index in importedSongs.indices {
+            let song = importedSongs[index]
+            guard let url = song.url, FileManager.default.fileExists(atPath: url.path) else { continue }
+
+            var current = song
+            if let refreshed = await importer.refreshTags(for: url, current: current) {
+                current = refreshed
+            }
+            if current.artist.isEmpty || current.album.isEmpty || current.genre.isEmpty || current.year.isEmpty {
+                current = await MetadataFetchService.shared.enrich(song: current)
+            }
+
+            guard index < importedSongs.count, importedSongs[index].id == song.id else { continue }
+            if current != song {
+                importedSongs[index] = current
+                updatedCount += 1
+            }
+
+            if let stamp = ScanCacheService.fileStamp(for: url) {
+                ScanCacheService.shared.store(song: current, for: url, stamp: stamp)
+            }
+            if let filename = current.url?.lastPathComponent {
+                var entry: [String: String] = [:]
+                if !current.artist.isEmpty { entry["artist"] = current.artist }
+                if !current.album.isEmpty  { entry["album"]  = current.album  }
+                if !current.genre.isEmpty  { entry["genre"]  = current.genre  }
+                if !current.year.isEmpty   { entry["year"]   = current.year   }
+                await EnrichmentCacheStore.shared.store(filename, entry: entry)
+            }
+        }
+
+        ScanCacheService.shared.persist()
+        await EnrichmentCacheStore.shared.persist()
+        rebuildAllSongs()
+
+        appLog("Force metadata sync: updated \(updatedCount) of \(total) song(s)", category: "library")
+        lastScanResult = "Force metadata sync: updated \(updatedCount) of \(total) song(s)"
+    }
+
+    // MARK: - Tempo (BPM)
+
+    /// Returns `song.bpm` if already known, otherwise analyzes the track via
+    /// `BPMAnalyzerService` (on-device, ffmpeg-equivalent autocorrelation) and
+    /// caches the result on the song for future lookups — used by the player
+    /// to drive beat-aware crossfades and by any other tempo-aware feature.
+    /// Returns `nil` if the song has no local URL or no tempo could be estimated.
+    func bpm(for song: Song) async -> Double? {
+        if let bpm = song.bpm { return bpm }
+        guard let url = song.url else { return nil }
+
+        guard let estimated = await BPMAnalyzerService.shared.bpm(for: url) else { return nil }
+        storeBPM(estimated, for: song.id)
+        return estimated
+    }
+
+    /// Writes a freshly-analyzed BPM back into `mediaSongs`/`importedSongs` so
+    /// it's returned instantly next time and survives in the persisted
+    /// library snapshot.
+    private func storeBPM(_ bpm: Double, for songID: String) {
+        if let index = mediaSongs.firstIndex(where: { $0.id == songID }) {
+            mediaSongs[index].bpm = bpm
+        } else if let index = importedSongs.firstIndex(where: { $0.id == songID }) {
+            importedSongs[index].bpm = bpm
+        } else {
+            return
+        }
         rebuildAllSongs()
     }
 
