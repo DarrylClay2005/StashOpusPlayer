@@ -21,7 +21,8 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
+import urllib.error
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,7 +39,7 @@ from auth import (
     hash_password_async,
     verify_password_async,
 )
-from db import _pool as _db_pool_ref, get_pool, init_db
+from db import get_pool, init_db
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -653,9 +654,6 @@ def _youtube_data_api_get(path: str, params: dict, api_key: str) -> dict:
     On a 403 quotaExceeded response, records a cooldown for *api_key* (see
     _youtube_quota_is_cooling_down) before re-raising.
     """
-    from urllib.parse import urlencode
-    import urllib.error
-
     query = urlencode({**params, "key": api_key})
     req = urllib.request.Request(f"https://www.googleapis.com/youtube/v3/{path}?{query}")
     try:
@@ -791,9 +789,6 @@ def _youtube_data_api_get_raw(path: str, params: dict, api_key: str) -> tuple[in
     returns (status_code, parsed_json_body) so callers can inspect the
     `error.errors[].reason` field YouTube returns for quota/auth failures
     (used by /youtube/validate-key and /youtube/key-exposure-check)."""
-    from urllib.parse import urlencode
-    import urllib.error
-
     query = urlencode({**params, "key": api_key})
     req = urllib.request.Request(f"https://www.googleapis.com/youtube/v3/{path}?{query}")
     try:
@@ -3753,8 +3748,7 @@ async def server_library(
     await _FFPROBE_CACHE.flush()
 
     tracks: list[dict] = []
-    for fpath, meta in zip(audio_files, tag_results):
-        abs_path = str(fpath.resolve())
+    for fpath, abs_path, meta in zip(audio_files, abs_paths, tag_results):
         try:
             rel_path = str(fpath.relative_to(music_root))
         except ValueError:
@@ -3777,7 +3771,7 @@ async def server_library(
         album_name = meta.get("album") or ""
         if not album_name:
             parent = fpath.parent
-            if parent.resolve() != music_root.resolve():
+            if parent.resolve() != music_root:
                 album_name = parent.name
 
         tracks.append({
@@ -3981,9 +3975,9 @@ async def get_user_music(
     tag_results = await asyncio.gather(*(_ffprobe_tags(p) for p in abs_paths))
     await _FFPROBE_CACHE.flush()
 
+    music_dir_resolved = music_dir.resolve()
     tracks: list[dict] = []
-    for fpath, meta in zip(audio_files, tag_results):
-        abs_path = str(fpath.resolve())
+    for fpath, abs_path, meta in zip(audio_files, abs_paths, tag_results):
         try:
             rel_path = str(fpath.relative_to(music_dir))
         except ValueError:
@@ -3995,7 +3989,7 @@ async def get_user_music(
         album_name = meta.get("album") or ""
         if not album_name:
             parent = fpath.parent
-            if parent.resolve() != music_dir.resolve():
+            if parent.resolve() != music_dir_resolved:
                 album_name = parent.name
 
         if search:

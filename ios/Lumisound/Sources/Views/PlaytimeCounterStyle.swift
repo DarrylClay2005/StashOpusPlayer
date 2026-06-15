@@ -56,14 +56,6 @@ enum PlaytimeCounterStyle: String, CaseIterable, Identifiable {
     }
 
     private static func formatTime(_ t: TimeInterval) -> String {
-        guard t.isFinite, t >= 0 else { return "0:00" }
-        let total = Int(t.rounded())
-        let h = total / 3600
-        let m = (total % 3600) / 60
-        let s = total % 60
-        if h > 0 {
-            return "\(h):\(String(format: "%02d", m)):\(String(format: "%02d", s))"
-        }
-        return "\(m):\(String(format: "%02d", s))"
+        t.formattedWithHours
     }
 }

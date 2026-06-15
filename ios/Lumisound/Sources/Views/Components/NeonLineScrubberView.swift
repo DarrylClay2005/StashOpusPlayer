@@ -116,8 +116,6 @@ struct NeonLineScrubberView: View {
     }
 
     private func formatTime(_ t: TimeInterval) -> String {
-        guard t.isFinite, t >= 0 else { return "0:00" }
-        let total = Int(t.rounded())
-        return "\(total / 60):\(String(format: "%02d", total % 60))"
+        t.formattedAsMinutesSeconds
     }
 }

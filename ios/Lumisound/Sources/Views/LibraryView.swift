@@ -500,18 +500,12 @@ private struct ArtistRow: View {
     let artist: String
     @EnvironmentObject private var library: LibraryManager
 
-    private var artistSongs: [Song] {
-        library.songs(byArtist: artist)
-    }
-
-    private var songCount: Int { artistSongs.count }
-
-    private var albumCount: Int {
-        Set(artistSongs.map { $0.albumName }).count
-    }
-
     var body: some View {
-        HStack(spacing: 12) {
+        let artistSongs = library.songs(byArtist: artist)
+        let songCount = artistSongs.count
+        let albumCount = Set(artistSongs.map { $0.albumName }).count
+
+        return HStack(spacing: 12) {
             ArtistAvatar(artist: artist, size: 40)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -533,18 +527,12 @@ private struct ArtistGridCell: View {
     let artist: String
     @EnvironmentObject private var library: LibraryManager
 
-    private var artistSongs: [Song] {
-        library.songs(byArtist: artist)
-    }
-
-    private var songCount: Int { artistSongs.count }
-
-    private var albumCount: Int {
-        Set(artistSongs.map { $0.albumName }).count
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let artistSongs = library.songs(byArtist: artist)
+        let songCount = artistSongs.count
+        let albumCount = Set(artistSongs.map { $0.albumName }).count
+
+        return VStack(alignment: .leading, spacing: 6) {
             GeometryReader { geo in
                 ArtistAvatar(artist: artist, size: geo.size.width, cornerRadius: 8)
             }
@@ -630,16 +618,11 @@ private struct AlbumGridCell: View {
     let album: String
     @EnvironmentObject private var library: LibraryManager
 
-    private var representativeSong: Song? {
-        library.songs(inAlbum: album).first
-    }
-
-    private var artistName: String {
-        representativeSong?.artistName ?? "Unknown Artist"
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let representativeSong = library.songs(inAlbum: album).first
+        let artistName = representativeSong?.artistName ?? "Unknown Artist"
+
+        return VStack(alignment: .leading, spacing: 6) {
             // GeometryReader sizes the artwork to the actual column width — like
             // SongGridCell/FolderGridCell, a hardcoded size here clips (3-column)
             // or under-fills (1-column) the cell depending on the chosen layout.

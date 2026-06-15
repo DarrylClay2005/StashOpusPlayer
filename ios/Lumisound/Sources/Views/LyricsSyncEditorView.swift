@@ -389,9 +389,7 @@ struct LyricsSyncEditorView: View {
 
     /// Formats a TimeInterval for display as `M:SS`
     private func formatTime(_ time: TimeInterval) -> String {
-        guard time.isFinite, time >= 0 else { return "0:00" }
-        let total = Int(time.rounded())
-        return "\(total / 60):\(String(format: "%02d", total % 60))"
+        time.formattedAsMinutesSeconds
     }
 
     /// Strips filesystem-illegal characters from a filename
