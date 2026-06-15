@@ -1624,8 +1624,16 @@ async def _do_download_job(
         "-i", str(output_file),
         "-map_metadata", "0",
         "-c", "copy",
-        "-metadata", f"LUMISOUND_ID={source_id}",
     ]
+    # For mp4/m4a containers, a stream-copy remux defaults to writing the moov
+    # atom at the end of the file. ffprobe (used by `_verify_downloaded_audio`)
+    # handles that fine, but it's exactly the "dropped/late moov atom" shape
+    # that makes AVAudioFile on the client reject the file as corrupt even
+    # though the bridge's own integrity check passed. +faststart moves it back
+    # to the front during the remux, which is otherwise a no-op for copy mode.
+    if output_file.suffix.lstrip(".") in ("m4a", "mp4", "mov"):
+        tag_cmd += ["-movflags", "+faststart"]
+    tag_cmd += ["-metadata", f"LUMISOUND_ID={source_id}"]
     # --embed-thumbnail is omitted above (no AtomicParsley for M4A), so the only
     # record of this track's artwork is the `thumbnail` query param. Embed it as
     # a metadata tag too: if the app's artwork disk cache is ever cleared (or the
@@ -1635,6 +1643,7 @@ async def _do_download_job(
     if thumbnail:
         tag_cmd += ["-metadata", f"LUMISOUND_THUMBNAIL={thumbnail}"]
     tag_cmd.append(str(tagged_file))
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *tag_cmd,
@@ -1646,13 +1655,22 @@ async def _do_download_job(
         # past the Cloudflare Tunnel's ~100s edge timeout (see download timeout
         # comment above).
         await asyncio.wait_for(proc.communicate(), timeout=20.0)
-        if proc.returncode == 0 and tagged_file.exists() and tagged_file.stat().st_size > 0:
+        # Re-verify after tagging: the remux can introduce corruption that
+        # `_verify_downloaded_audio`'s earlier pass on `output_file` (run before
+        # tagging) wouldn't have caught — exactly the kind of file the client's
+        # own integrity check then rejects, forcing a retry. Fall back to the
+        # already-verified untagged file rather than serve a possibly-broken one.
+        if (proc.returncode == 0 and tagged_file.exists() and tagged_file.stat().st_size > 0
+                and await _verify_downloaded_audio(tagged_file)):
             output_file.unlink(missing_ok=True)
             output_file = tagged_file
         else:
-            logger.warning("LUMISOUND_ID tagging failed for %s, serving untagged file", output_file)
+            logger.warning("LUMISOUND_ID tagging failed or produced an unplayable file for %s, serving untagged file", output_file)
             tagged_file.unlink(missing_ok=True)
     except (asyncio.TimeoutError, Exception) as exc:
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            await proc.communicate()
         logger.warning("LUMISOUND_ID tagging error for %s: %s", output_file, exc)
         tagged_file.unlink(missing_ok=True)
 
