@@ -934,35 +934,113 @@ final class StreamingService: ObservableObject {
         requestedExt: String,
         importDir: URL
     ) async throws -> URL {
-        var request = request
-        // Give the bridge 5 min to run yt-dlp before iOS cancels the request.
-        request.timeoutInterval = 360
+        // /api/download is async: it returns a job_id immediately (status 202)
+        // instead of holding the connection open for the whole yt-dlp run. A
+        // synchronous design here routinely exceeded the Cloudflare Tunnel's
+        // ~100s edge timeout for normal-length tracks, causing 524s followed by
+        // from-scratch retries that piled onto the bridge and made every
+        // subsequent request slower (a runaway retry storm).
+        var startRequest = request
+        startRequest.timeoutInterval = 30
+
+        let (startData, startResponse) = try await URLSession.shared.data(for: startRequest)
+        guard let startHTTP = startResponse as? HTTPURLResponse else {
+            throw StreamingError.invalidURL
+        }
+
+        switch startHTTP.statusCode {
+        case 202:
+            break
+        case 408:
+            appWarn("downloadToLibrary: timeout for \"\(track.title)\"", category: "network")
+            throw StreamingError.timeout
+        case 404:
+            appWarn("downloadToLibrary: not found for \"\(track.title)\"", category: "network")
+            throw StreamingError.notFound(track.title)
+        case 502, 503, 504, 524:
+            appWarn("downloadToLibrary: gateway error \(startHTTP.statusCode) for \"\(track.title)\" — will retry", category: "network")
+            throw StreamingError.incompleteDownload
+        default:
+            // Includes 204 ("client already has this track" per existing_ids) —
+            // this track's own id is excluded from that manifest, so 204 here
+            // would be unexpected; treat it like an incomplete result so the
+            // retry loop re-fetches rather than adopting an empty file.
+            appWarn("downloadToLibrary: unexpected start status \(startHTTP.statusCode) for \"\(track.title)\"", category: "network")
+            throw StreamingError.incompleteDownload
+        }
+
+        struct StartPayload: Decodable { let job_id: String }
+        guard let start = try? JSONDecoder().decode(StartPayload.self, from: startData) else {
+            throw StreamingError.incompleteDownload
+        }
+
+        guard let statusURL = jobPollURL(from: startRequest, path: "/api/download/status", jobID: start.job_id),
+              let resultURL = jobPollURL(from: startRequest, path: "/api/download/result", jobID: start.job_id) else {
+            throw StreamingError.invalidURL
+        }
+
+        var statusRequest = startRequest
+        statusRequest.url = statusURL
+
+        struct StatusPayload: Decodable { let status: String; let code: Int?; let detail: String? }
+
+        // Poll every 3s for up to 5 minutes — matches the previous client-side
+        // timeout, but each poll is a trivial dict lookup (<1s), so this never
+        // approaches the tunnel's ~100s edge timeout regardless of how long
+        // yt-dlp itself takes on the bridge.
+        let deadline = Date().addingTimeInterval(300)
+        pollLoop: while true {
+            if Date() > deadline {
+                appWarn("downloadToLibrary: job poll timed out for \"\(track.title)\"", category: "network")
+                throw StreamingError.incompleteDownload
+            }
+            let (data, resp) = try await URLSession.shared.data(for: statusRequest)
+            guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
+                  let status = try? JSONDecoder().decode(StatusPayload.self, from: data) else {
+                throw StreamingError.incompleteDownload
+            }
+            switch status.status {
+            case "pending":
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                continue pollLoop
+            case "done":
+                break pollLoop
+            case "error":
+                switch status.code {
+                case 408:
+                    appWarn("downloadToLibrary: timeout for \"\(track.title)\"", category: "network")
+                    throw StreamingError.timeout
+                case 404:
+                    appWarn("downloadToLibrary: not found for \"\(track.title)\"", category: "network")
+                    throw StreamingError.notFound(track.title)
+                case 502, 503, 504, 524:
+                    appWarn("downloadToLibrary: job failed with gateway error \(status.code ?? 0) for \"\(track.title)\" — will retry", category: "network")
+                    throw StreamingError.incompleteDownload
+                default:
+                    appError("downloadToLibrary: job failed (\(status.code ?? 0)) for \"\(track.title)\": \(status.detail ?? "")", category: "network")
+                    throw StreamingError.httpError(status.code ?? 500)
+                }
+            default:
+                throw StreamingError.incompleteDownload
+            }
+        }
+
+        var resultRequest = startRequest
+        resultRequest.url = resultURL
+        resultRequest.timeoutInterval = 120
 
         let (downloadedURL, response) = try await BackgroundDownloadManager.run(
             named: "lumisound.download.\(safeName)"
         ) {
-            try await URLSession.shared.download(for: request)
+            try await URLSession.shared.download(for: resultRequest)
         }
         if let httpResponse = response as? HTTPURLResponse {
             switch httpResponse.statusCode {
             case 200..<300:
                 break
-            case 408:
-                appWarn("downloadToLibrary: timeout for \"\(track.title)\"", category: "network")
-                throw StreamingError.timeout
-            case 404:
-                appWarn("downloadToLibrary: not found for \"\(track.title)\"", category: "network")
-                throw StreamingError.notFound(track.title)
-            case 502, 503, 504, 524:
-                // Transient gateway/tunnel errors (Cloudflare "524 A timeout
-                // occurred" is the common one) — the bridge's yt-dlp pipeline is
-                // just slow/overloaded, not permanently broken. Retry like
-                // .incompleteDownload instead of failing the whole download.
-                appWarn("downloadToLibrary: gateway error \(httpResponse.statusCode) for \"\(track.title)\" — will retry", category: "network")
-                throw StreamingError.incompleteDownload
             default:
-                appError("downloadToLibrary: HTTP \(httpResponse.statusCode) for \"\(track.title)\"", category: "network")
-                throw StreamingError.httpError(httpResponse.statusCode)
+                appError("downloadToLibrary: HTTP \(httpResponse.statusCode) fetching result for \"\(track.title)\"", category: "network")
+                throw StreamingError.incompleteDownload
             }
         }
 
@@ -1026,6 +1104,19 @@ final class StreamingService: ObservableObject {
         }
 
         return destURL
+    }
+
+    /// Builds the `/api/download/status` or `/api/download/result` URL for a given
+    /// job, reusing the scheme/host/port/auth of the original `/api/download`
+    /// request but replacing the path and query with `job_id=`.
+    private func jobPollURL(from request: URLRequest, path: String, jobID: String) -> URL? {
+        guard let url = request.url,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = path
+        components.queryItems = [URLQueryItem(name: "job_id", value: jobID)]
+        return components.url
     }
 
     /// Maps a format value to the appropriate file extension.

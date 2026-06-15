@@ -27,7 +27,7 @@ import urllib.error
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -180,6 +180,31 @@ _FFPROBE_CACHE = _FfprobeCache(_ffprobe_cache_path)
 # the memory limit — the iOS client's "Download All" already queues more requests
 # than this and just waits its turn.
 _YTDLP_SEMAPHORE = asyncio.Semaphore(4)  # max 4 concurrent yt-dlp processes
+
+# ---------------------------------------------------------------------------
+# /api/download job tracking
+#
+# yt-dlp extraction for a normal-length track routinely takes 70-100+ seconds,
+# which is right at (or past) the Cloudflare Tunnel's ~100s edge timeout. A
+# synchronous "hold the connection open until done" design means the client
+# gets a 524 a few seconds before the bridge actually finishes, retries with a
+# brand-new request that restarts the whole download from scratch, and piles
+# the retry onto the same 4-slot semaphore — a runaway retry storm where every
+# request gets slower. Instead, /api/download starts a background job and
+# returns the job_id immediately; the client polls /api/download/status (a
+# trivial dict lookup, always <1s) and fetches /api/download/result once done.
+_DOWNLOAD_JOBS: dict = {}
+_DOWNLOAD_JOB_MAX_AGE = 900  # seconds — sweep abandoned jobs/temp dirs after this
+
+
+def _sweep_stale_download_jobs() -> None:
+    now = time.monotonic()
+    stale = [jid for jid, job in _DOWNLOAD_JOBS.items() if now - job["created"] > _DOWNLOAD_JOB_MAX_AGE]
+    for jid in stale:
+        job = _DOWNLOAD_JOBS.pop(jid)
+        tmp_dir = job.get("tmp_dir")
+        if tmp_dir is not None:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 # ---------------------------------------------------------------------------
 # Rate limiter for auth endpoints (Fix 2)
@@ -1385,10 +1410,14 @@ async def download_track(
     ),
 ):
     """
-    Download audio with embedded metadata and thumbnail, stream the file bytes back,
-    then clean up the temporary file.
+    Starts a background download job and returns its `job_id` immediately
+    (status 202). Poll `/api/download/status?job_id=...` until the status is
+    no longer "pending", then fetch `/api/download/result?job_id=...` for the
+    file. See the `_DOWNLOAD_JOBS` comment for why this is async rather than
+    streaming the file back directly from this request.
     """
     await check_auth(request)
+    _sweep_stale_download_jobs()
 
     source = source.lower()
     format = format.lower()
@@ -1415,7 +1444,81 @@ async def download_track(
     extra_args, expected_ext = _download_format_args(format)
 
     safe_title = (title or id).replace("/", "-").replace(":", "-")[:100]
+    account_token = request.headers.get("X-Account-Token", "")
 
+    job_id = uuid.uuid4().hex
+    _DOWNLOAD_JOBS[job_id] = {"status": "pending", "created": time.monotonic(), "tmp_dir": None}
+    asyncio.create_task(_run_download_job(
+        job_id=job_id,
+        source=source,
+        id=id,
+        target_url=target_url,
+        extra_args=extra_args,
+        expected_ext=expected_ext,
+        safe_title=safe_title,
+        title=title,
+        artist=artist,
+        thumbnail=thumbnail,
+        duration=duration,
+        account_token=account_token,
+    ))
+    return JSONResponse({"job_id": job_id}, status_code=202)
+
+
+async def _run_download_job(
+    job_id: str,
+    source: str,
+    id: str,
+    target_url: str,
+    extra_args: list,
+    expected_ext: str,
+    safe_title: str,
+    title: Optional[str],
+    artist: Optional[str],
+    thumbnail: Optional[str],
+    duration: Optional[int],
+    account_token: str,
+) -> None:
+    """
+    Runs yt-dlp (with retries/verification) and the LUMISOUND_ID tagging step
+    for one /api/download request, then records the result in `_DOWNLOAD_JOBS`
+    for /api/download/status and /api/download/result to pick up. Split out of
+    download_track() so the HTTP request can return instantly with a job_id.
+    """
+    try:
+        await _do_download_job(
+            job_id=job_id, source=source, id=id, target_url=target_url,
+            extra_args=extra_args, expected_ext=expected_ext, safe_title=safe_title,
+            title=title, artist=artist, thumbnail=thumbnail, duration=duration,
+            account_token=account_token,
+        )
+    except HTTPException as exc:
+        job = _DOWNLOAD_JOBS.get(job_id, {})
+        job["status"] = "error"
+        job["code"] = exc.status_code
+        job["detail"] = exc.detail
+    except Exception as exc:
+        logger.exception("download job %s failed", job_id)
+        job = _DOWNLOAD_JOBS.get(job_id, {})
+        job["status"] = "error"
+        job["code"] = 500
+        job["detail"] = str(exc)
+
+
+async def _do_download_job(
+    job_id: str,
+    source: str,
+    id: str,
+    target_url: str,
+    extra_args: list,
+    expected_ext: str,
+    safe_title: str,
+    title: Optional[str],
+    artist: Optional[str],
+    thumbnail: Optional[str],
+    duration: Optional[int],
+    account_token: str,
+) -> None:
     # Large playlists drive this endpoint hard via the iOS "Download All" pipeline,
     # and yt-dlp occasionally exits 0 while leaving a truncated/corrupt file behind
     # (interrupted remux, dropped connection mid-transcode, etc.) — exactly what the
@@ -1549,7 +1652,6 @@ async def download_track(
     # token is optional, and history-tracking failures shouldn't block the
     # download itself). Powers "My Library" search, "Previously downloaded"
     # restore, and download stats.
-    account_token = request.headers.get("X-Account-Token", "")
     if account_token:
         payload = decode_token(account_token)
         if payload and payload.get("sub"):
@@ -1578,6 +1680,55 @@ async def download_track(
     }
     media_type = content_type_map.get(actual_ext, "application/octet-stream")
 
+    job = _DOWNLOAD_JOBS.get(job_id, {})
+    job["status"] = "done"
+    job["tmp_dir"] = tmp_dir
+    job["file"] = output_file
+    job["media_type"] = media_type
+    job["filename"] = f"{safe_title}.{actual_ext}"
+
+
+@app.get("/api/download/status")
+async def download_status(request: Request, job_id: str = Query(...)):
+    """Poll target for the job_id returned by /api/download. See `_DOWNLOAD_JOBS`."""
+    await check_auth(request)
+    job = _DOWNLOAD_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Unknown job_id")
+    if job["status"] == "error":
+        return JSONResponse({"status": "error", "code": job["code"], "detail": job["detail"]})
+    return JSONResponse({"status": job["status"]})
+
+
+@app.get("/api/download/result")
+async def download_result(request: Request, job_id: str = Query(...)):
+    """
+    Fetches the finished file for a completed /api/download job. Returns 202
+    while the job is still running, or re-raises the job's error status once
+    failed. Either way, a terminal call here removes the job and (on success)
+    schedules the temp dir for cleanup after the file has been streamed.
+    """
+    await check_auth(request)
+    job = _DOWNLOAD_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Unknown job_id")
+
+    if job["status"] == "pending":
+        return JSONResponse({"status": "pending"}, status_code=202)
+
+    if job["status"] == "error":
+        tmp_dir = job.get("tmp_dir")
+        _DOWNLOAD_JOBS.pop(job_id, None)
+        if tmp_dir is not None:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=job["code"], detail=job["detail"])
+
+    output_file = job["file"]
+    media_type = job["media_type"]
+    filename = job["filename"]
+    tmp_dir = job["tmp_dir"]
+    _DOWNLOAD_JOBS.pop(job_id, None)
+
     # Schedule cleanup after the file has been streamed (5-second grace period).
     async def _cleanup_later(path: pathlib.Path) -> None:
         await asyncio.sleep(5)
@@ -1588,7 +1739,7 @@ async def download_track(
     return FileResponse(
         path=str(output_file),
         media_type=media_type,
-        filename=f"{safe_title}.{actual_ext}",
+        filename=filename,
     )
 
 
