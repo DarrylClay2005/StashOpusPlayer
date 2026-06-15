@@ -1562,7 +1562,7 @@ async def _do_download_job(
         # (mp3/flac/wav/opus) — much more CPU-bound and slower than the m4a/best
         # stream copy, so it gets its own concurrency cap and a longer timeout.
         is_transcode = "-x" in extra_args or "--extract-audio" in extra_args
-        ytdlp_timeout = 240.0 if is_transcode else 90.0
+        ytdlp_timeout = 240.0 if is_transcode else 140.0
 
         async with AsyncExitStack() as stack:
             await stack.enter_async_context(_YTDLP_SEMAPHORE)
