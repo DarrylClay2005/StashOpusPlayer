@@ -25,10 +25,28 @@ async def get_pool() -> aiomysql.Pool:
     return _pool
 
 
+def _strip_sql_comments(sql: str) -> str:
+    """Removes `--` line comments before the statements are split on `;`.
+
+    The schema is split naively on `;`, so a semicolon *inside* a comment
+    (e.g. "Never echoed back to clients; see ...") used to slice a comment in
+    half and feed the trailing fragment to the DB as bogus SQL — crashing
+    startup. Stripping everything from `--` to end-of-line first makes the
+    splitter immune to punctuation in comments. (`--` only ever introduces a
+    comment in this DDL-only schema; it never appears inside a string literal.)
+    """
+    lines: list[str] = []
+    for line in sql.splitlines():
+        idx = line.find("--")
+        lines.append(line[:idx] if idx != -1 else line)
+    return "\n".join(lines)
+
+
 async def init_db():
     """Create iOS-specific tables if they don't exist, wrapped in a transaction."""
     pool = await get_pool()
-    sql = pathlib.Path(__file__).parent.joinpath("schema.sql").read_text()
+    raw = pathlib.Path(__file__).parent.joinpath("schema.sql").read_text()
+    sql = _strip_sql_comments(raw)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await conn.begin()

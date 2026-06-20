@@ -418,8 +418,8 @@ ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS youtube_api_key VARCHAR(1
 -- Per-user yt-dlp cookies (Netscape cookies.txt format), used to authenticate
 -- yt-dlp extraction (search/stream/resolve/download) as that user's YouTube
 -- session — required for age-restricted content and avoids YouTube's
--- anonymous-request bot-detection blocks. Never echoed back to clients; see
--- /user/ytdlp-cookies (status only) and /user/ytdlp-cookies/validate.
+-- anonymous-request bot-detection blocks. Never echoed back to clients (see
+-- the /user/ytdlp-cookies status + /user/ytdlp-cookies/validate endpoints).
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS ytdlp_cookies MEDIUMTEXT NULL;
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS ytdlp_cookies_updated_at TIMESTAMP NULL;
 

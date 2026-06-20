@@ -28,7 +28,7 @@ import urllib.error
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
@@ -1989,7 +1989,14 @@ def _download_format_args(format: str) -> tuple[list[str], str]:
     elif format == "wav":
         return ["-f", "bestaudio", "-x", "--audio-format", "wav", "--audio-quality", "0"], "wav"
     elif format == "best":
-        return ["-f", "bestaudio/best"], "m4a"
+        # "Best available": extract the highest-quality audio in its NATIVE
+        # codec (no re-encode, so it's lossless extraction). `-x` is required —
+        # without it, raw `bestaudio` is frequently a .webm container, which
+        # yt-dlp's --embed-thumbnail postprocessor does NOT support, so the
+        # download errored out immediately. With `-x` the audio lands in an
+        # embeddable container (.m4a/.opus/.ogg). expected_ext is a hint only;
+        # the temp-dir scan picks up the real extension.
+        return ["-f", "bestaudio/best", "-x"], "m4a"
     else:
         # m4a — native m4a from YouTube, no transcoding needed.
         return ["-f", "bestaudio[ext=m4a]/bestaudio/best"], "m4a"
@@ -2112,22 +2119,17 @@ async def resolve_playlist(
     return _filter_existing_tracks(tracks, source, existing_ids)
 
 
-@app.get("/api/playlist/expand")
-async def expand_playlist(
-    request: Request,
-    url: str = Query(..., description="Playlist or album URL"),
-    limit: int = Query(1000, ge=1, le=5000, description="Max items to return"),
-):
-    """Expands a playlist into its individual video URLs — the same concept as
-    export-youtube-playlist style tools. Returns a flat list of per-item
-    `https://www.youtube.com/watch?v=<id>` URLs (plus id/title), so each track
-    can be fetched individually with `--no-playlist` instead of handing yt-dlp
-    a whole playlist URL (which it handles far less reliably for large or
-    partially-unavailable playlists). Reuses the robust resolve path: YouTube
-    Data API (per-account key) first, yt-dlp flat-playlist fallback."""
-    await check_auth(request)
-    await _reject_ssrf_targets(url)
+# Directory where extracted per-playlist links.txt files are written. Lives
+# under the yt-dlp cache so it persists in the mounted volume and can be reused.
+YTDLP_LINKS_DIR = pathlib.Path(os.getenv("YTDLP_LINKS_DIR", "/app/.cache/yt-dlp/links"))
 
+
+async def _extract_playlist_items(request: Request, url: str, limit: int) -> tuple[str, list[dict]]:
+    """Shared playlist→individual-items resolution used by both the JSON expand
+    endpoint and the links.txt extractor. Returns (source, items) where each
+    item is {id, title, url}. Resolution order: YouTube Data API (per-account
+    key, no cap) → yt-dlp flat-playlist fallback."""
+    await _reject_ssrf_targets(url)
     source = _source_from_url(url)
     user_id = _account_token_user_id(request)
 
@@ -2142,7 +2144,7 @@ async def expand_playlist(
                 items = await _resolve_youtube_playlist_via_api(playlist_id, limit, api_key)
                 tracks = [_parse_track(item, source) for item in items]
             except Exception as exc:
-                logger.warning("expand_playlist: Data API failed, falling back to yt-dlp: %s", exc)
+                logger.warning("playlist extract: Data API failed, falling back to yt-dlp: %s", exc)
 
     if not tracks:
         args = (["--dump-json", url] if source == "soundcloud"
@@ -2150,24 +2152,195 @@ async def expand_playlist(
         try:
             entries = await _run_ytdlp(*args, timeout=120.0)
         except asyncio.TimeoutError:
-            raise HTTPException(status_code=408, detail="Playlist expand timed out")
+            raise HTTPException(status_code=408, detail="Playlist extract timed out")
         except Exception as exc:
-            logger.error("expand_playlist: yt-dlp error: %s", exc)
-            raise HTTPException(status_code=404, detail="Could not expand playlist")
+            logger.error("playlist extract: yt-dlp error: %s", exc)
+            raise HTTPException(status_code=404, detail="Could not extract playlist")
         tracks = [_parse_track(e, source) for e in entries[:limit]]
 
-    items = []
+    items: list[dict] = []
     for t in tracks:
-        # `youtube_url` is populated by _parse_track; fall back to building a
-        # watch URL from the id for YouTube entries that lack it.
         track_url = t.get("youtube_url") or (
             f"https://www.youtube.com/watch?v={t.get('id')}" if source == "youtube" and t.get("id") else None
         )
         if not track_url:
             continue
         items.append({"id": t.get("id"), "title": t.get("title"), "url": track_url})
+    return source, items
 
+
+@app.get("/api/playlist/expand")
+async def expand_playlist(
+    request: Request,
+    url: str = Query(..., description="Playlist or album URL"),
+    limit: int = Query(1000, ge=1, le=5000, description="Max items to return"),
+):
+    """Expands a playlist into its individual video URLs — the same concept as
+    export-youtube-playlist style tools. Returns a flat list of per-item
+    `https://www.youtube.com/watch?v=<id>` URLs (plus id/title), so each track
+    can be fetched individually with `--no-playlist` instead of handing yt-dlp
+    a whole playlist URL (which it handles far less reliably for large or
+    partially-unavailable playlists)."""
+    await check_auth(request)
+    source, items = await _extract_playlist_items(request, url, limit)
     return {"source": source, "count": len(items), "items": items}
+
+
+@app.get("/api/playlist/links")
+async def playlist_links(
+    request: Request,
+    url: str = Query(..., description="Playlist or single media URL"),
+    limit: int = Query(5000, ge=1, le=10000, description="Max links to extract"),
+):
+    """Playlist URL extractor: reads every media item from a playlist (or a
+    single URL) and returns a plain-text `links.txt` — one individual video URL
+    per line — which yt-dlp can consume directly with `--batch-file`/`-a`
+    (`yt-dlp -a links.txt`). For huge playlists this is far more reliable than
+    pointing yt-dlp at the playlist URL. The file is also persisted server-side
+    under YTDLP_LINKS_DIR and reused as the batch source by
+    `/api/download/batch`. A single (non-playlist) URL yields a one-line file."""
+    await check_auth(request)
+
+    # A single media URL (no playlist) → just that one line, no extraction.
+    if not _extract_youtube_playlist_id(url) and "list=" not in url and "/playlist" not in url and "/sets/" not in url:
+        await _reject_ssrf_targets(url)
+        content = url.strip() + "\n"
+        path = _write_links_file(url, content)
+        return PlainTextResponse(content, headers={"X-Links-Count": "1", "X-Links-File": str(path)})
+
+    _source, items = await _extract_playlist_items(request, url, limit)
+    content = "".join(item["url"] + "\n" for item in items)
+    path = _write_links_file(url, content)
+    return PlainTextResponse(
+        content,
+        headers={"X-Links-Count": str(len(items)), "X-Links-File": str(path)},
+    )
+
+
+def _write_links_file(source_url: str, content: str) -> pathlib.Path:
+    """Persists extracted links to `{YTDLP_LINKS_DIR}/<hash>.txt` (links.txt)
+    so it can be reused as a yt-dlp `--batch-file` source. Keyed by a hash of
+    the source URL so re-extracting the same playlist overwrites cleanly."""
+    YTDLP_LINKS_DIR.mkdir(parents=True, exist_ok=True)
+    key = hashlib.sha256(source_url.encode()).hexdigest()[:16]
+    path = YTDLP_LINKS_DIR / f"{key}.txt"
+    try:
+        path.write_text(content)
+    except OSError as exc:
+        logger.warning("playlist_links: could not persist links file: %s", exc)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# Batch playlist download — extracts a playlist into links.txt and runs a
+# single `yt-dlp -a links.txt` that downloads every item straight into the
+# user's per-user cloud library. One yt-dlp process pulling from the link file
+# is far more reliable for large playlists than handing it the playlist URL.
+# ---------------------------------------------------------------------------
+
+_BATCH_JOBS: dict[str, dict] = {}
+
+
+@app.post("/api/download/batch")
+async def batch_download(
+    request: Request,
+    url: str = Query(..., description="Playlist (or single) URL to batch-download"),
+    format: str = Query("m4a", description="Audio format: mp3, m4a, flac, opus, best"),
+    limit: int = Query(5000, ge=1, le=10000),
+    user: dict = Depends(get_current_user),
+):
+    """Extracts `url` into a links.txt and kicks off a background
+    `yt-dlp -a links.txt` that downloads every track into the caller's per-user
+    cloud library. Returns a job_id immediately; poll
+    `/api/download/batch/status?job_id=`. The downloaded tracks then appear in
+    "My Library" and can be streamed/downloaded to any device."""
+    user_id = user["sub"]
+    music_dir = _user_music_dir(user_id)
+    if music_dir is None:
+        raise HTTPException(status_code=503, detail="User music storage not configured")
+
+    format = format.lower()
+    source, items = await _extract_playlist_items(request, url, limit)
+    if not items:
+        raise HTTPException(status_code=404, detail="No items found to download")
+
+    links_content = "".join(item["url"] + "\n" for item in items)
+    links_path = _write_links_file(url, links_content)
+
+    job_id = uuid.uuid4().hex
+    _BATCH_JOBS[job_id] = {
+        "status": "pending", "total": len(items), "completed": 0,
+        "created": time.monotonic(), "source": source,
+    }
+    cookie_args = await _ytdlp_cookie_args(user_id)
+    asyncio.create_task(_run_batch_download(
+        job_id=job_id, links_path=links_path, music_dir=music_dir,
+        format=format, cookie_args=cookie_args,
+    ))
+    return JSONResponse({"job_id": job_id, "total": len(items)}, status_code=202)
+
+
+async def _run_batch_download(job_id: str, links_path: pathlib.Path, music_dir: pathlib.Path,
+                              format: str, cookie_args: list[str]) -> None:
+    job = _BATCH_JOBS.get(job_id, {})
+    extra_args, _ = _download_format_args(format)
+    before = _count_audio_files(music_dir)
+    # Download every URL listed in links.txt with the standard flags. -i keeps
+    # going past individual failures; -N gives modest per-item parallelism.
+    cmd = [
+        "yt-dlp",
+        "--batch-file", str(links_path),
+        "--no-playlist",
+        "--embed-metadata", "--embed-thumbnail",
+        "--ignore-errors",
+        "--sleep-interval", "5", "--max-sleep-interval", "15",
+        "-N", "3",
+        "-P", str(music_dir),
+        "-o", "%(title)s.%(ext)s",
+        *cookie_args,
+        *extra_args,
+    ]
+    logger.info("batch_download %s: %s", job_id, " ".join(cmd))
+    try:
+        async with _YTDLP_SEMAPHORE:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            # Generous ceiling for a whole playlist; -i means partial success
+            # still leaves the successfully-downloaded files in place.
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=3600.0)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.communicate()
+        after = _count_audio_files(music_dir)
+        job["completed"] = max(0, after - before)
+        job["status"] = "done"
+        logger.info("batch_download %s: done (%d new files)", job_id, job["completed"])
+    except Exception as exc:
+        logger.exception("batch_download %s failed", job_id)
+        job["status"] = "error"
+        job["detail"] = str(exc)
+
+
+def _count_audio_files(directory: pathlib.Path) -> int:
+    try:
+        return sum(1 for p in directory.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_AUDIO_EXTS)
+    except OSError:
+        return 0
+
+
+@app.get("/api/download/batch/status")
+async def batch_download_status(job_id: str = Query(...), user: dict = Depends(get_current_user)):
+    job = _BATCH_JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Batch job not found")
+    return {
+        "status": job.get("status"),
+        "total": job.get("total", 0),
+        "completed": job.get("completed", 0),
+        "detail": job.get("detail"),
+    }
 
 
 # ---------------------------------------------------------------------------

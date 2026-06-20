@@ -83,7 +83,9 @@ struct ArtistDetailView: View {
         // .insetGrouped, an inconsistent boxed look).
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background(Color.clear.ignoresSafeArea())
+        // Own gallery/theme background so the pushed detail view matches the
+        // rest of the app instead of falling back to the system black.
+        .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle(artist)
         .navigationBarTitleDisplayMode(.large)
         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }

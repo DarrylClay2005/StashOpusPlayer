@@ -529,6 +529,16 @@ final class AudioPlayerManager: ObservableObject {
         stopTremolo()
         stopVibrato()
         disableKaraoke()
+        // Fully release the audio system when stopped — without this the engine
+        // kept running and the audio session stayed active with nothing playing
+        // (the "ghost audio engine" / app stays an active audio app). The next
+        // play() restarts the engine + reactivates the session via
+        // `startEngineIfNeeded`. `.notifyOthersOnDeactivation` lets other apps
+        // (paused music, etc.) resume.
+        if engine.isRunning {
+            engine.stop()
+        }
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         updateNowPlaying()
     }
 
@@ -1567,7 +1577,13 @@ final class AudioPlayerManager: ObservableObject {
 
         // Setting `.rate` directly (rather than `.play()`, which always resumes at
         // 1.0×) both starts playback AND applies the user's chosen Speed setting.
-        if isPlaying { player.rate = Float(audioSettings.speed) }
+        // Activate the session first — the AVPlayer path bypasses the engine (so
+        // `startEngineIfNeeded`'s activation), and the session is no longer
+        // activated at launch.
+        if isPlaying {
+            try? AVAudioSession.sharedInstance().setActive(true)
+            player.rate = Float(audioSettings.speed)
+        }
 
         updateNowPlaying()
         appLog("Playing via AVPlayer: \(url.lastPathComponent)", category: "audio")
@@ -1992,7 +2008,12 @@ final class AudioPlayerManager: ObservableObject {
         // Request 48 kHz — the native rate for Opus and most modern audio.
         // iOS honours this when hardware supports it; silently ignores it otherwise.
         try? session.setPreferredSampleRate(48000)
-        try? session.setActive(true)
+        // NOTE: deliberately do NOT activate the session here. Activating at
+        // launch (before anything plays) made the app grab the audio system
+        // immediately — ducking other apps, holding the route, and acting like
+        // a running ("ghost") audio app with nothing playing. The session is
+        // now activated only when playback actually starts (see
+        // `startEngineIfNeeded`) and released on `stop()`.
 
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
@@ -2192,6 +2213,10 @@ final class AudioPlayerManager: ObservableObject {
 
     private func startEngineIfNeeded() {
         guard !engine.isRunning else { return }
+        // Activate the audio session lazily, right before the engine starts —
+        // not at launch — so the app only holds the audio system while actually
+        // playing (see `configureAudioSession`).
+        try? AVAudioSession.sharedInstance().setActive(true)
         do {
             try engine.start()
             errorMessage = nil

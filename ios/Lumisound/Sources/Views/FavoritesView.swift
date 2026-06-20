@@ -103,7 +103,9 @@ struct FavoritesView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(Color.clear.ignoresSafeArea())
+        // Own gallery/theme background (pushed detail views don't inherit the
+        // root's), so it matches the rest of the app instead of system black.
+        .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle("Favorites")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {

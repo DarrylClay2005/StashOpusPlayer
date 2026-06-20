@@ -154,7 +154,11 @@ struct AlbumDetailView: View {
                 }
             }
         }
-        .background(Color.clear.ignoresSafeArea())
+        // Use the app's gallery/theme background directly — a pushed detail
+        // view doesn't inherit the Library root's background through the
+        // NavigationStack, so a clear background fell back to the system's
+        // black (the "albums use a different dark UI" bug).
+        .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle(album)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }

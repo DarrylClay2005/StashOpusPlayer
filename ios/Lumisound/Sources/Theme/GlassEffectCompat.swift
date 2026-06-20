@@ -9,32 +9,33 @@ import SwiftUI
 // `#available(iOS 26, *)` with the existing `Material` look as the
 // fallback on older OS versions.
 //
-// All variants overlay a user-customizable tint (see `GlassSettings`) clipped
-// to the same shape, so the "Liquid Glass" Settings screen's tone/strength
-// sliders affect every glass surface app-wide.
+// All variants composite a user-customizable tint (see `GlassSettings`) into
+// the BACKGROUND layer — behind the view's own content — so the "Liquid Glass"
+// Settings sliders tint the card chrome without washing over foreground
+// content like song-card album artwork.
 
 extension View {
-    /// User-tint overlay applied on top of the base glass/material, clipped to
-    /// `shape`. `.allowsHitTesting(false)` so it never intercepts taps on
-    /// interactive glass (buttons/FABs).
+    /// The configured glass tint as a shape fill, sized to fill the background.
+    /// Returns an empty view when the tint is effectively clear.
     @ViewBuilder
-    fileprivate func glassTintOverlay<S: Shape>(in shape: S) -> some View {
+    fileprivate func glassTintLayer<S: Shape>(in shape: S) -> some View {
         let tint = GlassSettings.shared.tintColor
         if tint != .clear {
-            self.overlay(shape.fill(tint).allowsHitTesting(false))
+            shape.fill(tint)
         } else {
-            self
+            Color.clear
         }
     }
 
-    /// Applies Liquid Glass on iOS 26+, falling back to the given
-    /// `Material` (matching the look this call site used pre-iOS 26).
+    /// Applies Liquid Glass on iOS 26+, falling back to the given `Material`.
+    /// The user tint is layered behind the content (over the glass/material),
+    /// never in front of it.
     @ViewBuilder
     func adaptiveGlass<S: Shape>(in shape: S, fallback: Material = .ultraThinMaterial) -> some View {
         if #available(iOS 26.0, *) {
-            self.glassEffect(.regular, in: shape).glassTintOverlay(in: shape)
+            self.background(glassTintLayer(in: shape)).glassEffect(.regular, in: shape)
         } else {
-            self.background(fallback, in: shape).glassTintOverlay(in: shape)
+            self.background(glassTintLayer(in: shape)).background(fallback, in: shape)
         }
     }
 
@@ -45,9 +46,9 @@ extension View {
     @ViewBuilder
     func adaptiveGlass<S: Shape, F: ShapeStyle>(in shape: S, fallback: F) -> some View {
         if #available(iOS 26.0, *) {
-            self.glassEffect(.regular, in: shape).glassTintOverlay(in: shape)
+            self.background(glassTintLayer(in: shape)).glassEffect(.regular, in: shape)
         } else {
-            self.background(fallback, in: shape).glassTintOverlay(in: shape)
+            self.background(glassTintLayer(in: shape)).background(fallback, in: shape)
         }
     }
 
@@ -56,9 +57,9 @@ extension View {
     @ViewBuilder
     func adaptiveGlass<S: Shape>(tint: Color, in shape: S, fallback: Material = .ultraThinMaterial) -> some View {
         if #available(iOS 26.0, *) {
-            self.glassEffect(.regular.tint(tint).interactive(), in: shape).glassTintOverlay(in: shape)
+            self.background(glassTintLayer(in: shape)).glassEffect(.regular.tint(tint).interactive(), in: shape)
         } else {
-            self.background(fallback, in: shape).glassTintOverlay(in: shape)
+            self.background(glassTintLayer(in: shape)).background(fallback, in: shape)
         }
     }
 
@@ -67,9 +68,9 @@ extension View {
     @ViewBuilder
     func adaptiveGlass<S: Shape, F: ShapeStyle>(tint: Color, in shape: S, fallback: F) -> some View {
         if #available(iOS 26.0, *) {
-            self.glassEffect(.regular.tint(tint).interactive(), in: shape).glassTintOverlay(in: shape)
+            self.background(glassTintLayer(in: shape)).glassEffect(.regular.tint(tint).interactive(), in: shape)
         } else {
-            self.background(fallback, in: shape).glassTintOverlay(in: shape)
+            self.background(glassTintLayer(in: shape)).background(fallback, in: shape)
         }
     }
 }

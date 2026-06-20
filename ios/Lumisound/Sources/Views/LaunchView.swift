@@ -17,23 +17,59 @@ struct LaunchView: View {
 
     // Gentle breathing pulse on the app icon while the launch screen is visible.
     @State private var logoBreathing = false
+    // Animated chrome: drifting aurora backdrop + rotating glow ring.
+    @State private var ringRotation: Double = 0
+    @State private var auroraShift = false
 
     var body: some View {
         ZStack {
-            AppTheme.background.ignoresSafeArea()
+            // Animated ambient backdrop — drifting accent-colored aurora blobs
+            // over the base background, giving the launch screen depth/motion.
+            LaunchAuroraBackground(animate: auroraShift)
 
             VStack(spacing: 24) {
                 Spacer()
 
-                // App icon — uses the real Lumisound icon from Assets.xcassets
-                Image("AppIconDisplay")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 110, height: 110)
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .shadow(color: AppTheme.dynamicAccent.opacity(0.5), radius: 24, x: 0, y: 8)
-                    .scaleEffect(logoScale * (logoBreathing ? 1.03 : 1.0))
-                    .opacity(logoOpacity)
+                // App icon framed by a rotating gradient halo + live equalizer
+                // bars — a musical, animated centerpiece instead of a static icon.
+                ZStack {
+                    Circle()
+                        .stroke(
+                            AngularGradient(
+                                colors: [AppTheme.dynamicAccent, AppTheme.accentSoft, AppTheme.dynamicAccent],
+                                center: .center
+                            ),
+                            lineWidth: 3
+                        )
+                        .frame(width: 150, height: 150)
+                        .blur(radius: 1)
+                        .rotationEffect(.degrees(ringRotation))
+                        .opacity(logoOpacity)
+
+                    Circle()
+                        .fill(AppTheme.dynamicAccent)
+                        .frame(width: 150, height: 150)
+                        .blur(radius: 40)
+                        .opacity(logoOpacity * (logoBreathing ? 0.5 : 0.3))
+
+                    Image("AppIconDisplay")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 110, height: 110)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                .stroke(.white.opacity(0.15), lineWidth: 1)
+                        )
+                        .shadow(color: AppTheme.dynamicAccent.opacity(0.5), radius: 24, x: 0, y: 8)
+                        .scaleEffect(logoScale * (logoBreathing ? 1.03 : 1.0))
+                        .opacity(logoOpacity)
+                }
+
+                // Live equalizer bars under the icon (animate while the screen is up).
+                LaunchEqualizerBars(animate: logoBreathing)
+                    .frame(height: 22)
+                    .opacity(contentOpacity)
 
                 if account.isLoggedIn, let user = account.currentUser {
                     VStack(spacing: 8) {
@@ -73,8 +109,13 @@ struct LaunchView: View {
                 } else {
                     VStack(spacing: 8) {
                         Text("Lumisound")
-                            .font(.title.bold())
-                            .foregroundStyle(AppTheme.textPrimary)
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [AppTheme.textPrimary, AppTheme.dynamicAccent],
+                                    startPoint: .leading, endPoint: .trailing
+                                )
+                            )
                         Text("Your music, your way")
                             .font(.subheadline)
                             .foregroundStyle(AppTheme.textSecondary)
@@ -202,6 +243,14 @@ struct LaunchView: View {
                 logoScale = 1.0
                 logoOpacity = 1.0
             }
+            // Continuous rotating halo + drifting aurora for as long as the
+            // launch screen is visible.
+            withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) {
+                ringRotation = 360
+            }
+            withAnimation(.easeInOut(duration: 6).repeatForever(autoreverses: true)) {
+                auroraShift = true
+            }
             // Start a subtle breathing pulse on the icon once the entrance
             // spring has settled, for as long as the launch screen is up.
             Task { @MainActor in
@@ -288,6 +337,72 @@ struct LaunchView: View {
     }
 }
 
+// MARK: - LaunchAuroraBackground
+
+/// Drifting, heavily-blurred accent blobs over the base background — gives the
+/// launch screen subtle ambient motion without any artwork dependency.
+private struct LaunchAuroraBackground: View {
+    let animate: Bool
+
+    var body: some View {
+        ZStack {
+            AppTheme.background.ignoresSafeArea()
+
+            Circle()
+                .fill(AppTheme.dynamicAccent)
+                .frame(width: 320, height: 320)
+                .blur(radius: 90)
+                .opacity(0.35)
+                .offset(x: animate ? -90 : -40, y: animate ? -180 : -120)
+
+            Circle()
+                .fill(AppTheme.accentSoft)
+                .frame(width: 280, height: 280)
+                .blur(radius: 90)
+                .opacity(0.30)
+                .offset(x: animate ? 110 : 60, y: animate ? 200 : 150)
+
+            Circle()
+                .fill(AppTheme.dynamicAccent.opacity(0.8))
+                .frame(width: 220, height: 220)
+                .blur(radius: 80)
+                .opacity(0.22)
+                .offset(x: animate ? 80 : 30, y: animate ? -60 : -20)
+        }
+        .ignoresSafeArea()
+    }
+}
+
+// MARK: - LaunchEqualizerBars
+
+/// A small row of animated equalizer bars — a musical loading flourish. Each
+/// bar bounces on its own offset sine while `animate` is true.
+private struct LaunchEqualizerBars: View {
+    let animate: Bool
+    private let barCount = 7
+
+    var body: some View {
+        TimelineView(.animation(paused: !animate)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 5) {
+                ForEach(0..<barCount, id: \.self) { i in
+                    let phase = Double(i) * 0.7
+                    let h = animate ? (0.35 + 0.65 * (0.5 + 0.5 * sin(t * 4 + phase))) : 0.4
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
+                                startPoint: .bottom, endPoint: .top
+                            )
+                        )
+                        .frame(width: 4, height: 22 * CGFloat(h))
+                }
+            }
+            .frame(height: 22, alignment: .center)
+        }
+    }
+}
+
 // MARK: - LaunchStatChip
 
 private struct LaunchStatChip: View {
@@ -311,6 +426,9 @@ private struct LaunchStatChip: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .background(AppTheme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .adaptiveGlass(
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous),
+            fallback: AppTheme.surface.opacity(0.6)
+        )
     }
 }

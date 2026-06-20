@@ -393,19 +393,29 @@ enum AudioEffectsService {
 
     // MARK: Apply
 
-    /// Copies `settings`, applies the effect's EQ, speed, and pitch onto it,
-    /// and stamps `activeEffectID`. The caller should assign the return value
-    /// back to `AudioPlayerManager.audioSettings`.
+    /// Copies `settings`, applies the effect's speed/pitch (and EQ curve, only
+    /// for EQ-defining effects), and stamps `activeEffectID`. The caller should
+    /// assign the return value back to `AudioPlayerManager.audioSettings`.
+    ///
+    /// EQ, audio effects, and reverb are designed to LAYER: reverb is a separate
+    /// node (untouched here), and a speed/pitch/special effect (Nightcore, 8D,
+    /// Tremolo…) or "None" leaves the user's manual equalizer settings intact
+    /// instead of wiping them. Only effects that actually define an EQ curve
+    /// (`eqEnabled`, e.g. Bass Boost / Rock / Lo-Fi) overwrite the equalizer.
     static func apply(effect: AudioEffect, to settings: AudioSettings) -> AudioSettings {
         var s = settings
         s.speed = effect.speed
         s.pitchSemitones = effect.pitchSemitones
-        s.equalizerEnabled = effect.eqEnabled
-        s.eqBands = effect.eqBands
-        // Mark the preset as custom so the EQ chip strip doesn't highlight a
-        // mismatched preset while an audio effect is active.
-        s.eqPreset = effect.eqEnabled ? .custom : .flat
         s.activeEffectID = effect.id
+        if effect.eqEnabled {
+            s.equalizerEnabled = true
+            s.eqBands = effect.eqBands
+            // Mark the preset as custom so the EQ chip strip doesn't highlight a
+            // mismatched preset while an EQ-based audio effect is active.
+            s.eqPreset = .custom
+        }
+        // Non-EQ effects (and "None") preserve the user's existing EQ so the
+        // equalizer keeps working alongside the effect + reverb.
         return s
     }
 }

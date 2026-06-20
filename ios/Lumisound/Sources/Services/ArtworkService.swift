@@ -58,7 +58,9 @@ final class ArtworkService {
     /// one-time purge of disk-cached artwork written under the old settings, so
     /// upgrading users see the quality improvement without having to find and
     /// tap "Clear Artwork Cache" in Settings themselves.
-    private static let cacheFormatVersion = 2
+    // v3: artwork is now letterbox-trimmed + square-cropped on cache write, so
+    // purge older entries that were stored 16:9/letterboxed.
+    private static let cacheFormatVersion = 3
     private static let cacheVersionFileName = ".cache_format_version"
 
     private init() {
@@ -305,12 +307,14 @@ final class ArtworkService {
     }
 
     private func resizedImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
-        // First center-crop to a square so non-square sources (e.g. 16:9 / 4:3
-        // YouTube thumbnails) fill the square artwork frames used everywhere —
-        // song cards, Now Playing styles, Up Next — instead of showing
-        // letterbox bars or being letterboxed by the views. Album art that's
-        // already square is unchanged.
-        let squared = squareCropped(image)
+        // 1) Trim solid letterbox/pillarbox bars (e.g. a 16:9 video frame padded
+        //    into a 4:3 `hqdefault` YouTube thumbnail, which a plain square crop
+        //    would otherwise keep — the "artwork still shows 16:9 with black
+        //    bars" symptom). 2) center-crop the remaining content to a square so
+        //    it fills the square frames used everywhere. Already-square art with
+        //    no bars passes through both steps unchanged.
+        let trimmed = trimmedLetterbox(image)
+        let squared = squareCropped(trimmed)
         let size = squared.size
         guard size.width > maxDimension || size.height > maxDimension else { return squared }
         let scale = min(maxDimension / size.width, maxDimension / size.height)
@@ -335,6 +339,78 @@ final class ArtworkService {
             let origin = CGPoint(x: (side - w) / 2, y: (side - h) / 2)
             image.draw(in: CGRect(origin: origin, size: CGSize(width: w, height: h)))
         }
+    }
+
+    /// Detects and crops away near-uniform horizontal (letterbox) and vertical
+    /// (pillarbox) bars around an image's real content — the matte/black bars
+    /// baked into padded thumbnails (e.g. a 16:9 still inside a 4:3
+    /// `hqdefault.jpg`). Scans a small downsampled copy for speed, maps the
+    /// content rect back to the original, and crops. Returns the original
+    /// unchanged when no significant bars are found.
+    private func trimmedLetterbox(_ image: UIImage) -> UIImage {
+        guard let cg = image.cgImage else { return image }
+        let origW = cg.width, origH = cg.height
+        guard origW > 8, origH > 8 else { return image }
+
+        // Downsample to a small buffer (max 64px on the long edge) for a cheap scan.
+        let maxScan = 64
+        let scale = min(1.0, Double(maxScan) / Double(max(origW, origH)))
+        let sw = max(2, Int(Double(origW) * scale))
+        let sh = max(2, Int(Double(origH) * scale))
+        let bytesPerRow = sw * 4
+        var buf = [UInt8](repeating: 0, count: bytesPerRow * sh)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: &buf, width: sw, height: sh, bitsPerComponent: 8, bytesPerRow: bytesPerRow,
+            space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: sw, height: sh))
+
+        // A row/column is a "bar" if every pixel is near-uniform AND close to the
+        // corner color (the matte). Uniform: low spread from the line's first px.
+        func brightness(_ i: Int) -> Int { Int(buf[i]) + Int(buf[i + 1]) + Int(buf[i + 2]) }
+        let tol = 48  // per-channel-sum tolerance (~16/channel)
+
+        func rowIsBar(_ y: Int) -> Bool {
+            let base = y * bytesPerRow
+            let ref = brightness(base)
+            if ref > 170 * 3 { return false }  // bars are dark; skip bright rows
+            for x in 0..<sw {
+                if abs(brightness(base + x * 4) - ref) > tol { return false }
+            }
+            return true
+        }
+        func colIsBar(_ x: Int) -> Bool {
+            let ref = brightness(x * 4)
+            if ref > 170 * 3 { return false }
+            for y in 0..<sh {
+                if abs(brightness(y * bytesPerRow + x * 4) - ref) > tol { return false }
+            }
+            return true
+        }
+
+        var top = 0; while top < sh && rowIsBar(top) { top += 1 }
+        var bottom = sh - 1; while bottom > top && rowIsBar(bottom) { bottom -= 1 }
+        var left = 0; while left < sw && colIsBar(left) { left += 1 }
+        var right = sw - 1; while right > left && colIsBar(right) { right -= 1 }
+
+        let contentW = right - left + 1
+        let contentH = bottom - top + 1
+        // Ignore tiny trims (noise) — only act when a real bar (>4% of a side) exists.
+        let trimmedX = (left + (sw - 1 - right))
+        let trimmedY = (top + (sh - 1 - bottom))
+        guard contentW > sw / 2, contentH > sh / 2,
+              (trimmedY > sh / 25 || trimmedX > sw / 25) else { return image }
+
+        // Map the content rect back to original pixel coordinates.
+        let fx = Double(origW) / Double(sw)
+        let fy = Double(origH) / Double(sh)
+        let cropRect = CGRect(
+            x: Double(left) * fx, y: Double(top) * fy,
+            width: Double(contentW) * fx, height: Double(contentH) * fy
+        ).integral
+        guard let cropped = cg.cropping(to: cropRect) else { return image }
+        return UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation)
     }
 
     // MARK: - Fetch methods

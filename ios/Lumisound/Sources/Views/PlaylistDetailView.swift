@@ -119,7 +119,9 @@ struct PlaylistDetailView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(Color.clear.ignoresSafeArea())
+        // Own gallery/theme background (pushed detail views don't inherit the
+        // root's), so it matches the rest of the app instead of system black.
+        .background(GalleryBackgroundView().ignoresSafeArea())
         .environment(\.editMode, .constant(isEditing ? .active : .inactive))
         .navigationTitle(playlist.name)
         .navigationBarTitleDisplayMode(.large)

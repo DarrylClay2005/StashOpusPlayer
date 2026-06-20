@@ -173,7 +173,10 @@ struct LocalFolderDetailView: View {
                 }
             }
         }
-        .background(Color.clear.ignoresSafeArea())
+        // Own gallery/theme background — a pushed detail view doesn't inherit
+        // the Library root's background, so a clear background fell back to the
+        // system black (the "folders use a different dark UI" bug).
+        .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle(folderName)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
