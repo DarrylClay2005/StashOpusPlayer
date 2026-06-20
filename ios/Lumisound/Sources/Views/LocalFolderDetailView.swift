@@ -114,7 +114,9 @@ struct LocalFolderDetailView: View {
                         }
                     }
                 }
-                .listStyle(.insetGrouped)
+                // .plain to match the main Library's edge-to-edge list (was
+                // .insetGrouped, which made folders look boxed/different).
+                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             } else {
                 ScrollView {

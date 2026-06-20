@@ -220,11 +220,18 @@ struct StreamSearchView: View {
             if src == "my" {
                 guard let token = account.token else { return }
                 Task { await streaming.fetchUserMusic(token: token) }
+            } else if src == "server" {
+                // Browse the whole server library on open (empty query) so the
+                // Server tab actually shows content instead of an empty prompt.
+                Task { await streaming.searchServerLibrary(query: searchText) }
             }
         }
         .onAppear {
             if selectedSource == "my", let token = account.token {
                 Task { await streaming.fetchUserMusic(token: token) }
+            }
+            if selectedSource == "server" {
+                Task { await streaming.searchServerLibrary(query: searchText) }
             }
             if trendingQueries.isEmpty {
                 Task { trendingQueries = await streaming.searchTrending() }
@@ -289,37 +296,64 @@ struct StreamSearchView: View {
                 VStack(spacing: 0) {
                     // Playlist banner — only shown after a successful playlist resolve
                     if streaming.isPlaylistResult && !streaming.searchResults.isEmpty {
-                        HStack(spacing: 8) {
-                            Image(systemName: "music.note.list")
-                                .foregroundStyle(AppTheme.dynamicAccent)
-                            Text("\(streaming.searchResults.count) tracks")
-                                .font(AppTheme.bodyFont(size: 14))
-                                .foregroundStyle(AppTheme.textPrimary)
-                            Spacer()
-                            if isDownloadingAll {
-                                HStack(spacing: 6) {
-                                    ProgressView()
-                                        .tint(AppTheme.dynamicAccent)
-                                        .scaleEffect(0.8)
-                                    Text("\(downloadAllDone)/\(downloadAllTotal)")
-                                        .font(AppTheme.monoFont(size: 13))
+                        VStack(spacing: 8) {
+                            HStack(spacing: 10) {
+                                Image(systemName: "music.note.list")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(AppTheme.dynamicAccent)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("Playlist")
+                                        .font(AppTheme.bodyFont(size: 11).weight(.semibold))
                                         .foregroundStyle(AppTheme.textSecondary)
+                                        .kerning(0.6)
+                                    Text("\(streaming.searchResults.count) tracks")
+                                        .font(AppTheme.bodyFont(size: 15).weight(.semibold))
+                                        .foregroundStyle(AppTheme.textPrimary)
                                 }
-                            } else if !failedTrackIDs.isEmpty {
-                                // Only the tracks that failed last time are retried — no
-                                // full search/resolve refresh, unlike the generic error
-                                // banner's "Retry" which re-resolves the whole playlist.
-                                Button("Retry Failed (\(failedTrackIDs.count))") {
-                                    handleRetryFailedDownloads()
+                                Spacer()
+                                if isDownloadingAll {
+                                    HStack(spacing: 6) {
+                                        ProgressView()
+                                            .tint(AppTheme.dynamicAccent)
+                                            .scaleEffect(0.8)
+                                        Text("\(downloadAllDone)/\(downloadAllTotal)")
+                                            .font(AppTheme.monoFont(size: 13))
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+                                } else if !failedTrackIDs.isEmpty {
+                                    // Only the tracks that failed last time are retried — no
+                                    // full search/resolve refresh, unlike the generic error
+                                    // banner's "Retry" which re-resolves the whole playlist.
+                                    Button {
+                                        handleRetryFailedDownloads()
+                                    } label: {
+                                        Label("Retry \(failedTrackIDs.count)", systemImage: "arrow.clockwise")
+                                            .font(AppTheme.bodyFont(size: 13).weight(.semibold))
+                                            .foregroundStyle(AppTheme.warning)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 7)
+                                            .adaptiveGlass(in: Capsule(), fallback: AppTheme.warning.opacity(0.15))
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    Button {
+                                        handleDownloadAll()
+                                    } label: {
+                                        Label("Download All", systemImage: "arrow.down.circle.fill")
+                                            .font(AppTheme.bodyFont(size: 13).weight(.semibold))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 7)
+                                            .adaptiveGlass(tint: AppTheme.dynamicAccent, in: Capsule(), fallback: AppTheme.dynamicAccent)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .font(AppTheme.bodyFont(size: 13).weight(.semibold))
-                                .foregroundStyle(AppTheme.warning)
-                            } else {
-                                Button("Download All") {
-                                    handleDownloadAll()
-                                }
-                                .font(AppTheme.bodyFont(size: 13).weight(.semibold))
-                                .foregroundStyle(AppTheme.dynamicAccent)
+                            }
+
+                            // Determinate progress bar while a "Download All" run is active.
+                            if isDownloadingAll && downloadAllTotal > 0 {
+                                ProgressView(value: Double(downloadAllDone), total: Double(downloadAllTotal))
+                                    .tint(AppTheme.dynamicAccent)
                             }
                         }
                         .padding(.horizontal, 16)
@@ -486,13 +520,17 @@ struct StreamSearchView: View {
             } else if streaming.serverTracks.isEmpty {
                 Spacer()
                 VStack(spacing: 12) {
-                    Image(systemName: "externaldrive.connected.to.line.below")
+                    Image(systemName: streaming.serverLibraryConfigured == false
+                          ? "externaldrive.badge.xmark"
+                          : "externaldrive.connected.to.line.below")
                         .font(.system(size: 44))
                         .foregroundStyle(AppTheme.textSecondary)
                     Text("Server Library")
                         .font(AppTheme.headlineFont(size: 16))
                         .foregroundStyle(AppTheme.textPrimary)
-                    Text("Search the server's music collection.")
+                    Text(streaming.serverLibraryConfigured == false
+                         ? "No shared server library is configured. Ask the server admin to set SERVER_MUSIC_DIR to enable a shared, streamable music collection here."
+                         : "Browse and stream the server's shared music collection, or search it above.")
                         .font(AppTheme.bodyFont(size: 14))
                         .foregroundStyle(AppTheme.textSecondary)
                         .multilineTextAlignment(.center)
@@ -710,6 +748,7 @@ struct StreamSearchView: View {
 
     private func triggerSearch() {
         failedTrackIDs.removeAll()
+        appBreadcrumb("Searched \"\(searchText)\" [source: \(selectedSource)]")
         if selectedSource == "server" {
             Task { await streaming.searchServerLibrary(query: searchText) }
         } else if selectedSource == "my" {
@@ -728,6 +767,7 @@ struct StreamSearchView: View {
     private func handlePlay(track: StreamTrack) {
         guard loadingTrackID == nil else { return }
         loadingTrackID = track.id
+        appBreadcrumb("Tapped Play (preview) on \"\(track.title)\" [\(track.source)]")
         Task {
             defer { loadingTrackID = nil }
             do {
@@ -800,6 +840,7 @@ struct StreamSearchView: View {
     private func handleDownload(track: StreamTrack) {
         guard !downloadingTrackIDs.contains(track.id) else { return }
         downloadingTrackIDs.insert(track.id)
+        appBreadcrumb("Tapped Download on \"\(track.title)\" [\(track.source)]")
         Task {
             do {
                 // Rescan the full Documents tree (including subfolders the user has
@@ -823,6 +864,11 @@ struct StreamSearchView: View {
                 appLog("Download succeeded: \"\(track.title)\"", category: "download",
                        extra: ["title": track.title, "artist": track.artist, "source": track.source, "trackId": track.id])
                 ToastCenter.shared.show("Downloaded \"\(track.title)\"", category: .download, icon: "checkmark.circle.fill")
+                NotificationService.shared.notify(
+                    title: "Download Complete",
+                    body: "\"\(track.title)\" is ready in your library.",
+                    identifier: "download-\(track.id)"
+                )
                 if autoCloudBackup, account.isLoggedIn, let token = account.token {
                     Task {
                         try? await streaming.uploadTrack(

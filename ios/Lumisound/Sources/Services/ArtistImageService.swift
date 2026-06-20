@@ -66,7 +66,23 @@ final class ArtistImageService {
 
         if isKnownNoImage(key) { return nil }
 
-        guard let image = await fetchFromDeezer(artist: artist) else {
+        // Try the full name, then the cleaned primary-artist name (strips
+        // "feat."/"&"/"," collaborators that prevent an exact match), across
+        // each public source in turn.
+        let candidates = artistNameCandidates(from: artist)
+        var image: UIImage?
+        for name in candidates {
+            if let found = await fetchFromDeezer(artist: name) { image = found; break }
+        }
+        // Fall back to MusicBrainz + Wikimedia Commons (true artist photos) when
+        // Deezer has no match for any name variant.
+        if image == nil {
+            for name in candidates {
+                if let found = await fetchFromMusicBrainz(artist: name) { image = found; break }
+            }
+        }
+
+        guard let image else {
             markNoImage(key)
             return nil
         }
@@ -74,6 +90,35 @@ final class ArtistImageService {
         setMemoryCache(image, forKey: key)
         saveToDisk(image: image, key: key)
         return image
+    }
+
+    /// Produces an ordered, de-duplicated list of name variants to try: the
+    /// full trimmed name first, then a "primary artist only" variant with any
+    /// `feat.`/`ft.`/`&`/`,`/`x`/`vs` collaborator suffix stripped — since a
+    /// combined credit like "Artist A feat. Artist B" rarely matches a single
+    /// artist record on these services.
+    private func artistNameCandidates(from artist: String) -> [String] {
+        let full = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        var result = [full]
+        let separators = [" feat.", " feat ", " ft.", " ft ", " featuring ", " & ", ", ", " x ", " vs.", " vs "]
+        // Cut at the earliest collaborator separator found, taking everything
+        // before it as the primary artist. Matched case-insensitively directly
+        // on `full` so the resulting substring uses the original casing.
+        var earliest: String.Index?
+        for sep in separators {
+            if let range = full.range(of: sep, options: .caseInsensitive) {
+                if earliest == nil || range.lowerBound < earliest! {
+                    earliest = range.lowerBound
+                }
+            }
+        }
+        if let cut = earliest {
+            let primary = String(full[..<cut]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !primary.isEmpty, primary.localizedCaseInsensitiveCompare(full) != .orderedSame {
+                result.append(primary)
+            }
+        }
+        return result
     }
 
     /// Warms the cache for the given artist names at background priority.
@@ -124,6 +169,81 @@ final class ArtistImageService {
         guard let (data, response) = try? await URLSession.shared.data(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return UIImage(data: data)
+    }
+
+    // MARK: - MusicBrainz + Wikimedia Commons (recommended public source)
+
+    /// Resolves an artist photo via MusicBrainz (search → URL relations) and
+    /// Wikimedia Commons. MusicBrainz exposes an `image` URL relation that
+    /// usually points at a Wikimedia Commons file; we resolve that to a direct
+    /// image via the Commons API. Requires a descriptive User-Agent per
+    /// MusicBrainz policy.
+    private func fetchFromMusicBrainz(artist: String) async -> UIImage? {
+        let trimmed = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed.localizedCaseInsensitiveCompare("Unknown Artist") != .orderedSame,
+              let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let searchURL = URL(string: "https://musicbrainz.org/ws/2/artist/?query=artist:\(encoded)&fmt=json&limit=1")
+        else { return nil }
+
+        guard let json = await fetchJSON(searchURL),
+              let artists = json["artists"] as? [[String: Any]],
+              let mbid = artists.first?["id"] as? String,
+              let relURL = URL(string: "https://musicbrainz.org/ws/2/artist/\(mbid)?inc=url-rels&fmt=json")
+        else { return nil }
+
+        guard let relJSON = await fetchJSON(relURL),
+              let relations = relJSON["relations"] as? [[String: Any]]
+        else { return nil }
+
+        // Find an "image" relation; resolve Wikimedia Commons file pages to a
+        // direct image URL, otherwise use the URL as-is.
+        for relation in relations where (relation["type"] as? String) == "image" {
+            guard let urlObj = relation["url"] as? [String: Any],
+                  let resource = urlObj["resource"] as? String else { continue }
+            if let direct = await resolveCommonsImageURL(resource) ?? URL(string: resource),
+               let image = await fetchRemoteImage(url: direct) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    /// If `resource` is a Wikimedia Commons "File:" page, asks the Commons API
+    /// for the direct image URL; returns nil for non-Commons URLs.
+    private func resolveCommonsImageURL(_ resource: String) async -> URL? {
+        guard resource.contains("commons.wikimedia.org"),
+              let fileRange = resource.range(of: "File:")
+        else { return nil }
+        let fileName = String(resource[fileRange.lowerBound...])
+        guard let encoded = fileName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let apiURL = URL(string: "https://commons.wikimedia.org/w/api.php?action=query&titles=\(encoded)&prop=imageinfo&iiprop=url&iiurlwidth=500&format=json")
+        else { return nil }
+
+        guard let json = await fetchJSON(apiURL),
+              let query = json["query"] as? [String: Any],
+              let pages = query["pages"] as? [String: Any],
+              let firstPage = pages.values.first as? [String: Any],
+              let imageInfo = firstPage["imageinfo"] as? [[String: Any]],
+              let info = imageInfo.first
+        else { return nil }
+
+        if let thumb = info["thumburl"] as? String, let url = URL(string: thumb) { return url }
+        if let full = info["url"] as? String, let url = URL(string: full) { return url }
+        return nil
+    }
+
+    /// Fetches and parses a JSON object, sending the User-Agent MusicBrainz/
+    /// Wikimedia ask third-party clients to provide.
+    private func fetchJSON(_ url: URL) async -> [String: Any]? {
+        var request = URLRequest(url: url)
+        request.setValue("Lumisound/1.0 (https://github.com/HeavenlyXenusVR/Lumisound)", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 12
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return json
     }
 
     // MARK: - Cache helpers

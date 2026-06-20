@@ -8,12 +8,32 @@ import SwiftUI
 
 struct NotificationsView: View {
     @EnvironmentObject private var account: AccountService
+    @ObservedObject private var notificationService = NotificationService.shared
 
     @State private var notifications: [AppNotification] = []
     @State private var isLoading = false
 
     var body: some View {
         List {
+            Section {
+                Toggle(isOn: $notificationService.isEnabled) {
+                    Label("Device Notifications", systemImage: "bell.badge")
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .tint(AppTheme.dynamicAccent)
+
+                if notificationService.isEnabled && !notificationService.isAuthorized {
+                    Text("Notifications are turned off in iOS Settings for Lumisound. Enable them in Settings › Lumisound › Notifications to receive alerts.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.warning)
+                }
+            } footer: {
+                Text("Get alerts on your device for achievements, new artist uploads you follow, shared-playlist activity, and finished downloads.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .listRowBackground(AppTheme.surface)
+
             if isLoading && notifications.isEmpty {
                 HStack {
                     Spacer()
@@ -76,13 +96,19 @@ struct NotificationsView: View {
                 }
             }
         }
-        .task { await load() }
+        .task {
+            await notificationService.requestAuthorization()
+            await load()
+        }
         .refreshable { await load() }
     }
 
     private func load() async {
         isLoading = true
         notifications = await account.fetchNotifications()
+        // Mirror any unread server-inbox items to device notifications (deduped
+        // so opening this screen repeatedly doesn't re-alert).
+        NotificationService.shared.syncServerNotifications(notifications)
         isLoading = false
     }
 

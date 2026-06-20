@@ -52,6 +52,20 @@ struct FloatModifier: ViewModifier {
     }
 }
 
+// MARK: - PressableButtonStyle
+
+/// A button style that scales the label down slightly (and dims it) while
+/// pressed, for tactile press feedback on transport/control buttons. Replaces
+/// `.buttonStyle(.plain)` where a bit of physicality is wanted.
+struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.9 : 1.0)
+            .opacity(configuration.isPressed ? 0.8 : 1.0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
 // MARK: - FilmGrainOverlay
 
 /// A static, tiled speckle pattern drawn once with `Canvas` to suggest paper

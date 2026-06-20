@@ -37,31 +37,62 @@ struct SettingsView: View {
 
     // MARK: Body
 
+    /// Top-level Settings categories — replaces the old single cluttered
+    /// scroll with focused tabs, each showing only its related sections.
+    private enum SettingsTab: String, CaseIterable, Identifiable {
+        case general = "General"
+        case audio = "Audio"
+        case library = "Library"
+        case app = "App"
+
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .general: return "person.crop.circle"
+            case .audio:   return "waveform"
+            case .library: return "music.note.list"
+            case .app:     return "gearshape"
+            }
+        }
+    }
+
+    @State private var selectedTab: SettingsTab = .general
+
     var body: some View {
         NavigationStack {
-            List {
-                // Update banner — only visible when an update is available
-                if updater.updateAvailable {
-                    Section {
-                        UpdateBannerView()
-                            .environmentObject(updater)
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                }
+            VStack(spacing: 0) {
+                tabPicker
 
-                accountSection
-                playbackAudioSection
-                carModeSection
-                appearanceSection
-                librarySection
-                streamingDownloadsSection
-                sleepTimerSection
-                updatesSection
-                helpSection
-                aboutSection
+                List {
+                    // Update banner — visible on every tab when an update is available.
+                    if updater.updateAvailable {
+                        Section {
+                            UpdateBannerView()
+                                .environmentObject(updater)
+                        }
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    }
+
+                    switch selectedTab {
+                    case .general:
+                        accountSection
+                        appearanceSection
+                        sleepTimerSection
+                    case .audio:
+                        playbackAudioSection
+                        carModeSection
+                    case .library:
+                        librarySection
+                        streamingDownloadsSection
+                    case .app:
+                        updatesSection
+                        helpSection
+                        aboutSection
+                    }
+                }
+                .scrollContentBackground(.hidden)
             }
-            .scrollContentBackground(.hidden)
             .background(GalleryBackgroundView().ignoresSafeArea())
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
@@ -78,6 +109,32 @@ struct SettingsView: View {
                 youtubeExposureTimer?.invalidate()
                 youtubeExposureTimer = nil
             }
+        }
+    }
+
+    /// Horizontal, scrollable category selector pinned under the title.
+    private var tabPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(SettingsTab.allCases) { tab in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { selectedTab = tab }
+                    } label: {
+                        Label(tab.rawValue, systemImage: tab.icon)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(selectedTab == tab ? .white : AppTheme.textSecondary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(
+                                selectedTab == tab ? AppTheme.dynamicAccent : AppTheme.surface.opacity(0.6),
+                                in: Capsule()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
     }
 
@@ -251,7 +308,16 @@ struct SettingsView: View {
 
             // Force metadata sync
             Button {
-                Task { await library.forceMetadataSync(using: folderService) }
+                Task {
+                    await library.forceMetadataSync(using: folderService)
+                    // forceMetadataSync runs silently otherwise — without this the
+                    // button just shows a brief spinner and nothing else, which is
+                    // indistinguishable from doing nothing at all even though it
+                    // really did rescan, re-tag, and re-enrich every track.
+                    if let result = library.lastScanResult {
+                        ToastCenter.shared.show(result, category: .success, icon: "checkmark.circle")
+                    }
+                }
             } label: {
                 HStack {
                     Label("Force Metadata Sync", systemImage: "arrow.triangle.2.circlepath")
@@ -343,6 +409,22 @@ struct SettingsView: View {
                     }
                 }
                 .padding(.leading, 16)
+
+                // Smart Auto Crossfade — tempo-matched, beat-aligned crossfades.
+                Toggle(isOn: $player.audioSettings.smartCrossfadeEnabled) {
+                    Label("Smart Auto Crossfade", systemImage: "metronome")
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .tint(AppTheme.dynamicAccent)
+                .padding(.leading, 16)
+
+                if player.audioSettings.smartCrossfadeEnabled {
+                    Text("Analyzes each track's BPM and beatmatches the outgoing and incoming songs, aligning the fade to the beat for a seamless DJ-style transition. Falls back to a normal crossfade when tempos are too far apart or unknown.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .padding(.leading, 32)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
 
             // Gapless playback
@@ -426,10 +508,18 @@ struct SettingsView: View {
                 // based on tempo (see EQPreset.auto(forBPM:)), so the manual picker
                 // below is hidden to avoid implying a fixed preset is in effect.
                 Toggle(isOn: $player.audioSettings.autoEQEnabled) {
-                    Label("Auto EQ (by tempo)", systemImage: "wand.and.stars")
+                    Label("Auto EQ (by genre & tempo)", systemImage: "wand.and.stars")
                         .foregroundStyle(AppTheme.textPrimary)
                 }
                 .tint(AppTheme.dynamicAccent)
+
+                if player.audioSettings.autoEQEnabled {
+                    Text("Automatically picks the best EQ preset for each track from its genre tag, falling back to its analyzed BPM when no genre is tagged.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .padding(.leading, 16)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
                 if !player.audioSettings.autoEQEnabled {
                     HStack {
@@ -489,6 +579,57 @@ struct SettingsView: View {
                 .padding(.leading, 16)
             }
 
+            // Reverb toggle — on by default, applies live to whatever is playing.
+            Toggle(isOn: $player.audioSettings.reverbEnabled) {
+                Label("Reverb", systemImage: "circle.hexagonpath")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if player.audioSettings.reverbEnabled {
+                Text("Adds a real sense of space to playback. Changes apply instantly to the current track.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+
+                HStack {
+                    Label("Room", systemImage: "square.stack.3d.up")
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(AppTheme.bodyFont(size: 14))
+                    Spacer()
+                    Picker("", selection: $player.audioSettings.reverbPreset) {
+                        ForEach(ReverbRoomPreset.allCases) { preset in
+                            Text(preset.displayName)
+                                .tag(preset)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(AppTheme.dynamicAccent)
+                }
+                .padding(.leading, 16)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Label("Mix", systemImage: "dial.medium")
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .font(AppTheme.bodyFont(size: 14))
+                        Spacer()
+                        Text("\(Int(player.audioSettings.reverbWetDryMix))%")
+                            .font(AppTheme.monoFont(size: 14))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    Slider(value: $player.audioSettings.reverbWetDryMix, in: 0...100, step: 1)
+                        .tint(AppTheme.dynamicAccent)
+                    HStack {
+                        Text("Dry").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
+                        Spacer()
+                        Text("Wet").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+                .padding(.leading, 16)
+            }
+
             // Player error message (if any)
             if let error = player.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle")
@@ -505,6 +646,8 @@ struct SettingsView: View {
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.gaplessEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.replayGainEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.bassBoostEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.reverbEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.smartCrossfadeEnabled)
     }
 
     // MARK: — Streaming & Downloads Section
@@ -794,6 +937,10 @@ struct SettingsView: View {
             }
             NavigationLink(destination: BackgroundSettingsView()) {
                 Label("Gallery Background", systemImage: "photo.on.rectangle")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            NavigationLink(destination: GlassSettingsView()) {
+                Label("Liquid Glass", systemImage: "circle.hexagongrid.fill")
                     .foregroundStyle(AppTheme.textPrimary)
             }
         } header: {

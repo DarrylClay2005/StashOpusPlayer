@@ -101,7 +101,10 @@ struct AlbumDetailView: View {
                         }
                     }
                 }
-                .listStyle(.insetGrouped)
+                // .plain (not .insetGrouped) to match the main Library's
+                // edge-to-edge list — insetGrouped's boxed, inset sections were
+                // the "Albums look different from the rest of the app" mismatch.
+                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             } else {
                 ScrollView {

@@ -117,7 +117,7 @@ final class DuplicateFinderService: ObservableObject {
         // versions sharing a title, e.g. "Radio Edit" vs "Extended Mix").
         var byTitleArtist: [String: [Song]] = [:]
         for song in songs where !consumed.contains(song.id) {
-            let key = normalize(song.title) + "|" + normalize(song.artist)
+            let key = normalize(song.title) + "|" + normalizeArtist(song.artist)
             guard !key.isEmpty, key != "|" else { continue }
             byTitleArtist[key, default: []].append(song)
         }
@@ -154,16 +154,89 @@ final class DuplicateFinderService: ObservableObject {
         return clusters
     }
 
-    /// Lowercases, strips diacritics/punctuation, and collapses whitespace so
-    /// e.g. "Daft Punk - One More Time (Radio Edit)" and "daft punk one more
-    /// time radio edit" match.
+    /// Bracketed/parenthetical terms YouTube/SoundCloud uploaders routinely tack
+    /// onto a title that do NOT represent a genuinely different recording —
+    /// stripped before comparison so e.g. "Song Name" and "Song Name (Official
+    /// Music Video)" match. Deliberately excludes real edition markers (Radio
+    /// Edit, Extended Mix, Remix, Acoustic, Live, Instrumental, Cover, ...) so
+    /// those stay distinct rather than being merged with the original.
+    private static let titleNoiseTerms: Set<String> = [
+        "official video", "official music video", "official audio",
+        "official lyric video", "official lyrics video", "lyric video", "lyrics",
+        "audio", "video", "hd", "hq", "4k", "music video", "visualizer", "mv",
+        "full video", "with lyrics", "explicit", "clean", "clean version",
+        "monstercat release", "audio only",
+    ]
+
+    /// Matches a `feat./ft./featuring <name>` clause, optionally wrapped in
+    /// parens/brackets or introduced by a hyphen/comma — stripped from both
+    /// titles and artists since the same track is tagged inconsistently
+    /// with/without a feature credit across different uploads/sources.
+    private static let featureClauseRegex = try? NSRegularExpression(
+        pattern: #"(?i)[\(\[]?\s*(feat\.?|ft\.?|featuring)\s+[^()\[\],]+[\)\]]?"#
+    )
+
+    /// Lowercases, strips diacritics/punctuation, drops noise tags and feature
+    /// credits, and collapses whitespace so e.g. "Daft Punk - One More Time
+    /// (Official Audio)" and "daft punk one more time" match, while "(Radio
+    /// Edit)" vs "(Extended Mix)" of the same title stay distinct.
     nonisolated static func normalize(_ text: String) -> String {
-        let folded = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+        var working = text
+        if let featureClauseRegex {
+            working = featureClauseRegex.stringByReplacingMatches(
+                in: working, range: NSRange(working.startIndex..., in: working), withTemplate: ""
+            )
+        }
+        working = stripNoiseTags(from: working)
+
+        let folded = working.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
         let alphanumeric = folded.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0 == " " }
         return String(String.UnicodeScalarView(alphanumeric))
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+    }
+
+    /// Removes only the `(...)`/`[...]` groups whose contents are a known
+    /// noise term (see `titleNoiseTerms`) — groups containing a real edition
+    /// marker (e.g. "(Remix)") are left in place.
+    nonisolated private static func stripNoiseTags(from text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"[\(\[]([^()\[\]]+)[\)\]]"#) else { return text }
+        var result = text
+        let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+        for match in matches.reversed() {
+            guard let groupRange = Range(match.range(at: 1), in: result),
+                  let fullRange = Range(match.range, in: result) else { continue }
+            let inner = result[groupRange].lowercased().trimmingCharacters(in: .whitespaces)
+            if titleNoiseTerms.contains(inner) {
+                result.removeSubrange(fullRange)
+            }
+        }
+        return result
+    }
+
+    /// Like `normalize`, but additionally splits on common multi-artist
+    /// separators (",", "&", "/", " x ", " vs ", "with") and sorts the parts —
+    /// so "Artist A & Artist B" and "Artist B, Artist A" (or the same pairing
+    /// tagged with a different separator across sources) compare equal.
+    nonisolated static func normalizeArtist(_ text: String) -> String {
+        var working = text
+        if let featureClauseRegex {
+            working = featureClauseRegex.stringByReplacingMatches(
+                in: working, range: NSRange(working.startIndex..., in: working), withTemplate: ""
+            )
+        }
+        guard let separatorRegex = try? NSRegularExpression(pattern: #"(?i)\s*(,|&|/| x | vs\.?\s| with )\s*"#) else {
+            return normalize(working)
+        }
+        let unified = separatorRegex.stringByReplacingMatches(
+            in: working, range: NSRange(working.startIndex..., in: working), withTemplate: "|"
+        )
+        let parts = unified.components(separatedBy: "|")
+            .map { normalize($0) }
+            .filter { !$0.isEmpty }
+            .sorted()
+        return parts.joined(separator: " ")
     }
 }
 

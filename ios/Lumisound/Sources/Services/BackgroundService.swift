@@ -94,6 +94,16 @@ final class BackgroundService: ObservableObject {
     /// `willEnterForegroundNotification`) doesn't repeatedly hit the network.
     private var didAttemptCloudRestore = false
 
+    /// True only while `loadSettings()` is assigning the persisted values back
+    /// into the published properties. Each of those assignments fires the
+    /// property's `didSet → saveSettings()`, and `saveSettings()` writes EVERY
+    /// field — so without this guard the first assignment (e.g. `isEnabled`)
+    /// would persist the not-yet-loaded `animation`/`opacity` defaults
+    /// (`.fade`/`0.35`) back over the user's real saved values before they
+    /// were even read, which is exactly why the Appearance slider and
+    /// Transition Animation selection failed to persist across launches.
+    private var isLoadingSettings = false
+
     // MARK: Init — register for foreground notification
 
     init() {
@@ -420,6 +430,12 @@ final class BackgroundService: ObservableObject {
     // MARK: Persistence
 
     func saveSettings() {
+        // Suppressed while loadSettings() is populating the published
+        // properties — see `isLoadingSettings`. Without this, the didSet on an
+        // already-loaded property would call saveSettings() and write the
+        // remaining (not-yet-loaded) properties' default values back over the
+        // user's persisted ones.
+        guard !isLoadingSettings else { return }
         let defaults = UserDefaults.standard
         defaults.set(isEnabled, forKey: Keys.isEnabled)
         defaults.set(shuffleIntervalSeconds, forKey: Keys.shuffleInterval)
@@ -430,6 +446,12 @@ final class BackgroundService: ObservableObject {
 
     func loadSettings() {
         let defaults = UserDefaults.standard
+
+        // Guard against each property's didSet re-persisting partially-loaded
+        // state (see `isLoadingSettings`); one explicit saveSettings() runs at
+        // the end so any first-load migration (e.g. the legacy blur toggle) is
+        // still written back.
+        isLoadingSettings = true
 
         // isEnabled — default false when key absent
         isEnabled = defaults.bool(forKey: Keys.isEnabled)
@@ -455,6 +477,8 @@ final class BackgroundService: ObservableObject {
             defaults.removeObject(forKey: Keys.isBlurredLegacy)
             defaults.set(blurRadius, forKey: Keys.blurRadius)
         }
+
+        isLoadingSettings = false
 
         // Load persisted images from disk; this also starts shuffling if enabled
         loadImagesFromDisk()

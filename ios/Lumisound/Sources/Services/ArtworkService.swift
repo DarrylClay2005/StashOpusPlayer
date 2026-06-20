@@ -121,9 +121,13 @@ final class ArtworkService {
     /// Used by DocumentImportService to persist video-frame thumbnails so they
     /// survive app restarts and NSCache evictions.
     func cacheImage(_ image: UIImage, forKey key: String) {
-        setMemoryCache(image, forKey: key)
-        let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
-        saveToDisk(image: resized, key: key)
+        // Square-crop + downscale once, then use the SAME processed image for
+        // both caches so the in-memory and on-disk copies match (previously the
+        // raw, possibly non-square image went into memory while the squared one
+        // went to disk — the artwork appeared to "re-crop" after a relaunch).
+        let processed = resizedImage(image, maxDimension: Self.artworkCacheDimension)
+        setMemoryCache(processed, forKey: key)
+        saveToDisk(image: processed, key: key)
     }
 
     /// Fetches a remote image and writes it to both memory and disk cache under `key`.
@@ -301,13 +305,36 @@ final class ArtworkService {
     }
 
     private func resizedImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
-        let size = image.size
-        guard size.width > maxDimension || size.height > maxDimension else { return image }
+        // First center-crop to a square so non-square sources (e.g. 16:9 / 4:3
+        // YouTube thumbnails) fill the square artwork frames used everywhere —
+        // song cards, Now Playing styles, Up Next — instead of showing
+        // letterbox bars or being letterboxed by the views. Album art that's
+        // already square is unchanged.
+        let squared = squareCropped(image)
+        let size = squared.size
+        guard size.width > maxDimension || size.height > maxDimension else { return squared }
         let scale = min(maxDimension / size.width, maxDimension / size.height)
         let newSize = CGSize(width: (size.width * scale).rounded(),
                              height: (size.height * scale).rounded())
         let renderer = UIGraphicsImageRenderer(size: newSize)
-        return renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: newSize)) }
+        return renderer.image { _ in squared.draw(in: CGRect(origin: .zero, size: newSize)) }
+    }
+
+    /// Returns the largest centered square crop of `image`. A no-op for images
+    /// that are already square. Operates in the image's own pixel space and
+    /// preserves orientation by rendering through `UIGraphicsImageRenderer`.
+    private func squareCropped(_ image: UIImage) -> UIImage {
+        let w = image.size.width
+        let h = image.size.height
+        guard w > 0, h > 0, abs(w - h) > 0.5 else { return image }
+        let side = min(w, h)
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+        return renderer.image { _ in
+            // Center the source so equal amounts are cropped from both edges of
+            // the longer dimension.
+            let origin = CGPoint(x: (side - w) / 2, y: (side - h) / 2)
+            image.draw(in: CGRect(origin: origin, size: CGSize(width: w, height: h)))
+        }
     }
 
     // MARK: - Fetch methods

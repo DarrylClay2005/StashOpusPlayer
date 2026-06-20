@@ -415,6 +415,14 @@ CREATE TABLE IF NOT EXISTS ios_notifications (
 -- when a user hasn't set their own.
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS youtube_api_key VARCHAR(128) NULL;
 
+-- Per-user yt-dlp cookies (Netscape cookies.txt format), used to authenticate
+-- yt-dlp extraction (search/stream/resolve/download) as that user's YouTube
+-- session — required for age-restricted content and avoids YouTube's
+-- anonymous-request bot-detection blocks. Never echoed back to clients; see
+-- /user/ytdlp-cookies (status only) and /user/ytdlp-cookies/validate.
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS ytdlp_cookies MEDIUMTEXT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS ytdlp_cookies_updated_at TIMESTAMP NULL;
+
 -- Feature: Discord "now playing" webhook integration. True per-user Discord
 -- Rich Presence ("Listening to ...") requires the Discord desktop client and
 -- a local IPC connection, which an iOS app cannot establish on a user's
@@ -499,6 +507,11 @@ ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS library_artists_columns I
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS now_playing_artwork_style VARCHAR(32) NULL;
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS now_playing_seeker_style VARCHAR(32) NULL;
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS earned_badges_json MEDIUMTEXT NULL;
+-- Generic JSON bag of additional UserDefaults-backed preferences included in
+-- the per-user auto backup (notifications toggle, card style, auto-radio,
+-- Liquid Glass customization, etc.). A single extensible column so new
+-- settings can be backed up without per-field schema migrations.
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS extra_settings_json MEDIUMTEXT NULL;
 
 -- Feature: Discover subscriptions — resolve a user-entered channel
 -- URL/handle/search term to a real YouTube channel_id + thumbnail at

@@ -101,6 +101,14 @@ struct LumisoundApp: App {
                         )
                     }
 
+                    // Request device-notification authorization and mirror any
+                    // existing unread server-inbox items to device notifications.
+                    await NotificationService.shared.requestAuthorization()
+                    if account.isLoggedIn {
+                        let unread = await account.fetchNotifications(unreadOnly: true)
+                        NotificationService.shared.syncServerNotifications(unread)
+                    }
+
                     // Start periodic bridge health checks.
                     bridgeHealth.startPeriodicChecks(streaming: streaming)
 

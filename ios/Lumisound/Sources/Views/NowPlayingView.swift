@@ -423,6 +423,30 @@ struct NowPlayingView: View {
         case .tiltCard:
             TiltCardArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
+
+        case .depthParallax:
+            DepthParallaxArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .frostedStack:
+            FrostedStackArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .haloRing:
+            HaloRingArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .spotlight:
+            SpotlightArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .mirrorWall:
+            MirrorWallArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .waveBorder:
+            WaveBorderArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
         }
     }
 
@@ -634,11 +658,11 @@ struct NowPlayingView: View {
 
     private var transportSection: some View {
         HStack(spacing: 0) {
-            // Shuffle
+            // Shuffle — active state shows a filled accent well.
             transportButton(
                 systemName: "shuffle",
-                tint: player.shuffleEnabled ? AppTheme.dynamicAccent : AppTheme.textPrimary,
-                font: .system(size: 18, weight: .medium)
+                font: .system(size: 18, weight: .semibold),
+                isActive: player.shuffleEnabled
             ) {
                 player.toggleShuffle()
             }
@@ -648,8 +672,8 @@ struct NowPlayingView: View {
             // Previous
             transportButton(
                 systemName: "backward.fill",
-                tint: AppTheme.textPrimary,
-                font: .system(size: 24, weight: .medium)
+                font: .system(size: 24, weight: .medium),
+                isActive: false
             ) {
                 skipHaptic.impactOccurred()
                 player.skipToPrevious()
@@ -657,22 +681,30 @@ struct NowPlayingView: View {
 
             Spacer()
 
-            // Play / Pause — centered, always 68pt circle
+            // Play / Pause — centered, always 72pt circle with a soft gradient
+            // and press-scale feedback for a more tactile, modern feel.
             Button {
                 playHaptic.impactOccurred()
                 player.togglePlayPause()
             } label: {
                 ZStack {
                     Circle()
-                        .fill(AppTheme.dynamicAccent)
-                        .frame(width: 68, height: 68)
-                        .shadow(color: AppTheme.dynamicAccent.opacity(0.45), radius: 12, x: 0, y: 6)
+                        .fill(
+                            LinearGradient(
+                                colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 72, height: 72)
+                        .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+                        .shadow(color: AppTheme.dynamicAccent.opacity(0.5), radius: 16, x: 0, y: 8)
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 26, weight: .bold))
+                        .font(.system(size: 28, weight: .bold))
                         .foregroundStyle(.white)
+                        .contentTransition(.opacity)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableButtonStyle())
             .animation(.spring(response: 0.25, dampingFraction: 0.7), value: player.isPlaying)
 
             Spacer()
@@ -680,8 +712,8 @@ struct NowPlayingView: View {
             // Next
             transportButton(
                 systemName: "forward.fill",
-                tint: AppTheme.textPrimary,
-                font: .system(size: 24, weight: .medium)
+                font: .system(size: 24, weight: .medium),
+                isActive: false
             ) {
                 skipHaptic.impactOccurred()
                 player.skipToNext()
@@ -689,11 +721,11 @@ struct NowPlayingView: View {
 
             Spacer()
 
-            // Repeat
+            // Repeat — active (all/one) shows a filled accent well.
             transportButton(
                 systemName: repeatIcon,
-                tint: player.repeatMode == .off ? AppTheme.textPrimary : AppTheme.dynamicAccent,
-                font: .system(size: 18, weight: .medium)
+                font: .system(size: 18, weight: .semibold),
+                isActive: player.repeatMode != .off
             ) {
                 player.cycleRepeatMode()
             }
@@ -709,19 +741,33 @@ struct NowPlayingView: View {
         }
     }
 
+    /// A secondary transport control rendered as an icon inside a subtle
+    /// circular "well" — glass when active (accent-tinted), faint surface
+    /// otherwise — with press-scale feedback.
     private func transportButton(
         systemName: String,
-        tint: Color,
         font: Font,
+        isActive: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(font)
-                .foregroundStyle(tint)
-                .frame(width: 44, height: 44)
+                .foregroundStyle(isActive ? .white : AppTheme.textPrimary)
+                .frame(width: 46, height: 46)
+                .background(
+                    Circle().fill(
+                        isActive
+                            ? AppTheme.dynamicAccent.opacity(0.9)
+                            : AppTheme.elevatedSurface.opacity(0.5)
+                    )
+                )
+                .overlay(
+                    Circle().stroke(.white.opacity(isActive ? 0.25 : 0.08), lineWidth: 1)
+                )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableButtonStyle())
+        .animation(.easeInOut(duration: 0.2), value: isActive)
     }
 
     // MARK: - Sleep Timer Pill

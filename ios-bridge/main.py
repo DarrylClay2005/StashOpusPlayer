@@ -4,6 +4,7 @@ import hashlib
 import io
 import ipaddress
 import json
+import gzip
 import logging
 import math
 import os
@@ -18,7 +19,7 @@ import urllib.request
 import uuid
 import zipfile
 from collections import defaultdict
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlencode, urlsplit
@@ -30,6 +31,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 import yt_dlp
 
@@ -63,6 +65,15 @@ SERVER_MUSIC_DIR: str = os.getenv("SERVER_MUSIC_DIR", "")
 # Per-user music directory. Each user gets {USER_MUSIC_DIR}/{user_id}/.
 # Falls back to {SERVER_MUSIC_DIR}/users/ if SERVER_MUSIC_DIR is set.
 USER_MUSIC_DIR: str = os.getenv("USER_MUSIC_DIR", "")
+
+# When enabled, per-user cloud-backup uploads are stored gzip-compressed on
+# disk (transparently decompressed on stream/download/artwork). Reversible and
+# lossless — the user always gets their exact original file back. Detection on
+# read is by gzip magic bytes, so toggling this only affects NEW uploads and
+# never breaks already-stored (uncompressed) files. Default off so it's a
+# deliberate, post-verification opt-in rather than silently changing how every
+# user's backups are stored.
+USER_MUSIC_COMPRESSION: bool = os.getenv("USER_MUSIC_COMPRESSION", "0") in ("1", "true", "True", "yes")
 SUPPORTED_AUDIO_EXTS: frozenset[str] = frozenset({
     ".mp3", ".m4a", ".aac", ".wav", ".aif", ".aiff",
     ".flac", ".opus", ".ogg", ".caf", ".mp4", ".m4v",
@@ -189,6 +200,19 @@ _YTDLP_SEMAPHORE = asyncio.Semaphore(4)  # max 4 concurrent yt-dlp processes
 # tracks. Cap transcoding jobs to a smaller pool, acquired in addition to
 # _YTDLP_SEMAPHORE.
 _TRANSCODE_SEMAPHORE = asyncio.Semaphore(2)
+
+# aria2c is enforced as yt-dlp's external downloader for every /api/download
+# (and the per-track segments yt-dlp fetches): -x/-s/-j open many parallel
+# connections, --min-split-size keeps each worthwhile, and --file-allocation
+# =none avoids a slow pre-allocate on the temp file. This is the single
+# biggest download-speed win available here (the built-in downloader is
+# single-connection). aria2c is installed in the Docker image.
+_ARIA2_DOWNLOADER_ARGS = [
+    "--downloader", "aria2c",
+    "--downloader-args",
+    "aria2c:-x16 -s16 -j16 -k1M --min-split-size=1M --max-connection-per-server=16 "
+    "--file-allocation=none --console-log-level=warn --summary-interval=0",
+]
 
 # ---------------------------------------------------------------------------
 # /api/download job tracking
@@ -509,19 +533,77 @@ async def _reject_ssrf_targets(url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _ytdlp_cookie_args() -> list[str]:
+def _account_token_user_id(request: Request) -> Optional[str]:
+    """Best-effort: resolves the calling user's id from the optional
+    X-Account-Token header. The legacy yt-dlp endpoints (/api/search,
+    /api/stream, /api/download, etc.) authenticate via a shared bridge API
+    key rather than a per-account JWT, so most callers won't have one — in
+    that case this returns None and the caller falls back to the server-wide
+    cookie file."""
+    token = request.headers.get("X-Account-Token", "")
+    if not token:
+        return None
+    payload = decode_token(token)
+    return payload.get("sub") if payload else None
+
+
+# Per-user yt-dlp cookies (Netscape format) are stored in the DB
+# (ios_user_settings.ytdlp_cookies) and materialized to a file here on demand
+# — yt-dlp's --cookies flag requires a real filesystem path.
+YTDLP_USER_COOKIES_DIR = pathlib.Path(os.getenv("YTDLP_USER_COOKIES_DIR", "/app/.cache/yt-dlp/user-cookies"))
+
+
+async def _user_cookies_text(user_id: str) -> Optional[str]:
+    """Returns the user's stored cookies.txt contents, or None if they
+    haven't uploaded any."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT ytdlp_cookies FROM ios_user_settings WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+    return row[0] if row and row[0] else None
+
+
+async def _user_cookies_file(user_id: Optional[str]) -> Optional[str]:
+    """Materializes *user_id*'s stored cookies to a per-user file on disk and
+    returns its path, or None if they have none stored (or user_id is None).
+    Re-writing the file on every call is cheap (cookie files are a few KB)
+    and keeps it in sync with the latest upload with no separate cache to
+    invalidate."""
+    if not user_id:
+        return None
+    text = await _user_cookies_text(user_id)
+    if not text:
+        return None
+    YTDLP_USER_COOKIES_DIR.mkdir(parents=True, exist_ok=True)
+    path = YTDLP_USER_COOKIES_DIR / f"{user_id}.txt"
+    path.write_text(text)
+    return str(path)
+
+
+async def _ytdlp_cookie_args(user_id: Optional[str] = None) -> list[str]:
     """YouTube only paginates flat-playlist results past the first ~100 entries
-    for authenticated requests. If a session cookie export is bind-mounted at
-    YTDLP_COOKIES_FILE, use it — the file can be swapped out at any time
-    (no rebuild/restart needed) to refresh the session.
+    for authenticated requests, and increasingly throttles/blocks anonymous
+    extraction outright ("Sign in to confirm you're not a bot"). Prefers
+    *user_id*'s personally-uploaded cookies (see /user/ytdlp-cookies); falls
+    back to the server-wide cookie file at YTDLP_COOKIES_FILE when the user
+    has none configured (or *user_id* is None) — that file can be bind-mounted
+    /swapped out at any time (no rebuild/restart needed) to refresh the
+    shared session.
 
     Also skip yt-dlp's initial webpage fetch for the playlist tab and go
     straight to the API JSON — for large playlists that contain unavailable
     (deleted/private) videos this roughly doubles the number of entries
     yt-dlp is able to paginate through (e.g. 105/307 -> 205/307)."""
     args = ["--extractor-args", "youtubetab:skip=webpage"]
-    if os.path.isfile(YTDLP_COOKIES_FILE) and os.path.getsize(YTDLP_COOKIES_FILE) > 0:
-        args += ["--cookies", YTDLP_COOKIES_FILE]
+    cookie_path = await _user_cookies_file(user_id)
+    if not cookie_path and os.path.isfile(YTDLP_COOKIES_FILE) and os.path.getsize(YTDLP_COOKIES_FILE) > 0:
+        cookie_path = YTDLP_COOKIES_FILE
+    if cookie_path:
+        args += ["--cookies", cookie_path]
     return args
 
 
@@ -530,7 +612,7 @@ def _source_from_url(url: str) -> str:
     return "soundcloud" if "soundcloud.com" in url else "youtube"
 
 
-def _ytdlp_listing_args(target: str, source: str) -> list[str]:
+async def _ytdlp_listing_args(target: str, source: str, user_id: Optional[str] = None) -> list[str]:
     """Build yt-dlp args for listing (searching or resolving) tracks from
     *target* — either a `<prefix>search<n>:<query>` search term (for
     /api/search) or a playlist/track URL (for /api/resolve).
@@ -548,7 +630,7 @@ def _ytdlp_listing_args(target: str, source: str) -> list[str]:
         "--flat-playlist",
         "--no-playlist",
         "--cache-dir", YTDLP_CACHE_DIR,
-        *_ytdlp_cookie_args(),
+        *(await _ytdlp_cookie_args(user_id)),
     ]
 
 
@@ -976,14 +1058,14 @@ async def _channel_uploads_via_api(channel_id: str, max_results: int, api_key: s
     return tracks
 
 
-async def _channel_uploads_via_ytdlp(channel_id: str, max_results: int) -> list[dict]:
+async def _channel_uploads_via_ytdlp(channel_id: str, max_results: int, user_id: Optional[str] = None) -> list[dict]:
     """Fallback when no YouTube API key is configured or the API call fails:
     scrape the channel's /videos tab with yt-dlp (flat-playlist, cookie-auth)."""
     entries = await _run_ytdlp(
         f"https://www.youtube.com/channel/{channel_id}/videos",
         "--dump-json", "--flat-playlist", "--playlist-end", str(max_results),
         "--cache-dir", YTDLP_CACHE_DIR,
-        *_ytdlp_cookie_args(),
+        *(await _ytdlp_cookie_args(user_id)),
         timeout=30.0,
     )
     return [_parse_track(e, "youtube") for e in entries]
@@ -1097,6 +1179,7 @@ class SyncPushRequest(BaseModel):
     now_playing_artwork_style: Optional[str] = None
     now_playing_seeker_style: Optional[str] = None
     earned_badges_json: Optional[str] = None
+    extra_settings_json: Optional[str] = None
 
 
 class FolderBackupTrack(BaseModel):
@@ -1274,7 +1357,7 @@ async def search(
 
     prefix = "ytsearch" if source == "youtube" else "scsearch"
     search_url = f"{prefix}{limit}:{q}"
-    base_args = _ytdlp_listing_args(search_url, source)
+    base_args = await _ytdlp_listing_args(search_url, source, _account_token_user_id(request))
 
     try:
         entries = await _run_ytdlp(*base_args, timeout=30.0)
@@ -1314,11 +1397,30 @@ async def stream(
         target_url = f"https://youtube.com/watch?v={id}"
 
     format_flag = _format_flag(format)
-    stream_url = await _get_raw_url(target_url, format_flag=format_flag)
+    user_id = _account_token_user_id(request)
+    stream_url, failure_reason = await _get_raw_url(target_url, format_flag=format_flag, user_id=user_id)
     if not stream_url:
-        raise HTTPException(status_code=404, detail="No stream URL found")
+        raise HTTPException(status_code=404, detail=failure_reason or "No stream URL found")
 
     return {"url": stream_url, "expires_in": 21600}
+
+
+def _ytdlp_auth_failure_reason(stderr: bytes) -> Optional[str]:
+    """Maps common yt-dlp stderr failure signatures to a user-facing reason —
+    lets /api/stream and /api/download surface "upload your cookies" instead
+    of a generic "not found" when that's actually why extraction failed.
+    YouTube increasingly requires an authenticated session even for the
+    "Play" preview button, which is why this exists."""
+    text = stderr.decode(errors="replace").lower()
+    if "sign in to confirm" in text or "not a bot" in text:
+        return "YouTube is requiring sign-in to verify this isn't a bot. Upload your YouTube cookies in Settings to fix this."
+    if "age-restricted" in text or ("age" in text and "restrict" in text):
+        return "This video is age-restricted. Upload YouTube cookies from a logged-in, age-verified account in Settings to play it."
+    if "private video" in text:
+        return "This video is private."
+    if "sign in" in text and "login" in text:
+        return "This video requires you to be signed in. Upload your YouTube cookies in Settings."
+    return None
 
 
 def _format_flag(format: str) -> str:
@@ -1337,9 +1439,12 @@ def _format_flag(format: str) -> str:
 async def _get_raw_url(
     target_url: str,
     format_flag: str = "bestaudio[ext=m4a]/bestaudio/best",
-) -> Optional[str]:
+    user_id: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str]]:
     """
-    Runs yt-dlp --get-url and returns the first HTTP(S) line from stdout.
+    Runs yt-dlp --get-url and returns `(stream_url, failure_reason)` — exactly
+    one of the two is non-None. The first HTTP(S) stdout line is returned as
+    the URL on success.
 
     Some videos don't expose the requested container/codec combination (the
     preferred format simply isn't in the available formats list), which makes
@@ -1352,6 +1457,7 @@ async def _get_raw_url(
         if flag not in attempts:
             attempts.append(flag)
 
+    cookie_args = await _ytdlp_cookie_args(user_id)
     last_stderr = b""
     for attempt_flag in attempts:
         cmd = [
@@ -1359,7 +1465,7 @@ async def _get_raw_url(
             "-f", attempt_flag,
             "--get-url",
             "--no-playlist",
-            *_ytdlp_cookie_args(),
+            *cookie_args,
             target_url,
         ]
         logger.info("Running (raw): %s", " ".join(cmd))
@@ -1385,7 +1491,7 @@ async def _get_raw_url(
                         "Stream URL resolved via fallback format %r (preferred %r unavailable) for %s",
                         attempt_flag, format_flag, target_url,
                     )
-                return line
+                return line, None
 
         logger.warning(
             "yt-dlp returned no stream URL for %s with format %r — trying next fallback",
@@ -1396,7 +1502,7 @@ async def _get_raw_url(
         "yt-dlp exhausted all format fallbacks for %s — stderr: %s",
         target_url, last_stderr.decode(errors="replace")[-500:],
     )
-    return None
+    return None, _ytdlp_auth_failure_reason(last_stderr)
 
 
 @app.get("/api/download")
@@ -1538,25 +1644,47 @@ async def _do_download_job(
     actual_ext = expected_ext
     tmp_dir: Optional[pathlib.Path] = None
 
+    # Resolve the calling user once — used both for per-user cookies below and
+    # for the download-history write at the end of this function.
+    user_id: Optional[str] = None
+    if account_token:
+        token_payload = decode_token(account_token)
+        if token_payload:
+            user_id = token_payload.get("sub")
+    cookie_args = await _ytdlp_cookie_args(user_id)
+    last_stderr = b""
+
     for attempt in range(1, max_attempts + 1):
         # Use UUID-based temp dir to prevent collisions (Fix 6)
         tmp_dir = pathlib.Path(tempfile.gettempdir()) / f"dl_{uuid.uuid4().hex}"
         tmp_dir.mkdir(parents=True, exist_ok=True)
         output_template = str(tmp_dir / f"{safe_title}.%(ext)s")
 
+        # Standard default command for every download (single items and
+        # playlist entries alike): embed metadata + thumbnail, and throttle
+        # requests (--sleep-interval/--max-sleep-interval) to look less like
+        # a scraper and reduce rate-limit/ban risk. `extra_args` (from
+        # _download_format_args) adds the format-specific -f/-x/--audio-format
+        # /--audio-quality flags.
+        # Use aria2c for all but the final attempt; if aria2 itself is the
+        # reason a download keeps failing (some hosts/formats don't segment
+        # cleanly), the last attempt falls back to yt-dlp's built-in downloader
+        # so a track is never permanently un-downloadable just because of aria2.
+        use_aria2 = attempt < max_attempts
         cmd = [
             "yt-dlp",
             "--no-playlist",
             "--embed-metadata",
-            # --embed-thumbnail intentionally omitted: requires AtomicParsley for M4A
-            # which is not in the Docker image. The iOS ArtworkService handles artwork
-            # display separately via the thumbnailURL field from search results.
+            "--embed-thumbnail",
+            "--sleep-interval", "5",
+            "--max-sleep-interval", "15",
+            *(_ARIA2_DOWNLOADER_ARGS if use_aria2 else []),
             "-o", output_template,
-            *_ytdlp_cookie_args(),
+            *cookie_args,
             *extra_args,
             target_url,
         ]
-        logger.info("Download cmd (attempt %d/%d): %s", attempt, max_attempts, " ".join(cmd))
+        logger.info("Download cmd (attempt %d/%d, aria2=%s): %s", attempt, max_attempts, use_aria2, " ".join(cmd))
 
         # `-x`/`--extract-audio` means yt-dlp transcodes after downloading
         # (mp3/flac/wav/opus) — much more CPU-bound and slower than the m4a/best
@@ -1592,11 +1720,13 @@ async def _do_download_job(
                 raise HTTPException(status_code=408, detail="Download timed out")
 
         if proc.returncode != 0:
+            last_stderr = stderr_bytes
             err_text = stderr_bytes.decode(errors="replace")[-500:]
             logger.error("yt-dlp download failed (attempt %d/%d): %s", attempt, max_attempts, err_text)
             shutil.rmtree(tmp_dir, ignore_errors=True)
             if attempt == max_attempts:
-                raise HTTPException(status_code=404, detail="Could not download track")
+                detail = _ytdlp_auth_failure_reason(last_stderr) or "Could not download track"
+                raise HTTPException(status_code=404, detail=detail)
             continue
 
         # yt-dlp may choose a slightly different extension than requested — scan the dir.
@@ -1655,12 +1785,12 @@ async def _do_download_job(
     if output_file.suffix.lstrip(".") in ("m4a", "mp4", "mov"):
         tag_cmd += ["-movflags", "+faststart"]
     tag_cmd += ["-metadata", f"LUMISOUND_ID={source_id}"]
-    # --embed-thumbnail is omitted above (no AtomicParsley for M4A), so the only
-    # record of this track's artwork is the `thumbnail` query param. Embed it as
-    # a metadata tag too: if the app's artwork disk cache is ever cleared (or the
-    # in-flight prefetch from `thumbnail` fails), ArtworkService can still recover
-    # the YouTube thumbnail URL straight from the file itself instead of falling
-    # back to an iTunes Search guess that often doesn't match OST/remix titles.
+    # Defense-in-depth alongside yt-dlp's own --embed-thumbnail: store the
+    # thumbnail URL as a metadata tag too, so if embedding ever silently fails
+    # for a given container/extractor (or the app's artwork disk cache is
+    # cleared), ArtworkService can still recover the YouTube thumbnail URL
+    # straight from the file itself instead of falling back to an iTunes
+    # Search guess that often doesn't match OST/remix titles.
     if thumbnail:
         tag_cmd += ["-metadata", f"LUMISOUND_THUMBNAIL={thumbnail}"]
     tag_cmd.append(str(tagged_file))
@@ -1702,22 +1832,20 @@ async def _do_download_job(
     # token is optional, and history-tracking failures shouldn't block the
     # download itself). Powers "My Library" search, "Previously downloaded"
     # restore, and download stats.
-    if account_token:
-        payload = decode_token(account_token)
-        if payload and payload.get("sub"):
-            try:
-                await _record_download_history(
-                    user_id=payload["sub"],
-                    source=source,
-                    source_id=id,
-                    title=title or id,
-                    artist=artist or "",
-                    thumbnail_url=thumbnail or "",
-                    duration_seconds=duration or 0,
-                    format=actual_ext,
-                )
-            except Exception:
-                logger.exception("Failed to record download history for user %s", payload["sub"])
+    if user_id:
+        try:
+            await _record_download_history(
+                user_id=user_id,
+                source=source,
+                source_id=id,
+                title=title or id,
+                artist=artist or "",
+                thumbnail_url=thumbnail or "",
+                duration_seconds=duration or 0,
+                format=actual_ext,
+            )
+        except Exception:
+            logger.exception("Failed to record download history for user %s", user_id)
 
     content_type_map = {
         "mp3":  "audio/mpeg",
@@ -1844,11 +1972,11 @@ def _download_format_args(format: str) -> tuple[list[str], str]:
     if format == "mp3":
         return ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0"], "mp3"
     elif format == "flac":
-        return ["-f", "bestaudio", "-x", "--audio-format", "flac"], "flac"
+        return ["-f", "bestaudio", "-x", "--audio-format", "flac", "--audio-quality", "0"], "flac"
     elif format == "opus":
-        return ["-f", "bestaudio[ext=webm]/bestaudio", "-x", "--audio-format", "opus"], "opus"
+        return ["-f", "bestaudio[ext=webm]/bestaudio", "-x", "--audio-format", "opus", "--audio-quality", "0"], "opus"
     elif format == "wav":
-        return ["-f", "bestaudio", "-x", "--audio-format", "wav"], "wav"
+        return ["-f", "bestaudio", "-x", "--audio-format", "wav", "--audio-quality", "0"], "wav"
     elif format == "best":
         return ["-f", "bestaudio/best"], "m4a"
     else:
@@ -1868,7 +1996,7 @@ async def track_metadata(
         entries = await _run_ytdlp(
             "--dump-json",
             "--no-playlist",
-            *_ytdlp_cookie_args(),
+            *(await _ytdlp_cookie_args(_account_token_user_id(request))),
             url,
             timeout=20.0,
         )
@@ -1919,14 +2047,12 @@ async def resolve_playlist(
     await _reject_ssrf_targets(url)
 
     source = _source_from_url(url)
+    user_id = _account_token_user_id(request)
 
     if source == "youtube":
         api_key = YOUTUBE_API_KEY
-        account_token = request.headers.get("X-Account-Token", "")
-        if account_token:
-            payload = decode_token(account_token)
-            if payload and payload.get("sub"):
-                api_key = await _youtube_api_key_for_user(payload["sub"])
+        if user_id:
+            api_key = await _youtube_api_key_for_user(user_id)
 
         if api_key:
             playlist_id = _extract_youtube_playlist_id(url)
@@ -1960,7 +2086,7 @@ async def resolve_playlist(
     if source == "soundcloud":
         args = ["--dump-json", url]
     else:
-        args = ["--dump-json", "--flat-playlist", *_ytdlp_cookie_args(), url]
+        args = ["--dump-json", "--flat-playlist", *(await _ytdlp_cookie_args(user_id)), url]
 
     try:
         entries = await _run_ytdlp(*args, timeout=120.0)
@@ -1973,6 +2099,64 @@ async def resolve_playlist(
     tracks = [_parse_track(e, source) for e in entries[:limit]]
     _cache_set(ytdlp_cache_key, tracks)
     return _filter_existing_tracks(tracks, source, existing_ids)
+
+
+@app.get("/api/playlist/expand")
+async def expand_playlist(
+    request: Request,
+    url: str = Query(..., description="Playlist or album URL"),
+    limit: int = Query(1000, ge=1, le=5000, description="Max items to return"),
+):
+    """Expands a playlist into its individual video URLs — the same concept as
+    export-youtube-playlist style tools. Returns a flat list of per-item
+    `https://www.youtube.com/watch?v=<id>` URLs (plus id/title), so each track
+    can be fetched individually with `--no-playlist` instead of handing yt-dlp
+    a whole playlist URL (which it handles far less reliably for large or
+    partially-unavailable playlists). Reuses the robust resolve path: YouTube
+    Data API (per-account key) first, yt-dlp flat-playlist fallback."""
+    await check_auth(request)
+    await _reject_ssrf_targets(url)
+
+    source = _source_from_url(url)
+    user_id = _account_token_user_id(request)
+
+    tracks: list[dict] = []
+    if source == "youtube":
+        api_key = YOUTUBE_API_KEY
+        if user_id:
+            api_key = await _youtube_api_key_for_user(user_id)
+        playlist_id = _extract_youtube_playlist_id(url)
+        if api_key and playlist_id:
+            try:
+                items = await _resolve_youtube_playlist_via_api(playlist_id, limit, api_key)
+                tracks = [_parse_track(item, source) for item in items]
+            except Exception as exc:
+                logger.warning("expand_playlist: Data API failed, falling back to yt-dlp: %s", exc)
+
+    if not tracks:
+        args = (["--dump-json", url] if source == "soundcloud"
+                else ["--dump-json", "--flat-playlist", *(await _ytdlp_cookie_args(user_id)), url])
+        try:
+            entries = await _run_ytdlp(*args, timeout=120.0)
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=408, detail="Playlist expand timed out")
+        except Exception as exc:
+            logger.error("expand_playlist: yt-dlp error: %s", exc)
+            raise HTTPException(status_code=404, detail="Could not expand playlist")
+        tracks = [_parse_track(e, source) for e in entries[:limit]]
+
+    items = []
+    for t in tracks:
+        # `youtube_url` is populated by _parse_track; fall back to building a
+        # watch URL from the id for YouTube entries that lack it.
+        track_url = t.get("youtube_url") or (
+            f"https://www.youtube.com/watch?v={t.get('id')}" if source == "youtube" and t.get("id") else None
+        )
+        if not track_url:
+            continue
+        items.append({"id": t.get("id"), "title": t.get("title"), "url": track_url})
+
+    return {"source": source, "count": len(items), "items": items}
 
 
 # ---------------------------------------------------------------------------
@@ -3016,7 +3200,7 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
         "vinyl_disc_enabled, show_queue_preview, songs_per_row, albums_per_row, "
         "bg_animation, bg_opacity, preferred_audio_format, download_path, "
         "car_mode_enabled, library_artists_columns, now_playing_artwork_style, "
-        "now_playing_seeker_style, earned_badges_json "
+        "now_playing_seeker_style, earned_badges_json, extra_settings_json "
         "FROM ios_user_settings WHERE user_id = %s",
         (user_id,),
     )
@@ -3026,7 +3210,7 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
          vinyl_disc_enabled, show_queue_preview, songs_per_row, albums_per_row,
          bg_animation, bg_opacity, preferred_audio_format, download_path,
          car_mode_enabled, library_artists_columns, now_playing_artwork_style,
-         now_playing_seeker_style, earned_badges_json) = settings_row
+         now_playing_seeker_style, earned_badges_json, extra_settings_json) = settings_row
     else:
         audio_settings_json = None
         track_audio_settings_json = None
@@ -3044,6 +3228,7 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
         now_playing_artwork_style = None
         now_playing_seeker_style = None
         earned_badges_json = None
+        extra_settings_json = None
 
     return {
         "favorites": favorites,
@@ -3064,6 +3249,7 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
         "now_playing_artwork_style": now_playing_artwork_style,
         "now_playing_seeker_style": now_playing_seeker_style,
         "earned_badges_json": earned_badges_json,
+        "extra_settings_json": extra_settings_json,
     }
 
 
@@ -3133,8 +3319,8 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
              vinyl_disc_enabled, show_queue_preview, songs_per_row, albums_per_row,
              bg_animation, bg_opacity, preferred_audio_format, download_path,
              car_mode_enabled, library_artists_columns, now_playing_artwork_style,
-             now_playing_seeker_style, earned_badges_json)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             now_playing_seeker_style, earned_badges_json, extra_settings_json)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             audio_settings_json = %s,
             track_audio_settings_json = %s,
@@ -3151,7 +3337,8 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
             library_artists_columns = %s,
             now_playing_artwork_style = %s,
             now_playing_seeker_style = %s,
-            earned_badges_json = %s
+            earned_badges_json = %s,
+            extra_settings_json = %s
         """,
         (
             user_id,
@@ -3171,6 +3358,7 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
             snapshot.get("now_playing_artwork_style"),
             snapshot.get("now_playing_seeker_style"),
             snapshot.get("earned_badges_json"),
+            snapshot.get("extra_settings_json"),
             # ON DUPLICATE KEY UPDATE values
             snapshot.get("audio_settings_json"),
             snapshot.get("track_audio_settings_json"),
@@ -3188,6 +3376,7 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
             snapshot.get("now_playing_artwork_style"),
             snapshot.get("now_playing_seeker_style"),
             snapshot.get("earned_badges_json"),
+            snapshot.get("extra_settings_json"),
         ),
     )
 
@@ -3322,8 +3511,8 @@ async def sync_push(
                      vinyl_disc_enabled, show_queue_preview, songs_per_row, albums_per_row,
                      bg_animation, bg_opacity, preferred_audio_format, download_path,
                      car_mode_enabled, library_artists_columns, now_playing_artwork_style,
-                     now_playing_seeker_style, earned_badges_json)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     now_playing_seeker_style, earned_badges_json, extra_settings_json)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     audio_settings_json = IF(%s IS NULL, audio_settings_json, %s),
                     track_audio_settings_json = IF(%s IS NULL, track_audio_settings_json, %s),
@@ -3340,7 +3529,8 @@ async def sync_push(
                     library_artists_columns = IF(%s IS NULL, library_artists_columns, %s),
                     now_playing_artwork_style = IF(%s IS NULL, now_playing_artwork_style, %s),
                     now_playing_seeker_style = IF(%s IS NULL, now_playing_seeker_style, %s),
-                    earned_badges_json = IF(%s IS NULL, earned_badges_json, %s)
+                    earned_badges_json = IF(%s IS NULL, earned_badges_json, %s),
+                    extra_settings_json = IF(%s IS NULL, extra_settings_json, %s)
                 """,
                 (
                     user_id,
@@ -3360,6 +3550,7 @@ async def sync_push(
                     body.now_playing_artwork_style,
                     body.now_playing_seeker_style,
                     body.earned_badges_json,
+                    body.extra_settings_json,
                     # ON DUPLICATE KEY UPDATE values (IF %s IS NULL, ..., %s)
                     body.audio_settings_json, body.audio_settings_json,
                     body.track_audio_settings_json, body.track_audio_settings_json,
@@ -3377,6 +3568,7 @@ async def sync_push(
                     body.now_playing_artwork_style, body.now_playing_artwork_style,
                     body.now_playing_seeker_style, body.now_playing_seeker_style,
                     body.earned_badges_json, body.earned_badges_json,
+                    body.extra_settings_json, body.extra_settings_json,
                 ),
             )
 
@@ -3853,22 +4045,27 @@ async def _ffprobe_tags(path: str) -> dict:
     if cached is not None:
         return cached
 
-    cmd = [
-        "ffprobe",
-        "-v", "quiet",
-        "-print_format", "json",
-        "-show_streams",
-        "-show_format",
-        path,
-    ]
     async with _FFPROBE_SEMAPHORE:
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+            # Transparently decompress gzip-compressed per-user backups before
+            # probing (no-op/zero-copy for normal files, incl. the server
+            # library — detection is by gzip magic bytes). Cache stays keyed on
+            # the original `abs_path` so the temp path's randomness is irrelevant.
+            with _readable_user_music_file(pathlib.Path(path)) as probe_path:
+                cmd = [
+                    "ffprobe",
+                    "-v", "quiet",
+                    "-print_format", "json",
+                    "-show_streams",
+                    "-show_format",
+                    str(probe_path),
+                ]
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
         except asyncio.TimeoutError:
             logger.warning("ffprobe timed out for %s", path)
             return {}
@@ -4186,6 +4383,68 @@ def _user_music_dir(user_id: str) -> Optional[pathlib.Path]:
     return root / user_id
 
 
+# ---------------------------------------------------------------------------
+# Per-user music compression (gzip, reversible/lossless). See
+# USER_MUSIC_COMPRESSION. Stored files keep their original name/extension but
+# may contain gzip bytes; readers detect this by the gzip magic header and
+# decompress to a temp file transparently.
+# ---------------------------------------------------------------------------
+
+_GZIP_MAGIC = b"\x1f\x8b"
+
+
+def _is_gzip_file(path: pathlib.Path) -> bool:
+    """True if `path`'s first two bytes are the gzip magic header."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(2) == _GZIP_MAGIC
+    except OSError:
+        return False
+
+
+@contextmanager
+def _readable_user_music_file(path: pathlib.Path):
+    """Yields a real (decoded) audio file path for `path`. If the stored file
+    is gzip-compressed (a USER_MUSIC_COMPRESSION backup), it is decompressed to
+    a temp file that is deleted when the context exits; otherwise the original
+    path is yielded unchanged (no copy). Use for ffprobe/ffmpeg/local reads.
+
+    For HTTP responses that must outlive the request (FileResponse streams the
+    file after the handler returns), use `_materialize_user_music_file`
+    instead, which hands cleanup to a BackgroundTask."""
+    if not _is_gzip_file(path):
+        yield path
+        return
+    tmp = tempfile.NamedTemporaryFile(suffix=path.suffix, delete=False)
+    try:
+        with gzip.open(path, "rb") as src:
+            shutil.copyfileobj(src, tmp)
+        tmp.close()
+        yield pathlib.Path(tmp.name)
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+def _materialize_user_music_file(path: pathlib.Path) -> tuple[pathlib.Path, Optional[pathlib.Path]]:
+    """Like `_readable_user_music_file` but for streaming responses: returns
+    `(servable_path, temp_to_cleanup)`. When the stored file is compressed, the
+    decompressed temp path is returned along with itself as the cleanup target
+    (hand it to a Starlette BackgroundTask so it's removed AFTER the response is
+    sent). When uncompressed, returns the original path and `None` (nothing to
+    clean up)."""
+    if not _is_gzip_file(path):
+        return path, None
+    tmp = tempfile.NamedTemporaryFile(suffix=path.suffix, delete=False)
+    with gzip.open(path, "rb") as src:
+        shutil.copyfileobj(src, tmp)
+    tmp.close()
+    tmp_path = pathlib.Path(tmp.name)
+    return tmp_path, tmp_path
+
+
 @app.get("/user/download-history")
 async def get_download_history(
     search: str = Query("", description="Filter by title/artist"),
@@ -4245,7 +4504,7 @@ async def get_download_history(
 @app.get("/user/music")
 async def get_user_music(
     search: str = Query("", description="Filter by title/artist/album"),
-    limit: int = Query(200, ge=1, le=500),
+    limit: int = Query(5000, ge=1, le=100000),
     user: dict = Depends(get_current_user),
 ):
     """Lists all music files in the authenticated user's personal server directory."""
@@ -4398,12 +4657,24 @@ async def upload_user_music(
             }
 
     try:
-        await asyncio.to_thread(dest_path.write_bytes, body)
+        if USER_MUSIC_COMPRESSION:
+            # Store gzip-compressed (reversible/lossless). The file keeps its
+            # original name/extension; readers detect the gzip header and
+            # decompress transparently. `body` (the original bytes) is still
+            # what content_hash/dedup above is keyed on, so dedup is unaffected.
+            compressed = await asyncio.to_thread(lambda: gzip.compress(body, compresslevel=6))
+            await asyncio.to_thread(dest_path.write_bytes, compressed)
+            logger.info(
+                "upload_user_music: saved %s for user %s compressed (%d -> %d bytes, %.0f%%)",
+                safe_name, user_id, len(body), len(compressed),
+                100.0 * len(compressed) / max(1, len(body)),
+            )
+        else:
+            await asyncio.to_thread(dest_path.write_bytes, body)
+            logger.info("upload_user_music: saved %s for user %s (%d bytes)", safe_name, user_id, len(body))
     except Exception as exc:
         logger.error("upload_user_music: write failed for user %s: %s", user_id, exc)
         raise HTTPException(status_code=500, detail="Failed to save file")
-
-    logger.info("upload_user_music: saved %s for user %s (%d bytes)", safe_name, user_id, len(body))
     abs_path = str(dest_path.resolve())
     try:
         rel = str(dest_path.relative_to(music_dir))
@@ -4419,9 +4690,12 @@ async def upload_user_music(
     # _UPLOAD_ANALYSIS_SEMAPHORE so a burst of uploads (e.g. "Download All" with
     # auto-cloud-backup) can't spawn unlimited concurrent ffmpeg processes.
     async with _UPLOAD_ANALYSIS_SEMAPHORE:
-        loudness_lufs = await _measure_loudness(dest_path)
-        bpm = await _estimate_bpm(dest_path)
-        musical_key = await _estimate_key(dest_path)
+        # ffmpeg/ffprobe need the decoded audio — decompress first if the file
+        # was stored gzip-compressed (no-op/zero-copy when uncompressed).
+        with _readable_user_music_file(dest_path) as analysis_path:
+            loudness_lufs = await _measure_loudness(analysis_path)
+            bpm = await _estimate_bpm(analysis_path)
+            musical_key = await _estimate_key(analysis_path)
 
     # Populate ios_user_music_metadata when metadata is provided
     try:
@@ -4528,7 +4802,26 @@ async def stream_user_music(
     except Exception as exc:
         logger.warning("stream_user_music: loudness lookup failed for %s: %s", path, exc)
 
-    return FileResponse(path=str(full_path), media_type=_audio_media_type(ext), filename=full_path.name, headers=headers)
+    # If stored gzip-compressed (USER_MUSIC_COMPRESSION), decompress to a temp
+    # file the client receives as the exact original, then delete that temp
+    # AFTER the response is sent — so only the compressed copy remains on disk.
+    servable_path, temp_cleanup = _materialize_user_music_file(full_path)
+    background = BackgroundTask(_safe_unlink, temp_cleanup) if temp_cleanup else None
+    return FileResponse(
+        path=str(servable_path), media_type=_audio_media_type(ext),
+        filename=full_path.name, headers=headers, background=background,
+    )
+
+
+def _safe_unlink(path: Optional[pathlib.Path]) -> None:
+    """Deletes `path` if set, ignoring errors — used as a response
+    BackgroundTask to remove the transient decompressed copy."""
+    if path is None:
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 @app.get("/user/music/artwork")
@@ -4548,10 +4841,12 @@ async def user_music_artwork(
     if not full_path.exists() or not full_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
-    cmd = ["ffmpeg", "-i", str(full_path), "-map", "0:v", "-frames:v", "1", "-f", "image2", "-vcodec", "copy", "-"]
+    # Decompress first if stored gzip-compressed (no-op when uncompressed).
     try:
-        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        with _readable_user_music_file(full_path) as art_path:
+            cmd = ["ffmpeg", "-i", str(art_path), "-map", "0:v", "-frames:v", "1", "-f", "image2", "-vcodec", "copy", "-"]
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
     except asyncio.TimeoutError:
         raise HTTPException(status_code=408, detail="Artwork extraction timed out")
     except Exception as exc:
@@ -4635,7 +4930,7 @@ _USER_MUSIC_METADATA_COLS = [
 
 @app.get("/user/music/metadata")
 async def list_user_music_metadata(
-    limit: int = Query(200, ge=1, le=500),
+    limit: int = Query(5000, ge=1, le=100000),
     min_bpm: Optional[float] = Query(None, ge=0, description="Only tracks with bpm >= this value"),
     max_bpm: Optional[float] = Query(None, ge=0, description="Only tracks with bpm <= this value"),
     key: Optional[str] = Query(None, description="Only tracks with this musical_key (e.g. 'A minor')"),
@@ -5118,7 +5413,7 @@ async def get_radio(
             "--dump-json",
             "--flat-playlist",
             "--no-warnings",
-            *_ytdlp_cookie_args(),
+            *(await _ytdlp_cookie_args(_account_token_user_id(request))),
             mix_url,
             timeout=30.0,
         )
@@ -5377,7 +5672,7 @@ async def refresh_playlist_source(
             (local_count,) = await cur.fetchone()
 
     try:
-        entries = await _run_ytdlp("--dump-json", "--flat-playlist", "--no-warnings", *_ytdlp_cookie_args(), source_url, timeout=60.0)
+        entries = await _run_ytdlp("--dump-json", "--flat-playlist", "--no-warnings", *(await _ytdlp_cookie_args(user_id)), source_url, timeout=60.0)
     except asyncio.TimeoutError:
         raise HTTPException(status_code=408, detail="Playlist refresh timed out")
     except Exception as exc:
@@ -6253,7 +6548,7 @@ async def get_discover_mix(
                 f"ytsearch{per_artist}:{artist}",
                 "--dump-json", "--flat-playlist", "--no-playlist",
                 "--cache-dir", YTDLP_CACHE_DIR,
-                *_ytdlp_cookie_args(),
+                *(await _ytdlp_cookie_args(user_id)),
                 timeout=20.0,
             )
         except Exception as exc:
@@ -6310,7 +6605,7 @@ async def youtube_channel_uploads(
             logger.warning("channel_uploads: API failed for %r, falling back to yt-dlp: %s", channel_id, exc)
 
     try:
-        return await _channel_uploads_via_ytdlp(channel_id, limit)
+        return await _channel_uploads_via_ytdlp(channel_id, limit, user_id)
     except Exception as exc:
         logger.warning("channel_uploads: yt-dlp failed for %r: %s", channel_id, exc)
         raise HTTPException(status_code=502, detail="Could not fetch channel uploads")
@@ -6437,7 +6732,7 @@ async def check_subscription(sub_id: str, payload: dict = Depends(get_current_us
                 logger.warning("check_subscription: API failed for %r, falling back to yt-dlp: %s", channel_id, exc)
         if not tracks:
             try:
-                tracks = await _channel_uploads_via_ytdlp(channel_id, 5)
+                tracks = await _channel_uploads_via_ytdlp(channel_id, 5, user_id)
             except Exception as exc:
                 logger.warning("check_subscription: yt-dlp failed for channel_id %r: %s", channel_id, exc)
 
@@ -6447,7 +6742,7 @@ async def check_subscription(sub_id: str, payload: dict = Depends(get_current_us
                 channel_url,
                 "--dump-json", "--flat-playlist", "--playlist-end", "5",
                 "--cache-dir", YTDLP_CACHE_DIR,
-                *_ytdlp_cookie_args(),
+                *(await _ytdlp_cookie_args(user_id)),
                 timeout=30.0,
             )
         except Exception as exc:
@@ -7441,6 +7736,223 @@ async def youtube_key_exposure_check(payload: dict = Depends(get_current_user)):
         return {"exposed": True, "detail": "API key has exhausted its daily quota — if this happens shortly after setup, it may indicate the key was leaked and is being used elsewhere."}
 
     return {"exposed": False, "detail": ""}
+
+
+# ---------------------------------------------------------------------------
+# Per-user yt-dlp cookies (Feature: ytdlp-cookies)
+# ---------------------------------------------------------------------------
+
+# A session-authenticated YouTube request carries one of these (legacy
+# unprefixed names, or the __Secure- prefixed variants modern Chrome/Firefox
+# exports use instead).
+_YTDLP_SESSION_COOKIE_NAMES = {"SID", "HSID", "SSID", "APISID", "SAPISID"}
+_YTDLP_SECURE_SESSION_COOKIE_NAMES = {
+    "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PAPISID", "__Secure-3PAPISID",
+}
+# Present only when the export was taken while actually logged in (not just a
+# guest/anonymous session) — yt-dlp needs this specifically to unlock
+# age-restricted videos.
+_YTDLP_AGE_RESTRICTION_COOKIE_NAME = "LOGIN_INFO"
+# A stable, always-available, non-age-restricted video (YouTube's first-ever
+# upload) used purely to confirm yt-dlp actually accepts the uploaded cookies
+# — not hardcoded to any age-restricted content.
+_YTDLP_COOKIE_LIVE_CHECK_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+
+
+class YtdlpCookiesUploadRequest(BaseModel):
+    cookies_text: str
+
+
+def _parse_netscape_cookies(text: str) -> list[dict]:
+    """Parses a Netscape-format cookies.txt export into a list of
+    {domain, path, secure, expiry, name, value} dicts. Returns an empty list
+    if nothing resembling a cookie line is found (used to reject garbage
+    uploads outright)."""
+    cookies: list[dict] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            # Some exporters mark HttpOnly cookies with a "#HttpOnly_" prefix
+            # instead of a real comment — unwrap and parse those, skip
+            # everything else starting with "#".
+            if line.startswith("#HttpOnly_"):
+                line = line[len("#HttpOnly_"):]
+            else:
+                continue
+        parts = line.split("\t")
+        if len(parts) != 7:
+            continue
+        domain, _domain_flag, path, secure, expiry, name, value = parts
+        cookies.append({
+            "domain": domain,
+            "path": path,
+            "secure": secure.upper() == "TRUE",
+            "expiry": int(expiry) if expiry.isdigit() else 0,
+            "name": name,
+            "value": value,
+        })
+    return cookies
+
+
+async def _validate_user_cookies(user_id: str) -> dict:
+    """Detailed cookie validation: structural checks (do the required
+    sign-in cookies exist, are they expired, is LOGIN_INFO present for
+    age-restricted content) followed by a real yt-dlp call to confirm
+    YouTube actually accepts them — mirrors the YouTube API key validator's
+    "make a real call and check the result" approach rather than just
+    checking the file parses."""
+    text = await _user_cookies_text(user_id)
+    if not text or not text.strip():
+        return {
+            "status": "missing", "detail": "No cookies uploaded.",
+            "missing": ["cookies.txt file"], "age_restriction_ready": False, "cookie_count": 0,
+        }
+
+    cookies = _parse_netscape_cookies(text)
+    if not cookies:
+        return {
+            "status": "invalid", "detail": "File isn't a valid Netscape cookies.txt export.",
+            "missing": [], "age_restriction_ready": False, "cookie_count": 0,
+        }
+
+    youtube_cookies = [c for c in cookies if "youtube.com" in c["domain"] or "google.com" in c["domain"]]
+    if not youtube_cookies:
+        return {
+            "status": "invalid", "detail": "No youtube.com/google.com cookies found in this file.",
+            "missing": ["youtube.com cookies"], "age_restriction_ready": False, "cookie_count": 0,
+        }
+
+    now = int(time.time())
+    names = {c["name"] for c in youtube_cookies}
+    expired_names = {c["name"] for c in youtube_cookies if c["expiry"] and c["expiry"] < now}
+    session_names_present = (names & _YTDLP_SESSION_COOKIE_NAMES) | (names & _YTDLP_SECURE_SESSION_COOKIE_NAMES)
+    has_session_auth = bool(session_names_present)
+    age_restriction_ready = (
+        _YTDLP_AGE_RESTRICTION_COOKIE_NAME in names
+        and _YTDLP_AGE_RESTRICTION_COOKIE_NAME not in expired_names
+    )
+
+    missing: list[str] = []
+    if not has_session_auth:
+        missing.append("Sign-in session cookies (SID/HSID/SSID/APISID/SAPISID or the __Secure- variants)")
+    if not age_restriction_ready:
+        missing.append("LOGIN_INFO (required to unlock age-restricted videos)")
+
+    if not has_session_auth:
+        status, detail = "incomplete", (
+            "Missing required sign-in cookies — re-export cookies.txt while logged into YouTube "
+            "(not in a private/incognito or guest session)."
+        )
+    elif session_names_present & expired_names:
+        status, detail = "expired", "Your session cookies have expired — re-export a fresh cookies.txt."
+    elif not age_restriction_ready:
+        status, detail = "valid_no_age_restriction", (
+            "Cookies are valid for normal downloads, but missing LOGIN_INFO — age-restricted videos "
+            "will likely still fail. Make sure you're fully logged in (not a guest session) when exporting."
+        )
+    else:
+        status, detail = "valid", "Cookies look complete, including age-restriction support."
+
+    # Live check: a cookie file can parse fine structurally yet still be
+    # rejected outright by YouTube (revoked, signed out elsewhere, etc.) —
+    # only worth running once the structural checks above already pass.
+    if status in ("valid", "valid_no_age_restriction"):
+        cookie_path = await _user_cookies_file(user_id)
+        try:
+            if not cookie_path:
+                raise RuntimeError("cookie file unexpectedly missing")
+            entries = await _run_ytdlp(
+                "--dump-json", "--no-playlist", "--simulate", "--skip-download",
+                "--cookies", cookie_path,
+                _YTDLP_COOKIE_LIVE_CHECK_URL,
+                timeout=20.0,
+            )
+            live_ok = bool(entries)
+        except Exception as exc:
+            logger.warning("cookie validation live check failed for user %s: %s", user_id, exc)
+            live_ok = False
+        if not live_ok:
+            status = "invalid"
+            detail = (
+                "yt-dlp rejected these cookies when actually used — they may be expired, revoked, "
+                "or exported from a session that was since signed out."
+            )
+
+    return {
+        "status": status,
+        "detail": detail,
+        "missing": missing,
+        "age_restriction_ready": age_restriction_ready,
+        "cookie_count": len(youtube_cookies),
+    }
+
+
+@app.get("/user/ytdlp-cookies")
+async def get_ytdlp_cookies_status(payload: dict = Depends(get_current_user)):
+    """Status only (configured + last updated) — the cookie contents
+    themselves are never echoed back to any client."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT ytdlp_cookies IS NOT NULL, ytdlp_cookies_updated_at FROM ios_user_settings WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+    if not row or not row[0]:
+        return {"configured": False, "updated_at": None}
+    return {"configured": True, "updated_at": row[1].isoformat() if row[1] else None}
+
+
+@app.put("/user/ytdlp-cookies")
+async def set_ytdlp_cookies(body: YtdlpCookiesUploadRequest, payload: dict = Depends(get_current_user)):
+    text = body.cookies_text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="cookies_text is required")
+    # A real cookies.txt export is a few KB at most — this is a generous
+    # abuse/mistake guard, not a realistic limit.
+    if len(text) > 2_000_000:
+        raise HTTPException(status_code=413, detail="Cookie file is too large")
+    if not _parse_netscape_cookies(text):
+        raise HTTPException(status_code=400, detail="Not a valid Netscape cookies.txt export")
+
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_user_settings (user_id, ytdlp_cookies, ytdlp_cookies_updated_at) "
+                "VALUES (%s, %s, CURRENT_TIMESTAMP) "
+                "ON DUPLICATE KEY UPDATE ytdlp_cookies = VALUES(ytdlp_cookies), "
+                "ytdlp_cookies_updated_at = CURRENT_TIMESTAMP",
+                (user_id, text),
+            )
+    # Drop any previously-materialized file so the very next download/stream
+    # picks up this upload immediately instead of an up-to-2-min-stale copy.
+    (YTDLP_USER_COOKIES_DIR / f"{user_id}.txt").unlink(missing_ok=True)
+    return {"status": "ok"}
+
+
+@app.delete("/user/ytdlp-cookies", status_code=204)
+async def delete_ytdlp_cookies(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_user_settings SET ytdlp_cookies = NULL, ytdlp_cookies_updated_at = NULL "
+                "WHERE user_id = %s",
+                (user_id,),
+            )
+    (YTDLP_USER_COOKIES_DIR / f"{user_id}.txt").unlink(missing_ok=True)
+
+
+@app.post("/user/ytdlp-cookies/validate")
+async def validate_ytdlp_cookies(payload: dict = Depends(get_current_user)):
+    return await _validate_user_cookies(payload["sub"])
 
 
 # ---------------------------------------------------------------------------

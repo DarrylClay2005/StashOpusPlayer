@@ -6,6 +6,8 @@ struct DocumentPicker: UIViewControllerRepresentable {
     enum Mode {
         case folder
         case audioFiles
+        /// Single plain-text file (used for importing a yt-dlp cookies.txt export).
+        case textFile
     }
 
     let mode: Mode
@@ -34,14 +36,20 @@ struct DocumentPicker: UIViewControllerRepresentable {
                 UTType(filenameExtension: "caf") ?? .audio
             ]
             allowsMultiple = true
+        case .textFile:
+            // cookies.txt exports are plain text but commonly carry no
+            // registered UTType of their own — accept .plainText/.text plus
+            // an explicit "txt" extension fallback so Files still offers it.
+            types = [.plainText, .text, UTType(filenameExtension: "txt") ?? .plainText]
+            allowsMultiple = false
         }
 
         // asCopy: false for folder — we need security-scoped access to the original location.
-        // asCopy: true for audio files — iOS copies them into the app's temp directory so no
-        // security-scoped resource access is required on the returned URLs.
+        // asCopy: true for audio files / text file — iOS copies them into the app's temp
+        // directory so no security-scoped resource access is required on the returned URLs.
         let picker = UIDocumentPickerViewController(
             forOpeningContentTypes: types,
-            asCopy: mode == .audioFiles
+            asCopy: mode != .folder
         )
         picker.allowsMultipleSelection = allowsMultiple
         picker.shouldShowFileExtensions = true

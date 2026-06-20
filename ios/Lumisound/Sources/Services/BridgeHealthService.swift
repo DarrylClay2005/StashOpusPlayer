@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 // MARK: - BridgeHealthService
 
@@ -31,6 +32,11 @@ final class BridgeHealthService: ObservableObject {
         appLog("startPeriodicChecks: bridge=\(streaming.bridgeURL)", category: "network")
         checkTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
+                // The health indicator is only meaningful while the user is in the
+                // app — skip the network probe when backgrounded to save radio/
+                // battery during background audio playback. The immediate check on
+                // the next foreground `startPeriodicChecks` re-establishes status.
+                guard UIApplication.shared.applicationState == .active else { return }
                 await self?.check(streaming: streaming)
             }
         }

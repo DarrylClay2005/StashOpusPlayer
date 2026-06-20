@@ -95,4 +95,39 @@ struct AudioSettings: Codable, Equatable {
     /// tempo (see `EQPreset.auto(forBPM:)`) instead of staying on whatever
     /// preset the user last picked manually.
     var autoEQEnabled: Bool = false
+    /// Real-room reverb, applied via `AVAudioUnitReverb` on the main signal
+    /// chain. On by default per product requirement — gives every track a
+    /// subtle sense of space rather than a perfectly dry signal.
+    var reverbEnabled: Bool = true
+    /// Wet/dry mix, 0–100. Maps directly to `AVAudioUnitReverb.wetDryMix`.
+    var reverbWetDryMix: Float = 18.0
+    var reverbPreset: ReverbRoomPreset = .mediumRoom
+}
+
+/// Room/space presets for the live reverb effect. Mirrors a subset of
+/// `AVAudioUnitReverbPreset` — kept as our own String enum (rather than using
+/// AVFoundation's type directly) so the Models layer doesn't need to import
+/// AVFoundation; `AudioPlayerManager` maps this to the real preset.
+enum ReverbRoomPreset: String, CaseIterable, Codable, Identifiable {
+    case smallRoom
+    case mediumRoom
+    case largeRoom
+    case mediumHall
+    case largeHall
+    case plate
+    case cathedral
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .smallRoom: return "Small Room"
+        case .mediumRoom: return "Medium Room"
+        case .largeRoom: return "Large Room"
+        case .mediumHall: return "Medium Hall"
+        case .largeHall: return "Large Hall"
+        case .plate: return "Plate"
+        case .cathedral: return "Cathedral"
+        }
+    }
 }

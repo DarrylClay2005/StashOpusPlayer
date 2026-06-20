@@ -33,6 +33,30 @@ enum SongCardStyle: String, CaseIterable, Identifiable {
     }
 }
 
+/// Liquid Glass background for the "Card" `SongRow` style — real glass on
+/// iOS 26+, falling back to the same flat tint this card used pre-iOS 26
+/// (with an accent tint while the song is current) so older OS versions
+/// look exactly as before.
+private struct SongCardGlassBackground: ViewModifier {
+    let isCurrent: Bool
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        if isCurrent {
+            content.adaptiveGlass(
+                tint: AppTheme.dynamicAccent,
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
+                fallback: AppTheme.dynamicAccent.opacity(0.14)
+            )
+        } else {
+            content.adaptiveGlass(
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
+                fallback: AppTheme.elevatedSurface
+            )
+        }
+    }
+}
+
 struct SongRow: View {
     let song: Song
     let isCurrent: Bool
@@ -145,10 +169,7 @@ struct SongRow: View {
             durationLabel(.footnote)
         }
         .padding(12)
-        .background(
-            isCurrent ? AppTheme.dynamicAccent.opacity(0.14) : AppTheme.elevatedSurface,
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
+        .modifier(SongCardGlassBackground(isCurrent: isCurrent, cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(isCurrent ? AppTheme.dynamicAccent.opacity(0.5) : .clear, lineWidth: 1.5)
@@ -277,7 +298,10 @@ struct SongGridCell: View {
             .padding(.horizontal, 2)
         }
         .padding(6)
-        .background(AppTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .adaptiveGlass(
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous),
+            fallback: AppTheme.surface.opacity(0.5)
+        )
         // Animate the "now playing" highlight (accent text/badge) transitioning
         // in or out, instead of snapping instantly.
         .animation(.easeInOut(duration: 0.25), value: isCurrent)

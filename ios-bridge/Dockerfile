@@ -1,6 +1,10 @@
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y ffmpeg curl unzip && rm -rf /var/lib/apt/lists/*
+# atomicparsley is required for yt-dlp's --embed-thumbnail to work on M4A —
+# ffmpeg alone can embed thumbnails into mp3/opus/etc, but not M4A/MP4 containers.
+# aria2 (aria2c) is used as yt-dlp's external downloader for multi-connection,
+# segmented downloads — substantially faster than the built-in downloader.
+RUN apt-get update && apt-get install -y ffmpeg curl unzip atomicparsley aria2 && rm -rf /var/lib/apt/lists/*
 
 # yt-dlp now needs a JS runtime to solve YouTube's player/signature challenge
 # (EJS) — without one, extraction fails for most videos with "This video is

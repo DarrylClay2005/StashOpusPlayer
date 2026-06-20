@@ -96,7 +96,10 @@ struct ContentView: View {
                 // MARK: Tab 4 — Search Streaming
                 StreamSearchView()
                     .tabItem {
-                        Label("Search", systemImage: "magnifyingglass")
+                        // Cloud-with-download-arrow better signals this tab's purpose
+                        // (downloading from YouTube/SoundCloud/server) than a generic
+                        // magnifying glass.
+                        Label("Search", systemImage: "icloud.and.arrow.down")
                     }
                     .tag(3)
 

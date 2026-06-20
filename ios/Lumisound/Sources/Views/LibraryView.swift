@@ -199,17 +199,28 @@ struct LibraryView: View {
                     .tint(AppTheme.dynamicAccent)
             } else {
                 Button {
-                    library.scanAll(folderService: folderService)
-                    // Also pull the latest favorites/playlists/settings from
-                    // the server, so "Refresh" reflects changes made on
-                    // another device, not just local filesystem changes.
-                    if account.isLoggedIn {
-                        Task { await account.pullSync(library: library, player: player) }
+                    Task {
+                        // Thorough re-scan: picks up new, deleted, AND changed-in-place
+                        // files (not just new ones), re-scans watched folders + Apple
+                        // Music, then pulls the latest favorites/playlists/settings from
+                        // the server — all without restarting the app.
+                        await library.refreshAll(folderService: folderService)
+                        if account.isLoggedIn {
+                            await account.pullSync(library: library, player: player)
+                        }
+                        if let result = library.lastScanResult {
+                            ToastCenter.shared.show(result, category: .success, icon: "arrow.clockwise")
+                        }
                     }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    if library.isScanning {
+                        ProgressView().tint(AppTheme.dynamicAccent)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
                 }
                 .tint(AppTheme.dynamicAccent)
+                .disabled(library.isScanning)
             }
 
             Button {
@@ -241,14 +252,26 @@ private struct LibraryTabBar: View {
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
                             .foregroundStyle(
-                                selectedTab == tab ? AppTheme.textPrimary : AppTheme.textSecondary
+                                selectedTab == tab ? .white : AppTheme.textSecondary
                             )
                             .background {
-                                Capsule(style: .continuous)
-                                    .fill(selectedTab == tab ? AppTheme.dynamicAccent : AppTheme.surface)
+                                if selectedTab == tab {
+                                    Capsule(style: .continuous)
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
+                                                startPoint: .topLeading, endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .shadow(color: AppTheme.dynamicAccent.opacity(0.4), radius: 6, x: 0, y: 3)
+                                } else {
+                                    Capsule(style: .continuous)
+                                        .fill(AppTheme.surface.opacity(0.6))
+                                        .overlay(Capsule().stroke(.white.opacity(0.06), lineWidth: 1))
+                                }
                             }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressableButtonStyle())
                 }
             }
             .padding(.vertical, 2)
@@ -375,7 +398,16 @@ private struct SongsTab: View {
         // actually open the search field. `.searchable` integrates with the
         // large-title nav bar instead of competing for toolbar space, matching
         // the proven pattern already used in PlaylistDetailView/StreamSearchView.
-        .searchable(text: $searchText, prompt: "Search songs, artists, albums…")
+        //
+        // `displayMode: .always` pins the field below the nav bar so it stays
+        // visible while scrolling — the default `.automatic` placement collapses
+        // the bar into the title on scroll-down, which is exactly the "search
+        // bar randomly disappears" report (it only reappeared on scroll-to-top).
+        .searchable(
+            text: $searchText,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search songs, artists, albums…"
+        )
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 // Layout toggles

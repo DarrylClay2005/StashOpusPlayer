@@ -124,7 +124,12 @@ final class LibraryManager: ObservableObject {
 
         let interval: TimeInterval = 10 * 60
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.reenrichSongsMissingMetadata() }
+            Task { @MainActor in
+                // Skip the network-bound online metadata lookups while backgrounded —
+                // pointless radio/CPU use when the user isn't viewing the library.
+                guard UIApplication.shared.applicationState == .active else { return }
+                await self?.reenrichSongsMissingMetadata()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         metadataReenrichTimer = timer
@@ -301,7 +306,13 @@ final class LibraryManager: ObservableObject {
 
         let interval: TimeInterval = 3 * 60
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refreshNextMetadataBatch() }
+            Task { @MainActor in
+                // Skip while backgrounded — re-reading file tags is wasted work
+                // when the user can't see the library (e.g. background audio
+                // playback keeps the process alive). Resumes on next foreground tick.
+                guard UIApplication.shared.applicationState == .active else { return }
+                await self?.refreshNextMetadataBatch()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         metadataRefreshTimer = timer
@@ -504,6 +515,28 @@ final class LibraryManager: ObservableObject {
         }
     }
 
+    /// Thorough re-scan used by the Library "Refresh" button: re-reads files
+    /// whose on-disk `(mtime, size)` changed since they were imported (e.g.
+    /// tags edited in place via the Files app or a desktop tool), not just
+    /// brand-new files — the periodic/automatic scan keeps its faster
+    /// new-files-only path. Also re-scans watched folders and (if authorized)
+    /// Apple Music, and publishes a `lastScanResult` summary the UI can toast.
+    func refreshAll(folderService: MusicFolderService) async {
+        beginScan()
+        defer { endScan() }
+        let before = importedSongs.count
+        await performLocalDocumentsScan(force: true)
+        await scanWatchedFoldersAsync(using: folderService)
+        if MPMediaLibrary.authorizationStatus() == .authorized {
+            scanMediaLibrary()
+        }
+        let after = allSongs.count
+        let delta = after - before
+        lastScanResult = delta > 0
+            ? "Refreshed — \(after) songs (\(delta) new/updated)"
+            : "Refreshed — \(after) songs, library is up to date"
+    }
+
     /// Awaitable variant of `scanLocalDocuments()` — used by callers (e.g.
     /// "Download All") that need `allSongs` to reflect every locally-imported
     /// file, including any sitting in subfolders the user created or moved
@@ -514,8 +547,8 @@ final class LibraryManager: ObservableObject {
         await performLocalDocumentsScan()
     }
 
-    private func performLocalDocumentsScan() async {
-        appLog("Scanning local documents directory", category: "library")
+    private func performLocalDocumentsScan(force: Bool = false) async {
+        appLog("Scanning local documents directory (force: \(force))", category: "library")
         let fm = FileManager.default
         guard let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
 
@@ -545,6 +578,22 @@ final class LibraryManager: ObservableObject {
         importedSongs = importedSongs.filter { song in
             guard let url = song.url else { return false }
             return fm2.fileExists(atPath: url.path)
+        }
+
+        if force {
+            // Refresh-button path: re-resolve EVERY candidate. `resolveSongs`
+            // returns cached songs unchanged (cheap stat + dict hit) for files
+            // whose (mtime, size) still matches, and re-extracts metadata only
+            // for files that actually changed on disk — so in-place tag edits
+            // are finally picked up, which the new-files-only path below misses.
+            let resolved = await resolveSongs(for: candidates)
+            importedSongs = Array(
+                Dictionary(grouping: resolved, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id })
+                    .compactMap { $0.value.first }
+            )
+            appLog("Local scan (force) complete: \(importedSongs.count) song(s)", category: "library")
+            rebuildAllSongs()
+            return
         }
 
         // Only process files we haven't seen before.

@@ -32,7 +32,7 @@ bridge, and build-from-source instructions.
 | Feature | Details |
 |---|---|
 | **Playback** | Gapless, crossfade, A–B repeat, sleep timer, variable speed & pitch, auto-radio |
-| **Audio FX** | 10-band EQ with presets, 23 effects (8D spatial audio, bass boost, tremolo, vibrato, nightcore, vaporwave, karaoke vocal removal…) |
+| **Audio FX** | 10-band EQ with presets, 23 effects (8D spatial audio, bass boost, tremolo, vibrato, nightcore, vaporwave, karaoke vocal removal…), real-room reverb (on by default, adjustable room/mix) |
 | **Per-Track Sound** | Pin EQ/effects/volume overrides to a specific song |
 | **ReplayGain & Volume Boost** | Loudness normalisation plus up to 200% volume with a limiter |
 | **Now Playing** | Vinyl disc or album-art view, full transport controls, Up Next queue, lock-screen & headphone controls |

@@ -280,6 +280,10 @@ final class StreamingService: ObservableObject {
 
     @Published var serverTracks: [ServerTrack] = []
     @Published var isSearchingServer = false
+    /// nil until the first server-library load; then true/false per the bridge's
+    /// `configured` flag (whether SERVER_MUSIC_DIR is set). Lets the UI show a
+    /// clear "not set up" message instead of an indefinitely-empty list.
+    @Published var serverLibraryConfigured: Bool? = nil
 
     // MARK: User Music Library state (personal per-user storage)
 
@@ -391,6 +395,13 @@ final class StreamingService: ObservableObject {
             return
         }
         request.timeoutInterval = 20
+        // Lets the bridge use this account's personally-uploaded yt-dlp
+        // cookies (Settings -> YouTube Cookies) so search results include
+        // age-restricted videos and aren't blocked by YouTube's
+        // anonymous-request bot detection.
+        if let accountToken = AccountService.shared?.token {
+            request.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
+        }
 
         do {
             let tracks = try await NetworkRetry.withRetry {
@@ -599,17 +610,88 @@ final class StreamingService: ObservableObject {
                 }
             }
             let tracks = try JSONDecoder().decode([StreamTrack].self, from: data)
-            searchResults = tracks
-            isPlaylistResult = true
-            appLog("Resolved playlist: \(tracks.count) track(s)", category: "network")
+            if tracks.isEmpty {
+                // Primary resolve returned nothing — fall back to the
+                // playlist-to-individual-URLs expander (the export-style
+                // workaround), which can succeed where full playlist resolution
+                // doesn't for large/partially-unavailable playlists.
+                let expanded = await expandPlaylistTracks(url: url, existingSongs: existingSongs)
+                searchResults = expanded
+                isPlaylistResult = !expanded.isEmpty
+                appLog("Resolved playlist via expand fallback: \(expanded.count) track(s)", category: "network")
+            } else {
+                searchResults = tracks
+                isPlaylistResult = true
+                appLog("Resolved playlist: \(tracks.count) track(s)", category: "network")
+            }
         } catch {
             appError("Playlist resolve failed: \(error.localizedDescription)", category: "network")
-            errorMessage = "Failed to resolve playlist: \(error.localizedDescription)"
-            searchResults = []
+            // Last resort before giving up: try the individual-URL expander.
+            let expanded = await expandPlaylistTracks(url: url, existingSongs: existingSongs)
+            if !expanded.isEmpty {
+                searchResults = expanded
+                isPlaylistResult = true
+                errorMessage = nil
+                appLog("Playlist resolve recovered via expand fallback: \(expanded.count) track(s)", category: "network")
+            } else {
+                errorMessage = "Failed to resolve playlist: \(error.localizedDescription)"
+                searchResults = []
+            }
+        }
+    }
+
+    /// Expands a playlist URL into individual track entries via the bridge's
+    /// `/api/playlist/expand` endpoint (the export-youtube-playlist-style
+    /// extraction). Used as a robustness fallback by `resolvePlaylist`. Returns
+    /// an empty array on any failure. Already-imported tracks (by sourceTrackID)
+    /// are filtered out using `existingSongs`.
+    private func expandPlaylistTracks(url: String, existingSongs: [Song]) async -> [StreamTrack] {
+        var components = URLComponents()
+        components.path = "/api/playlist/expand"
+        components.queryItems = [
+            URLQueryItem(name: "url", value: url),
+            URLQueryItem(name: "limit", value: "1000"),
+        ]
+        guard var request = makeRequest(components.string ?? "/api/playlist/expand") else { return [] }
+        request.timeoutInterval = 130
+        if let accountToken = AccountService.shared?.token {
+            request.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
+        }
+
+        struct ExpandItem: Decodable { let id: String?; let title: String?; let url: String? }
+        struct ExpandResponse: Decodable { let source: String; let count: Int; let items: [ExpandItem] }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return [] }
+            let decoded = try JSONDecoder().decode(ExpandResponse.self, from: data)
+            let haveIDs = Set(existingSongs.compactMap { $0.sourceTrackID })
+            return decoded.items.compactMap { item -> StreamTrack? in
+                guard let id = item.id, !id.isEmpty else { return nil }
+                if haveIDs.contains("\(decoded.source):\(id)") { return nil }
+                return StreamTrack(
+                    id: id,
+                    title: item.title ?? "Unknown Title",
+                    artist: "",
+                    durationSeconds: 0,
+                    thumbnailURL: "",
+                    source: decoded.source,
+                    youtubeURL: item.url ?? ""
+                )
+            }
+        } catch {
+            appWarn("expandPlaylistTracks failed: \(error.localizedDescription)", category: "network")
+            return []
         }
     }
 
     // MARK: - Stream URL
+
+    /// Decodes FastAPI's standard `{"detail": "..."}` error body, if present.
+    private static func decodeErrorDetail(_ data: Data) -> String? {
+        struct ErrorBody: Decodable { let detail: String }
+        return try? JSONDecoder().decode(ErrorBody.self, from: data).detail
+    }
 
     func streamURL(for track: StreamTrack) async throws -> URL {
         guard isConfigured else {
@@ -643,6 +725,13 @@ final class StreamingService: ObservableObject {
             throw StreamingError.invalidURL
         }
         request.timeoutInterval = 30
+        // Lets the bridge use this account's personally-uploaded yt-dlp
+        // cookies so the Play-before-download button works for age-restricted
+        // videos and isn't blocked by YouTube's anonymous-request bot
+        // detection (see Settings -> YouTube Cookies).
+        if let accountToken = AccountService.shared?.token {
+            request.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
+        }
 
         let (data, response) = try await URLSession.shared.data(for: request)
         if let httpResponse = response as? HTTPURLResponse {
@@ -654,6 +743,13 @@ final class StreamingService: ObservableObject {
                 throw StreamingError.timeout
             case 404:
                 appWarn("streamURL: not found for \"\(track.title)\"", category: "network")
+                // The bridge includes a specific reason (e.g. "upload your YouTube
+                // cookies") in `detail` when it knows why extraction failed — surface
+                // that instead of a generic "not found" so the user actually knows
+                // what to fix when the Play button doesn't work.
+                if let detail = Self.decodeErrorDetail(data), !detail.isEmpty {
+                    throw StreamingError.serverDetail(detail)
+                }
                 throw StreamingError.notFound(track.title)
             default:
                 appError("streamURL: HTTP \(httpResponse.statusCode) for \"\(track.title)\"", category: "network")
@@ -694,13 +790,13 @@ final class StreamingService: ObservableObject {
     // MARK: - Server Library Search
 
     /// Searches the server's local music library via `GET /api/library/server`.
-    /// Results are published on `serverTracks`. On error the `errorMessage` is set.
+    /// Results are published on `serverTracks`. An empty `query` browses the
+    /// whole server library (the bridge lists everything when no search filter
+    /// is given) so the Server tab actually loads content on open instead of
+    /// sitting empty until the user types. On error the `errorMessage` is set.
     func searchServerLibrary(query: String) async {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
-            serverTracks = []
-            return
-        }
-        appLog("searchServerLibrary: \"\(query)\"", category: "network")
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        appLog("searchServerLibrary: \"\(trimmed)\" (browse-all: \(trimmed.isEmpty))", category: "network")
         isSearchingServer = true
         errorMessage = nil
         defer { isSearchingServer = false }
@@ -708,8 +804,8 @@ final class StreamingService: ObservableObject {
         var components = URLComponents()
         components.path = "/api/library/server"
         components.queryItems = [
-            URLQueryItem(name: "search", value: query),
-            URLQueryItem(name: "limit",  value: "100"),
+            URLQueryItem(name: "search", value: trimmed),
+            URLQueryItem(name: "limit",  value: "200"),
         ]
 
         guard var request = makeRequest(components.string ?? "/api/library/server") else {
@@ -735,7 +831,8 @@ final class StreamingService: ObservableObject {
                 return try JSONDecoder().decode(ServerLibraryResponse.self, from: data)
             }
             serverTracks = decoded.tracks
-            appLog("searchServerLibrary: \(serverTracks.count) result(s) for \"\(query)\"", category: "network")
+            serverLibraryConfigured = decoded.configured ?? true
+            appLog("searchServerLibrary: \(serverTracks.count) result(s) for \"\(trimmed)\" (configured: \(serverLibraryConfigured == true))", category: "network")
         } catch {
             appError("searchServerLibrary: \(error.localizedDescription)", category: "network")
             errorMessage = "Streaming service is unavailable right now. Please try again later."
@@ -1232,7 +1329,8 @@ final class StreamingService: ObservableObject {
         var components = URLComponents()
         components.path = "/user/music"
         components.queryItems = [
-            URLQueryItem(name: "limit", value: "200"),
+            // No 500-item cap on the user's cloud library (server allows up to 100k).
+            URLQueryItem(name: "limit", value: "100000"),
         ]
         if !search.isEmpty {
             components.queryItems?.append(URLQueryItem(name: "search", value: search))
@@ -1465,7 +1563,9 @@ final class StreamingService: ObservableObject {
         isLoadingUserMusicMetadata = true
         defer { isLoadingUserMusicMetadata = false }
 
-        guard var request = makeRequest("/user/music/metadata?limit=500") else {
+        // No artificial 500-item cap on a user's cloud-backed library — request
+        // the full set (server allows up to 100k).
+        guard var request = makeRequest("/user/music/metadata?limit=100000") else {
             throw StreamingError.invalidURL
         }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -1702,6 +1802,10 @@ enum StreamingError: LocalizedError {
     case httpError(Int)
     case incompleteDownload
     case corruptDownload
+    /// Carries a specific, already-user-facing reason string straight from
+    /// the bridge's error `detail` field (e.g. "upload your YouTube cookies
+    /// to play age-restricted videos") instead of a generic message.
+    case serverDetail(String)
 
     var errorDescription: String? {
         switch self {
@@ -1713,6 +1817,8 @@ enum StreamingError: LocalizedError {
             return "Stream URL fetch timed out. Try again."
         case .notFound(let title):
             return "Could not find a stream URL for \"\(title)\"."
+        case .serverDetail(let detail):
+            return detail
         case .httpError(let code):
             switch code {
             case 401, 403:

@@ -32,6 +32,10 @@ services:
       # Per-user music storage. Each user gets their own subdirectory under this path.
       # Defaults to /mnt/Seagate-MariaDB/lumisound-user-music (mounted as /usermusic).
       - USER_MUSIC_DIR=${USER_MUSIC_DIR:-/usermusic}
+      # When "1", per-user cloud-backup uploads are stored gzip-compressed
+      # (reversible/lossless — transparently decompressed on stream/download).
+      # Only affects NEW uploads; already-stored files keep working either way.
+      - USER_MUSIC_COMPRESSION=${USER_MUSIC_COMPRESSION:-0}
     volumes:
       - ./cache/yt-dlp:/app/.cache/yt-dlp
       - ./cookies.txt:/app/cookies.txt

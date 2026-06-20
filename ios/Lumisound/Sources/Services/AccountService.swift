@@ -46,6 +46,11 @@ struct SyncData: Codable {
     var nowPlayingArtworkStyle: String?
     var nowPlayingSeekerStyle: String?
     var earnedBadgesJSON: String?
+    /// JSON-encoded bag of additional UserDefaults-backed prefs (card style,
+    /// auto-radio, notifications toggle, Liquid Glass customization, …) so they
+    /// ride along in the per-user auto backup without a column each. See
+    /// `AccountService.extraBackupKeys`.
+    var extraSettingsJSON: String?
 
     enum CodingKeys: String, CodingKey {
         case favorites
@@ -69,6 +74,7 @@ struct SyncData: Codable {
         case nowPlayingArtworkStyle = "now_playing_artwork_style"
         case nowPlayingSeekerStyle  = "now_playing_seeker_style"
         case earnedBadgesJSON       = "earned_badges_json"
+        case extraSettingsJSON      = "extra_settings_json"
     }
 }
 
@@ -435,6 +441,37 @@ struct DiscordRpcConfig: Decodable {
 /// Data API v3 key, used by /api/resolve to enumerate full YouTube playlists
 /// (bypassing yt-dlp's ~205-entry flat-playlist cap). `apiKey` is masked
 /// (e.g. "AIzaSy...AbPw") since the full key is never sent back after saving.
+/// Status of this account's stored yt-dlp cookies.txt upload. The cookie
+/// contents themselves are never sent back from the server — only whether
+/// one is configured and when it was last updated.
+struct YtdlpCookiesStatus: Decodable {
+    let configured: Bool
+    let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case configured
+        case updatedAt = "updated_at"
+    }
+}
+
+/// Detailed result of validating this account's stored yt-dlp cookies —
+/// mirrors the structural + live checks the bridge runs in
+/// `_validate_user_cookies` (required sign-in cookies present/expired, plus
+/// whether LOGIN_INFO is present for age-restricted content).
+struct YtdlpCookiesValidation: Decodable {
+    let status: String
+    let detail: String
+    let missing: [String]
+    let ageRestrictionReady: Bool
+    let cookieCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case status, detail, missing
+        case ageRestrictionReady = "age_restriction_ready"
+        case cookieCount = "cookie_count"
+    }
+}
+
 struct YoutubeApiKeyConfig: Decodable {
     let configured: Bool
     let apiKey: String?
@@ -915,7 +952,8 @@ final class AccountService: ObservableObject {
             libraryArtistsColumns: libraryArtistsColumns,
             nowPlayingArtworkStyle: nowPlayingArtworkStyle,
             nowPlayingSeekerStyle: nowPlayingSeekerStyle,
-            earnedBadgesJSON: earnedBadgesJSON
+            earnedBadgesJSON: earnedBadgesJSON,
+            extraSettingsJSON: Self.buildExtraSettingsJSON()
         )
 
         do {
@@ -928,6 +966,68 @@ final class AccountService: ObservableObject {
         } catch {
             appError("Push sync error: \(error.localizedDescription)", category: "account")
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Additional UserDefaults-backed preference keys (and their value type)
+    /// included in the per-user auto backup beyond the explicitly-modelled
+    /// SyncData columns. Backed up/restored as a single JSON bag
+    /// (`extra_settings_json`). Adding a new backed-up preference is a one-line
+    /// addition here.
+    private static let extraBackupKeys: [(key: String, kind: ExtraSettingKind)] = [
+        ("library_cardStyle", .string),
+        ("autoRadio_enabled", .bool),
+        ("notifications_enabled", .bool),
+        // Liquid Glass customization (see GlassSettings)
+        ("glass_tintStrength", .double),
+        ("glass_tintHue", .double),
+        ("glass_useAccentTint", .bool),
+        ("glass_translucency", .double),
+    ]
+
+    private enum ExtraSettingKind { case bool, double, string, int }
+
+    /// Serializes the current values of `extraBackupKeys` (only those actually
+    /// set) into a JSON object string for the backup payload.
+    static func buildExtraSettingsJSON() -> String? {
+        let defaults = UserDefaults.standard
+        var dict: [String: Any] = [:]
+        for entry in extraBackupKeys {
+            guard defaults.object(forKey: entry.key) != nil else { continue }
+            switch entry.kind {
+            case .bool:   dict[entry.key] = defaults.bool(forKey: entry.key)
+            case .double: dict[entry.key] = defaults.double(forKey: entry.key)
+            case .int:    dict[entry.key] = defaults.integer(forKey: entry.key)
+            case .string: dict[entry.key] = defaults.string(forKey: entry.key)
+            }
+        }
+        guard !dict.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: dict),
+              let json = String(data: data, encoding: .utf8)
+        else { return nil }
+        return json
+    }
+
+    /// Restores backed-up extra settings, writing each key only when it's not
+    /// already set locally — first-run/new-device bootstrap only, mirroring the
+    /// non-destructive restore policy used for the other synced settings (see
+    /// the destructive-pull-sync fix) so a fresher local value is never
+    /// clobbered by a stale server one.
+    static func applyExtraSettingsJSON(_ json: String?) {
+        guard let json, let data = json.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+        let defaults = UserDefaults.standard
+        for entry in extraBackupKeys {
+            guard defaults.object(forKey: entry.key) == nil, let value = dict[entry.key] else { continue }
+            switch entry.kind {
+            case .bool:   if let b = value as? Bool   { defaults.set(b, forKey: entry.key) }
+            case .double: if let d = value as? Double { defaults.set(d, forKey: entry.key) }
+                          else if let n = value as? NSNumber { defaults.set(n.doubleValue, forKey: entry.key) }
+            case .int:    if let i = value as? Int    { defaults.set(i, forKey: entry.key) }
+                          else if let n = value as? NSNumber { defaults.set(n.intValue, forKey: entry.key) }
+            case .string: if let s = value as? String { defaults.set(s, forKey: entry.key) }
+            }
         }
     }
 
@@ -1116,6 +1216,11 @@ final class AccountService: ObservableObject {
                     defaults.set(encoded, forKey: "earnedBadges")
                 }
             }
+
+            // Restore any additional backed-up preferences (card style,
+            // auto-radio, notifications, Liquid Glass customization, …) — only
+            // for keys not already set locally (new-device bootstrap).
+            Self.applyExtraSettingsJSON(sync.extraSettingsJSON)
 
             lastSyncDate = Date()
             appLog("Pull sync complete (favorites: \(remoteIDs.count), playlists: \(sync.playlists.count))", category: "account")
@@ -2022,6 +2127,78 @@ final class AccountService: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             return false
+        }
+    }
+
+    // MARK: - yt-dlp cookies (per-user, for authenticated/age-restricted downloads)
+
+    /// Fetches whether this account has yt-dlp cookies configured (status
+    /// only — contents are never returned).
+    func fetchYtdlpCookiesStatus() async -> YtdlpCookiesStatus? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/user/ytdlp-cookies")
+            return try JSONDecoder().decode(YtdlpCookiesStatus.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Uploads (or replaces) this account's yt-dlp cookies.txt contents
+    /// (Netscape format). Used to authenticate yt-dlp as this user's YouTube
+    /// session for search/stream/resolve/download — required for
+    /// age-restricted videos and to avoid YouTube's anonymous-request
+    /// bot-detection blocks.
+    func setYtdlpCookies(_ cookiesText: String) async -> Bool {
+        guard isLoggedIn else { return false }
+        struct Body: Encodable { let cookies_text: String }
+        do {
+            _ = try await makeRequest("/user/ytdlp-cookies", method: "PUT", body: Body(cookies_text: cookiesText))
+            errorMessage = nil
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Removes this account's stored yt-dlp cookies.
+    func deleteYtdlpCookies() async -> Bool {
+        guard isLoggedIn else { return false }
+        do {
+            _ = try await makeRequest("/user/ytdlp-cookies", method: "DELETE")
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Runs the bridge's detailed cookie validator: structural checks (are
+    /// the required sign-in cookies present and unexpired, is LOGIN_INFO
+    /// present for age-restricted content) followed by a real yt-dlp call to
+    /// confirm YouTube actually accepts them.
+    func validateYtdlpCookies() async -> YtdlpCookiesValidation? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/user/ytdlp-cookies/validate", method: "POST")
+            return try JSONDecoder().decode(YtdlpCookiesValidation.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
         }
     }
 

@@ -122,4 +122,48 @@ final class EQSystemTests: XCTestCase {
             )
         }
     }
+
+    // MARK: Test 11 — Reverb is on by default with a sane wet/dry mix
+
+    func testReverbOnByDefault() {
+        let settings = AudioSettings()
+        XCTAssertTrue(settings.reverbEnabled, "Reverb must be on by default")
+        XCTAssertTrue((0...100).contains(settings.reverbWetDryMix), "Default wet/dry mix must be in 0...100")
+        XCTAssertEqual(settings.reverbPreset, .mediumRoom)
+    }
+
+    // MARK: Test 12 — Every reverb room preset has a display name
+
+    func testReverbPresetsHaveDisplayNames() {
+        for preset in ReverbRoomPreset.allCases {
+            XCTAssertFalse(preset.displayName.isEmpty, "Preset \(preset.id) must have a display name")
+        }
+    }
+
+    // MARK: Test 13 — Genre-aware Auto EQ prefers genre over tempo
+
+    func testAutoEQPrefersGenreOverTempo() {
+        // 90 BPM would map to .acoustic by tempo alone, but a hip-hop genre tag
+        // must win.
+        XCTAssertEqual(EQPreset.auto(forBPM: 90, genre: "Hip-Hop"), .hiphop)
+        XCTAssertEqual(EQPreset.auto(forBPM: 90, genre: "Trap"), .hiphop)
+        XCTAssertEqual(EQPreset.auto(forBPM: 140, genre: "Classical"), .classical)
+        XCTAssertEqual(EQPreset.preset(forGenre: "Deep House"), .electronic)
+    }
+
+    // MARK: Test 14 — Auto EQ falls back to tempo when genre is unknown
+
+    func testAutoEQFallsBackToTempo() {
+        XCTAssertEqual(EQPreset.auto(forBPM: 60, genre: nil), .classical)
+        XCTAssertEqual(EQPreset.auto(forBPM: 120, genre: ""), .pop)
+        XCTAssertEqual(EQPreset.auto(forBPM: 150, genre: "Unrecognizable Genre XYZ"), .electronic)
+        XCTAssertNil(EQPreset.auto(forBPM: nil, genre: nil))
+    }
+
+    // MARK: Test 15 — Smart Auto Crossfade defaults off (opt-in)
+
+    func testSmartCrossfadeDefaultsOff() {
+        let settings = AudioSettings()
+        XCTAssertFalse(settings.smartCrossfadeEnabled, "Smart Auto Crossfade must be opt-in (default off)")
+    }
 }

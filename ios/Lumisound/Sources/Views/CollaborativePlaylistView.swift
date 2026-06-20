@@ -74,6 +74,13 @@ private struct ShareModeView: View {
         return "lumisound://shared/\(token)"
     }
 
+    /// Human-readable message bundled into the system share sheet so the
+    /// recipient knows both the code to type into "Open Shared Playlist" and
+    /// the deep link that opens it directly.
+    private func shareMessage(code: String) -> String {
+        "Join my Lumisound playlist \"\(playlist.name)\"! Open the app → Playlists → Open Shared Playlist and enter code \(code), or tap: lumisound://shared/\(code)"
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
@@ -153,6 +160,18 @@ private struct ShareModeView: View {
                             .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
                         .buttonStyle(.plain)
+
+                        // Native share sheet — lets the user actually SEND the
+                        // code/link to another person (Messages, Mail, etc.)
+                        // rather than only copying it to the clipboard.
+                        ShareLink(item: shareMessage(code: code)) {
+                            Label("Share Code…", systemImage: "square.and.arrow.up")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(AppTheme.dynamicAccent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .foregroundStyle(.white)
+                        }
                     }
                     .padding(.horizontal)
                 }

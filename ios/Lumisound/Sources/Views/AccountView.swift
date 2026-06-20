@@ -500,10 +500,14 @@ struct AccountView: View {
                         Label("YouTube API Key", systemImage: "key")
                             .foregroundStyle(AppTheme.textPrimary)
                     }
+                    NavigationLink(destination: CookiesFileView()) {
+                        Label("YouTube Cookies", systemImage: "doc.text")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
                 } header: {
                     sectionHeader("Streaming")
                 } footer: {
-                    Text("Add your own YouTube Data API v3 key so full playlists (beyond ~205 tracks) resolve completely when imported or played, linked to your account and yt-dlp lookups.")
+                    Text("Add your own YouTube Data API v3 key so full playlists (beyond ~205 tracks) resolve completely when imported or played. Upload a cookies.txt export to authenticate downloads as your own YouTube session — needed for age-restricted videos and to avoid YouTube blocking anonymous requests.")
                         .font(AppTheme.bodyFont(size: 12))
                         .foregroundStyle(AppTheme.textSecondary)
                 }

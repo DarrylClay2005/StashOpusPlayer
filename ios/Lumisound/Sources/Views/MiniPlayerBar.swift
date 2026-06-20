@@ -73,6 +73,12 @@ struct MiniPlayerBar: View {
         Group {
             if let song = player.currentSong {
                 ArtworkThumbnail(song: song, size: 46)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(.white.opacity(0.12), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.25), radius: 5, x: 0, y: 3)
             }
         }
     }
@@ -119,14 +125,21 @@ struct MiniPlayerBar: View {
             } label: {
                 ZStack {
                     Circle()
-                        .fill(AppTheme.dynamicAccent)
-                        .frame(width: 36, height: 36)
+                        .fill(
+                            LinearGradient(
+                                colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 38, height: 38)
+                        .shadow(color: AppTheme.dynamicAccent.opacity(0.4), radius: 6, x: 0, y: 3)
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.white)
+                        .contentTransition(.opacity)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableButtonStyle())
             .animation(.spring(response: 0.25, dampingFraction: 0.7), value: player.isPlaying)
 
             // Skip Next
@@ -138,7 +151,7 @@ struct MiniPlayerBar: View {
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableButtonStyle())
         }
         .onAppear {
             playHaptic.prepare()
@@ -161,15 +174,20 @@ private struct MiniPlayerProgressBar: View {
         GeometryReader { geo in
             let fraction = progress.duration > 0 ? progress.position / progress.duration : 0
             ZStack(alignment: .leading) {
-                Rectangle()
+                Capsule()
                     .fill(AppTheme.surface)
-                    .frame(height: 2)
-                Rectangle()
-                    .fill(AppTheme.dynamicAccent)
-                    .frame(width: geo.size.width * CGFloat(fraction), height: 2)
+                    .frame(height: 3)
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
+                    .frame(width: geo.size.width * CGFloat(fraction), height: 3)
                     .animation(.linear(duration: 0.25), value: progress.position)
             }
         }
-        .frame(height: 2)
+        .frame(height: 3)
     }
 }

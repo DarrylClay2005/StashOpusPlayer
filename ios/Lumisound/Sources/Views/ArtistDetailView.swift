@@ -79,7 +79,9 @@ struct ArtistDetailView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        // .plain to match the main Library / Album / Folder views (was
+        // .insetGrouped, an inconsistent boxed look).
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color.clear.ignoresSafeArea())
         .navigationTitle(artist)

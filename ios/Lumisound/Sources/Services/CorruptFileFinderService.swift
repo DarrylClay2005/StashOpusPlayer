@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import UIKit
 
 // MARK: - CorruptFileFinderService
 
@@ -71,7 +72,14 @@ final class CorruptFileFinderService: ObservableObject {
 
         let interval: TimeInterval = 5 * 60
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.scanDocumentsDirectory() }
+            Task { @MainActor in
+                // Skip the (file-I/O heavy) scan while the app is backgrounded —
+                // during background audio playback the process stays alive and
+                // this would otherwise keep churning the disk every 5 min for no
+                // user-visible benefit. It runs again on the next foreground tick.
+                guard UIApplication.shared.applicationState == .active else { return }
+                self?.scanDocumentsDirectory()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         periodicTimer = timer

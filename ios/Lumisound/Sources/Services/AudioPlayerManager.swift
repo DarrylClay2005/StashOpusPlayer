@@ -147,6 +147,13 @@ final class AudioPlayerManager: ObservableObject {
 
     private let timePitch = AVAudioUnitTimePitch()
     private let equalizer = AVAudioUnitEQ(numberOfBands: 10)
+    // Real-room reverb — sits after the EQ, before the limiter, so any wet
+    // signal it adds still gets caught by the limiter instead of clipping.
+    private let reverb = AVAudioUnitReverb()
+    // Tracks which factory preset is currently loaded on `reverb` so
+    // `applyAudioSettings` only calls `loadFactoryPreset` (a relatively heavy
+    // call) when the user's chosen preset actually changes.
+    private var loadedReverbPreset: ReverbRoomPreset?
     // Brick-wall peak limiter placed at the very end of the chain. Lets
     // `audioSettings.volume` boost gain above 100% (up to `maxVolume`) without
     // the boosted signal clipping — the limiter clamps transient peaks instead
@@ -207,6 +214,23 @@ final class AudioPlayerManager: ObservableObject {
     private var fileStartFrame: AVAudioFramePosition = 0
     private var timer: Timer?
     private var isEngineConfigured = false
+
+    /// The AVAudioFile pre-scheduled by `scheduleGaplessNext` for the next
+    /// gapless hand-off, stashed so `handleTrackEnded` can adopt it as the new
+    /// `audioFile` the instant that track starts playing (otherwise position/
+    /// duration would keep reflecting the track that just ended).
+    private var pendingGaplessFile: AVAudioFile?
+
+    /// The active node's render-clock sample time at the moment the current
+    /// gapless segment began. A gapless hand-off appends the next file to the
+    /// SAME continuously-playing node, so `playerTime.sampleTime` keeps
+    /// accumulating across tracks instead of resetting to 0 — without
+    /// subtracting this baseline, `updatePositionFromPlayer` would compute the
+    /// new track's position from the cumulative frame count (clamped to the new
+    /// duration), freezing the Now Playing scrubber/MiniPlayer progress. Reset
+    /// to 0 on every fresh (stop()+play()) schedule, where the node's clock
+    /// really does restart at 0.
+    private var gaplessBaseFrame: Double = 0
 
     // ReplayGain: linear gain factor derived from the current track's metadata/RMS analysis
     // (see the `replayGainEnabled` block in scheduleCurrent/transcodeAndSchedule). Reset to
@@ -945,6 +969,11 @@ final class AudioPlayerManager: ObservableObject {
     private func resetReplayGainForNewTrack() {
         recentLoadFailureTimestamps.removeAll()
         replayGainLinearGain = 1.0
+        // Every fresh (stop()+play()) schedule restarts the node's sample clock
+        // at 0, so the gapless position baseline must reset too. The gapless
+        // hand-off path also calls this, then immediately re-captures the
+        // node's cumulative sample time (see `handleTrackEnded`).
+        gaplessBaseFrame = 0
         // Re-apply the master volume/boost (and reset ReplayGain's contribution
         // to neutral) so a track change can't leave the previous track's
         // analysed ReplayGain — or a stale boost level — applied to the new one.
@@ -1039,12 +1068,22 @@ final class AudioPlayerManager: ObservableObject {
 
             // Pre-schedule the next track for gapless playback 0.1 s after this segment
             // starts, giving the engine enough time to buffer it seamlessly.
-            if audioSettings.gaplessEnabled {
+            //
+            // Gapless and crossfade are mutually-exclusive transition strategies:
+            // crossfade starts the incoming track on the OTHER node a few seconds
+            // early, while gapless queues it on THIS node to start the instant
+            // this one ends. With both enabled, the crossfade fires AND the
+            // gapless-queued segment also plays — two tracks at once (the
+            // "current + next play together" bug). So only arm gapless when
+            // crossfade is off.
+            if audioSettings.gaplessEnabled && !audioSettings.crossfadeEnabled {
                 Task { [weak self] in
                     guard let self else { return }
                     try? await Task.sleep(nanoseconds: 100_000_000)
                     await MainActor.run {
-                        guard self.isPlaying, self.audioSettings.gaplessEnabled,
+                        guard self.isPlaying,
+                              self.audioSettings.gaplessEnabled,
+                              !self.audioSettings.crossfadeEnabled,
                               !self.gaplessScheduled else { return }
                         self.scheduleGaplessNext()
                     }
@@ -1362,6 +1401,29 @@ final class AudioPlayerManager: ObservableObject {
             advanceIndex()
             gaplessScheduled = false
             pendingNextIndex = nil
+            // Adopt the file that just began playing gaplessly so position,
+            // duration, and the scrubber track the NEW track. Without this the
+            // Now Playing UI/MiniPlayer keep showing the previous track's
+            // duration and a frozen (clamped) progress bar — the "won't update
+            // when crossfade is off" bug, since gapless is the default
+            // crossfade-off transition path.
+            if let nextFile = pendingGaplessFile {
+                audioFile = nextFile
+                duration = nextFile.duration
+            }
+            fileStartFrame = 0
+            pendingGaplessFile = nil
+            // Fresh track — reset ReplayGain to neutral (its own analysis, if
+            // enabled, runs per-track in the scheduling paths). This also zeroes
+            // `gaplessBaseFrame`, so capture the node's CURRENT cumulative sample
+            // time as this segment's baseline immediately afterward.
+            resetReplayGainForNewTrack()
+            if let nodeTime = activeNode.lastRenderTime,
+               let playerTime = activeNode.playerTime(forNodeTime: nodeTime) {
+                gaplessBaseFrame = Double(playerTime.sampleTime)
+            }
+            position = 0
+            reapplyActiveEffect()
             updateNowPlaying()
             // Schedule completion for the newly playing segment.
             scheduleGaplessNext()
@@ -1409,7 +1471,7 @@ final class AudioPlayerManager: ObservableObject {
     /// AVPlayer has access to iOS's full codec pipeline and can always play .opus files.
     /// Basic play/pause/seek/volume/speed work (speed via `.rate` + `.spectral`
     /// pitch algorithm — see `applyAudioSettings`). EQ, pitch shift, ReplayGain,
-    /// 8D, crossfade, and gapless need the AVAudioEngine graph and do not apply.
+    /// 8D, crossfade, gapless, and reverb need the AVAudioEngine graph and do not apply.
     private func scheduleWithOpusPlayer(url: URL, startTime: TimeInterval) {
         tearDownOpusPlayer()
 
@@ -1545,12 +1607,14 @@ final class AudioPlayerManager: ObservableObject {
         }
 
         isCrossfading = true
-        // Snap to the outgoing track's beat grid (if known) so the fade starts
-        // and ends on a downbeat instead of an arbitrary fraction of a second.
-        let fadeDuration = smartFadeDuration(
-            base: audioSettings.crossfadeDuration,
-            bpm: currentSong.flatMap { bpmCache[$0.id] }
-        )
+        // Smart Auto Crossfade (when enabled): snap the fade to the outgoing
+        // track's beat grid (if its tempo is known) so it starts and ends on a
+        // downbeat instead of an arbitrary fraction of a second. With Smart
+        // Crossfade off, use the fixed user-set duration verbatim.
+        let smartCrossfade = audioSettings.smartCrossfadeEnabled
+        let fadeDuration = smartCrossfade
+            ? smartFadeDuration(base: audioSettings.crossfadeDuration, bpm: currentSong.flatMap { bpmCache[$0.id] })
+            : audioSettings.crossfadeDuration
 
         // The outgoing node is the one currently playing; incoming is the opposite.
         // Captured as `let` — the upcoming `usingPrimaryNode` flip changes what
@@ -1561,16 +1625,17 @@ final class AudioPlayerManager: ObservableObject {
         let outgoingBeatMatch = usingPrimaryNode ? primaryBeatMatch : secondaryBeatMatch
         let incomingBeatMatch = usingPrimaryNode ? secondaryBeatMatch : primaryBeatMatch
 
-        // True beatmatching: nudge both tracks' tempos toward their midpoint for
-        // the duration of the overlap, then ease the incoming track back to its
-        // native tempo as the fade completes. Only attempted when both BPMs are
-        // known and the required adjustment is modest (±8%) — outside that range
-        // the tempo change would be audible/unpleasant, so both rates stay at 1.0
-        // (a plain volume crossfade, as before).
+        // True beatmatching (Smart Auto Crossfade only): nudge both tracks'
+        // tempos toward their midpoint for the duration of the overlap, then
+        // ease the incoming track back to its native tempo as the fade
+        // completes. Only attempted when Smart Crossfade is on, both BPMs are
+        // known, and the required adjustment is modest (±8%) — outside that
+        // range (or with Smart Crossfade off) both rates stay at 1.0 for a
+        // plain volume crossfade.
         let outgoingBPM = currentSong.flatMap { bpmCache[$0.id] }
         let incomingBPM = bpmCache[nextSong.id]
         var incomingRate: Float = 1.0
-        if let oBPM = outgoingBPM, let iBPM = incomingBPM, oBPM > 0, iBPM > 0 {
+        if smartCrossfade, let oBPM = outgoingBPM, let iBPM = incomingBPM, oBPM > 0, iBPM > 0 {
             let target = (oBPM + iBPM) / 2
             let oRatio = target / oBPM
             let iRatio = target / iBPM
@@ -1750,12 +1815,15 @@ final class AudioPlayerManager: ObservableObject {
         }
     }
 
-    /// If "Auto EQ" is enabled, switches the EQ preset to match `bpm` (see
-    /// `EQPreset.auto(forBPM:)`). No-op if Auto EQ is off, `bpm` is unknown, or
-    /// the suggested preset is already active.
+    /// If "Auto EQ" is enabled, switches the EQ preset to match the current
+    /// track's genre (preferred) or tempo (fallback) — see
+    /// `EQPreset.auto(forBPM:genre:)`. No-op if Auto EQ is off, neither signal
+    /// is usable, or the suggested preset is already active.
     private func applyAutoEQIfNeeded(bpm: Double?) {
         guard audioSettings.autoEQEnabled else { return }
-        guard let preset = EQPreset.auto(forBPM: bpm), audioSettings.eqPreset != preset else { return }
+        let genre = currentSong?.genre
+        guard let preset = EQPreset.auto(forBPM: bpm, genre: genre),
+              audioSettings.eqPreset != preset else { return }
         applyEQPreset(preset)
     }
 
@@ -1764,11 +1832,16 @@ final class AudioPlayerManager: ObservableObject {
     /// Pre-schedules the next track on primaryNode immediately after the current segment,
     /// so AVAudioEngine delivers audio without any gap.
     private func scheduleGaplessNext() {
-        guard audioSettings.gaplessEnabled else { return }
+        // Never schedule gapless while crossfade is enabled — the two transition
+        // strategies would both fire and play two tracks at once.
+        guard audioSettings.gaplessEnabled, !audioSettings.crossfadeEnabled else { return }
         guard let nextSong = peekNextSong(), let nextURL = nextSong.url else { return }
         guard let nextFile = try? AVAudioFile(forReading: nextURL) else { return }
 
         gaplessScheduled = true
+        // Stashed so `handleTrackEnded` can adopt it as the live `audioFile`
+        // when this segment actually starts playing.
+        pendingGaplessFile = nextFile
         // Reuse the current generation rather than bumping it: this segment is
         // appended to the SAME engine session as the currently-playing segment,
         // whose completion handler captured this same `scheduleGeneration` value
@@ -2030,8 +2103,10 @@ final class AudioPlayerManager: ObservableObject {
         engine.attach(crossfadeMixer)
         engine.attach(timePitch)
         engine.attach(equalizer)
+        engine.attach(reverb)
         engine.attach(limiter)
         configureLimiter()
+        configureReverb()
 
         // Both player nodes connect to separate mixer inputs (via their own
         // beatmatch time-stretch units) so their volumes can be ramped
@@ -2043,10 +2118,35 @@ final class AudioPlayerManager: ObservableObject {
         engine.connect(secondaryBeatMatch, to: crossfadeMixer, fromBus: 0, toBus: 1, format: nil)
         engine.connect(crossfadeMixer, to: timePitch, format: nil)
         engine.connect(timePitch, to: equalizer, format: nil)
-        engine.connect(equalizer, to: limiter, format: nil)
+        engine.connect(equalizer, to: reverb, format: nil)
+        engine.connect(reverb, to: limiter, format: nil)
         engine.connect(limiter, to: engine.mainMixerNode, format: nil)
 
         isEngineConfigured = true
+    }
+
+    /// Loads the default factory preset and zeroes the wet/dry mix — the real
+    /// mix level/preset is then applied immediately by `applyAudioSettings()`,
+    /// which runs as soon as the engine starts (or `audioSettings` is restored
+    /// from disk) so reverb never plays at a stale level after a rebuild.
+    private func configureReverb() {
+        reverb.loadFactoryPreset(.mediumRoom)
+        reverb.wetDryMix = 0
+        loadedReverbPreset = .mediumRoom
+    }
+
+    /// Maps our Codable `ReverbRoomPreset` (Models layer, no AVFoundation
+    /// dependency) onto the real `AVAudioUnitReverbPreset`.
+    private func avReverbPreset(for preset: ReverbRoomPreset) -> AVAudioUnitReverbPreset {
+        switch preset {
+        case .smallRoom: return .smallRoom
+        case .mediumRoom: return .mediumRoom
+        case .largeRoom: return .largeRoom
+        case .mediumHall: return .mediumHall
+        case .largeHall: return .largeHall
+        case .plate: return .plate
+        case .cathedral: return .cathedral
+        }
     }
 
     /// Configures `limiter` as a fast brick-wall peak limiter: threshold just
@@ -2359,6 +2459,17 @@ final class AudioPlayerManager: ObservableObject {
             }
         }
 
+        // Reverb — live wet/dry mix and room preset. Only reload the factory
+        // preset when it actually changed (loadFactoryPreset is the heavy
+        // call); wetDryMix itself is cheap and safe to set on every pass so
+        // toggling the setting or dragging the mix slider applies instantly,
+        // including to whatever is playing right now.
+        if loadedReverbPreset != audioSettings.reverbPreset {
+            reverb.loadFactoryPreset(avReverbPreset(for: audioSettings.reverbPreset))
+            loadedReverbPreset = audioSettings.reverbPreset
+        }
+        reverb.wetDryMix = audioSettings.reverbEnabled ? min(max(audioSettings.reverbWetDryMix, 0), 100) : 0
+
         // ReplayGain + master volume/boost: re-combine the current track's analysed
         // gain (replayGainLinearGain, computed asynchronously in scheduleCurrent/
         // transcodeAndSchedule from embedded REPLAYGAIN_TRACK_GAIN metadata or RMS
@@ -2534,7 +2645,10 @@ final class AudioPlayerManager: ObservableObject {
               let file = audioFile
         else { return }
 
-        let elapsedFrames = Double(playerTime.sampleTime)
+        // Subtract `gaplessBaseFrame` so elapsed time is measured from the start
+        // of the CURRENT segment, not the cumulative frame count of every
+        // gapless segment played on this node since the last fresh schedule.
+        let elapsedFrames = Double(playerTime.sampleTime) - gaplessBaseFrame
         let computed = Double(fileStartFrame) / file.processingFormat.sampleRate
             + elapsedFrames / playerTime.sampleRate
         position = min(duration, max(0, computed))
