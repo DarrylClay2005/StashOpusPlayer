@@ -2,10 +2,11 @@ import SwiftUI
 
 // MARK: - EditorialArtworkView
 //
-// A magazine-spread layout: a small, slightly desaturated cover sits beside
-// a large serif title with a thin accent rule above it and an uppercase,
-// letter-spaced artist line below. A hairline progress rule runs the full
-// width beneath, driven by the player's position/duration.
+// A bold magazine/poster spread: an oversized, faded title sits behind the
+// layout as a graphic element, the cover anchors the top-left with a heavy drop
+// shadow, a thick accent rail runs down the side, and a full-width hairline
+// progress rule tracks playback. Stronger typographic hierarchy than a plain
+// art card.
 
 struct EditorialArtworkView: View {
     let song: Song?
@@ -17,85 +18,94 @@ struct EditorialArtworkView: View {
     @State private var palette: ArtworkPalette?
     @State private var breathe = false
 
-    private let artSize: CGFloat = 150
+    private let artSize: CGFloat = 158
     private let totalWidth: CGFloat = 320
+    private let totalHeight: CGFloat = 320
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 18) {
-                artworkContent
-                    .frame(width: artSize, height: artSize)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .saturation(0.85)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(.white.opacity(0.10), lineWidth: 1)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill((palette?.primary ?? AppTheme.dynamicAccent).opacity(isPlaying ? 0.10 : 0))
-                            .blendMode(.overlay)
-                    )
-                    .scaleEffect(breathe ? 1.015 : 1.0)
-                    .shadow(color: .black.opacity(0.3), radius: 14, x: 0, y: 8)
+        ZStack(alignment: .topLeading) {
+            // Oversized faded background word — a graphic poster element.
+            Text(song?.displayName ?? "LUMISOUND")
+                .font(.system(size: 86, weight: .black, design: .rounded))
+                .foregroundStyle((palette?.primary ?? AppTheme.dynamicAccent).opacity(0.12))
+                .lineLimit(2)
+                .minimumScaleFactor(0.4)
+                .frame(width: totalWidth, height: totalHeight, alignment: .bottomTrailing)
+
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top, spacing: 16) {
+                    // Thick accent rail.
+                    Rectangle()
+                        .fill(
+                            LinearGradient(colors: [palette?.primary ?? AppTheme.dynamicAccent,
+                                                    palette?.secondary ?? AppTheme.accentSoft],
+                                           startPoint: .top, endPoint: .bottom)
+                        )
+                        .frame(width: 6, height: artSize)
+                        .clipShape(Capsule())
+
+                    artworkContent
+                        .frame(width: artSize, height: artSize)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(.white.opacity(0.12), lineWidth: 1)
+                        )
+                        .scaleEffect(breathe ? 1.015 : 1.0)
+                        .shadow(color: .black.opacity(0.4), radius: 18, x: 0, y: 12)
+
+                    Spacer(minLength: 0)
+                }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Rectangle()
-                        .fill(palette?.primary ?? AppTheme.dynamicAccent)
-                        .frame(width: 28, height: 3)
+                    Text("NOW PLAYING")
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundStyle(palette?.primary ?? AppTheme.dynamicAccent)
+                        .kerning(3)
 
                     Text(song?.displayName ?? "Nothing Playing")
-                        .font(.system(size: 24, weight: .bold, design: .serif))
+                        .font(.system(size: 26, weight: .bold, design: .serif))
                         .foregroundStyle(AppTheme.textPrimary)
-                        .lineLimit(3)
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
 
                     if let artist = song?.artistName, !artist.isEmpty {
                         Text(artist.uppercased())
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(AppTheme.textSecondary)
-                            .kerning(1.5)
-                            .lineLimit(2)
+                            .kerning(2)
+                            .lineLimit(1)
                     }
-
-                    Spacer(minLength: 0)
                 }
-                .frame(height: artSize, alignment: .topLeading)
 
-                Spacer(minLength: 0)
-            }
-
-            // Hairline progress rule
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(AppTheme.surface.opacity(0.6))
-                        .frame(height: 1)
-                    Rectangle()
-                        .fill(palette?.primary ?? AppTheme.dynamicAccent)
-                        .frame(width: geo.size.width * CGFloat(max(0, min(1, progress))), height: 1)
-                        .animation(.easeInOut(duration: 0.2), value: progress)
+                // Full-width hairline progress rule.
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(AppTheme.surface.opacity(0.6)).frame(height: 2)
+                        Capsule()
+                            .fill(palette?.primary ?? AppTheme.dynamicAccent)
+                            .frame(width: geo.size.width * CGFloat(max(0, min(1, progress))), height: 2)
+                            .animation(.easeInOut(duration: 0.2), value: progress)
+                    }
                 }
+                .frame(height: 2)
             }
-            .frame(height: 1)
+            .frame(width: totalWidth, alignment: .leading)
         }
-        .frame(width: totalWidth)
+        .frame(width: totalWidth, height: totalHeight)
         .onChange(of: isPlaying) { playing in
-            withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) {
-                breathe = playing
-            }
-            if !playing {
+            if playing {
+                withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) { breathe = true }
+            } else {
                 withAnimation(.easeOut(duration: 0.5)) { breathe = false }
             }
         }
         .onAppear {
             if isPlaying {
-                withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) {
-                    breathe = true
-                }
+                withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) { breathe = true }
             }
         }
-        .task(id: song?.id) { await loadPalette() }
+        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
         .animation(.easeInOut(duration: 1.2), value: palette)
     }
 
@@ -106,13 +116,8 @@ struct EditorialArtworkView: View {
                 .environmentObject(library)
         } else {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [AppTheme.surface, AppTheme.elevatedSurface],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(LinearGradient(colors: [AppTheme.surface, AppTheme.elevatedSurface],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
                 .frame(width: artSize, height: artSize)
                 .overlay {
                     Image(systemName: "music.note")
@@ -120,9 +125,5 @@ struct EditorialArtworkView: View {
                         .foregroundStyle(AppTheme.dynamicAccent)
                 }
         }
-    }
-
-    private func loadPalette() async {
-        palette = await ArtworkPaletteLoader.palette(for: song, library: library)
     }
 }

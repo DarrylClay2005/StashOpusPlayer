@@ -2,197 +2,89 @@ import SwiftUI
 
 // MARK: - OrigamiArtworkView
 //
-// The artwork is presented as a folded paper card: a triangular corner fold
-// reveals a solid color sampled from the artwork's palette, faint crease
-// lines suggest where the paper has been folded, and the whole card flutters
-// gently in 3D like a sheet of paper settling.
+// The cover seen through a folded-paper / low-poly facet mesh: the artwork is
+// overlaid with a grid of triangular facets, each catching light differently
+// from a slowly-shifting source — a crystalline, origami-like surface that
+// shimmers while playing. Distinct from any flat-card style.
 
 struct OrigamiArtworkView: View {
     let song: Song?
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-
     @State private var palette: ArtworkPalette?
-    @State private var flutter = false
-    @State private var floating = false
 
-    private let artSize: CGFloat = 250
-    private let foldSize: CGFloat = 54
+    private let artSize: CGFloat = 280
+    private let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+    private let cols = 6
+    private let rows = 6
 
     var body: some View {
-        VStack(spacing: 14) {
-            ZStack(alignment: .topTrailing) {
-                artworkContent
-                    .frame(width: artSize, height: artSize)
-                    .clipShape(FoldedCornerShape(fold: foldSize))
-                    .overlay(
-                        FoldedCornerShape(fold: foldSize)
-                            .stroke(.white.opacity(0.12), lineWidth: 1)
-                    )
-                    .overlay(creaseLines)
-                    .overlay(
-                        FilmGrainOverlay()
-                            .frame(width: artSize, height: artSize)
-                            .blendMode(.overlay)
-                            .opacity(0.10)
-                            .clipShape(FoldedCornerShape(fold: foldSize))
-                            .allowsHitTesting(false)
-                    )
-
-                // The folded-back corner — backside of the paper, tinted
-                // with a color sampled from the artwork itself.
-                FoldTriangleShape()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                (palette?.secondary ?? AppTheme.dynamicAccent).opacity(0.95),
-                                (palette?.primary ?? AppTheme.accentSoft).opacity(0.75),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: foldSize, height: foldSize)
-                    .overlay(
-                        FoldTriangleShape()
-                            .stroke(.black.opacity(0.18), lineWidth: 1)
-                    )
-                    .shadow(color: .black.opacity(0.3), radius: 6, x: -2, y: 2)
-                    .allowsHitTesting(false)
-            }
-            .shadow(color: .black.opacity(0.4), radius: floating ? 26 : 14, x: 0, y: floating ? 16 : 8)
-            .rotation3DEffect(.degrees(flutter ? 2.2 : -2.2), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
-            .rotation3DEffect(.degrees(flutter ? -0.8 : 0.8), axis: (x: 1, y: 0, z: 0), perspective: 0.5)
-            .offset(y: floating ? -7 : 0)
-
-            VStack(spacing: 2) {
-                Text(song?.displayName ?? "Nothing Playing")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AppTheme.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                if let artist = song?.artistName, !artist.isEmpty {
-                    Text(artist)
-                        .font(.system(size: 13))
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .lineLimit(1)
+        artwork(size: artSize)
+            .clipShape(shape)
+            .overlay(
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying)) { timeline in
+                    Canvas { context, size in
+                        let t = isPlaying ? timeline.date.timeIntervalSinceReferenceDate : 0.6
+                        drawFacets(context: context, size: size, time: t)
+                    }
                 }
-            }
-            .frame(maxWidth: artSize)
-        }
-        .onAppear { updateAnimations(playing: isPlaying) }
-        .onChange(of: isPlaying) { playing in updateAnimations(playing: playing) }
-        .task(id: song?.id) { await loadPalette() }
-        .animation(.easeInOut(duration: 1.2), value: palette)
+                .clipShape(shape)
+            )
+            .overlay(shape.stroke(.white.opacity(0.12), lineWidth: 1))
+            .shadow(color: (palette?.primary ?? AppTheme.dynamicAccent).opacity(0.35), radius: 22, x: 0, y: 12)
+            .shadow(color: .black.opacity(0.4), radius: 14, x: 0, y: 8)
+            .frame(width: 320, height: 320)
+            .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.0))
+            .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
+            .animation(.easeInOut(duration: 1.0), value: palette)
     }
 
-    /// Faint diagonal creases — a couple of low-opacity strokes drawn once,
-    /// suggesting the paper has been folded into thirds.
-    private var creaseLines: some View {
-        Canvas { context, size in
-            let crease1 = Path { p in
-                p.move(to: CGPoint(x: 0, y: size.height * 0.36))
-                p.addLine(to: CGPoint(x: size.width, y: size.height * 0.40))
+    private func drawFacets(context: GraphicsContext, size: CGSize, time: Double) {
+        let cw = size.width / CGFloat(cols)
+        let ch = size.height / CGFloat(rows)
+        for r in 0..<rows {
+            for c in 0..<cols {
+                let x0 = CGFloat(c) * cw, y0 = CGFloat(r) * ch
+                let x1 = x0 + cw, y1 = y0 + ch
+                // Two triangles per cell, each with its own shifting shade.
+                let shadeA = facetShade(r: r, c: c, tri: 0, time: time)
+                let shadeB = facetShade(r: r, c: c, tri: 1, time: time)
+                fillTriangle(context, CGPoint(x: x0, y: y0), CGPoint(x: x1, y: y0), CGPoint(x: x0, y: y1), shade: shadeA)
+                fillTriangle(context, CGPoint(x: x1, y: y0), CGPoint(x: x1, y: y1), CGPoint(x: x0, y: y1), shade: shadeB)
             }
-            let crease2 = Path { p in
-                p.move(to: CGPoint(x: 0, y: size.height * 0.70))
-                p.addLine(to: CGPoint(x: size.width, y: size.height * 0.66))
-            }
-            context.stroke(crease1, with: .color(.black.opacity(0.10)), lineWidth: 1)
-            context.stroke(crease2, with: .color(.white.opacity(0.08)), lineWidth: 1)
         }
-        .allowsHitTesting(false)
+    }
+
+    /// Facet shading in roughly [-0.16, 0.16] — positive = white highlight,
+    /// negative = dark shadow — driven by the facet's position and time so the
+    /// "light" sweeps across the mesh.
+    private func facetShade(r: Int, c: Int, tri: Int, time: Double) -> Double {
+        0.16 * sin(time * 1.4 + Double(r + c) * 0.7 + Double(tri) * 1.1)
+    }
+
+    private func fillTriangle(_ context: GraphicsContext, _ p0: CGPoint, _ p1: CGPoint, _ p2: CGPoint, shade: Double) {
+        var path = Path()
+        path.move(to: p0); path.addLine(to: p1); path.addLine(to: p2); path.closeSubpath()
+        let color: Color = shade >= 0 ? .white : .black
+        context.fill(path, with: .color(color.opacity(abs(shade))))
     }
 
     @ViewBuilder
-    private var artworkContent: some View {
+    private func artwork(size: CGFloat) -> some View {
         if let song {
-            ArtworkThumbnail(song: song, size: artSize)
+            ArtworkThumbnail(song: song, size: size)
                 .environmentObject(library)
         } else {
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [AppTheme.surface, AppTheme.elevatedSurface],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: artSize, height: artSize)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(LinearGradient(colors: [AppTheme.surface, AppTheme.elevatedSurface],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: size, height: size)
                 .overlay {
                     Image(systemName: "music.note")
-                        .font(.system(size: 64, weight: .semibold))
+                        .font(.system(size: size * 0.27, weight: .semibold))
                         .foregroundStyle(AppTheme.dynamicAccent)
                 }
         }
-    }
-
-    private func loadPalette() async {
-        palette = await ArtworkPaletteLoader.palette(for: song, library: library)
-    }
-
-    private func updateAnimations(playing: Bool) {
-        if playing {
-            withAnimation(.easeInOut(duration: 4.2).repeatForever(autoreverses: true)) {
-                flutter = true
-            }
-            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) {
-                floating = true
-            }
-        } else {
-            withAnimation(.easeOut(duration: 0.6)) {
-                flutter = false
-                floating = false
-            }
-        }
-    }
-}
-
-// MARK: - FoldedCornerShape
-
-/// A rounded rectangle with its top-trailing corner cut away on the diagonal,
-/// leaving a triangular notch for `FoldTriangleShape` to fill.
-struct FoldedCornerShape: Shape {
-    let fold: CGFloat
-    var cornerRadius: CGFloat = 6
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX + cornerRadius, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX - fold, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + fold))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - cornerRadius))
-        path.addArc(
-            center: CGPoint(x: rect.maxX - cornerRadius, y: rect.maxY - cornerRadius),
-            radius: cornerRadius, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false
-        )
-        path.addLine(to: CGPoint(x: rect.minX + cornerRadius, y: rect.maxY))
-        path.addArc(
-            center: CGPoint(x: rect.minX + cornerRadius, y: rect.maxY - cornerRadius),
-            radius: cornerRadius, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false
-        )
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + cornerRadius))
-        path.addArc(
-            center: CGPoint(x: rect.minX + cornerRadius, y: rect.minY + cornerRadius),
-            radius: cornerRadius, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false
-        )
-        path.closeSubpath()
-        return path
-    }
-}
-
-// MARK: - FoldTriangleShape
-
-/// The small triangle that fills the notch cut by `FoldedCornerShape`,
-/// representing the folded-back corner of the paper.
-struct FoldTriangleShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.closeSubpath()
-        return path
     }
 }

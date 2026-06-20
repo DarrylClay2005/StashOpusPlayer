@@ -2,172 +2,93 @@ import SwiftUI
 
 // MARK: - FloatingCardsArtworkView
 //
-// A fanned stack of glass-bordered cards: a crisp front card, a softly
-// blurred back card peeking out behind it, and a deep card further back —
-// each gently bobbing at its own pace. A diagonal shimmer sweeps across the
-// front card while playing, and the whole stack sits over a soft palette-
-// driven glow.
+// Three copies of the cover floating in 3D space: a deep blurred card and a
+// mid card tilted back behind a crisp, perspective-tilted front card. The whole
+// stack gently wobbles in 3D (rotation3DEffect) and drifts while playing, over
+// a soft palette glow — a real sense of depth, not a flat stack.
 
 struct FloatingCardsArtworkView: View {
     let song: Song?
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-
-    private let cardSize: CGFloat = 240
-
-    @State private var frontFloat    = false
-    @State private var backFloat     = false
-    @State private var deepFloat     = false
-    @State private var drift: CGFloat = 0
-    @State private var shimmerOffset: CGFloat = -260
     @State private var palette: ArtworkPalette?
+    @State private var wobble: CGFloat = 0
+    @State private var float: CGFloat = 0
+
+    private let cardSize: CGFloat = 230
 
     var body: some View {
         ZStack {
-            // Ambient glow — a soft blurred wash sampled from the artwork's
-            // dominant colors, giving the whole stack a sense of depth and
-            // tying the floating cards to the track's palette.
-            if let palette {
-                Circle()
-                    .fill(palette.primary)
-                    .frame(width: 260, height: 260)
-                    .blur(radius: 70)
-                    .opacity(0.45)
-                    .offset(x: -30 + drift, y: -10 - drift * 0.4)
+            // Palette glow.
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(palette?.primary ?? AppTheme.dynamicAccent)
+                .frame(width: cardSize, height: cardSize)
+                .blur(radius: 50)
+                .opacity(isPlaying ? 0.45 : 0.28)
 
-                Circle()
-                    .fill(palette.secondary)
-                    .frame(width: 220, height: 220)
-                    .blur(radius: 60)
-                    .opacity(0.35)
-                    .offset(x: 40 - drift, y: 30 + drift * 0.3)
-            }
+            // Deep card.
+            card(size: cardSize)
+                .blur(radius: 5)
+                .opacity(0.55)
+                .scaleEffect(0.86)
+                .rotationEffect(.degrees(-9))
+                .offset(x: -34 + wobble * 6, y: 22 - float * 4)
 
-            // Deep card — partially visible, heavy tilt, far behind, most blurred
-            cardView(song: song, size: cardSize * 0.86, cornerRadius: 16)
-                .rotationEffect(.degrees(13))
-                .offset(x: 34 + drift * 0.5, y: deepFloat ? 6 : 14)
-                .opacity(0.45)
-                .blur(radius: 4)
-                .zIndex(0)
-
-            // Back card — current artwork, rotated, offset, gently blurred
-            // for parallax depth relative to the crisp front card
-            cardView(song: song, size: cardSize, cornerRadius: 18)
-                .rotationEffect(.degrees(8))
-                .offset(x: 20 + drift * 0.25, y: backFloat ? -6 : 6)
-                .shadow(color: .black.opacity(0.3), radius: 14, x: 0, y: 6)
-                .blur(radius: 1.5)
+            // Mid card.
+            card(size: cardSize)
                 .opacity(0.8)
-                .zIndex(1)
+                .scaleEffect(0.93)
+                .rotationEffect(.degrees(6))
+                .offset(x: 26 - wobble * 5, y: -10 + float * 3)
 
-            // Front card — main focus, subtle tilt, slightly left, fully crisp
-            cardView(song: song, size: cardSize, cornerRadius: 18)
-                .rotationEffect(.degrees(-5))
-                .offset(x: -10, y: frontFloat ? -10 : 4)
-                .shadow(color: .black.opacity(0.5), radius: 24, x: 0, y: 12)
-                .overlay(shimmer.clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous)))
-                .zIndex(2)
+            // Front crisp card, perspective-tilted.
+            card(size: cardSize)
+                .shadow(color: .black.opacity(0.45), radius: 22, x: 0, y: 16)
+                .rotation3DEffect(.degrees(Double(wobble) * 6), axis: (x: 1, y: 0, z: 0))
+                .rotation3DEffect(.degrees(Double(wobble) * -8), axis: (x: 0, y: 1, z: 0))
+                .offset(y: float * 5)
         }
-        .frame(width: cardSize + 80, height: cardSize + 60)
-        .onChange(of: isPlaying) { playing in
-            updateAnimations(playing: playing)
-        }
-        .onAppear {
-            updateAnimations(playing: isPlaying)
-        }
-        .task(id: song?.id) {
-            await loadPalette()
-        }
-        .animation(.easeInOut(duration: 1.2), value: palette)
+        .frame(width: 320, height: 320)
+        .onAppear { animate(playing: isPlaying) }
+        .onChange(of: isPlaying) { animate(playing: $0) }
+        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
+        .animation(.easeInOut(duration: 1.0), value: palette)
     }
 
-    /// A diagonal highlight sweep across the front card, like light catching glass.
-    private var shimmer: some View {
-        LinearGradient(
-            stops: [
-                .init(color: .clear, location: 0),
-                .init(color: .white.opacity(0.16), location: 0.45),
-                .init(color: .white.opacity(0.28), location: 0.5),
-                .init(color: .white.opacity(0.16), location: 0.55),
-                .init(color: .clear, location: 1),
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .frame(width: cardSize * 1.4)
-        .offset(x: shimmerOffset)
-        .allowsHitTesting(false)
+    private func animate(playing: Bool) {
+        if playing {
+            withAnimation(.easeInOut(duration: 4.5).repeatForever(autoreverses: true)) { wobble = 1 }
+            withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) { float = 1 }
+        } else {
+            withAnimation(.easeOut(duration: 0.7)) { wobble = 0; float = 0 }
+        }
     }
 
-    private func loadPalette() async {
-        palette = await ArtworkPaletteLoader.palette(for: song, library: library)
+    private func card(size: CGFloat) -> some View {
+        artwork(size: size)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.white.opacity(0.18), lineWidth: 1)
+            )
     }
 
     @ViewBuilder
-    private func cardView(song: Song?, size: CGFloat, cornerRadius: CGFloat) -> some View {
-        Group {
-            if let song {
-                ArtworkThumbnail(song: song, size: size)
-                    .environmentObject(library)
-            } else {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [AppTheme.surface, AppTheme.elevatedSurface],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: size, height: size)
-                    .overlay {
-                        Image(systemName: "music.note")
-                            .font(.system(size: size * 0.3, weight: .semibold))
-                            .foregroundStyle(AppTheme.dynamicAccent)
-                    }
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(.white.opacity(0.14), lineWidth: 1)
-        )
-    }
-
-    private func updateAnimations(playing: Bool) {
-        if playing {
-            withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) {
-                frontFloat = true
-            }
-            withAnimation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true).delay(0.4)) {
-                backFloat = true
-            }
-            withAnimation(.easeInOut(duration: 3.4).repeatForever(autoreverses: true).delay(0.8)) {
-                deepFloat = true
-            }
-            withAnimation(.easeInOut(duration: 8).repeatForever(autoreverses: true)) {
-                drift = 18
-            }
-            startShimmer()
+    private func artwork(size: CGFloat) -> some View {
+        if let song {
+            ArtworkThumbnail(song: song, size: size)
+                .environmentObject(library)
         } else {
-            withAnimation(.easeOut(duration: 0.5)) {
-                frontFloat = false
-                backFloat  = false
-                deepFloat  = false
-                drift      = 0
-            }
-            withAnimation(.easeOut(duration: 0.3)) {
-                shimmerOffset = -260
-            }
-        }
-    }
-
-    private func startShimmer() {
-        shimmerOffset = -260
-        withAnimation(.linear(duration: 3.2).repeatForever(autoreverses: false)) {
-            shimmerOffset = 300
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(LinearGradient(colors: [AppTheme.surface, AppTheme.elevatedSurface],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: size, height: size)
+                .overlay {
+                    Image(systemName: "music.note")
+                        .font(.system(size: size * 0.27, weight: .semibold))
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                }
         }
     }
 }

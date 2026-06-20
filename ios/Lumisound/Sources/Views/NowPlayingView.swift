@@ -35,6 +35,7 @@ private struct VinylDiscView: View {
     @State private var rotation: Double     = 0
     @State private var sheenRotation: Double = 0
     @State private var grooveGlow           = false
+    @State private var tonearmEngaged       = false
 
     var body: some View {
         ZStack {
@@ -99,6 +100,14 @@ private struct VinylDiscView: View {
                 .blur(radius: 8)
                 .animation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true), value: grooveGlow)
                 .allowsHitTesting(false)
+
+            // ── Tonearm — swings down onto the record while playing, lifts off
+            //    and parks toward the edge when paused (like a real turntable) ──
+            tonearm
+                .rotationEffect(.degrees(tonearmEngaged ? 34 : 16), anchor: UnitPoint(x: 0.5, y: 0.206))
+                .offset(x: 90, y: -33)
+                .animation(.easeInOut(duration: 0.9), value: tonearmEngaged)
+                .allowsHitTesting(false)
         }
         .frame(width: 300, height: 300)
         .shadow(
@@ -125,6 +134,45 @@ private struct VinylDiscView: View {
         }
     }
 
+    /// A turntable tonearm: counterweight, pivot, tube and a headshell with a
+    /// stylus tip. Rotated/anchored at the pivot by the caller.
+    private var tonearm: some View {
+        VStack(spacing: 0) {
+            // Counterweight (above the pivot).
+            Capsule()
+                .fill(LinearGradient(colors: [Color(white: 0.55), Color(white: 0.3)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 17, height: 26)
+
+            // Pivot base.
+            Circle()
+                .fill(RadialGradient(colors: [Color(white: 0.6), Color(white: 0.22)],
+                                     center: .center, startRadius: 1, endRadius: 12))
+                .frame(width: 22, height: 22)
+                .overlay(Circle().stroke(Color(white: 0.12), lineWidth: 1))
+
+            // Arm tube.
+            Capsule()
+                .fill(LinearGradient(colors: [Color(white: 0.62), Color(white: 0.34)],
+                                     startPoint: .leading, endPoint: .trailing))
+                .frame(width: 6, height: 116)
+
+            // Headshell + stylus.
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color(white: 0.18))
+                    .frame(width: 14, height: 16)
+                Circle()
+                    .fill(AppTheme.dynamicAccent)
+                    .frame(width: 5, height: 5)
+                    .offset(y: 3)
+                    .shadow(color: AppTheme.dynamicAccent.opacity(grooveGlow ? 0.8 : 0.0), radius: 4)
+            }
+        }
+        .frame(width: 22, height: 180)
+        .shadow(color: .black.opacity(0.4), radius: 6, x: 0, y: 4)
+    }
+
     private func startAnimations() {
         withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
             rotation = 360
@@ -133,12 +181,14 @@ private struct VinylDiscView: View {
             sheenRotation = 360
         }
         grooveGlow = true
+        tonearmEngaged = true
     }
 
     private func pauseAnimations() {
         withAnimation(.easeOut(duration: 0.5)) { }
         sheenRotation = 0
         grooveGlow = false
+        tonearmEngaged = false
     }
 }
 
@@ -346,39 +396,8 @@ struct NowPlayingView: View {
             VinylDiscView(song: player.currentSong, isPlaying: player.isPlaying)
 
         case .albumArt:
-            VStack(spacing: 4) {
-                Group {
-                    if let song = player.currentSong {
-                        ArtworkThumbnail(song: song, size: 300)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .stroke(.white.opacity(0.12), lineWidth: 1)
-                            )
-                            .shadow(color: AppTheme.dynamicAccent.opacity(0.3), radius: 24, x: 0, y: 12)
-                    } else {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [AppTheme.surface, AppTheme.elevatedSurface],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 300, height: 300)
-                            .overlay {
-                                Image(systemName: "music.note")
-                                    .font(.system(size: 80, weight: .semibold))
-                                    .foregroundStyle(AppTheme.dynamicAccent)
-                            }
-                            .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 10)
-                    }
-                }
-
-                ArtworkReflectionView(song: player.currentSong, size: 300, cornerRadius: 16)
-                    .environmentObject(library)
-            }
-            .modifier(FloatModifier(isPlaying: player.isPlaying, amount: 6, speed: 2.8))
+            AlbumArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
 
         case .polaroid:
             OrigamiArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
