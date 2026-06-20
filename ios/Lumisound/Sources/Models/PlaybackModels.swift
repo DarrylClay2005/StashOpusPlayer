@@ -95,6 +95,10 @@ struct AudioSettings: Codable, Equatable {
     /// tempo (see `EQPreset.auto(forBPM:)`) instead of staying on whatever
     /// preset the user last picked manually.
     var autoEQEnabled: Bool = false
+    /// When true, the BPM-aware crossfade engine beatmatches and beat-aligns
+    /// the overlap using each track's analysed tempo instead of a fixed
+    /// duration (see `AudioPlayerManager.beginCrossfade`). Opt-in.
+    var smartCrossfadeEnabled: Bool = false
     /// Real-room reverb, applied via `AVAudioUnitReverb` on the main signal
     /// chain. On by default per product requirement — gives every track a
     /// subtle sense of space rather than a perfectly dry signal.
