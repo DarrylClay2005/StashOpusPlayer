@@ -424,28 +424,28 @@ struct NowPlayingView: View {
             TiltCardArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .depthParallax:
-            DepthParallaxArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .marquee:
+            MarqueeArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .frostedStack:
-            FrostedStackArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .holographic:
+            HolographicArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .haloRing:
-            HaloRingArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .ripple:
+            RippleArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .spotlight:
-            SpotlightArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .popArt:
+            PopArtArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .mirrorWall:
-            MirrorWallArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .starfield:
+            StarfieldArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .waveBorder:
-            WaveBorderArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .stainedGlass:
+            StainedGlassArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
         }
     }

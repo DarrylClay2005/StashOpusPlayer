@@ -1523,6 +1523,14 @@ async def download_track(
                      "'source:id' is in the manifest, the bridge skips running "
                      "yt-dlp entirely and returns 204.",
     ),
+    use_aria2: bool = Query(
+        False,
+        description="When true, use aria2c as yt-dlp's external downloader "
+                     "(multi-connection). Default false — the native downloader "
+                     "is faster on most connections; aria2 only helps where "
+                     "YouTube throttles single connections. Client-controlled "
+                     "via Settings -> yt-dlp.",
+    ),
 ):
     """
     Starts a background download job and returns its `job_id` immediately
@@ -1576,6 +1584,7 @@ async def download_track(
         thumbnail=thumbnail,
         duration=duration,
         account_token=account_token,
+        use_aria2=use_aria2,
     ))
     return JSONResponse({"job_id": job_id}, status_code=202)
 
@@ -1593,6 +1602,7 @@ async def _run_download_job(
     thumbnail: Optional[str],
     duration: Optional[int],
     account_token: str,
+    use_aria2: bool = False,
 ) -> None:
     """
     Runs yt-dlp (with retries/verification) and the LUMISOUND_ID tagging step
@@ -1605,7 +1615,7 @@ async def _run_download_job(
             job_id=job_id, source=source, id=id, target_url=target_url,
             extra_args=extra_args, expected_ext=expected_ext, safe_title=safe_title,
             title=title, artist=artist, thumbnail=thumbnail, duration=duration,
-            account_token=account_token,
+            account_token=account_token, use_aria2=use_aria2,
         )
     except HTTPException as exc:
         job = _DOWNLOAD_JOBS.get(job_id, {})
@@ -1633,6 +1643,7 @@ async def _do_download_job(
     thumbnail: Optional[str],
     duration: Optional[int],
     account_token: str,
+    use_aria2: bool = False,
 ) -> None:
     # Large playlists drive this endpoint hard via the iOS "Download All" pipeline,
     # and yt-dlp occasionally exits 0 while leaving a truncated/corrupt file behind
@@ -1666,11 +1677,11 @@ async def _do_download_job(
         # a scraper and reduce rate-limit/ban risk. `extra_args` (from
         # _download_format_args) adds the format-specific -f/-x/--audio-format
         # /--audio-quality flags.
-        # Use aria2c for all but the final attempt; if aria2 itself is the
-        # reason a download keeps failing (some hosts/formats don't segment
-        # cleanly), the last attempt falls back to yt-dlp's built-in downloader
-        # so a track is never permanently un-downloadable just because of aria2.
-        use_aria2 = attempt < max_attempts
+        # aria2 is OPT-IN per the user's Settings -> yt-dlp toggle (`use_aria2`):
+        # the native downloader is the default and is faster on most connections.
+        # Even when opted in, the FINAL attempt drops aria2 so a download is
+        # never permanently stuck if aria2 itself is the failure cause.
+        aria2_this_attempt = use_aria2 and attempt < max_attempts
         cmd = [
             "yt-dlp",
             "--no-playlist",
@@ -1678,13 +1689,13 @@ async def _do_download_job(
             "--embed-thumbnail",
             "--sleep-interval", "5",
             "--max-sleep-interval", "15",
-            *(_ARIA2_DOWNLOADER_ARGS if use_aria2 else []),
+            *(_ARIA2_DOWNLOADER_ARGS if aria2_this_attempt else []),
             "-o", output_template,
             *cookie_args,
             *extra_args,
             target_url,
         ]
-        logger.info("Download cmd (attempt %d/%d, aria2=%s): %s", attempt, max_attempts, use_aria2, " ".join(cmd))
+        logger.info("Download cmd (attempt %d/%d, aria2=%s): %s", attempt, max_attempts, aria2_this_attempt, " ".join(cmd))
 
         # `-x`/`--extract-audio` means yt-dlp transcodes after downloading
         # (mp3/flac/wav/opus) — much more CPU-bound and slower than the m4a/best

@@ -15,13 +15,13 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
     case neonGlow
     case auraGlow
     case tiltCard
-    // New modernized styles
-    case depthParallax
-    case frostedStack
-    case haloRing
-    case spotlight
-    case mirrorWall
-    case waveBorder
+    // Distinctive styles, each its own visual concept
+    case marquee
+    case holographic
+    case ripple
+    case popArt
+    case starfield
+    case stainedGlass
 
     var id: String { rawValue }
 
@@ -39,12 +39,12 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .neonGlow:         return "Prism Beams"
         case .auraGlow:         return "Liquid Aura"
         case .tiltCard:         return "Tilt Card"
-        case .depthParallax:    return "Depth Parallax"
-        case .frostedStack:     return "Frosted Stack"
-        case .haloRing:         return "Halo Ring"
-        case .spotlight:        return "Spotlight"
-        case .mirrorWall:       return "Mirror Wall"
-        case .waveBorder:       return "Wave Border"
+        case .marquee:          return "Marquee"
+        case .holographic:      return "Holographic"
+        case .ripple:           return "Ripple"
+        case .popArt:           return "Pop Art"
+        case .starfield:        return "Starfield"
+        case .stainedGlass:     return "Stained Glass"
         }
     }
 
@@ -62,12 +62,12 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .neonGlow:         return "sun.max.fill"
         case .auraGlow:         return "drop.fill"
         case .tiltCard:         return "rotate.3d"
-        case .depthParallax:    return "square.3.layers.3d"
-        case .frostedStack:     return "square.stack.3d.up.fill"
-        case .haloRing:         return "circle.circle.fill"
-        case .spotlight:        return "lightbulb.max.fill"
-        case .mirrorWall:       return "rectangle.fill.on.rectangle.fill"
-        case .waveBorder:       return "waveform.circle.fill"
+        case .marquee:          return "theatermasks.fill"
+        case .holographic:      return "rainbow"
+        case .ripple:           return "drop.circle.fill"
+        case .popArt:           return "circle.grid.2x2.fill"
+        case .starfield:        return "sparkles"
+        case .stainedGlass:     return "square.grid.3x3.fill"
         }
     }
 }

@@ -22,6 +22,15 @@ struct SettingsView: View {
     /// disables auto-activation on car-stereo connection when this is off.
     @AppStorage("carModeEnabled") private var carModeEnabled: Bool = false
 
+    /// When on, downloads ask the bridge to use aria2 (multi-connection) as the
+    /// yt-dlp downloader. Default OFF: benchmarking showed the native downloader
+    /// is ~2-3x faster than aria2 on YouTube's CDN for this deployment (aria2's
+    /// many-connection splitting added overhead instead of bypassing throttling).
+    /// Kept as an opt-in for networks where YouTube hard-throttles single
+    /// connections, where aria2 can genuinely win. Read by
+    /// `StreamingService.downloadToLibrary` and sent as `use_aria2` to the bridge.
+    @AppStorage("ytdlp_use_aria2") private var ytdlpUseAria2: Bool = false
+
     // MARK: YouTube API Key Validation / Exposure Check State
 
     @State private var youtubeKeyConfig: YoutubeApiKeyConfig?
@@ -43,6 +52,7 @@ struct SettingsView: View {
         case general = "General"
         case audio = "Audio"
         case library = "Library"
+        case ytdlp = "yt-dlp"
         case app = "App"
 
         var id: String { rawValue }
@@ -51,6 +61,7 @@ struct SettingsView: View {
             case .general: return "person.crop.circle"
             case .audio:   return "waveform"
             case .library: return "music.note.list"
+            case .ytdlp:   return "arrow.down.circle"
             case .app:     return "gearshape"
             }
         }
@@ -85,6 +96,8 @@ struct SettingsView: View {
                     case .library:
                         librarySection
                         streamingDownloadsSection
+                    case .ytdlp:
+                        ytdlpSection
                     case .app:
                         updatesSection
                         helpSection
@@ -755,6 +768,81 @@ struct SettingsView: View {
             sectionHeader("Streaming & Downloads")
         }
         .listRowBackground(AppTheme.surface)
+    }
+
+    // MARK: — yt-dlp Section
+
+    private var ytdlpSection: some View {
+        Group {
+            Section {
+                Toggle(isOn: $ytdlpUseAria2) {
+                    Label("Use aria2 downloader", systemImage: "bolt.horizontal.circle")
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .tint(AppTheme.dynamicAccent)
+
+                Text(ytdlpUseAria2
+                     ? "Downloads use aria2 with multiple parallel connections. This can help on networks where YouTube throttles single connections — but on a fast, un-throttled connection the built-in downloader is usually faster."
+                     : "Downloads use yt-dlp's built-in downloader (recommended — benchmarked faster on most connections). Turn this on only if your network throttles single downloads.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            } header: {
+                sectionHeader("Download Engine")
+            } footer: {
+                Text("aria2 opens many connections per download. It bypasses per-connection throttling on some networks, but adds overhead that makes it slower when a single connection is already fast.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .listRowBackground(AppTheme.surface)
+
+            // Audio format also governs yt-dlp's output, so surface it here too.
+            Section {
+                HStack {
+                    Label("Audio Format", systemImage: "waveform")
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    Picker("Audio Format", selection: Binding(
+                        get: { streaming.preferredFormat },
+                        set: { streaming.preferredFormat = $0 }
+                    )) {
+                        ForEach(StreamingService.availableFormats, id: \.value) { fmt in
+                            Text(fmt.label).tag(fmt.value)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(AppTheme.dynamicAccent)
+                }
+            } header: {
+                sectionHeader("Format")
+            } footer: {
+                Text("Preferred audio format for downloads (yt-dlp -x --audio-format). Highest quality is used for every download.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .listRowBackground(AppTheme.surface)
+
+            // YouTube auth — cookies + Data API key — both feed yt-dlp lookups.
+            if account.isLoggedIn {
+                Section {
+                    NavigationLink(destination: CookiesFileView()) {
+                        Label("YouTube Cookies", systemImage: "doc.text")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                    NavigationLink(destination: YoutubeApiKeyView()) {
+                        Label("YouTube API Key", systemImage: "key")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                } header: {
+                    sectionHeader("YouTube Authentication")
+                } footer: {
+                    Text("Upload a cookies.txt to download age-restricted content and avoid bot checks. Add a YouTube Data API key for full playlist resolution.")
+                        .font(AppTheme.bodyFont(size: 12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .listRowBackground(AppTheme.surface)
+            }
+        }
+        .animation(.easeInOut(duration: 0.22), value: ytdlpUseAria2)
     }
 
     // MARK: — YouTube API Key Rows

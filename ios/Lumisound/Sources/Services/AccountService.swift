@@ -978,6 +978,7 @@ final class AccountService: ObservableObject {
         ("library_cardStyle", .string),
         ("autoRadio_enabled", .bool),
         ("notifications_enabled", .bool),
+        ("ytdlp_use_aria2", .bool),
         // Liquid Glass customization (see GlassSettings)
         ("glass_tintStrength", .double),
         ("glass_tintHue", .double),

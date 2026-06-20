@@ -960,6 +960,12 @@ final class StreamingService: ObservableObject {
         if track.source == "soundcloud" {
             queryItems.append(URLQueryItem(name: "url", value: track.youtubeURL))
         }
+        // Per-user aria2 preference (Settings → yt-dlp). Off by default — the
+        // bridge uses its native downloader unless this is true. Only send when
+        // enabled to keep the default request unchanged.
+        if UserDefaults.standard.bool(forKey: "ytdlp_use_aria2") {
+            queryItems.append(URLQueryItem(name: "use_aria2", value: "true"))
+        }
         // Defense-in-depth: also tell the bridge what the client already has, so
         // a stale/incomplete `existingSongs` snapshot still gets server-side dedupe.
         // Exclude this track's own ID — if we got this far the pre-download check
