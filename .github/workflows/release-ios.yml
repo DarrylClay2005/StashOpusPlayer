@@ -262,22 +262,8 @@ jobs:
           print("Updated altstore-source.json to version $VERSION")
           EOF
 
-      - name: Commit updated altstore-source.json
-        run: |
-          git config user.email "actions@github.com"
-          git config user.name "GitHub Actions"
-          git add ios/altstore-source.json
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-          git commit -m "chore(ios): update altstore-source.json to v${{ steps.version.outputs.version }} [skip ci]"
-          for i in 1 2 3; do
-            git push origin HEAD:main && break
-            git fetch origin main
-            git rebase origin/main
-          done
-
+      # Publish the release FIRST so the IPA is always delivered even if the
+      # altstore-source.json housekeeping commit below loses a push race.
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -295,6 +281,28 @@ jobs:
             --title "Lumisound iOS v${VERSION}" \
             --notes "$(printf '## Lumisound iOS v%s\n\n**Installation:** %s\n\n**AltStore users:** Add the source URL from Settings → Streaming to get automatic updates.' "$VERSION" "$INSTALL_NOTE")" \
             "ios/build/$IPA_NAME"
+
+      # Best-effort: never fail the build over this housekeeping commit.
+      - name: Commit updated altstore-source.json
+        continue-on-error: true
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          # The "Stamp version into project.yml" step left project.yml modified in
+          # the working tree; discard it so the rebase fallback isn't blocked by
+          # "cannot rebase: you have unstaged changes".
+          git checkout -- ios/project.yml || true
+          git add ios/altstore-source.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "chore(ios): update altstore-source.json to v${{ steps.version.outputs.version }} [skip ci]"
+          for i in 1 2 3; do
+            git push origin HEAD:main && break
+            git fetch origin main
+            git rebase origin/main || git rebase --abort
+          done
 
       - name: Cleanup signing credentials
         if: always() && steps.signing.outputs.signed == 'true'
