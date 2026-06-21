@@ -1405,6 +1405,94 @@ async def stream(
     return {"url": stream_url, "expires_in": 21600}
 
 
+# Short-TTL cache of extracted raw stream URLs, so seeking (Range requests) and
+# repeated plays of the same track don't each pay yt-dlp's extraction cost.
+_PROXY_URL_CACHE: dict[str, tuple[str, float]] = {}
+_PROXY_URL_TTL = 5 * 3600  # under the ~6h googlevideo URL validity
+
+
+@app.get("/api/stream/proxy")
+async def stream_proxy(
+    request: Request,
+    id: str = Query(..., description="Video/track ID"),
+    source: str = Query("youtube", description="youtube or soundcloud"),
+    url: Optional[str] = Query(None, description="Full URL (required for soundcloud)"),
+    format: str = Query("m4a", description="Audio format"),
+):
+    """Proxies the extracted audio through the bridge instead of handing the app
+    the raw CDN URL. YouTube's googlevideo URLs are bound to the IP that
+    extracted them, so the app (a different IP) got 403 and nothing played — the
+    "Play sends no temp file" bug. Re-streaming here keeps the fetch on the
+    extracting IP. Range requests are passed through so the player can seek and
+    buffer progressively."""
+    await check_auth(request)
+    source = source.lower()
+    format = format.lower()
+
+    if source == "soundcloud":
+        if not url:
+            raise HTTPException(status_code=400, detail="url parameter required for soundcloud source")
+        await _reject_ssrf_targets(url)
+        target_url = url
+    else:
+        target_url = f"https://youtube.com/watch?v={id}"
+
+    user_id = _account_token_user_id(request)
+    cache_key = f"{source}:{id}:{format}"
+    cached = _PROXY_URL_CACHE.get(cache_key)
+    if cached and cached[1] > time.monotonic():
+        raw_url = cached[0]
+    else:
+        raw_url, failure_reason = await _get_raw_url(
+            target_url, format_flag=_format_flag(format), user_id=user_id
+        )
+        if not raw_url:
+            raise HTTPException(status_code=404, detail=failure_reason or "No stream URL found")
+        _PROXY_URL_CACHE[cache_key] = (raw_url, time.monotonic() + _PROXY_URL_TTL)
+
+    req_headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                      "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+    }
+    range_header = request.headers.get("range")
+    if range_header:
+        req_headers["Range"] = range_header
+
+    def _open_upstream():
+        return urllib.request.urlopen(
+            urllib.request.Request(raw_url, headers=req_headers), timeout=30
+        )
+
+    try:
+        upstream = await asyncio.to_thread(_open_upstream)
+    except Exception as exc:
+        # A cached URL may have expired early — drop it so the next try re-extracts.
+        _PROXY_URL_CACHE.pop(cache_key, None)
+        logger.warning("stream_proxy upstream open failed for %s: %s", cache_key, exc)
+        raise HTTPException(status_code=502, detail="Upstream stream fetch failed")
+
+    status_code = upstream.getcode() or 200
+    passthrough: dict[str, str] = {}
+    for h in ("Content-Length", "Content-Range", "Accept-Ranges"):
+        v = upstream.headers.get(h)
+        if v:
+            passthrough[h] = v
+    passthrough.setdefault("Accept-Ranges", "bytes")
+    media_type = upstream.headers.get("Content-Type") or "audio/mp4"
+
+    def _body():
+        try:
+            while True:
+                chunk = upstream.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            upstream.close()
+
+    return StreamingResponse(_body(), status_code=status_code, headers=passthrough, media_type=media_type)
+
+
 def _ytdlp_auth_failure_reason(stderr: bytes) -> Optional[str]:
     """Maps common yt-dlp stderr failure signatures to a user-facing reason —
     lets /api/stream and /api/download surface "upload your cookies" instead
