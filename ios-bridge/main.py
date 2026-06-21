@@ -2241,6 +2241,44 @@ def _write_links_file(source_url: str, content: str) -> pathlib.Path:
 _BATCH_JOBS: dict[str, dict] = {}
 
 
+async def _build_download_archive(music_dir: pathlib.Path) -> pathlib.Path:
+    """Rebuilds the per-user yt-dlp download archive from the LUMISOUND_ID tags
+    of the audio files CURRENTLY present in `music_dir`. Passing this to
+    `yt-dlp --download-archive` makes a batch download skip every track the user
+    already has (matched by the embedded "<source>:<id>", regardless of filename
+    or which playlist it came from) — the missing "tell yt-dlp what's there"
+    piece — while re-downloading anything they've since deleted (it drops out of
+    the rebuilt archive). yt-dlp also appends each newly-downloaded id to this
+    same file during the run, so the next rebuild already includes them.
+
+    Archive line format matches yt-dlp's own: "<extractor> <id>", e.g.
+    "youtube dQw4w9WgXcQ". Per-file probes are cached by (path, mtime, size), so
+    repeat builds over a large library are cheap."""
+    archive_path = music_dir / ".lumisound_download_archive.txt"
+    lines: set[str] = set()
+    try:
+        files = [p for p in music_dir.rglob("*")
+                 if p.is_file() and p.suffix.lower() in SUPPORTED_AUDIO_EXTS]
+    except OSError:
+        files = []
+    for p in files:
+        tags = await _ffprobe_tags(str(p))
+        lid = (tags.get("lumisound_id") or "").strip()
+        if ":" in lid:
+            source, _, vid = lid.partition(":")
+            source = source.strip().lower()
+            vid = vid.strip()
+            if source and vid:
+                lines.add(f"{source} {vid}")
+    await _FFPROBE_CACHE.flush()
+    try:
+        archive_path.write_text("".join(line + "\n" for line in sorted(lines)))
+        logger.info("download archive: %d known track(s) for %s", len(lines), music_dir)
+    except OSError as exc:
+        logger.warning("download archive write failed: %s", exc)
+    return archive_path
+
+
 @app.post("/api/download/batch")
 async def batch_download(
     request: Request,
@@ -2273,20 +2311,27 @@ async def batch_download(
         "created": time.monotonic(), "source": source,
     }
     cookie_args = await _ytdlp_cookie_args(user_id)
+    # Build the dedup archive from what the user already has so yt-dlp skips it.
+    archive_path = await _build_download_archive(music_dir)
     asyncio.create_task(_run_batch_download(
         job_id=job_id, links_path=links_path, music_dir=music_dir,
-        format=format, cookie_args=cookie_args,
+        format=format, cookie_args=cookie_args, archive_path=archive_path,
     ))
     return JSONResponse({"job_id": job_id, "total": len(items)}, status_code=202)
 
 
 async def _run_batch_download(job_id: str, links_path: pathlib.Path, music_dir: pathlib.Path,
-                              format: str, cookie_args: list[str]) -> None:
+                              format: str, cookie_args: list[str],
+                              archive_path: Optional[pathlib.Path] = None) -> None:
     job = _BATCH_JOBS.get(job_id, {})
     extra_args, _ = _download_format_args(format)
     before = _count_audio_files(music_dir)
     # Download every URL listed in links.txt with the standard flags. -i keeps
     # going past individual failures; -N gives modest per-item parallelism.
+    # --download-archive makes yt-dlp skip any track already in the user's
+    # library (the archive was just rebuilt from their files' LUMISOUND_IDs) and
+    # records each newly-downloaded id, so re-running a big playlist only fetches
+    # what's genuinely missing instead of re-downloading everything.
     cmd = [
         "yt-dlp",
         "--batch-file", str(links_path),
@@ -2297,6 +2342,7 @@ async def _run_batch_download(job_id: str, links_path: pathlib.Path, music_dir: 
         "-N", "3",
         "-P", str(music_dir),
         "-o", "%(title)s.%(ext)s",
+        *(["--download-archive", str(archive_path)] if archive_path else []),
         *cookie_args,
         *extra_args,
     ]
@@ -4226,7 +4272,9 @@ async def _ffprobe_tags(path: str) -> dict:
     """
     abs_path = os.path.abspath(path)
     cached = _FFPROBE_CACHE.get(abs_path)
-    if cached is not None:
+    # Require the newer `lumisound_id` field; entries cached before it was added
+    # fall through and re-probe once (auto-migration, no global cache wipe).
+    if cached is not None and "lumisound_id" in cached:
         return cached
 
     async with _FFPROBE_SEMAPHORE:
@@ -4301,6 +4349,9 @@ async def _ffprobe_tags(path: str) -> dict:
         "track_number": tags_lower.get("track") or tags_lower.get("tracknumber") or "",
         "duration": duration,
         "has_artwork": has_artwork,
+        # Embedded source identifier ("youtube:<id>") written at download time —
+        # used to build the per-user yt-dlp download archive for dedup.
+        "lumisound_id": tags_lower.get("lumisound_id") or "",
     }
     _FFPROBE_CACHE.put(abs_path, result)
     return result
