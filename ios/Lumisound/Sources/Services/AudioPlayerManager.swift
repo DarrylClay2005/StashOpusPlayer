@@ -147,9 +147,23 @@ final class AudioPlayerManager: ObservableObject {
 
     private let timePitch = AVAudioUnitTimePitch()
     private let equalizer = AVAudioUnitEQ(numberOfBands: 10)
-    // Real-room reverb — sits after the EQ, before the limiter, so any wet
-    // signal it adds still gets caught by the limiter instead of clipping.
+    // Real-room reverb in a PARALLEL (send/return) topology, not an insert.
+    //
+    // AVAudioUnitReverb's only blend control is `wetDryMix`, which *crossfades*
+    // dry↔wet: at any mix > 0 the dry signal is attenuated (mix 18 → dry at
+    // 82%). Wired inline that quietly degrades the direct signal whenever reverb
+    // is on — and it's on by default — which reads as "reverb lowers audio
+    // quality". Instead the EQ output fans out to two paths: a full-level dry
+    // path straight into `reverbMixer`, and a wet path through `reverb`
+    // (wetDryMix pinned at 100 = pure tail) scaled by `reverbWetMixer` and
+    // summed back in. The dry signal is therefore never touched — when reverb is
+    // off the wet bus is silent and playback is bit-perfect.
     private let reverb = AVAudioUnitReverb()
+    // Sums the dry path (bus 0) and the scaled wet path (bus 1) before the limiter.
+    private let reverbMixer = AVAudioMixerNode()
+    // Single-input gain stage on the wet path; its outputVolume is the reverb
+    // amount (reverbWetDryMix / 100), or 0 when reverb is disabled.
+    private let reverbWetMixer = AVAudioMixerNode()
     // Tracks which factory preset is currently loaded on `reverb` so
     // `applyAudioSettings` only calls `loadFactoryPreset` (a relatively heavy
     // call) when the user's chosen preset actually changes.
@@ -2125,6 +2139,8 @@ final class AudioPlayerManager: ObservableObject {
         engine.attach(timePitch)
         engine.attach(equalizer)
         engine.attach(reverb)
+        engine.attach(reverbMixer)
+        engine.attach(reverbWetMixer)
         engine.attach(limiter)
         configureLimiter()
         configureReverb()
@@ -2139,8 +2155,14 @@ final class AudioPlayerManager: ObservableObject {
         engine.connect(secondaryBeatMatch, to: crossfadeMixer, fromBus: 0, toBus: 1, format: nil)
         engine.connect(crossfadeMixer, to: timePitch, format: nil)
         engine.connect(timePitch, to: equalizer, format: nil)
-        engine.connect(equalizer, to: reverb, format: nil)
-        engine.connect(reverb, to: limiter, format: nil)
+        // Parallel reverb: EQ output fans out to the dry sum bus AND the reverb send.
+        engine.connect(equalizer, to: [
+            AVAudioConnectionPoint(node: reverbMixer, bus: 0),   // dry, full level
+            AVAudioConnectionPoint(node: reverb, bus: 0)         // wet send
+        ], fromBus: 0, format: nil)
+        engine.connect(reverb, to: reverbWetMixer, format: nil)
+        engine.connect(reverbWetMixer, to: reverbMixer, fromBus: 0, toBus: 1, format: nil)
+        engine.connect(reverbMixer, to: limiter, format: nil)
         engine.connect(limiter, to: engine.mainMixerNode, format: nil)
 
         isEngineConfigured = true
@@ -2152,7 +2174,13 @@ final class AudioPlayerManager: ObservableObject {
     /// from disk) so reverb never plays at a stale level after a rebuild.
     private func configureReverb() {
         reverb.loadFactoryPreset(.mediumRoom)
-        reverb.wetDryMix = 0
+        // The reverb node is always 100% wet — it only ever produces the tail;
+        // the blend with the dry signal happens at `reverbMixer`. The real
+        // reverb amount lives on `reverbWetMixer.outputVolume`, set (along with
+        // the dry bus at unity) by `applyAudioSettings()`.
+        reverb.wetDryMix = 100
+        reverbWetMixer.outputVolume = 0
+        reverbMixer.outputVolume = 1
         loadedReverbPreset = .mediumRoom
     }
 
@@ -2484,16 +2512,20 @@ final class AudioPlayerManager: ObservableObject {
             }
         }
 
-        // Reverb — live wet/dry mix and room preset. Only reload the factory
-        // preset when it actually changed (loadFactoryPreset is the heavy
-        // call); wetDryMix itself is cheap and safe to set on every pass so
-        // toggling the setting or dragging the mix slider applies instantly,
-        // including to whatever is playing right now.
+        // Reverb — live amount and room preset. Only reload the factory preset
+        // when it actually changed (loadFactoryPreset is the heavy call, and it
+        // resets wetDryMix, so re-pin it to 100 after). The reverb amount is the
+        // wet-path gain, applied on every pass so toggling reverb or dragging
+        // the mix slider takes effect instantly on whatever is playing — and
+        // because the dry path is separate, turning reverb down/off never
+        // attenuates the original signal.
         if loadedReverbPreset != audioSettings.reverbPreset {
             reverb.loadFactoryPreset(avReverbPreset(for: audioSettings.reverbPreset))
+            reverb.wetDryMix = 100
             loadedReverbPreset = audioSettings.reverbPreset
         }
-        reverb.wetDryMix = audioSettings.reverbEnabled ? min(max(audioSettings.reverbWetDryMix, 0), 100) : 0
+        let reverbWet = min(max(audioSettings.reverbWetDryMix, 0), 100) / 100.0
+        reverbWetMixer.outputVolume = audioSettings.reverbEnabled ? reverbWet : 0
 
         // ReplayGain + master volume/boost: re-combine the current track's analysed
         // gain (replayGainLinearGain, computed asynchronously in scheduleCurrent/

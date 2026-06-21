@@ -640,6 +640,47 @@ final class StreamingService: ObservableObject {
         }
     }
 
+    /// Resolves a playlist URL to its tracks and RETURNS them, without touching
+    /// the published `searchResults`/`isPlaylistResult` state. Used by the
+    /// tracked-playlist screen so opening a tracked playlist doesn't clobber the
+    /// user's current Stream-search results. Pass `existingSongs: []` to keep
+    /// already-owned tracks in the result (the tracked-playlist UI wants to show
+    /// them with an "In Library" badge rather than hide them). Returns `[]` on
+    /// failure; `errorMessage` is left untouched.
+    func fetchPlaylistTracks(url: String, existingSongs: [Song] = []) async -> [StreamTrack] {
+        guard isConfigured else { return [] }
+        var components = URLComponents()
+        components.path = "/api/resolve"
+        components.queryItems = [
+            URLQueryItem(name: "url",   value: url),
+            URLQueryItem(name: "limit", value: "1000"),
+        ]
+        let manifest = existingTrackManifest(songs: existingSongs)
+        if !manifest.isEmpty {
+            components.queryItems?.append(URLQueryItem(name: "existing_ids", value: manifest))
+        }
+        guard var request = makeRequest(components.string ?? "/api/resolve") else { return [] }
+        request.timeoutInterval = 130
+        if let accountToken = AccountService.shared?.token {
+            request.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
+        }
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                // Fall back to the individual-URL expander on any non-2xx.
+                return await expandPlaylistTracks(url: url, existingSongs: existingSongs)
+            }
+            let tracks = try JSONDecoder().decode([StreamTrack].self, from: data)
+            if tracks.isEmpty {
+                return await expandPlaylistTracks(url: url, existingSongs: existingSongs)
+            }
+            return tracks
+        } catch {
+            appWarn("fetchPlaylistTracks failed: \(error.localizedDescription)", category: "network")
+            return await expandPlaylistTracks(url: url, existingSongs: existingSongs)
+        }
+    }
+
     /// Expands a playlist URL into individual track entries via the bridge's
     /// `/api/playlist/expand` endpoint (the export-youtube-playlist-style
     /// extraction). Used as a robustness fallback by `resolvePlaylist`. Returns

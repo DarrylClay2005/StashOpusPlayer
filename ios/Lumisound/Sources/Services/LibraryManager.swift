@@ -1014,6 +1014,33 @@ final class LibraryManager: ObservableObject {
         }
     }
 
+    /// True if a local copy of `track` already exists on the device, by EITHER:
+    ///   1. an exact source-ID match (`Song.sourceTrackID` == "<source>:<id>",
+    ///      i.e. the `LUMISOUND_ID` embedded at download time) whose backing file
+    ///      still exists, OR
+    ///   2. a normalized title+artist (+duration) match via `isAlreadyImported`,
+    ///      which catches manual imports, re-encodes, and pre-tagging downloads.
+    ///
+    /// This is the pre-download gate for the tracked-playlist feature. Callers
+    /// MUST `await scanLocalDocumentsAsync()` first so `allSongs` reflects every
+    /// file in the Imported Music directory *and its subfolders* — otherwise a
+    /// track that lives in a subfolder the scan hasn't seen yet would slip
+    /// through and be downloaded twice (the bug this replaces: the old flow
+    /// checked a stale library before yt-dlp ever ran).
+    func hasLocalCopy(of track: StreamTrack) -> Bool {
+        let sourceID = "\(track.source):\(track.id)"
+        let fm = FileManager.default
+        if allSongs.contains(where: { song in
+            guard song.sourceTrackID == sourceID else { return false }
+            guard let url = song.url else { return false }
+            return fm.fileExists(atPath: url.path)
+        }) {
+            return true
+        }
+        let dur: TimeInterval? = track.durationSeconds > 0 ? TimeInterval(track.durationSeconds) : nil
+        return isAlreadyImported(title: track.title, artist: track.artist, duration: dur)
+    }
+
     /// Permanently removes a locally-imported/downloaded song: deletes its
     /// backing file, drops it from `importedSongs`/`allSongs`, and removes any
     /// references to it from playlists and favorites. Used by the duplicate

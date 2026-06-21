@@ -19,16 +19,26 @@ struct GalleryBackgroundView: View {
                 // moment isEnabled + images are both true, without any onAppear
                 // ordering dependency.
                 if bg.isEnabled, !bg.images.isEmpty {
-                    let img = bg.images[bg.currentIndex % bg.images.count]
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .clipped()
-                        .blur(radius: bg.blurRadius, opaque: true)
-                        .opacity(bg.opacity)
-                        .id(bg.currentIndex)
-                        .transition(transitionForAnimation(bg.animation))
+                    // Driving the swap through a single-element ForEach (rather
+                    // than a bare `.id()` on one conditional Image) is what makes
+                    // the crossfade actually overlap: ForEach tracks the leaving
+                    // image (index N) and the entering image (index N+1) as two
+                    // distinct elements, so the outgoing view runs its *removal*
+                    // transition on top of the incoming one instead of being
+                    // yanked instantly — which is why every animation previously
+                    // blanked to the background before the next image faded in.
+                    ZStack {
+                        ForEach([bg.currentIndex], id: \.self) { index in
+                            Image(uiImage: bg.images[index % bg.images.count])
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .clipped()
+                                .blur(radius: bg.blurRadius, opaque: true)
+                                .opacity(bg.opacity)
+                                .transition(transitionForAnimation(bg.animation))
+                        }
+                    }
                 }
             }
         }

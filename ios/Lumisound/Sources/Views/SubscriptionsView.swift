@@ -23,6 +23,12 @@ struct SubscriptionsView: View {
     @State private var newTracksBySubscription: [String: [StreamTrack]] = [:]
     @State private var loadingTrackID: String?
 
+    // Tracked playlists (local, on-device) — a separate area from channel follows.
+    @ObservedObject private var trackedStore = TrackedPlaylistStore.shared
+    @State private var playlistURL = ""
+    @State private var playlistName = ""
+    @State private var playlistError: String?
+
     var body: some View {
         List {
             Section {
@@ -144,6 +150,8 @@ struct SubscriptionsView: View {
                     }
                 }
             }
+
+            playlistSections
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -207,6 +215,110 @@ struct SubscriptionsView: View {
             } catch {
                 streaming.errorMessage = error.localizedDescription
             }
+        }
+    }
+
+    // MARK: - Tracked Playlists
+
+    @ViewBuilder
+    private var playlistSections: some View {
+        Section {
+            TextField("YouTube playlist URL", text: $playlistURL)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+                .foregroundStyle(AppTheme.textPrimary)
+
+            TextField("Name (optional)", text: $playlistName)
+                .autocorrectionDisabled()
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Button {
+                addPlaylist()
+            } label: {
+                Text("Track Playlist")
+            }
+            .disabled(playlistURL.trimmingCharacters(in: .whitespaces).isEmpty)
+            .foregroundStyle(AppTheme.dynamicAccent)
+
+            if let playlistError {
+                Text(playlistError)
+                    .font(.footnote)
+                    .foregroundStyle(AppTheme.error)
+            }
+        } header: {
+            sectionHeader("Track a Playlist")
+        } footer: {
+            Text("Paste a YouTube playlist link to track it. Open a tracked playlist to download individual tracks — anything already in your library is detected and skipped so nothing downloads twice.")
+        }
+        .listRowBackground(AppTheme.surface)
+
+        if !trackedStore.playlists.isEmpty {
+            Section {
+                ForEach(trackedStore.playlists) { pl in
+                    NavigationLink {
+                        TrackedPlaylistDetailView(playlist: pl)
+                    } label: {
+                        HStack(spacing: 12) {
+                            playlistThumbnail(for: pl)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(pl.name)
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                    .lineLimit(1)
+                                Text(pl.lastTrackCount > 0 ? "\(pl.lastTrackCount) tracks" : pl.url)
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
+                    }
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            trackedStore.remove(id: pl.id)
+                        } label: {
+                            Label("Untrack", systemImage: "trash")
+                        }
+                    }
+                }
+            } header: {
+                sectionHeader("Tracked Playlists")
+            }
+            .listRowBackground(AppTheme.surface.opacity(0.5))
+        }
+    }
+
+    @ViewBuilder
+    private func playlistThumbnail(for pl: TrackedPlaylist) -> some View {
+        if let url = URL(string: pl.thumbnailURL), !pl.thumbnailURL.isEmpty {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().aspectRatio(contentMode: .fill)
+                default:
+                    Image(systemName: "music.note.list")
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+            .frame(width: 40, height: 40)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        } else {
+            Image(systemName: "music.note.list")
+                .font(.system(size: 22))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: 40, height: 40)
+        }
+    }
+
+    private func addPlaylist() {
+        let url = playlistURL.trimmingCharacters(in: .whitespaces)
+        guard !url.isEmpty else { return }
+        playlistError = nil
+        if trackedStore.add(url: url, name: playlistName) {
+            playlistURL = ""
+            playlistName = ""
+        } else {
+            playlistError = "That playlist is already tracked (or the URL is invalid)."
         }
     }
 
