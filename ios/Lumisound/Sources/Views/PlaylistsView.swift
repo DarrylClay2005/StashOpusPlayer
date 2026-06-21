@@ -14,6 +14,16 @@ struct PlaylistsView: View {
 
     var body: some View {
         List {
+            Section {
+                NavigationLink {
+                    SmartPlaylistsView()
+                } label: {
+                    Label("Smart Playlists", systemImage: "sparkles")
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+            }
+            .listRowBackground(AppTheme.surface.opacity(0.5))
+
             if account.isLoggedIn {
                 Section {
                     NavigationLink {
