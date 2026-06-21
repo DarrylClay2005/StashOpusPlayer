@@ -1074,7 +1074,7 @@ final class AudioPlayerManager: ObservableObject {
 
             // Schedule crossfade to begin crossfadeDuration seconds before the track ends,
             // so the incoming track fades in while the current track is still playing.
-            if audioSettings.crossfadeEnabled && audioSettings.crossfadeDuration > 0 {
+            if audioSettings.crossfadeActive && audioSettings.crossfadeDuration > 0 {
                 let trackLength = Double(framesLeft) / file.processingFormat.sampleRate
                 let crossfadeOffset = max(0, trackLength - audioSettings.crossfadeDuration)
                 if crossfadeOffset > 0 {
@@ -1100,14 +1100,14 @@ final class AudioPlayerManager: ObservableObject {
             // gapless-queued segment also plays — two tracks at once (the
             // "current + next play together" bug). So only arm gapless when
             // crossfade is off.
-            if audioSettings.gaplessEnabled && !audioSettings.crossfadeEnabled {
+            if audioSettings.gaplessEnabled && !audioSettings.crossfadeActive {
                 Task { [weak self] in
                     guard let self else { return }
                     try? await Task.sleep(nanoseconds: 100_000_000)
                     await MainActor.run {
                         guard self.isPlaying,
                               self.audioSettings.gaplessEnabled,
-                              !self.audioSettings.crossfadeEnabled,
+                              !self.audioSettings.crossfadeActive,
                               !self.gaplessScheduled else { return }
                         self.scheduleGaplessNext()
                     }
@@ -1214,7 +1214,7 @@ final class AudioPlayerManager: ObservableObject {
             prewarmBPM(for: peekNextSong())
 
             // Crossfade timer — same logic as scheduleCurrent.
-            if audioSettings.crossfadeEnabled && audioSettings.crossfadeDuration > 0 {
+            if audioSettings.crossfadeActive && audioSettings.crossfadeDuration > 0 {
                 let trackLength     = Double(framesLeft) / sampleRate
                 let crossfadeOffset = max(0, trackLength - audioSettings.crossfadeDuration)
                 if crossfadeOffset > 0 {
@@ -1454,7 +1454,7 @@ final class AudioPlayerManager: ObservableObject {
             return
         }
 
-        if audioSettings.crossfadeEnabled {
+        if audioSettings.crossfadeActive {
             // The crossfadeStartTimer may have already started the crossfade;
             // don't trigger a second crossfade if we're already mid-fade.
             guard !isCrossfading else { return }
@@ -1864,7 +1864,7 @@ final class AudioPlayerManager: ObservableObject {
     private func scheduleGaplessNext() {
         // Never schedule gapless while crossfade is enabled — the two transition
         // strategies would both fire and play two tracks at once.
-        guard audioSettings.gaplessEnabled, !audioSettings.crossfadeEnabled else { return }
+        guard audioSettings.gaplessEnabled, !audioSettings.crossfadeActive else { return }
         guard let nextSong = peekNextSong(), let nextURL = nextSong.url else { return }
         guard let nextFile = try? AVAudioFile(forReading: nextURL) else { return }
 

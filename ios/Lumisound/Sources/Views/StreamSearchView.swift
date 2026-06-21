@@ -933,7 +933,7 @@ struct StreamSearchView: View {
             var toDownload: [StreamTrack] = []
             var skipped = 0
             for track in tracks {
-                if library.isAlreadyImported(title: track.title, artist: track.artist, duration: track.duration) {
+                if library.hasLocalCopy(of: track) {
                     skipped += 1
                     downloadedTrackIDs.insert(track.id)
                     downloadAllDone += 1

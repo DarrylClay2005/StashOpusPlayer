@@ -389,12 +389,17 @@ struct SettingsView: View {
 
     private var playbackAudioSection: some View {
         Section {
-            // Crossfade toggle
+            // Crossfade (manual, fixed-duration). Mutually exclusive with Smart
+            // Auto Crossfade — enabling one turns the other off; either one
+            // drives an actual crossfade transition.
             Toggle(isOn: $player.audioSettings.crossfadeEnabled) {
                 Label("Crossfade", systemImage: "waveform.path.ecg")
                     .foregroundStyle(AppTheme.textPrimary)
             }
             .tint(AppTheme.dynamicAccent)
+            .onChange(of: player.audioSettings.crossfadeEnabled) { on in
+                if on { player.audioSettings.smartCrossfadeEnabled = false }
+            }
 
             if player.audioSettings.crossfadeEnabled {
                 Text("Songs will fade into each other over \(Int(player.audioSettings.crossfadeDuration))s. A smooth, uninterrupted listening experience.")
@@ -404,8 +409,29 @@ struct SettingsView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            // Crossfade duration — only shown when crossfade is on
-            if player.audioSettings.crossfadeEnabled {
+            // Smart Auto Crossfade — independent top-level option (previously
+            // nested under Crossfade, so it only worked when manual crossfade was
+            // also on). Mutually exclusive with manual Crossfade.
+            Toggle(isOn: $player.audioSettings.smartCrossfadeEnabled) {
+                Label("Smart Auto Crossfade", systemImage: "metronome")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+            .onChange(of: player.audioSettings.smartCrossfadeEnabled) { on in
+                if on { player.audioSettings.crossfadeEnabled = false }
+            }
+
+            if player.audioSettings.smartCrossfadeEnabled {
+                Text("Analyzes each track's BPM and beatmatches the outgoing and incoming songs, aligning the fade to the beat for a seamless DJ-style transition. Falls back to a normal crossfade when tempos are too far apart or unknown.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Crossfade duration — shown when EITHER mode is on (it's the base /
+            // fallback duration that Smart Auto Crossfade adjusts around).
+            if player.audioSettings.crossfadeActive {
                 HStack {
                     Label("Duration", systemImage: "timer")
                         .foregroundStyle(AppTheme.textSecondary)
@@ -422,22 +448,6 @@ struct SettingsView: View {
                     }
                 }
                 .padding(.leading, 16)
-
-                // Smart Auto Crossfade — tempo-matched, beat-aligned crossfades.
-                Toggle(isOn: $player.audioSettings.smartCrossfadeEnabled) {
-                    Label("Smart Auto Crossfade", systemImage: "metronome")
-                        .foregroundStyle(AppTheme.textPrimary)
-                }
-                .tint(AppTheme.dynamicAccent)
-                .padding(.leading, 16)
-
-                if player.audioSettings.smartCrossfadeEnabled {
-                    Text("Analyzes each track's BPM and beatmatches the outgoing and incoming songs, aligning the fade to the beat for a seamless DJ-style transition. Falls back to a normal crossfade when tempos are too far apart or unknown.")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .padding(.leading, 32)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
             }
 
             // Gapless playback

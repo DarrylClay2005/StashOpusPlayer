@@ -548,11 +548,19 @@ final class StreamingService: ObservableObject {
     /// can be matched this way — local-only imports have no such ID and are
     /// simply omitted from the manifest.
     func existingTrackManifest(songs: [Song]) -> String {
-        songs.compactMap { song -> String? in
+        var ids = Set(songs.compactMap { song -> String? in
             guard let id = song.sourceTrackID, !id.isEmpty else { return nil }
             return id
+        })
+        // Also include ids from the download ledger whose files are still present.
+        // This covers tracks whose embedded LUMISOUND_ID didn't round-trip (e.g.
+        // older m4a downloads), so the server's playlist-resolve dedup filter
+        // doesn't hand them back as "missing" and trigger duplicate downloads.
+        let presentFilenames = Set(songs.compactMap { $0.url?.lastPathComponent })
+        for id in DownloadLedgerStore.shared.presentSourceIDs(presentFilenames: presentFilenames) {
+            ids.insert(id)
         }
-        .joined(separator: ",")
+        return ids.joined(separator: ",")
     }
 
     /// Resolves a YouTube (or SoundCloud) playlist URL to a list of tracks via
@@ -954,6 +962,7 @@ final class StreamingService: ObservableObject {
            FileManager.default.fileExists(atPath: existingURL.path) {
             if CorruptFileFinderService.isValidAudioFile(at: existingURL) {
                 appLog("downloadToLibrary: skipping \"\(track.title)\" — valid existing copy at \(existingURL.lastPathComponent)", category: "network")
+                DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: existingURL.lastPathComponent)
                 return existingURL
             } else {
                 appWarn("downloadToLibrary: existing copy of \"\(track.title)\" is corrupt — redownloading to replace it", category: "network")
@@ -985,6 +994,7 @@ final class StreamingService: ObservableObject {
         let provisionalDestURL = importDir.appendingPathComponent("\(safeName).\(requestedExt)")
         if FileManager.default.fileExists(atPath: provisionalDestURL.path) {
             appLog("downloadToLibrary: already exists, skipping \(provisionalDestURL.lastPathComponent)", category: "network")
+            DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: provisionalDestURL.lastPathComponent)
             return provisionalDestURL
         }
 
@@ -1050,6 +1060,7 @@ final class StreamingService: ObservableObject {
                 if attempt != 1 {
                     appLog("downloadToLibrary: succeeded for \"\(track.title)\" on attempt \(attempt)/\(maxAttempts)", category: "network")
                 }
+                DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
                 return destURL
             } catch let error as StreamingError {
                 switch error {

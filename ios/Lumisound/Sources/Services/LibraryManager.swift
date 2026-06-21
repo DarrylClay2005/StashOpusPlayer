@@ -1037,6 +1037,14 @@ final class LibraryManager: ObservableObject {
         }) {
             return true
         }
+        // Download-ledger check: covers tracks whose embedded LUMISOUND_ID didn't
+        // round-trip (m4a dropped the tag), so the file is in the library but no
+        // Song carries `sourceID`. The ledger maps sourceID → filename; if that
+        // filename is still present in the library, we have it.
+        if let fn = DownloadLedgerStore.shared.filename(for: sourceID),
+           allSongs.contains(where: { $0.url?.lastPathComponent == fn }) {
+            return true
+        }
         let dur: TimeInterval? = track.durationSeconds > 0 ? TimeInterval(track.durationSeconds) : nil
         return isAlreadyImported(title: track.title, artist: track.artist, duration: dur)
     }

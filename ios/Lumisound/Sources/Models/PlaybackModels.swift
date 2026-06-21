@@ -99,6 +99,11 @@ struct AudioSettings: Codable, Equatable {
     /// the overlap using each track's analysed tempo instead of a fixed
     /// duration (see `AudioPlayerManager.beginCrossfade`). Opt-in.
     var smartCrossfadeEnabled: Bool = false
+    /// True when EITHER crossfade mode is on. Manual and Smart crossfade are
+    /// mutually exclusive in the UI, and either one must drive an actual
+    /// crossfade transition — previously only `crossfadeEnabled` was checked at
+    /// the trigger sites, so turning on Smart Crossfade alone did nothing.
+    var crossfadeActive: Bool { crossfadeEnabled || smartCrossfadeEnabled }
     /// Real-room reverb, applied via `AVAudioUnitReverb` on the main signal
     /// chain. On by default per product requirement — gives every track a
     /// subtle sense of space rather than a perfectly dry signal.
