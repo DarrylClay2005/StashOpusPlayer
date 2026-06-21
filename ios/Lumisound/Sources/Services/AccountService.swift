@@ -626,6 +626,7 @@ final class AccountService: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self, self.isLoggedIn else { return }
                 await self.pushSync(library: library)
+                await self.syncLibraryInventory(library: library)
             }
         }
     }
@@ -648,6 +649,30 @@ final class AccountService: ObservableObject {
             try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
             guard let self, !Task.isCancelled, self.isLoggedIn else { return }
             await self.pushSync(library: library, audioSettings: audioSettings, trackAudioSettings: trackAudioSettings)
+            await self.syncLibraryInventory(library: library)
+        }
+    }
+
+    /// Uploads the set of source ids currently in the on-device library
+    /// (Song.sourceTrackID + download-ledger ids whose files are still present)
+    /// to the bridge, so server-side dedup (playlist resolve / downloads) knows
+    /// what the user already has even though yt-dlp can never see the device's
+    /// folders. Replaces the stored snapshot, so deletions are reflected. Cheap
+    /// and debounced via the schedulePush path that calls it.
+    func syncLibraryInventory(library: LibraryManager) async {
+        guard isLoggedIn else { return }
+        var ids = Set(library.allSongs.compactMap { $0.sourceTrackID }.filter { !$0.isEmpty })
+        let presentFilenames = Set(library.allSongs.compactMap { $0.url?.lastPathComponent })
+        for id in DownloadLedgerStore.shared.presentSourceIDs(presentFilenames: presentFilenames) {
+            ids.insert(id)
+        }
+        struct InventoryBody: Encodable { let source_ids: [String] }
+        do {
+            _ = try await makeRequest("/user/library/inventory", method: "POST",
+                                      body: InventoryBody(source_ids: Array(ids)))
+            appLog("syncLibraryInventory: uploaded \(ids.count) source id(s)", category: "account")
+        } catch {
+            appWarn("syncLibraryInventory failed: \(error.localizedDescription)", category: "account")
         }
     }
 
