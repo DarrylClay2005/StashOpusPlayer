@@ -747,16 +747,14 @@ final class StreamingService: ObservableObject {
             throw StreamingError.notConfigured
         }
 
-        let cacheKey = "\(track.id)_\(preferredFormat)_\(track.source)"
-        if let hit = streamURLCache[cacheKey], hit.expiry > Date() {
-            appLog("streamURL: cache hit for \"\(track.title)\"", category: "network")
-            return hit.url
-        }
-
-        appLog("streamURL: \"\(track.title)\" [src: \(track.source), fmt: \(preferredFormat)]", category: "network")
-        isLoadingStream = true
-        defer { isLoadingStream = false }
-
+        // Return the bridge's stream PROXY URL rather than the raw CDN URL.
+        // YouTube's googlevideo URLs are bound to the IP that extracted them, so
+        // the old flow (bridge extracts → app fetches the raw URL from a
+        // different IP) returned 403 and never produced a temp file to play. The
+        // proxy re-streams the audio from the bridge's IP, so playback works; it
+        // also extracts lazily (when the app fetches it), so Play is instant and
+        // the URL is deterministic/cacheable. Auth/cookie headers travel on the
+        // Song (see `toSong`) since the player fetches this URL directly.
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "id",     value: track.id),
             URLQueryItem(name: "source", value: track.source),
@@ -767,59 +765,30 @@ final class StreamingService: ObservableObject {
         }
 
         var components = URLComponents()
-        components.path = "/api/stream"
+        components.path = "/api/stream/proxy"
         components.queryItems = queryItems
 
-        guard var request = makeRequest(components.string ?? "/api/stream") else {
+        guard let request = makeRequest(components.string ?? "/api/stream/proxy"),
+              let url = request.url else {
             throw StreamingError.invalidURL
         }
-        request.timeoutInterval = 30
-        // Lets the bridge use this account's personally-uploaded yt-dlp
-        // cookies so the Play-before-download button works for age-restricted
-        // videos and isn't blocked by YouTube's anonymous-request bot
-        // detection (see Settings -> YouTube Cookies).
-        if let accountToken = AccountService.shared?.token {
-            request.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
-        }
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if let httpResponse = response as? HTTPURLResponse {
-            switch httpResponse.statusCode {
-            case 200..<300:
-                break
-            case 408:
-                appWarn("streamURL: timeout for \"\(track.title)\"", category: "network")
-                throw StreamingError.timeout
-            case 404:
-                appWarn("streamURL: not found for \"\(track.title)\"", category: "network")
-                // The bridge includes a specific reason (e.g. "upload your YouTube
-                // cookies") in `detail` when it knows why extraction failed — surface
-                // that instead of a generic "not found" so the user actually knows
-                // what to fix when the Play button doesn't work.
-                if let detail = Self.decodeErrorDetail(data), !detail.isEmpty {
-                    throw StreamingError.serverDetail(detail)
-                }
-                throw StreamingError.notFound(track.title)
-            default:
-                appError("streamURL: HTTP \(httpResponse.statusCode) for \"\(track.title)\"", category: "network")
-                throw StreamingError.httpError(httpResponse.statusCode)
-            }
-        }
-
-        let decoded = try JSONDecoder().decode(StreamResponse.self, from: data)
-        guard let url = URL(string: decoded.url) else {
-            appError("streamURL: invalid URL in response for \"\(track.title)\"", category: "network")
-            throw StreamingError.invalidURL
-        }
-        streamURLCache[cacheKey] = (url: url, expiry: Date().addingTimeInterval(Self.streamURLCacheTTL))
-        appLog("streamURL: got URL for \"\(track.title)\" (expires \(decoded.expiresIn)s)", category: "network")
+        appLog("streamURL: proxy URL for \"\(track.title)\" [src: \(track.source), fmt: \(preferredFormat)]", category: "network")
         return url
     }
 
     // MARK: - Convert to Song
 
     func toSong(track: StreamTrack, streamURL: URL) -> Song {
-        Song(
+        // The player fetches `streamURL` (the bridge proxy) directly, so carry
+        // any auth the bridge needs on the Song: the shared API key (if set) and
+        // the account token (lets the proxy use this user's YouTube cookies for
+        // age-restricted/bot-gated videos).
+        var headers: [String: String] = [:]
+        if !apiKey.isEmpty { headers["Authorization"] = "Bearer \(apiKey)" }
+        if let token = AccountService.shared?.token, !token.isEmpty {
+            headers["X-Account-Token"] = token
+        }
+        return Song(
             id: track.id,
             title: track.title,
             artist: track.artist,
@@ -832,7 +801,8 @@ final class StreamingService: ObservableObject {
             year: "",
             genre: "",
             bitrate: 0,
-            sampleRate: 0
+            sampleRate: 0,
+            httpHeaders: headers.isEmpty ? nil : headers
         )
     }
 
