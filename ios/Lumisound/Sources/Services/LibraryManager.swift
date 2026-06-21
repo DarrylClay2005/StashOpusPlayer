@@ -549,25 +549,31 @@ final class LibraryManager: ObservableObject {
 
     private func performLocalDocumentsScan(force: Bool = false) async {
         appLog("Scanning local documents directory (force: \(force))", category: "library")
-        let fm = FileManager.default
-        guard let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        guard FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first != nil else { return }
 
-        var candidates: [URL] = []
-
-        // Walk the full Documents tree recursively — covers root, Imported Music/,
-        // and any nested folders the user may have created (e.g. by artist or album).
-        let enumerator = fm.enumerator(
-            at: docsDir,
-            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        )
-        while let url = enumerator?.nextObject() as? URL {
-            // Skip directories themselves; only process regular files.
-            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
-            if DocumentImportService.supportedExtensions.contains(url.pathExtension.lowercased()) {
-                candidates.append(url)
+        // Walk the full Documents tree OFF the main actor — LibraryManager is
+        // @MainActor, so doing this enumeration inline blocked the UI every time
+        // a screen scanned on appear (Subscriptions / tracked playlists / the
+        // Cloud Services download flows), which is a big source of the "lag spike
+        // when loading" reports on large libraries. Covers root, Imported Music/,
+        // and any nested folders the user created.
+        let candidates: [URL] = await Task.detached(priority: .utility) {
+            let fm = FileManager.default
+            guard let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return [] }
+            var result: [URL] = []
+            let enumerator = fm.enumerator(
+                at: docsDir,
+                includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            )
+            while let url = enumerator?.nextObject() as? URL {
+                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+                if DocumentImportService.supportedExtensions.contains(url.pathExtension.lowercased()) {
+                    result.append(url)
+                }
             }
-        }
+            return result
+        }.value
 
         guard !candidates.isEmpty else { return }
 

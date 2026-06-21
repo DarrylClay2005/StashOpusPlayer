@@ -2,6 +2,12 @@ import Foundation
 import SwiftUI
 import UIKit
 
+/// Shared ISO8601 parser. Creating an `ISO8601DateFormatter` is expensive, and
+/// the model `date` computed properties below are read once per row on every
+/// SwiftUI redraw — a fresh formatter each time caused visible lag on lists with
+/// many items (e.g. Backup History). One shared instance removes that cost.
+let sharedISO8601Formatter = ISO8601DateFormatter()
+
 // MARK: - Models
 
 struct AppUser: Codable, Equatable {
@@ -179,7 +185,7 @@ struct SyncBackup: Codable, Identifiable {
 
     /// `created_at` parsed as a `Date`, for display with relative formatting.
     var date: Date? {
-        ISO8601DateFormatter().date(from: createdAt)
+        sharedISO8601Formatter.date(from: createdAt)
     }
 
     var reasonDisplayName: String {
@@ -215,7 +221,7 @@ struct ActivityEntry: Codable, Identifiable {
 
     var date: Date? {
         guard let playedAt else { return nil }
-        return ISO8601DateFormatter().date(from: playedAt)
+        return sharedISO8601Formatter.date(from: playedAt)
     }
 }
 
@@ -256,7 +262,7 @@ struct AccountSession: Codable, Identifiable {
     }
 
     var createdDate: Date? {
-        ISO8601DateFormatter().date(from: createdAt)
+        sharedISO8601Formatter.date(from: createdAt)
     }
 }
 
