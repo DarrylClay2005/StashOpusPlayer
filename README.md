@@ -93,6 +93,8 @@ bridge, and build-from-source instructions.
 The app includes a full **Help & Feature Guide** (Settings → Help) covering every feature above
 in detail, with usage tips for each.
 
+READ IT!!!
+
 ---
 
 ## License
