@@ -544,3 +544,18 @@ CREATE TABLE IF NOT EXISTS ios_download_history (
     INDEX idx_user_history (user_id, last_downloaded_at),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+
+-- Per-user snapshot of the source ids CURRENTLY in the user's on-device library
+-- (Song.sourceTrackID values + download-ledger ids), uploaded periodically by
+-- the app. yt-dlp/the bridge can never see the device's folders, so this is how
+-- the server knows what the user already has: the resolve + single-download
+-- dedup consult it so re-downloading a playlist skips owned tracks even when the
+-- per-request existing_ids manifest is incomplete or too large for a URL. Unlike
+-- ios_download_history (append-only "ever downloaded"), this is replaced on each
+-- sync, so deleting a track on-device lets it be downloaded again.
+CREATE TABLE IF NOT EXISTS ios_user_library_inventory (
+    user_id VARCHAR(36) NOT NULL,
+    source_id VARCHAR(255) NOT NULL,
+    PRIMARY KEY (user_id, source_id),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);

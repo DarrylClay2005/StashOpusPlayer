@@ -1110,6 +1110,13 @@ class AddFavoriteRequest(BaseModel):
     album: Optional[str] = None
 
 
+class LibraryInventoryRequest(BaseModel):
+    # The full set of source ids ("youtube:<id>", "soundcloud:<id>") currently in
+    # the user's on-device library (Song.sourceTrackID values + download-ledger
+    # ids). Replaces the stored snapshot wholesale.
+    source_ids: list[str] = []
+
+
 class LogPlayRequest(BaseModel):
     title: str
     artist: Optional[str] = None
@@ -1633,14 +1640,17 @@ async def download_track(
     source = source.lower()
     format = format.lower()
 
-    # Pre-download dedupe: the client already has a valid local copy of this
-    # exact source track (verified client-side via CorruptFileFinderService
-    # before even sending the request) — skip running yt-dlp entirely.
+    # Pre-download dedupe: skip running yt-dlp entirely if the track is already
+    # owned — per the client's manifest OR the user's server-stored library
+    # inventory (the inventory is the reliable source for large libraries where
+    # the manifest query param would be truncated).
+    dl_user_id = _account_token_user_id(request)
+    owned: set[str] = await _user_inventory_source_ids(dl_user_id)
     if existing_ids:
-        have = {s.strip() for s in existing_ids.split(",") if s.strip()}
-        if f"{source}:{id}" in have:
-            logger.info("download_track: skipping %s:%s — already in client manifest", source, id)
-            return Response(status_code=204)
+        owned |= {s.strip() for s in existing_ids.split(",") if s.strip()}
+    if f"{source}:{id}" in owned:
+        logger.info("download_track: skipping %s:%s — already owned (manifest/inventory)", source, id)
+        return Response(status_code=204)
 
     if source == "soundcloud":
         if not url:
@@ -2128,16 +2138,21 @@ async def track_metadata(
     return base
 
 
-def _filter_existing_tracks(tracks: list[dict], source: str, existing_ids: Optional[str]) -> list[dict]:
+def _filter_existing_tracks(
+    tracks: list[dict],
+    source: str,
+    existing_ids: Optional[str],
+    inventory_ids: Optional[set[str]] = None,
+) -> list[dict]:
     """Drops entries whose `f"{source}:{id}"` (the LUMISOUND_ID format embedded
-    in downloaded files and stored as `Song.sourceTrackID`) appears in
-    `existing_ids` — a comma-separated manifest the client sends listing tracks
-    it already has. Used by /api/resolve so a "Download All" pass doesn't even
-    list tracks the user already has, dedupe'd by the client across re-downloads
-    under different filenames."""
-    if not existing_ids:
-        return tracks
-    have = {s.strip() for s in existing_ids.split(",") if s.strip()}
+    in downloaded files and stored as `Song.sourceTrackID`) appears in either the
+    per-request `existing_ids` manifest OR the user's server-stored library
+    inventory (`inventory_ids`). The stored inventory is what makes this reliable
+    for large libraries — the manifest query param can be truncated/rejected when
+    it lists thousands of ids, whereas the inventory is uploaded out-of-band."""
+    have: set[str] = set(inventory_ids or set())
+    if existing_ids:
+        have |= {s.strip() for s in existing_ids.split(",") if s.strip()}
     if not have:
         return tracks
     return [t for t in tracks if f"{source}:{t.get('id')}" not in have]
@@ -2160,6 +2175,9 @@ async def resolve_playlist(
 
     source = _source_from_url(url)
     user_id = _account_token_user_id(request)
+    # The user's server-stored library inventory — merged with the per-request
+    # existing_ids so owned tracks are dropped even if the manifest is missing.
+    inventory_ids = await _user_inventory_source_ids(user_id)
 
     if source == "youtube":
         api_key = YOUTUBE_API_KEY
@@ -2172,12 +2190,12 @@ async def resolve_playlist(
                 cache_key = f"resolve:{playlist_id}:{limit}"
                 cached = _cache_get(cache_key)
                 if cached is not None:
-                    return _filter_existing_tracks(cached, source, existing_ids)
+                    return _filter_existing_tracks(cached, source, existing_ids, inventory_ids)
                 try:
                     items = await _resolve_youtube_playlist_via_api(playlist_id, limit, api_key)
                     tracks = [_parse_track(item, source) for item in items]
                     _cache_set(cache_key, tracks)
-                    return _filter_existing_tracks(tracks, source, existing_ids)
+                    return _filter_existing_tracks(tracks, source, existing_ids, inventory_ids)
                 except Exception as exc:
                     logger.warning("YouTube Data API resolve failed, falling back to yt-dlp: %s", exc)
 
@@ -2188,7 +2206,7 @@ async def resolve_playlist(
     ytdlp_cache_key = f"resolve_ytdlp:{url}:{limit}"
     cached = _cache_get(ytdlp_cache_key)
     if cached is not None:
-        return _filter_existing_tracks(cached, source, existing_ids)
+        return _filter_existing_tracks(cached, source, existing_ids, inventory_ids)
 
     # SoundCloud flat-playlist entries are sparse (often missing artist/duration/
     # thumbnails) — use full --dump-json for complete metadata, same as /api/search.
@@ -2210,7 +2228,7 @@ async def resolve_playlist(
 
     tracks = [_parse_track(e, source) for e in entries[:limit]]
     _cache_set(ytdlp_cache_key, tracks)
-    return _filter_existing_tracks(tracks, source, existing_ids)
+    return _filter_existing_tracks(tracks, source, existing_ids, inventory_ids)
 
 
 # Directory where extracted per-playlist links.txt files are written. Lives
@@ -3242,6 +3260,68 @@ async def remove_favorite(
                 "DELETE FROM ios_user_favorites WHERE user_id = %s AND song_id = %s",
                 (user_id, song_id),
             )
+
+
+# ---------------------------------------------------------------------------
+# Per-user library inventory — the app's authoritative "what I already have",
+# so dedup works without the device's folders being reachable by yt-dlp.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/user/library/inventory")
+async def upload_library_inventory(
+    body: LibraryInventoryRequest,
+    payload: dict = Depends(get_current_user),
+):
+    """Replaces the user's stored library inventory (the source ids currently on
+    their device). Resolve + download dedup consult this so re-downloading a
+    playlist skips tracks the user already has — the server-side answer to
+    'yt-dlp can't see my local folders'."""
+    user_id = payload["sub"]
+    # Sanitise + de-dupe + cap to a sane maximum to bound the write.
+    ids = {s.strip() for s in body.source_ids if s and s.strip()}
+    ids = {s for s in ids if len(s) <= 255}
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM ios_user_library_inventory WHERE user_id = %s", (user_id,))
+            if ids:
+                await cur.executemany(
+                    "INSERT IGNORE INTO ios_user_library_inventory (user_id, source_id) VALUES (%s, %s)",
+                    [(user_id, sid) for sid in ids],
+                )
+    _INVENTORY_CACHE.pop(user_id, None)  # reflect the new snapshot immediately
+    return {"status": "ok", "count": len(ids)}
+
+
+# Short in-process cache of each user's inventory set so a burst of per-track
+# download requests (a "Download All") doesn't refetch the whole set every time.
+_INVENTORY_CACHE: dict[str, tuple[set[str], float]] = {}
+_INVENTORY_CACHE_TTL = 30.0
+
+
+async def _user_inventory_source_ids(user_id: Optional[str]) -> set[str]:
+    """The set of source ids the user's device library currently holds (uploaded
+    via POST /user/library/inventory). Empty set when unknown. Cached briefly."""
+    if not user_id:
+        return set()
+    cached = _INVENTORY_CACHE.get(user_id)
+    if cached and cached[1] > time.monotonic():
+        return cached[0]
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT source_id FROM ios_user_library_inventory WHERE user_id = %s",
+                    (user_id,),
+                )
+                ids = {row[0] for row in await cur.fetchall()}
+        _INVENTORY_CACHE[user_id] = (ids, time.monotonic() + _INVENTORY_CACHE_TTL)
+        return ids
+    except Exception as exc:
+        logger.warning("inventory lookup failed for %s: %s", user_id, exc)
+        return set()
 
 
 # ---------------------------------------------------------------------------
