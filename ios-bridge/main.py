@@ -1794,7 +1794,13 @@ async def _do_download_job(
     # though the bridge's own integrity check passed. +faststart moves it back
     # to the front during the remux, which is otherwise a no-op for copy mode.
     if output_file.suffix.lstrip(".") in ("m4a", "mp4", "mov"):
-        tag_cmd += ["-movflags", "+faststart"]
+        # +faststart moves the moov atom to the front (see above). use_metadata_tags
+        # is REQUIRED for custom keys: the mp4/mov muxer otherwise silently drops
+        # any metadata key it doesn't recognise (title/artist/etc. survive, but
+        # LUMISOUND_ID/LUMISOUND_THUMBNAIL were being discarded entirely). Without
+        # it, m4a — the default download format — carried no source id, so the
+        # app could never dedupe re-downloads by id and re-fetched owned tracks.
+        tag_cmd += ["-movflags", "+faststart+use_metadata_tags"]
     tag_cmd += ["-metadata", f"LUMISOUND_ID={source_id}"]
     # Defense-in-depth alongside yt-dlp's own --embed-thumbnail: store the
     # thumbnail URL as a metadata tag too, so if embedding ever silently fails
