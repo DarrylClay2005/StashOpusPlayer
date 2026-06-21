@@ -30,6 +30,10 @@ struct SettingsView: View {
     /// connections, where aria2 can genuinely win. Read by
     /// `StreamingService.downloadToLibrary` and sent as `use_aria2` to the bridge.
     @AppStorage("ytdlp_use_aria2") private var ytdlpUseAria2: Bool = false
+    /// Optional custom subfolder for downloads (Settings → yt-dlp). When set,
+    /// downloads land in "Imported Music/<folder>". Read by
+    /// `StreamingService.downloadDirectory`.
+    @AppStorage("ytdlp_download_folder") private var ytdlpDownloadFolder: String = ""
 
     // MARK: YouTube API Key Validation / Exposure Check State
 
@@ -826,6 +830,33 @@ struct SettingsView: View {
                 sectionHeader("Format")
             } footer: {
                 Text("Preferred audio format for downloads (yt-dlp -x --audio-format). Highest quality is used for every download.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .listRowBackground(AppTheme.surface)
+
+            // Custom download folder — downloads land in Imported Music/<folder>.
+            Section {
+                HStack {
+                    Label("Download Folder", systemImage: "folder")
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    TextField("Imported Music", text: $ytdlpDownloadFolder)
+                        .multilineTextAlignment(.trailing)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                        .frame(maxWidth: 180)
+                }
+                if !ytdlpDownloadFolder.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Text("Saving to: Imported Music/\(StreamingService.sanitizedFolderName(ytdlpDownloadFolder))")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            } header: {
+                sectionHeader("Download Folder")
+            } footer: {
+                Text("Name a folder to send every download into (created automatically), so a big playlist lands together instead of in the Imported Music root. Leave blank to use Imported Music. Downloads in any subfolder are still found and de-duplicated.")
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }

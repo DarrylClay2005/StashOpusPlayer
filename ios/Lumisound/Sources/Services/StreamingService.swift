@@ -247,6 +247,21 @@ final class StreamingService: ObservableObject {
     static let apiKeyKey         = "ios_bridge_api_key"
     static let preferredFormatKey = "streaming_preferred_format"
     static let downloadPathKey    = "download_path_key"
+    /// Optional user-named subfolder (Settings → yt-dlp → Download Folder) that
+    /// downloads are placed into, so a big playlist lands in one folder instead
+    /// of dumping into "Imported Music" — saving manual moving in the Files app.
+    static let downloadSubfolderKey = "ytdlp_download_folder"
+
+    /// Strips path separators and trims a user-entered folder name to a single
+    /// safe path component (so it can't escape the download directory).
+    static func sanitizedFolderName(_ raw: String) -> String {
+        String(raw
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .replacingOccurrences(of: "\\", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(80))
+    }
 
     /// Public URL baked into the app — routed via a Cloudflare Tunnel so
     /// it works anywhere without home WiFi. Users can override in Settings.
@@ -340,14 +355,26 @@ final class StreamingService: ObservableObject {
 
     var downloadDirectory: URL {
         get {
+            let base: URL
             if let savedPath = UserDefaults.standard.string(forKey: Self.downloadPathKey),
                let url = URL(string: savedPath) {
-                return url
+                base = url
+            } else {
+                guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                    fatalError("Document directory unavailable")
+                }
+                base = docs.appendingPathComponent("Imported Music")
             }
-            guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-                fatalError("Document directory unavailable")
+            // Place downloads inside the user's custom folder if one is set, so a
+            // whole playlist lands together. The library scan recurses, so dedup
+            // and playback still see everything regardless of subfolder.
+            if let sub = UserDefaults.standard.string(forKey: Self.downloadSubfolderKey) {
+                let name = Self.sanitizedFolderName(sub)
+                if !name.isEmpty {
+                    return base.appendingPathComponent(name, isDirectory: true)
+                }
             }
-            return docs.appendingPathComponent("Imported Music")
+            return base
         }
         set {
             UserDefaults.standard.set(newValue.absoluteString, forKey: Self.downloadPathKey)

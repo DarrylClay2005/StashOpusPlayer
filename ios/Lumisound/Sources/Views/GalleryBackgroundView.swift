@@ -51,12 +51,27 @@ struct GalleryBackgroundView: View {
         switch anim {
         case .fade:      return .opacity
         case .slideLeft: return .asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading))
+        case .slideRight: return .asymmetric(insertion: .move(edge: .leading), removal: .move(edge: .trailing))
         case .slideUp:   return .asymmetric(insertion: .move(edge: .bottom), removal: .move(edge: .top))
+        case .slideDown: return .asymmetric(insertion: .move(edge: .top), removal: .move(edge: .bottom))
         case .zoomIn:    return .scale(scale: 0.8).combined(with: .opacity)
         case .zoomOut:   return .scale(scale: 1.2).combined(with: .opacity)
+        // Zoom Blur — the incoming image rushes in from larger-than-screen while
+        // sharpening from a blur.
+        case .zoomBlur:  return .scale(scale: 1.4)
+            .combined(with: .modifier(active: BlurTransitionModifier(radius: 24),
+                                      identity: BlurTransitionModifier(radius: 0)))
+            .combined(with: .opacity)
         case .flip:      return .asymmetric(
             insertion: .scale(scale: 0.01, anchor: .center).combined(with: .opacity),
             removal:   .scale(scale: 0.01, anchor: .center).combined(with: .opacity)
+        )
+        // Twist — images rotate + scale as they swap.
+        case .twist:     return .asymmetric(
+            insertion: .modifier(active: TwistTransitionModifier(angle: -25, scale: 0.7),
+                                 identity: TwistTransitionModifier(angle: 0, scale: 1)).combined(with: .opacity),
+            removal:   .modifier(active: TwistTransitionModifier(angle: 25, scale: 0.7),
+                                 identity: TwistTransitionModifier(angle: 0, scale: 1)).combined(with: .opacity)
         )
         // "Blur In brings the next image into focus" (per the Help screen) — the
         // incoming image should visibly sharpen from a blur, not just crossfade
@@ -85,5 +100,24 @@ private struct BlurTransitionModifier: ViewModifier, Animatable {
 
     func body(content: Content) -> some View {
         content.blur(radius: radius)
+    }
+}
+
+// MARK: - Twist Transition Modifier
+
+/// Interpolates rotation + scale together for the "Twist" transition.
+private struct TwistTransitionModifier: ViewModifier, Animatable {
+    var angle: CGFloat
+    var scale: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(angle, scale) }
+        set { angle = newValue.first; scale = newValue.second }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .rotationEffect(.degrees(Double(angle)))
+            .scaleEffect(scale)
     }
 }

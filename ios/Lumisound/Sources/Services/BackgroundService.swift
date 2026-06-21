@@ -2,16 +2,21 @@ import Foundation
 import UIKit
 import PhotosUI
 import SwiftUI
+import ImageIO
 
 // MARK: - BackgroundAnimation
 
 enum BackgroundAnimation: String, CaseIterable, Codable, Identifiable {
     case fade       = "Fade"
     case slideLeft  = "Slide Left"
+    case slideRight = "Slide Right"
     case slideUp    = "Slide Up"
+    case slideDown  = "Slide Down"
     case zoomIn     = "Zoom In"
     case zoomOut    = "Zoom Out"
+    case zoomBlur   = "Zoom Blur"
     case flip       = "Flip"
+    case twist      = "Twist"
     case blur       = "Blur In"
     case none       = "Cut"
 
@@ -19,14 +24,18 @@ enum BackgroundAnimation: String, CaseIterable, Codable, Identifiable {
     var displayName: String { rawValue }
     var sfSymbol: String {
         switch self {
-        case .fade:      return "circle.lefthalf.filled"
-        case .slideLeft: return "arrow.left"
-        case .slideUp:   return "arrow.up"
-        case .zoomIn:    return "magnifyingglass.circle.fill"
-        case .zoomOut:   return "minus.magnifyingglass"
-        case .flip:      return "rotate.3d"
-        case .blur:      return "aqi.medium"
-        case .none:      return "scissors"
+        case .fade:       return "circle.lefthalf.filled"
+        case .slideLeft:  return "arrow.left"
+        case .slideRight: return "arrow.right"
+        case .slideUp:    return "arrow.up"
+        case .slideDown:  return "arrow.down"
+        case .zoomIn:     return "magnifyingglass.circle.fill"
+        case .zoomOut:    return "minus.magnifyingglass"
+        case .zoomBlur:   return "circle.hexagongrid.fill"
+        case .flip:       return "rotate.3d"
+        case .twist:      return "arrow.triangle.2.circlepath"
+        case .blur:       return "aqi.medium"
+        case .none:       return "scissors"
         }
     }
 }
@@ -158,6 +167,25 @@ final class BackgroundService: ObservableObject {
     }
 
     // MARK: Image Management
+
+    /// Memory-efficient downsample straight from encoded image data via ImageIO —
+    /// produces a thumbnail at most `maxDimension` px on its long edge WITHOUT
+    /// ever decoding the full-resolution image. Background images are shown
+    /// full-screen and blurred, so a modest size is plenty; this keeps a large
+    /// gallery (up to 150 photos) from decoding hundreds of MB of full-res
+    /// bitmaps and spiking memory. Returns nil if the data isn't a decodable image.
+    static func downsampledImage(from data: Data, maxDimension: CGFloat = 1280) -> UIImage? {
+        let sourceOpts = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let src = CGImageSourceCreateWithData(data as CFData, sourceOpts) else { return nil }
+        let thumbOpts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, thumbOpts as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
+    }
 
     func addImages(_ newImages: [UIImage]) {
         images.append(contentsOf: newImages)

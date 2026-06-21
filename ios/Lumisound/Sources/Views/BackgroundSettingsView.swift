@@ -77,7 +77,7 @@ struct BackgroundSettingsView: View {
             Section("Images (\(bg.images.count) saved)") {
                 PhotosPicker(
                     selection: $selectedItems,
-                    maxSelectionCount: 50,
+                    maxSelectionCount: 150,
                     matching: .images
                 ) {
                     HStack {
@@ -96,8 +96,11 @@ struct BackgroundSettingsView: View {
                     Task {
                         var loaded: [UIImage] = []
                         for item in items {
-                            if let data = try? await item.loadTransferable(type: Data.self),
-                               let image = UIImage(data: data) {
+                            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+                            // Downsample on import so a large gallery doesn't hog memory.
+                            if let image = BackgroundService.downsampledImage(from: data, maxDimension: 1280) {
+                                loaded.append(image)
+                            } else if let image = UIImage(data: data) {
                                 loaded.append(image)
                             }
                         }
