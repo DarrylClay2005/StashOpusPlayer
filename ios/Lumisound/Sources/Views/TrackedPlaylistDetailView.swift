@@ -309,7 +309,7 @@ struct TrackedPlaylistDetailView: View {
         try? await streaming.uploadTrack(
             fileURL: localURL,
             token: token,
-            metadata: TrackMetadata(title: track.title, artist: track.artist, durationSeconds: track.durationSeconds)
+            metadata: TrackMetadata(title: track.title, artist: track.artist, durationSeconds: track.duration)
         )
     }
 }
