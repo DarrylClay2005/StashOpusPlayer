@@ -237,6 +237,11 @@ struct AccountView: View {
                         }
                     }
 
+                    NavigationLink(destination: RewindView()) {
+                        Label("Your Rewind", systemImage: "chart.bar.xaxis")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+
                     NavigationLink(destination: AchievementsView()) {
                         Label("Achievements", systemImage: "trophy")
                             .foregroundStyle(AppTheme.textPrimary)

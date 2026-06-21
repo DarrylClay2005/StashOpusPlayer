@@ -1469,6 +1469,28 @@ struct NowPlayingView: View {
                     }
                     .padding(.top, 4)
                 }
+
+                // Karaoke Mode — one switch that pairs the synced lyrics above
+                // with the center-channel vocal-cancellation audio effect, so
+                // "sing along" is a single toggle instead of hunting in Effects.
+                if player.currentSong != nil {
+                    Toggle(isOn: Binding(
+                        get: { player.audioSettings.activeEffectID == "karaoke" },
+                        set: { on in player.applyEffect(on ? AudioEffectsService.karaoke : AudioEffectsService.none) }
+                    )) {
+                        Label("Karaoke Mode", systemImage: "music.mic")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                    .tint(AppTheme.dynamicAccent)
+                    .padding(.top, 6)
+
+                    if player.audioSettings.activeEffectID == "karaoke" {
+                        Text("Reduces lead vocals (center-channel cancellation) so you can sing along to the lyrics above. Works best on standard stereo mixes.")
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
             },
             label: {
                 Text("Lyrics")
