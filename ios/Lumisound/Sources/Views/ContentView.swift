@@ -99,7 +99,7 @@ struct ContentView: View {
                         // Cloud-with-download-arrow better signals this tab's purpose
                         // (downloading from YouTube/SoundCloud/server) than a generic
                         // magnifying glass.
-                        Label("Search", systemImage: "icloud.and.arrow.down")
+                        Label("Cloud Services", systemImage: "icloud.and.arrow.down")
                     }
                     .tag(3)
 
@@ -131,7 +131,7 @@ struct ContentView: View {
             // the crash" is the single most useful fact for diagnosing reports
             // like "it just freezes/crashes sometimes". See AppLogger.breadcrumb.
             .onChange(of: selectedTab) { newValue in
-                let names = ["Library", "Playing", "Queue", "Search", "Settings"]
+                let names = ["Library", "Playing", "Queue", "Cloud Services", "Settings"]
                 appBreadcrumb("Switched to \(names.indices.contains(newValue) ? names[newValue] : "tab \(newValue)") tab")
 
                 // Quick scale "pop" — dip down then spring back to 1.0 — gives the

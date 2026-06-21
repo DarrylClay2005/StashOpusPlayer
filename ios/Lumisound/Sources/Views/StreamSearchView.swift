@@ -53,10 +53,34 @@ struct StreamSearchView: View {
                     notConfiguredView
                 }
             }
-            .navigationTitle("Search Streaming")
+            .navigationTitle("Cloud Services")
             .navigationBarTitleDisplayMode(.large)
             .background(GalleryBackgroundView().ignoresSafeArea())
             .toolbarBackground(.hidden, for: .navigationBar)
+            // Consolidates the server-side features here (the "Cloud Services" hub)
+            // so everything that talks to the bridge/account lives in one tab.
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        NavigationLink(destination: SubscriptionsView()) {
+                            Label("Subscriptions & Tracked Playlists", systemImage: "person.crop.circle.badge.checkmark")
+                        }
+                        NavigationLink(destination: DiscoverView()) {
+                            Label("Discover", systemImage: "sparkles")
+                        }
+                        NavigationLink(destination: DiscoverMixView()) {
+                            Label("Discover Mix", systemImage: "wand.and.stars")
+                        }
+                        if account.isLoggedIn {
+                            NavigationLink(destination: SharedPlaylistsView()) {
+                                Label("Shared With Me", systemImage: "person.2.fill")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "square.grid.2x2")
+                    }
+                }
+            }
             // Every other tab (Library, Queue, etc.) shows MiniPlayerBar so tapping a
             // track gives instant visual confirmation that playback started. This tab
             // was missing it — tapping ▶ on a search result appeared to do nothing
