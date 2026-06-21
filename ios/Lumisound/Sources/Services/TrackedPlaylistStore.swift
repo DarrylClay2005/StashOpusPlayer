@@ -17,19 +17,30 @@ struct TrackedPlaylist: Identifiable, Codable, Equatable {
     /// Track count seen on the last successful resolve — lets the list show a
     /// hint ("32 tracks") without re-resolving every appearance.
     var lastTrackCount: Int
+    /// When true, the app auto-downloads newly-added tracks from this playlist in
+    /// the background. Optional so older persisted entries decode (missing = off).
+    var autoDownload: Bool?
+    /// Last time the auto-downloader checked this playlist (throttles checks).
+    var lastAutoCheck: Date?
+
+    var isAutoDownload: Bool { autoDownload ?? false }
 
     init(id: String = UUID().uuidString,
          url: String,
          name: String,
          thumbnailURL: String = "",
          dateAdded: Date = Date(),
-         lastTrackCount: Int = 0) {
+         lastTrackCount: Int = 0,
+         autoDownload: Bool? = nil,
+         lastAutoCheck: Date? = nil) {
         self.id = id
         self.url = url
         self.name = name
         self.thumbnailURL = thumbnailURL
         self.dateAdded = dateAdded
         self.lastTrackCount = lastTrackCount
+        self.autoDownload = autoDownload
+        self.lastAutoCheck = lastAutoCheck
     }
 }
 
@@ -83,6 +94,55 @@ final class TrackedPlaylistStore: ObservableObject {
         if let thumbnailURL, !thumbnailURL.isEmpty { playlists[idx].thumbnailURL = thumbnailURL }
         if let name, !name.isEmpty { playlists[idx].name = name }
         save()
+    }
+
+    func setAutoDownload(id: String, _ on: Bool) {
+        guard let idx = playlists.firstIndex(where: { $0.id == id }) else { return }
+        playlists[idx].autoDownload = on
+        save()
+    }
+
+    private func markAutoChecked(id: String) {
+        guard let idx = playlists.firstIndex(where: { $0.id == id }) else { return }
+        playlists[idx].lastAutoCheck = Date()
+        save()
+    }
+
+    // MARK: Auto-download
+
+    /// For each auto-download playlist not checked in the last `minInterval`,
+    /// resolves it and downloads any tracks the user doesn't already have
+    /// (deduped via `LibraryManager.hasLocalCopy`). Safe to call on launch /
+    /// foreground; throttled so it doesn't re-resolve constantly.
+    func runAutoDownloads(streaming: StreamingService,
+                          library: LibraryManager,
+                          minInterval: TimeInterval = 6 * 3600) async {
+        let now = Date()
+        let due = playlists.filter { pl in
+            guard pl.isAutoDownload else { return false }
+            if let last = pl.lastAutoCheck { return now.timeIntervalSince(last) >= minInterval }
+            return true
+        }
+        guard !due.isEmpty else { return }
+
+        for pl in due {
+            await library.scanLocalDocumentsAsync()
+            let tracks = await streaming.fetchPlaylistTracks(url: pl.url, existingSongs: [])
+            let toGet = tracks.filter { !library.hasLocalCopy(of: $0) }
+            var got = 0
+            for track in toGet {
+                if (try? await streaming.downloadToLibrary(track: track, existingSongs: library.allSongs)) != nil {
+                    got += 1
+                }
+            }
+            if got > 0 {
+                library.scanLocalDocuments()
+                ToastCenter.shared.show("Auto-downloaded \(got) new track\(got == 1 ? "" : "s") from \"\(pl.name)\"",
+                                        category: .download)
+            }
+            markAutoChecked(id: pl.id)
+            if !tracks.isEmpty { updateMetadata(id: pl.id, trackCount: tracks.count) }
+        }
     }
 
     // MARK: Helpers

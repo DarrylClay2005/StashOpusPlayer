@@ -15,6 +15,7 @@ struct TrackedPlaylistDetailView: View {
     @EnvironmentObject private var streaming: StreamingService
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var account: AccountService
+    @ObservedObject private var trackedStore = TrackedPlaylistStore.shared
 
     @State private var tracks: [StreamTrack] = []
     @State private var isResolving = false
@@ -93,8 +94,17 @@ struct TrackedPlaylistDetailView: View {
                 ProgressView(value: Double(downloadAllDone), total: Double(downloadAllTotal))
                     .tint(AppTheme.dynamicAccent)
             }
+
+            Toggle(isOn: Binding(
+                get: { trackedStore.playlists.first { $0.id == playlist.id }?.isAutoDownload ?? false },
+                set: { trackedStore.setAutoDownload(id: playlist.id, $0) }
+            )) {
+                Label("Auto-download new tracks", systemImage: "arrow.triangle.2.circlepath.circle")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
         } footer: {
-            Text("Tracks already in your library are skipped automatically — Lumisound rescans the local Imported Music folder (and its subfolders) before each download so nothing is fetched twice.")
+            Text("Tracks already in your library are skipped automatically — Lumisound rescans the local Imported Music folder (and its subfolders) before each download so nothing is fetched twice. With auto-download on, new tracks added to this playlist are fetched automatically when you open the app.")
         }
         .listRowBackground(AppTheme.surface)
     }

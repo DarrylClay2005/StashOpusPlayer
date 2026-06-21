@@ -115,6 +115,13 @@ struct LumisoundApp: App {
                     // Check for updates after a brief delay.
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     await updater.checkForUpdates()
+
+                    // Auto-download new tracks from any tracked playlists that
+                    // have it enabled (throttled internally). Runs after the
+                    // initial library scan so dedup sees what's already present.
+                    await TrackedPlaylistStore.shared.runAutoDownloads(
+                        streaming: streaming, library: libraryManager
+                    )
                 }
                 .onAppear {
                     bgService.loadSettings()
