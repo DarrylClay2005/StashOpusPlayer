@@ -90,6 +90,30 @@ targets:
         SKIP_INSTALL: "YES"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
 
+  # watchOS companion remote. Intentionally a STANDALONE target (not a dependency
+  # of the Lumisound app target / scheme) so a compile error here can never break
+  # the iOS release archive. Validated by the separate build-platforms.yml CI.
+  LumisoundWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "9.0"
+    sources:
+      - path: LumisoundWatch/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lumisound.ios.watchkitapp
+        INFOPLIST_FILE: LumisoundWatch/Resources/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        TARGETED_DEVICE_FAMILY: "4"
+        SKIP_INSTALL: "NO"
+    scheme:
+      buildAction:
+        targets:
+          - LumisoundWatch
+      archiveAction:
+        config: Release
+
   LumisoundTests:
     type: bundle.unit-test
     platform: iOS

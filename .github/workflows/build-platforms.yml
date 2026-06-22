@@ -1,0 +1,48 @@
+name: Build Platform Ports
+
+# Compile-checks the tvOS / watchOS targets in isolation from the iOS release
+# pipeline (release-ios.yml). A failure here never affects iOS releases.
+
+on:
+  push:
+    paths:
+      - 'ios/LumisoundWatch/**'
+      - 'ios/LumisoundTV/**'
+      - 'ios/project.yml'
+      - '.github/workflows/build-platforms.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compile tvOS + watchOS targets
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          XCODE=$(ls /Applications | grep '^Xcode' | sort -rV | head -1)
+          sudo xcode-select -s "/Applications/$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build watchOS companion (compile check, no signing)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Lumisound.xcodeproj \
+            -scheme LumisoundWatch \
+            -destination 'generic/platform=watchOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO
