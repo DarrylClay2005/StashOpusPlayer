@@ -1626,6 +1626,17 @@ async def download_track(
                      "YouTube throttles single connections. Client-controlled "
                      "via Settings -> yt-dlp.",
     ),
+    throttle_seconds: int = Query(
+        5, ge=0, le=60,
+        description="Inter-request sleep (yt-dlp --sleep-interval). 0 disables "
+                     "throttling for max speed (higher bot-ban risk); default 5 "
+                     "keeps the 5-15s anti-bot pacing. Client-controlled.",
+    ),
+    concurrent_fragments: int = Query(
+        1, ge=1, le=16,
+        description="Parallel DASH fragment downloads (yt-dlp -N). >1 speeds up "
+                     "large downloads. Client-controlled via Settings -> yt-dlp.",
+    ),
 ):
     """
     Starts a background download job and returns its `job_id` immediately
@@ -1683,6 +1694,8 @@ async def download_track(
         duration=duration,
         account_token=account_token,
         use_aria2=use_aria2,
+        throttle_seconds=throttle_seconds,
+        concurrent_fragments=concurrent_fragments,
     ))
     return JSONResponse({"job_id": job_id}, status_code=202)
 
@@ -1701,6 +1714,8 @@ async def _run_download_job(
     duration: Optional[int],
     account_token: str,
     use_aria2: bool = False,
+    throttle_seconds: int = 5,
+    concurrent_fragments: int = 1,
 ) -> None:
     """
     Runs yt-dlp (with retries/verification) and the LUMISOUND_ID tagging step
@@ -1714,6 +1729,7 @@ async def _run_download_job(
             extra_args=extra_args, expected_ext=expected_ext, safe_title=safe_title,
             title=title, artist=artist, thumbnail=thumbnail, duration=duration,
             account_token=account_token, use_aria2=use_aria2,
+            throttle_seconds=throttle_seconds, concurrent_fragments=concurrent_fragments,
         )
     except HTTPException as exc:
         job = _DOWNLOAD_JOBS.get(job_id, {})
@@ -1742,6 +1758,8 @@ async def _do_download_job(
     duration: Optional[int],
     account_token: str,
     use_aria2: bool = False,
+    throttle_seconds: int = 5,
+    concurrent_fragments: int = 1,
 ) -> None:
     # Large playlists drive this endpoint hard via the iOS "Download All" pipeline,
     # and yt-dlp occasionally exits 0 while leaving a truncated/corrupt file behind
@@ -1780,13 +1798,22 @@ async def _do_download_job(
         # Even when opted in, the FINAL attempt drops aria2 so a download is
         # never permanently stuck if aria2 itself is the failure cause.
         aria2_this_attempt = use_aria2 and attempt < max_attempts
+        # Client-configurable throttle (Settings → yt-dlp). throttle_seconds=0
+        # disables the inter-request sleep for maximum speed (higher ban risk);
+        # the default 5 keeps the previous 5–15s anti-bot pacing. concurrent_frags
+        # > 1 fetches DASH fragments in parallel (-N) for faster large downloads.
+        sleep_args: list[str] = []
+        if throttle_seconds > 0:
+            sleep_args = ["--sleep-interval", str(throttle_seconds),
+                          "--max-sleep-interval", str(throttle_seconds * 3)]
+        concurrency_args = ["-N", str(concurrent_fragments)] if concurrent_fragments > 1 else []
         cmd = [
             "yt-dlp",
             "--no-playlist",
             "--embed-metadata",
             "--embed-thumbnail",
-            "--sleep-interval", "5",
-            "--max-sleep-interval", "15",
+            *sleep_args,
+            *concurrency_args,
             *(_ARIA2_DOWNLOADER_ARGS if aria2_this_attempt else []),
             "-o", output_template,
             *cookie_args,

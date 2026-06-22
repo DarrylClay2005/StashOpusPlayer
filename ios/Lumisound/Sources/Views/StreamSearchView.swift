@@ -914,9 +914,26 @@ struct StreamSearchView: View {
 
     private func handleDownloadAll() {
         guard !isDownloadingAll else { return }
+        failedTrackIDs.removeAll()
+        let url = searchText.trimmingCharacters(in: .whitespaces)
+        let looksLikePlaylist = url.contains("list=") || url.contains("/playlist") || url.contains("/sets/")
+
+        // For a playlist, re-run the resolver (the full per-item extractor) right
+        // before downloading, so Download All always operates on EVERY item in
+        // the current playlist — not a stale or partial result. The resolve also
+        // sends the dedup manifest/inventory, so owned tracks are excluded.
+        if streaming.isPlaylistResult, looksLikePlaylist {
+            Task { @MainActor in
+                await streaming.resolvePlaylist(url: url, existingSongs: library.allSongs)
+                let tracks = streaming.searchResults
+                guard !tracks.isEmpty else { return }
+                runDownloadPipeline(tracks: tracks)
+            }
+            return
+        }
+
         let tracks = streaming.searchResults
         guard !tracks.isEmpty else { return }
-        failedTrackIDs.removeAll()
         runDownloadPipeline(tracks: tracks)
     }
 

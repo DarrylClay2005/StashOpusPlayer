@@ -1014,6 +1014,17 @@ final class StreamingService: ObservableObject {
         if UserDefaults.standard.bool(forKey: "ytdlp_use_aria2") {
             queryItems.append(URLQueryItem(name: "use_aria2", value: "true"))
         }
+        // Per-user download tuning (Settings → yt-dlp). Throttle controls the
+        // anti-bot sleep (0 = fastest); concurrent fragments parallelises large
+        // downloads. Only send when they differ from the bridge defaults.
+        let throttle = UserDefaults.standard.object(forKey: "ytdlp_throttle_seconds") as? Int ?? 5
+        if throttle != 5 {
+            queryItems.append(URLQueryItem(name: "throttle_seconds", value: String(max(0, min(60, throttle)))))
+        }
+        let concurrentFrags = UserDefaults.standard.object(forKey: "ytdlp_concurrent_fragments") as? Int ?? 1
+        if concurrentFrags > 1 {
+            queryItems.append(URLQueryItem(name: "concurrent_fragments", value: String(min(16, concurrentFrags))))
+        }
         // Defense-in-depth: also tell the bridge what the client already has, so
         // a stale/incomplete `existingSongs` snapshot still gets server-side dedupe.
         // Exclude this track's own ID — if we got this far the pre-download check

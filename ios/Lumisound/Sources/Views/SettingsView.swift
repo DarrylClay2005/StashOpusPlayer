@@ -34,6 +34,10 @@ struct SettingsView: View {
     /// downloads land in "Imported Music/<folder>". Read by
     /// `StreamingService.downloadDirectory`.
     @AppStorage("ytdlp_download_folder") private var ytdlpDownloadFolder: String = ""
+    /// Inter-request throttle (yt-dlp --sleep-interval). 0 = fastest. Default 5.
+    @AppStorage("ytdlp_throttle_seconds") private var ytdlpThrottleSeconds: Int = 5
+    /// Parallel DASH fragments (yt-dlp -N). 1 = default. Higher = faster, riskier.
+    @AppStorage("ytdlp_concurrent_fragments") private var ytdlpConcurrentFragments: Int = 1
 
     // MARK: YouTube API Key Validation / Exposure Check State
 
@@ -804,6 +808,37 @@ struct SettingsView: View {
                 sectionHeader("Download Engine")
             } footer: {
                 Text("aria2 opens many connections per download. It bypasses per-connection throttling on some networks, but adds overhead that makes it slower when a single connection is already fast.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .listRowBackground(AppTheme.surface)
+
+            // Download tuning — speed vs. ban-risk knobs that were hardcoded.
+            Section {
+                Stepper(value: $ytdlpThrottleSeconds, in: 0...30, step: 1) {
+                    HStack {
+                        Label("Request Throttle", systemImage: "tortoise")
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer()
+                        Text(ytdlpThrottleSeconds == 0 ? "Off" : "\(ytdlpThrottleSeconds)s")
+                            .font(AppTheme.monoFont(size: 14))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+                Stepper(value: $ytdlpConcurrentFragments, in: 1...8, step: 1) {
+                    HStack {
+                        Label("Parallel Fragments", systemImage: "hare")
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer()
+                        Text("\(ytdlpConcurrentFragments)×")
+                            .font(AppTheme.monoFont(size: 14))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+            } header: {
+                sectionHeader("Download Speed")
+            } footer: {
+                Text("Throttle adds a pause between requests to avoid YouTube bot checks — set it to Off for maximum speed (slightly higher risk of temporary blocks). Parallel Fragments downloads pieces of each track at once; higher is faster on big files.")
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }
