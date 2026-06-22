@@ -47,9 +47,20 @@ jobs:
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO
 
-      # Validates the iOS app still compiles WITH the embedded watch app + the
-      # PhoneWatchSync glue — so a real ios/v* release tag is safe.
-      - name: Build iOS app w/ embedded watch (compile check, no signing)
+      - name: Build tvOS app (compile check, no signing)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Lumisound.xcodeproj \
+            -scheme LumisoundTV \
+            -destination 'generic/platform=tvOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO
+
+      # Validates the iOS app + PhoneWatchSync glue still compile alongside the
+      # new targets — so a real ios/v* release tag is safe.
+      - name: Build iOS app (compile check, no signing)
         working-directory: ios
         run: |
           set -o pipefail

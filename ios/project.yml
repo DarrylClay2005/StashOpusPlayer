@@ -56,8 +56,11 @@ targets:
         DEVELOPMENT_TEAM: ""
     dependencies:
       - target: LumisoundWidget
-      - target: LumisoundWatch
-        embed: true
+      # NOTE: LumisoundWatch is intentionally NOT embedded here — keeping it out
+      # of the released IPA keeps the phone-app sideload bulletproof on tools that
+      # can't re-sign embedded watch apps. The target still compiles in CI
+      # (build-platforms.yml); flip to `- target: LumisoundWatch / embed: true`
+      # once a signing path that supports embedded watch apps is in use.
       - package: DSWaveformImage
         product: DSWaveformImageViews
     scheme:
@@ -113,6 +116,29 @@ targets:
       buildAction:
         targets:
           - LumisoundWatch
+      archiveAction:
+        config: Release
+
+  # tvOS app — standalone (its own scheme), installed via atvloadly from the
+  # tvOS .ipa produced by release-tvos.yml. Not tied to the iOS scheme.
+  LumisoundTV:
+    type: application
+    platform: tvOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: LumisoundTV/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lumisound.ios.tv
+        INFOPLIST_FILE: LumisoundTV/Resources/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        TARGETED_DEVICE_FAMILY: "3"
+        SKIP_INSTALL: "NO"
+    scheme:
+      buildAction:
+        targets:
+          - LumisoundTV
       archiveAction:
         config: Release
 
