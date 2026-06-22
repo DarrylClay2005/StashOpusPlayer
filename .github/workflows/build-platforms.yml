@@ -46,3 +46,16 @@ jobs:
             -destination 'generic/platform=watchOS Simulator' \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO
+
+      # Validates the iOS app still compiles WITH the embedded watch app + the
+      # PhoneWatchSync glue — so a real ios/v* release tag is safe.
+      - name: Build iOS app w/ embedded watch (compile check, no signing)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Lumisound.xcodeproj \
+            -scheme Lumisound \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO

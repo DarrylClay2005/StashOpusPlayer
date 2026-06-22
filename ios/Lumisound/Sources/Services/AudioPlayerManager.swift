@@ -2743,6 +2743,7 @@ final class AudioPlayerManager: ObservableObject {
     private func updateNowPlayingArtwork(for song: Song?) async {
         guard let song else {
             WidgetDataService.shared.update(song: nil, isPlaying: false, artwork: nil)
+            PhoneWatchSync.shared.update(song: nil, isPlaying: false, artwork: nil)
             return
         }
         let image = await ArtworkService.shared.loadArtwork(for: song)
@@ -2753,6 +2754,7 @@ final class AudioPlayerManager: ObservableObject {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         }
         WidgetDataService.shared.update(song: song, isPlaying: isPlaying, artwork: image, position: position, duration: duration)
+        PhoneWatchSync.shared.update(song: song, isPlaying: isPlaying, artwork: image)
     }
 
     private func configureRemoteCommands() {

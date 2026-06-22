@@ -67,6 +67,16 @@ struct LumisoundApp: App {
                     // beat-aware crossfades.
                     player.libraryManager = libraryManager
 
+                    // Route transport commands from the watch companion to the player.
+                    PhoneWatchSync.shared.commandHandler = { command in
+                        switch command {
+                        case "toggle":   player.togglePlayPause()
+                        case "next":     player.skipToNext()
+                        case "previous": player.skipToPrevious()
+                        default:         break
+                        }
+                    }
+
                     // Auto-scan for corrupt files immediately, then every 5 minutes
                     // for the rest of the session (non-blocking, all users).
                     CorruptFileFinderService.shared.startPeriodicScanning()
