@@ -1,0 +1,95 @@
+name: Release tvOS IPA
+
+# Produces an unsigned tvOS .ipa (install on Apple TV with atvloadly).
+# Independent of the iOS release pipeline.
+
+on:
+  push:
+    tags:
+      - 'tvos/v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish tvOS release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#tvos/v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp version into project.yml
+        run: |
+          sed -i '' "s/MARKETING_VERSION: \".*\"/MARKETING_VERSION: \"${{ steps.version.outputs.version }}\"/" ios/project.yml
+
+      - name: Select Xcode
+        run: |
+          XCODE=$(ls /Applications | grep '^Xcode' | sort -rV | head -1)
+          sudo xcode-select -s "/Applications/$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Archive (unsigned)
+        working-directory: ios
+        run: |
+          mkdir -p build
+          xcodebuild archive \
+            -project Lumisound.xcodeproj \
+            -scheme LumisoundTV \
+            -configuration Release \
+            -destination 'generic/platform=tvOS' \
+            -archivePath build/LumisoundTV.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            SKIP_INSTALL=NO 2>&1 | tee /tmp/tvbuild.log | tail -25
+          if grep -q "error:" /tmp/tvbuild.log; then
+            echo "--- Compiler errors ---"; grep "error:" /tmp/tvbuild.log | head -30
+          fi
+          APP=$(find build/LumisoundTV.xcarchive -name "*.app" | head -1)
+          if [ -z "$APP" ]; then
+            echo "::error::Archive did not produce a .app bundle"; exit 1
+          fi
+          echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+
+      - name: Package IPA (unsigned)
+        id: ipa
+        working-directory: ios
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          IPA_NAME="LumisoundTV-${VERSION}-unsigned.ipa"
+          mkdir -p build/Payload/Payload
+          cp -R "$APP_PATH" build/Payload/Payload/
+          (cd build/Payload && zip -r "../$IPA_NAME" Payload/ -x "*.DS_Store")
+          echo "IPA: $(du -sh build/$IPA_NAME)"
+          echo "ipa_name=$IPA_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          IPA_NAME="${{ steps.ipa.outputs.ipa_name }}"
+          gh release create "$TAG" \
+            --title "Lumisound tvOS v${VERSION}" \
+            --notes "$(printf 'Apple TV build for Lumisound v%s.\n\n**Install:** download the .ipa and sideload it to your Apple TV with [atvloadly](https://github.com/your/atvloadly). Search and stream from the Lumisound bridge.' "$VERSION")" \
+            "ios/build/$IPA_NAME"
