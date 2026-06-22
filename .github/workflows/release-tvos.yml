@@ -91,5 +91,5 @@ jobs:
           IPA_NAME="${{ steps.ipa.outputs.ipa_name }}"
           gh release create "$TAG" \
             --title "Lumisound tvOS v${VERSION}" \
-            --notes "$(printf 'Apple TV build for Lumisound v%s.\n\n**Install:** download the .ipa and sideload it to your Apple TV with [atvloadly](https://github.com/your/atvloadly). Search and stream from the Lumisound bridge.' "$VERSION")" \
+            --notes "$(printf 'Apple TV build for Lumisound v%s.\n\n**Install:** download the .ipa and sideload it to your Apple TV with **atvloadly**. Search and stream from the Lumisound bridge.' "$VERSION")" \
             "ios/build/$IPA_NAME"
