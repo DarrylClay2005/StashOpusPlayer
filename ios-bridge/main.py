@@ -3352,6 +3352,95 @@ async def _user_inventory_source_ids(user_id: Optional[str]) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
+# Acoustic-fingerprint duplicate detection (Chromaprint / fpcalc) — catches true
+# duplicates in the user's cloud library whose titles/artists differ, which the
+# normalize-based duplicate finder misses.
+# ---------------------------------------------------------------------------
+
+_CHROMAPRINT_CACHE: dict[str, tuple[float, list[int]]] = {}
+
+
+async def _chromaprint(path: str) -> tuple[float, list[int]]:
+    """(duration, raw Chromaprint fingerprint) via fpcalc. Cached by path|mtime|size."""
+    try:
+        st = os.stat(path)
+        cache_key = f"{path}|{st.st_mtime}|{st.st_size}"
+    except OSError:
+        return 0.0, []
+    cached = _CHROMAPRINT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "fpcalc", "-raw", "-json", "-length", "120", path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+        data = json.loads(out)
+        result = (float(data.get("duration", 0)), list(data.get("fingerprint", [])))
+    except Exception as exc:
+        logger.warning("fpcalc failed for %s: %s", path, exc)
+        result = (0.0, [])
+    _CHROMAPRINT_CACHE[cache_key] = result
+    return result
+
+
+def _fp_similarity(a: list[int], b: list[int]) -> float:
+    """Bit-match ratio (0–1) over the aligned prefix of two raw fingerprints."""
+    n = min(len(a), len(b))
+    if n == 0:
+        return 0.0
+    diff = 0
+    for i in range(n):
+        diff += bin((a[i] ^ b[i]) & 0xFFFFFFFF).count("1")
+    return 1.0 - diff / (n * 32)
+
+
+@app.get("/user/library/acoustic-duplicates")
+async def acoustic_duplicates(user: dict = Depends(get_current_user)):
+    """Groups files in the user's cloud library that are acoustically the same
+    recording (fingerprint match ≥ 0.85, within 15s duration), regardless of
+    metadata — the audio-level complement to the on-device title/artist finder."""
+    user_id = user["sub"]
+    music_dir = _user_music_dir(user_id)
+    if music_dir is None:
+        raise HTTPException(status_code=503, detail="User music storage not configured")
+    try:
+        files = sorted(p for p in music_dir.rglob("*")
+                       if p.is_file() and p.suffix.lower() in SUPPORTED_AUDIO_EXTS)
+    except OSError:
+        files = []
+    files = files[:300]  # bound the O(n^2) comparison
+
+    prints: list[tuple[pathlib.Path, float, list[int]]] = []
+    for p in files:
+        dur, fp = await _chromaprint(str(p))
+        if fp:
+            prints.append((p, dur, fp))
+
+    threshold = 0.85
+    used: set[int] = set()
+    groups: list[list[dict]] = []
+    for i in range(len(prints)):
+        if i in used:
+            continue
+        members = [i]
+        for j in range(i + 1, len(prints)):
+            if j in used:
+                continue
+            if abs(prints[i][1] - prints[j][1]) > 15:
+                continue
+            if _fp_similarity(prints[i][2], prints[j][2]) >= threshold:
+                members.append(j)
+                used.add(j)
+        if len(members) > 1:
+            used.add(i)
+            groups.append([{"file": prints[k][0].name,
+                            "duration": round(prints[k][1], 1)} for k in members])
+    return {"scanned": len(prints), "duplicate_groups": groups}
+
+
+# ---------------------------------------------------------------------------
 # Play History Endpoints
 # ---------------------------------------------------------------------------
 

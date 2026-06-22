@@ -4,7 +4,10 @@ FROM python:3.12-slim
 # ffmpeg alone can embed thumbnails into mp3/opus/etc, but not M4A/MP4 containers.
 # aria2 (aria2c) is used as yt-dlp's external downloader for multi-connection,
 # segmented downloads — substantially faster than the built-in downloader.
-RUN apt-get update && apt-get install -y ffmpeg curl unzip atomicparsley aria2 && rm -rf /var/lib/apt/lists/*
+# libchromaprint-tools provides `fpcalc` for acoustic fingerprinting (used by
+# the /user/library/acoustic-duplicates endpoint to catch true duplicates whose
+# metadata differs).
+RUN apt-get update && apt-get install -y ffmpeg curl unzip atomicparsley aria2 libchromaprint-tools && rm -rf /var/lib/apt/lists/*
 
 # yt-dlp now needs a JS runtime to solve YouTube's player/signature challenge
 # (EJS) — without one, extraction fails for most videos with "This video is
