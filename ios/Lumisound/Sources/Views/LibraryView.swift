@@ -313,8 +313,42 @@ private struct SongsTab: View {
         Array(repeating: GridItem(.flexible(), spacing: 12), count: songColumns)
     }
 
+    /// Spotify/Apple-Music-style action bar above the song list.
+    private var songsActionHeader: some View {
+        HStack(spacing: 12) {
+            Button {
+                player.setQueue(songs, startIndex: 0, autoplay: true)
+            } label: {
+                Label("Play", systemImage: "play.fill")
+                    .font(.subheadline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(AppTheme.dynamicAccent, in: Capsule())
+                    .foregroundStyle(.white)
+            }
+            Button {
+                player.setQueue(songs.shuffled(), startIndex: 0, autoplay: true)
+            } label: {
+                Label("Shuffle", systemImage: "shuffle")
+                    .font(.subheadline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(AppTheme.surface, in: Capsule())
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .overlay(Capsule().stroke(.white.opacity(0.08), lineWidth: 1))
+            }
+        }
+        .buttonStyle(PressableButtonStyle())
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
+            if !songs.isEmpty {
+                songsActionHeader
+            }
             // Content — list or grid
             Group {
                 if songColumns == 1 {

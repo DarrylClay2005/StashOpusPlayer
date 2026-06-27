@@ -1,6 +1,19 @@
 import SwiftUI
 import UIKit
 
+// MARK: - Now Playing secondary-controls panel
+//
+// The advanced controls are grouped into switchable panels (segmented control)
+// instead of one long vertical wall, so the core playback stays prominent and
+// the extras are organized — the layout big music apps use.
+private enum NowPlayingPanel: String, CaseIterable, Identifiable {
+    case controls = "Controls"
+    case sound    = "Sound"
+    case queue    = "Queue"
+    case lyrics   = "Lyrics"
+    var id: String { rawValue }
+}
+
 // MARK: - Vertical Slider
 
 /// A vertical slider built by rotating a standard SwiftUI Slider -90 degrees.
@@ -277,6 +290,8 @@ struct NowPlayingView: View {
     private let heartHaptic = UIImpactFeedbackGenerator(style: .soft)
     private let selectHaptic = UISelectionFeedbackGenerator()
 
+    @State private var selectedPanel: NowPlayingPanel = .controls
+
     var body: some View {
         NavigationStack {
             scrollContent
@@ -309,20 +324,17 @@ struct NowPlayingView: View {
     private var scrollContent: some View {
         ScrollView {
             VStack(spacing: 20) {
+                // ── Core playback (always visible) ──
                 artworkSection
                 trackInfoSection
                 timelineSection
                 transportSection
-                sleepTimerPill
-                autoRadioToggle
-                volumeSection
-                playbackControlsSection
-                queuePreviewSection
-                abRepeatSection
-                effectsSection
-                equalizerSection
-                trackAudioSettingsSection
-                lyricsSection
+
+                // ── Secondary controls, organized into switchable panels ──
+                panelPicker
+                selectedPanelContent
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.18), value: selectedPanel)
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
@@ -330,6 +342,40 @@ struct NowPlayingView: View {
         }
         .navigationTitle("Now Playing")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var panelPicker: some View {
+        Picker("Controls", selection: $selectedPanel) {
+            ForEach(NowPlayingPanel.allCases) { panel in
+                Text(panel.rawValue).tag(panel)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private var selectedPanelContent: some View {
+        switch selectedPanel {
+        case .controls:
+            VStack(spacing: 20) {
+                volumeSection
+                playbackControlsSection
+                abRepeatSection
+                sleepTimerPill
+                autoRadioToggle
+            }
+        case .sound:
+            VStack(spacing: 20) {
+                effectsSection
+                equalizerSection
+                trackAudioSettingsSection
+            }
+        case .queue:
+            queuePreviewSection
+        case .lyrics:
+            lyricsSection
+        }
     }
 
     // MARK: - Artwork
