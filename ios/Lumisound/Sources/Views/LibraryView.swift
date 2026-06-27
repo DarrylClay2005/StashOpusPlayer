@@ -12,6 +12,19 @@ private enum LibraryTab: String, CaseIterable {
     case playlists = "Playlists"
     case favorites = "Favorites"
     case moods     = "Moods"
+
+    var icon: String {
+        switch self {
+        case .songs:     return "music.note"
+        case .artists:   return "music.mic"
+        case .albums:    return "square.stack"
+        case .folders:   return "folder"
+        case .genres:    return "guitars"
+        case .playlists: return "music.note.list"
+        case .favorites: return "heart"
+        case .moods:     return "theatermasks"
+        }
+    }
 }
 
 // MARK: - LibraryView
@@ -247,7 +260,11 @@ private struct LibraryTabBar: View {
                             selectedTab = tab
                         }
                     } label: {
-                        Text(tab.rawValue)
+                        HStack(spacing: 6) {
+                            Image(systemName: tab.icon)
+                                .imageScale(.small)
+                            Text(tab.rawValue)
+                        }
                             .font(.subheadline.weight(.semibold))
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
