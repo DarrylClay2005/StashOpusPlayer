@@ -1,108 +1,51 @@
 import SwiftUI
 
-// MARK: - StarfieldArtworkView
+// MARK: - StarfieldArtworkView — "Cosmos"
 //
-// The cover floats in deep space while a star-warp field streaks outward from
-// behind it (stars accelerate from the center to the edges, leaving light
-// trails) — a sci-fi "jump to lightspeed" motion when playing, drifting gently
-// when paused. The only style with a true 3D-warp particle field.
-
+// The cover sits inside a slowly-rotating field of twinkling stars.
 struct StarfieldArtworkView: View {
     let song: Song?
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-    @State private var palette: ArtworkPalette?
+    @State private var rotate = false
+    @State private var twinkle = false
 
-    // Deterministic per-star angle/phase/speed so the field is stable frame-to-frame.
-    private let seeds: [(angle: Double, phase: Double, speed: Double)] = {
-        var rng = SeededRandom(seed: 0xC0FFEE)
-        return (0..<90).map { _ in
-            (angle: rng.nextDouble() * 2 * Double.pi,
-             phase: rng.nextDouble(),
-             speed: 0.25 + rng.nextDouble() * 0.55)
-        }
-    }()
+    // Deterministic star positions within a 320×320 field.
+    private let stars: [(x: CGFloat, y: CGFloat, s: CGFloat)] = (0..<70).map { i in
+        let x = CGFloat((i &* 73) % 300) + 10
+        let y = CGFloat((i &* 151) % 300) + 10
+        let s = CGFloat(1 + (i % 3))
+        return (x, y, s)
+    }
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(
-                    RadialGradient(
-                        colors: [Color(red: 0.05, green: 0.06, blue: 0.12), .black],
-                        center: .center, startRadius: 20, endRadius: 230
-                    )
-                )
-                .frame(width: 320, height: 320)
+            RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Color.black)
 
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying)) { timeline in
-                Canvas { context, size in
-                    let t = timeline.date.timeIntervalSinceReferenceDate
-                    drawStars(context: context, size: size, time: t, warping: isPlaying)
+            ZStack {
+                ForEach(Array(stars.enumerated()), id: \.offset) { _, st in
+                    Circle()
+                        .fill(.white)
+                        .frame(width: st.s, height: st.s)
+                        .position(x: st.x, y: st.y)
                 }
-                .frame(width: 320, height: 320)
-                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
             }
+            .frame(width: 320, height: 320)
+            .rotationEffect(.degrees(rotate ? 360 : 0))
+            .opacity(twinkle ? 0.95 : 0.5)
 
-            // Cover floating in the center with a palette glow.
-            artwork(size: 200)
+            StyleCover(song: song, size: 240, cornerRadius: 18)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(.white.opacity(0.15), lineWidth: 1)
-                )
-                .shadow(color: (palette?.primary ?? AppTheme.dynamicAccent).opacity(0.6), radius: 26, x: 0, y: 0)
-                .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.5))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
+                .shadow(color: .black.opacity(0.7), radius: 30)
         }
         .frame(width: 320, height: 320)
-        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
-        .animation(.easeInOut(duration: 1.0), value: palette)
-    }
-
-    private func drawStars(context: GraphicsContext, size: CGSize, time: Double, warping: Bool) {
-        let center = CGPoint(x: size.width / 2, y: size.height / 2)
-        let maxR = max(size.width, size.height) * 0.72
-        let starColor = palette?.secondary ?? Color.white
-        for s in seeds {
-            // Distance from center cycles 0→1; warping speeds it up + adds trails.
-            let rate = warping ? s.speed : s.speed * 0.18
-            let frac = (time * rate + s.phase).truncatingRemainder(dividingBy: 1)
-            let r = CGFloat(frac) * maxR
-            let dx = cos(s.angle), dy = sin(s.angle)
-            let p = CGPoint(x: center.x + CGFloat(dx) * r, y: center.y + CGFloat(dy) * r)
-            let dotSize: CGFloat = 0.6 + CGFloat(frac) * 2.2
-            let alpha = min(1.0, frac * 1.4)
-
-            if warping && frac > 0.15 {
-                // Light trail: a short streak behind the star toward center.
-                let trail = CGFloat(min(28, frac * 40))
-                var path = Path()
-                path.move(to: CGPoint(x: p.x - CGFloat(dx) * trail, y: p.y - CGFloat(dy) * trail))
-                path.addLine(to: p)
-                context.stroke(path, with: .color(starColor.opacity(0.5 * alpha)), lineWidth: dotSize)
-            }
-            context.fill(
-                Path(ellipseIn: CGRect(x: p.x - dotSize / 2, y: p.y - dotSize / 2, width: dotSize, height: dotSize)),
-                with: .color(starColor.opacity(alpha))
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func artwork(size: CGFloat) -> some View {
-        if let song {
-            ArtworkThumbnail(song: song, size: size)
-                .environmentObject(library)
-        } else {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(LinearGradient(colors: [AppTheme.surface, AppTheme.elevatedSurface],
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: size, height: size)
-                .overlay {
-                    Image(systemName: "music.note")
-                        .font(.system(size: size * 0.27, weight: .semibold))
-                        .foregroundStyle(AppTheme.dynamicAccent)
-                }
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.4))
+        .onAppear {
+            withAnimation(.linear(duration: 70).repeatForever(autoreverses: false)) { rotate = true }
+            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { twinkle = true }
         }
     }
 }

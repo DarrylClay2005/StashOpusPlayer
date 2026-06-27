@@ -28,7 +28,7 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .vinylDisc:        return "Vinyl Disc"
-        case .albumArt:         return "Album Art"
+        case .albumArt:         return "Aurora Veil"
         case .polaroid:         return "Origami"
         case .floatingCards:    return "Floating Cards"
         case .minimalist:       return "Editorial"
@@ -41,9 +41,9 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .tiltCard:         return "Tilt Card"
         case .marquee:          return "Marquee"
         case .holographic:      return "Holographic"
-        case .ripple:           return "Ripple"
+        case .ripple:           return "Halo Pulse"
         case .popArt:           return "Pop Art"
-        case .starfield:        return "Starfield"
+        case .starfield:        return "Cosmos"
         case .stainedGlass:     return "Stained Glass"
         }
     }
@@ -51,7 +51,7 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
     var iconName: String {
         switch self {
         case .vinylDisc:        return "opticaldisc"
-        case .albumArt:         return "photo"
+        case .albumArt:         return "sparkles"
         case .polaroid:         return "square.on.square"
         case .floatingCards:    return "rectangle.on.rectangle"
         case .minimalist:       return "newspaper"
@@ -64,9 +64,9 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .tiltCard:         return "rotate.3d"
         case .marquee:          return "theatermasks.fill"
         case .holographic:      return "rainbow"
-        case .ripple:           return "drop.circle.fill"
+        case .ripple:           return "circle.circle.fill"
         case .popArt:           return "circle.grid.2x2.fill"
-        case .starfield:        return "sparkles"
+        case .starfield:        return "moon.stars.fill"
         case .stainedGlass:     return "square.grid.3x3.fill"
         }
     }
