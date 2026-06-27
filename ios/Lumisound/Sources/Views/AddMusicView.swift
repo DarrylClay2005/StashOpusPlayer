@@ -148,8 +148,8 @@ struct AddMusicView: View {
                 // MARK: Mac / USB transfer instructions
                 // ─────────────────────────────────────────────────────────────
                 Section {
-                    HStack(spacing: 12) {
-                        Image(systemName: "cable.connector").frame(width: 32).foregroundStyle(.gray)
+                    HStack(spacing: 14) {
+                        iconBadge("laptopcomputer", color: Color(white: 0.42))
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Transfer via Mac (USB or WiFi)")
                                 .fontWeight(.medium).foregroundStyle(AppTheme.textPrimary)
@@ -195,12 +195,25 @@ struct AddMusicView: View {
     }
 
     private func importRow(icon: String, color: Color, title: String, subtitle: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon).frame(width: 32).foregroundStyle(color)
+        HStack(spacing: 14) {
+            iconBadge(icon, color: color)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).fontWeight(.medium).foregroundStyle(AppTheme.textPrimary)
                 Text(subtitle).font(.caption).foregroundStyle(AppTheme.textSecondary)
             }
+        }
+    }
+
+    /// Consistent rounded-square icon badge used by every Add Music row, so the
+    /// rows share one visual language instead of mixing bare glyphs and badges.
+    private func iconBadge(_ systemName: String, color: Color) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(color)
+                .frame(width: 40, height: 40)
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
         }
     }
 
