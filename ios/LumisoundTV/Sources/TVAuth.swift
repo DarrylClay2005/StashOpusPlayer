@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Auth models
 
-struct TVUser: Decodable, Hashable {
+struct TVUser: Codable, Hashable {
     let username: String?
     let display_name: String?
     var name: String { display_name ?? username ?? "You" }
