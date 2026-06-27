@@ -1,88 +1,49 @@
 import SwiftUI
 
-// MARK: - HolographicArtworkView
+// MARK: - HolographicArtworkView — "Foil Shimmer"
 //
-// Treats the cover like a holographic foil trading card: a rainbow iridescent
-// wash (angular gradient, screen-blended) rotates slowly over the art, and a
-// bright specular "sheen" band sweeps diagonally across while playing — the
-// telltale tilt-the-card-in-the-light effect. Distinct from every other style
-// in that the effect is an iridescent material on the artwork itself.
-
+// The cover under an iridescent foil: a rotating rainbow angular gradient plus a
+// sweeping specular sheen, like holographic trading-card foil catching light.
 struct HolographicArtworkView: View {
     let song: Song?
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-    @State private var palette: ArtworkPalette?
-    @State private var hueRotate: Double = 0
-    @State private var sheen: CGFloat = -1.4
+    @State private var spin = false
+    @State private var sheen: CGFloat = -1
 
-    private let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+    private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
 
     var body: some View {
-        artwork(size: 280)
+        StyleCover(song: song, size: 300, cornerRadius: 20)
             .clipShape(shape)
-            // Iridescent rainbow wash, screen-blended and rotating.
             .overlay(
                 AngularGradient(
-                    colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red],
+                    colors: [.pink, .purple, .blue, .cyan, .green, .yellow, .pink],
                     center: .center,
-                    angle: .degrees(hueRotate)
+                    angle: .degrees(spin ? 360 : 0)
                 )
-                .blendMode(.screen)
-                .opacity(0.35)
+                .blendMode(.overlay)
+                .opacity(isPlaying ? 0.5 : 0.3)
                 .clipShape(shape)
             )
-            // Diagonal specular sheen sweeping across.
             .overlay(
                 GeometryReader { geo in
-                    LinearGradient(
-                        colors: [.clear, .white.opacity(0.7), .clear],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    )
-                    .frame(width: geo.size.width * 0.5)
-                    .rotationEffect(.degrees(22))
-                    .offset(x: sheen * geo.size.width)
-                    .blendMode(.plusLighter)
+                    LinearGradient(colors: [.clear, .white.opacity(0.6), .clear],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: geo.size.height * 0.4)
+                        .offset(y: sheen * geo.size.height)
+                        .blendMode(.plusLighter)
                 }
                 .clipShape(shape)
             )
-            .overlay(shape.stroke(.white.opacity(0.25), lineWidth: 1))
-            .shadow(color: (palette?.primary ?? AppTheme.dynamicAccent).opacity(0.4), radius: 22, x: 0, y: 10)
-            .frame(width: 320, height: 320)
-            .onAppear { animate(playing: isPlaying) }
-            .onChange(of: isPlaying) { animate(playing: $0) }
-            .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
-    }
-
-    private func animate(playing: Bool) {
-        if playing {
-            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
-                hueRotate = 360
+            .overlay(shape.stroke(.white.opacity(0.2), lineWidth: 1))
+            .shadow(color: .purple.opacity(0.4), radius: 28)
+            .frame(width: 300, height: 300)
+            .modifier(FloatModifier(isPlaying: isPlaying, amount: 6, speed: 3.0))
+            .onAppear {
+                withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) { spin = true }
+                withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) { sheen = 1 }
             }
-            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: false)) {
-                sheen = 1.4
-            }
-        } else {
-            withAnimation(.easeOut(duration: 0.6)) { sheen = 0.0 }
-        }
-    }
-
-    @ViewBuilder
-    private func artwork(size: CGFloat) -> some View {
-        if let song {
-            ArtworkThumbnail(song: song, size: size)
-                .environmentObject(library)
-        } else {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(LinearGradient(colors: [AppTheme.surface, AppTheme.elevatedSurface],
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: size, height: size)
-                .overlay {
-                    Image(systemName: "music.note")
-                        .font(.system(size: size * 0.27, weight: .semibold))
-                        .foregroundStyle(AppTheme.dynamicAccent)
-                }
-        }
     }
 }
