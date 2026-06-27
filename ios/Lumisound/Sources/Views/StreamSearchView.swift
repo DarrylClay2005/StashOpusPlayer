@@ -405,7 +405,10 @@ struct StreamSearchView: View {
                         ForEach(groupedResults, id: \.source) { group in
                             Section {
                                 ForEach(Array(group.tracks.enumerated()), id: \.element.id) { localIndex, track in
-                                    let globalIndex = (streaming.searchResults.firstIndex(where: { $0.id == track.id }) ?? localIndex)
+                                    // Cap the stagger index: it only drives the fade-in delay, and
+                                    // the old `searchResults.firstIndex` lookup here was O(n) per
+                                    // row → O(n²) over a big playlist (a main-thread hang).
+                                    let globalIndex = min(localIndex, 12)
                                     StreamTrackRow(
                                         track: track,
                                         isLoading: loadingTrackID == track.id,
@@ -856,18 +859,21 @@ struct StreamSearchView: View {
     private func refreshDownloadedStatus() {
         guard !library.allSongs.isEmpty else { return }
         let localSourceIDs = Set(library.allSongs.compactMap { $0.sourceTrackID })
+        // Build the imported-track index ONCE (O(library)), then check each result
+        // in O(1). The old code called isAlreadyImported per result — O(library)
+        // each — which on a 1000-track playlist hung the main thread long enough
+        // for the watchdog to kill the app (the "big playlist" crash).
+        let index = library.importedIdentityIndex()
 
-        for track in streaming.searchResults {
-            guard !downloadedTrackIDs.contains(track.id) else { continue }
+        for track in streaming.searchResults where !downloadedTrackIDs.contains(track.id) {
             if localSourceIDs.contains(track.sourceTrackID)
-                || library.isAlreadyImported(title: track.title, artist: track.artist, duration: track.duration) {
+                || index.contains(title: track.title, artist: track.artist, duration: track.duration) {
                 downloadedTrackIDs.insert(track.id)
             }
         }
 
-        for track in streaming.serverTracks {
-            guard !downloadedServerTrackIDs.contains(track.id) else { continue }
-            if library.isAlreadyImported(title: track.title, artist: track.artist, duration: track.duration) {
+        for track in streaming.serverTracks where !downloadedServerTrackIDs.contains(track.id) {
+            if index.contains(title: track.title, artist: track.artist, duration: track.duration) {
                 downloadedServerTrackIDs.insert(track.id)
             }
         }

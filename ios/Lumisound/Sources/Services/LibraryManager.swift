@@ -1020,6 +1020,32 @@ final class LibraryManager: ObservableObject {
         }
     }
 
+    /// A precomputed index of the library's imported tracks for O(1) duplicate
+    /// checks. `isAlreadyImported` is O(library) per call (it re-normalizes every
+    /// song), so calling it in a loop over a big playlist (up to 1000 results)
+    /// was an O(results × library) string-crunch on the main thread — long enough
+    /// to trip the iOS watchdog (which presents as a crash). Build this index
+    /// ONCE, then query it per candidate in O(1).
+    struct ImportedIdentityIndex {
+        fileprivate let byKey: [String: [TimeInterval]]
+        func contains(title: String, artist: String, duration: TimeInterval?) -> Bool {
+            let key = DuplicateFinderService.normalize(title) + "|" + DuplicateFinderService.normalize(artist)
+            guard key != "|", let durations = byKey[key] else { return false }
+            guard let duration, duration > 0 else { return true }
+            return durations.contains { abs($0 - duration) <= DuplicateFinderService.durationTolerance }
+        }
+    }
+
+    func importedIdentityIndex() -> ImportedIdentityIndex {
+        var byKey: [String: [TimeInterval]] = [:]
+        for song in allSongs {
+            let key = DuplicateFinderService.normalize(song.title) + "|" + DuplicateFinderService.normalize(song.artist)
+            guard key != "|" else { continue }
+            byKey[key, default: []].append(song.duration)
+        }
+        return ImportedIdentityIndex(byKey: byKey)
+    }
+
     /// True if a local copy of `track` already exists on the device, by EITHER:
     ///   1. an exact source-ID match (`Song.sourceTrackID` == "<source>:<id>",
     ///      i.e. the `LUMISOUND_ID` embedded at download time) whose backing file
