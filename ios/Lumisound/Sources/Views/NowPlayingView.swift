@@ -869,6 +869,12 @@ struct NowPlayingView: View {
                 Image(systemName: "speaker.wave.3.fill")
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
+                // AirPlay / output-route picker (AirPlay speakers, Bluetooth, etc.).
+                AirPlayRoutePicker(
+                    tint: UIColor(AppTheme.textSecondary),
+                    activeTint: UIColor(AppTheme.dynamicAccent)
+                )
+                .frame(width: 30, height: 30)
             }
             // Above 100% the volume slider is boosting gain beyond the
             // device's normal output (via the EQ's global gain stage, in dB —
