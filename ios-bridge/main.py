@@ -1,6 +1,7 @@
 import array
 import asyncio
 import hashlib
+import html
 import io
 import ipaddress
 import json
@@ -394,7 +395,10 @@ async def _log_slow_requests(request: Request, call_next):
 # ---------------------------------------------------------------------------
 
 _search_cache: dict[str, tuple[float, list[dict]]] = {}
-_CACHE_TTL = 300       # seconds
+# 1 hour: long enough that repeated searches (esp. via the per-account YouTube
+# Data API key) don't re-spend quota, short enough that brand-new uploads still
+# surface within the hour.
+_CACHE_TTL = 3600      # seconds
 _CACHE_MAX  = 500      # max entries before eviction
 
 
@@ -1341,6 +1345,84 @@ async def health():
     }
 
 
+def _youtube_search_via_api_sync(query: str, limit: int, api_key: str) -> Optional[list[dict]]:
+    """Searches YouTube via the Data API using *api_key*: search.list (100 quota
+    units) + one batched videos.list (1 unit) for durations. Near-instant vs
+    yt-dlp's 20-30s scrape.
+
+    Returns parsed track dicts (possibly empty — an authoritative "no results"),
+    or None to signal the caller to fall back to yt-dlp (no key / quota exhausted
+    / any error). The caller caches the result, so a given query spends quota at
+    most once per cache window — repeated searches are free.
+    """
+    if not api_key:
+        return None
+    try:
+        status, body = _youtube_data_api_get_raw(
+            "search",
+            {
+                "part": "snippet",
+                "type": "video",
+                "q": query,
+                "maxResults": min(max(limit, 1), 50),
+                "order": "relevance",
+            },
+            api_key,
+        )
+        if status == 403:
+            reasons = [e.get("reason") for e in (body.get("error", {}).get("errors") or [])]
+            if any(r in ("quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded") for r in reasons):
+                _youtube_mark_quota_exceeded(api_key)
+            return None
+        if status != 200:
+            return None
+
+        items = body.get("items") or []
+        video_ids = [
+            vid for it in items
+            if (vid := (it.get("id") or {}).get("videoId"))
+        ]
+        if not video_ids:
+            return []
+
+        # Batched contentDetails for durations — 1 quota unit, best-effort.
+        durations: dict[str, int] = {}
+        try:
+            d_status, d_body = _youtube_data_api_get_raw(
+                "videos",
+                {"part": "contentDetails", "id": ",".join(video_ids)},
+                api_key,
+            )
+            if d_status == 200:
+                for v in d_body.get("items") or []:
+                    if vid := v.get("id"):
+                        durations[vid] = _parse_iso8601_duration(
+                            (v.get("contentDetails") or {}).get("duration", "")
+                        )
+        except Exception:
+            pass
+
+        tracks: list[dict] = []
+        for it in items:
+            vid = (it.get("id") or {}).get("videoId")
+            if not vid:
+                continue
+            snippet = it.get("snippet") or {}
+            tracks.append({
+                "id": vid,
+                "title": html.unescape(snippet.get("title") or "Unknown Title"),
+                "artist": html.unescape(snippet.get("channelTitle") or "Unknown Artist"),
+                "duration_seconds": durations.get(vid, 0),
+                "thumbnail_url": _youtube_thumbnail_from_snippet(snippet),
+                "source": "youtube",
+                "youtube_url": f"https://youtube.com/watch?v={vid}",
+            })
+        return tracks
+    except Exception as exc:
+        logger.warning("YouTube Data API search failed, falling back to yt-dlp: %s", exc)
+        return None
+
+
 @app.get("/api/search")
 async def search(
     request: Request,
@@ -1356,11 +1438,26 @@ async def search(
 
     asyncio.create_task(_log_search(q, source))
 
-    cache_key = f"{source}:{limit}:{q}"
+    cache_key = f"{source}:{limit}:{q.strip().lower()}"
     cached = _cache_get(cache_key)
     if cached is not None:
         logger.info("Cache hit for query %r", q)
         return cached
+
+    # Fast path: search with the account's own YouTube Data API key — near-instant
+    # and, once cached, quota-cheap (a query spends quota at most once per cache
+    # window). Any miss — no key set, quota exhausted (cooldown), or an API error —
+    # silently falls through to the yt-dlp scrape below, so search never breaks.
+    if source == "youtube":
+        user_id = _account_token_user_id(request)
+        if user_id:
+            api_key = await _youtube_api_key_for_user(user_id)
+            if api_key and not _youtube_quota_is_cooling_down(api_key):
+                api_tracks = await asyncio.to_thread(_youtube_search_via_api_sync, q, limit, api_key)
+                if api_tracks is not None:
+                    logger.info("Search via YouTube Data API: %d result(s) for %r", len(api_tracks), q)
+                    _cache_set(cache_key, api_tracks)
+                    return api_tracks
 
     prefix = "ytsearch" if source == "youtube" else "scsearch"
     search_url = f"{prefix}{limit}:{q}"
