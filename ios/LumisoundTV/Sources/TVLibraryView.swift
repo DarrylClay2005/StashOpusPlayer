@@ -57,7 +57,7 @@ struct TVLibraryView: View {
             .clipped()
 
             Text(track.title.isEmpty ? track.filename : track.title)
-                .font(.headline).lineLimit(1)
+                .font(.headline).lineLimit(2, reservesSpace: true)
             Text(track.artist.isEmpty ? "Unknown Artist" : track.artist)
                 .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
         }

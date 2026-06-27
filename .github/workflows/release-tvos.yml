@@ -70,6 +70,26 @@ jobs:
           fi
           echo "APP_PATH=$APP" >> "$GITHUB_ENV"
 
+      # Unsigned archives don't run actool for the app icon, so compile the
+      # tvOS Brand Assets (App Icon + Top Shelf) into the .app manually — without
+      # this the app shows the blank placeholder icon on the Home screen.
+      - name: Compile Brand Assets (actool)
+        working-directory: ios
+        run: |
+          XCASSETS="LumisoundTV/Resources/Assets.xcassets"
+          xcrun actool \
+            --output-format human-readable-text \
+            --notices --warnings \
+            --platform appletvos \
+            --minimum-deployment-target 16.0 \
+            --target-device tv \
+            --app-icon "App Icon & Top Shelf Image" \
+            --output-partial-info-plist /tmp/tvassets.plist \
+            --compress-pngs \
+            --compile "$APP_PATH" \
+            "$XCASSETS"
+          echo "Assets.car: $(du -sh "$APP_PATH/Assets.car" 2>/dev/null || echo MISSING)"
+
       - name: Package IPA (unsigned)
         id: ipa
         working-directory: ios

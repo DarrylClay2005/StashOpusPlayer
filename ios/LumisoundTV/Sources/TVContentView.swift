@@ -97,7 +97,7 @@ struct TVTrackCard: View {
             .frame(width: 280, height: 158)
             .clipped()
 
-            Text(track.title).font(.headline).lineLimit(1)
+            Text(track.title).font(.headline).lineLimit(2, reservesSpace: true)
             Text(track.artist.isEmpty ? "Unknown Artist" : track.artist)
                 .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
         }

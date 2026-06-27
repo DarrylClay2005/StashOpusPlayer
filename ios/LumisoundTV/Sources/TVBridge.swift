@@ -116,6 +116,11 @@ final class TVBridgeClient: ObservableObject {
         do {
             var req = URLRequest(url: url)
             req.timeoutInterval = 60  // YouTube extraction routinely takes 20-35s
+            // Lets the bridge search with this account's YouTube Data API key
+            // (near-instant) instead of the slow yt-dlp scrape.
+            if let accountToken = TVAccount.shared.token {
+                req.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
+            }
             let (data, response) = try await dataWithRetry(req)
             guard activeSearch == q else { return }  // a newer search superseded this one
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
