@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - TVTrack
+// MARK: - TVTrack (search result)
 
 struct TVTrack: Identifiable, Codable, Hashable {
     let id: String
@@ -19,6 +19,41 @@ struct TVTrack: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - UserMusicTrack (per-user cloud library)
+
+struct UserMusicTrack: Identifiable, Codable, Hashable {
+    let id: String
+    let title: String
+    let artist: String
+    let album: String
+    let duration: Double
+    let hasArtwork: Bool
+    let serverPath: String
+    let filename: String
+    let ext: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, artist, album, duration, filename, ext
+        case hasArtwork = "has_artwork"
+        case serverPath = "server_path"
+    }
+}
+
+// MARK: - TVPlayable (unified playback item)
+//
+// Both search results and per-user library tracks reduce to this so the player
+// handles them uniformly. `authToken`, when set, is sent as a Bearer header for
+// the stream + artwork (per-user library requires auth; search streams don't).
+
+struct TVPlayable: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let artist: String
+    let streamURL: URL
+    let artworkURL: URL?
+    let authToken: String?
+}
+
 // MARK: - TVBridgeClient
 
 @MainActor
@@ -28,15 +63,24 @@ final class TVBridgeClient: ObservableObject {
     /// The same public bridge the iOS app uses by default.
     let baseURL = "https://lumisound-bridge.xenusanimations.studio"
 
+    // Search
     @Published var results: [TVTrack] = []
     @Published var isSearching = false
-    @Published var errorText: String?
+    @Published var searchError: String?
+
+    // Per-user library
+    @Published var library: [UserMusicTrack] = []
+    @Published var isLoadingLibrary = false
+    @Published var libraryError: String?
+    @Published var libraryConfigured = true
+
+    // MARK: Search
 
     func search(_ query: String) async {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
         isSearching = true
-        errorText = nil
+        searchError = nil
         defer { isSearching = false }
 
         guard var comps = URLComponents(string: baseURL + "/api/search") else { return }
@@ -51,18 +95,64 @@ final class TVBridgeClient: ObservableObject {
             req.timeoutInterval = 30
             let (data, response) = try await URLSession.shared.data(for: req)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                errorText = "Search failed. Try again."
+                searchError = "Search failed. Try again."
                 results = []
                 return
             }
             results = try JSONDecoder().decode([TVTrack].self, from: data)
         } catch {
-            errorText = error.localizedDescription
+            searchError = error.localizedDescription
             results = []
         }
     }
 
-    /// The bridge proxy stream URL for a track — AVPlayer streams this directly.
+    // MARK: Per-user library
+
+    func fetchLibrary(token: String, search: String = "") async {
+        isLoadingLibrary = true
+        libraryError = nil
+        defer { isLoadingLibrary = false }
+
+        guard var comps = URLComponents(string: baseURL + "/user/music") else { return }
+        comps.queryItems = [URLQueryItem(name: "limit", value: "100000")]
+        let s = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !s.isEmpty { comps.queryItems?.append(URLQueryItem(name: "search", value: s)) }
+        guard let url = comps.url else { return }
+
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 90  // cold ffprobe pass on the server can be slow
+
+        struct Response: Decodable {
+            let tracks: [UserMusicTrack]
+            let total: Int
+            let configured: Bool
+        }
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                libraryError = http.statusCode == 401
+                    ? "Your session expired. Please log in again."
+                    : "Library error (HTTP \(http.statusCode))."
+                return
+            }
+            let decoded = try JSONDecoder().decode(Response.self, from: data)
+            libraryConfigured = decoded.configured
+            if !decoded.configured {
+                libraryError = "User music storage is not configured on the server."
+                library = []
+                return
+            }
+            library = decoded.tracks
+        } catch {
+            libraryError = error.localizedDescription
+            library = []
+        }
+    }
+
+    // MARK: URL builders
+
+    /// Bridge proxy stream URL for a search result — AVPlayer streams this directly.
     func streamURL(for track: TVTrack) -> URL? {
         guard var comps = URLComponents(string: baseURL + "/api/stream/proxy") else { return nil }
         comps.queryItems = [
@@ -74,5 +164,43 @@ final class TVBridgeClient: ObservableObject {
             comps.queryItems?.append(URLQueryItem(name: "url", value: track.youtubeURL))
         }
         return comps.url
+    }
+
+    private func encodedPath(_ path: String) -> String? {
+        path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+    }
+
+    func userMusicStreamURL(for track: UserMusicTrack) -> URL? {
+        guard let p = encodedPath(track.serverPath) else { return nil }
+        return URL(string: "\(baseURL)/user/music/stream?path=\(p)")
+    }
+
+    func userMusicArtworkURL(for track: UserMusicTrack) -> URL? {
+        guard track.hasArtwork, let p = encodedPath(track.serverPath) else { return nil }
+        return URL(string: "\(baseURL)/user/music/artwork?path=\(p)")
+    }
+
+    // MARK: Playable mappers
+
+    func playable(from track: TVTrack) -> TVPlayable? {
+        guard let url = streamURL(for: track) else { return nil }
+        return TVPlayable(
+            id: track.id, title: track.title, artist: track.artist,
+            streamURL: url,
+            artworkURL: URL(string: track.thumbnailURL),
+            authToken: nil
+        )
+    }
+
+    func playable(from track: UserMusicTrack, token: String) -> TVPlayable? {
+        guard let url = userMusicStreamURL(for: track) else { return nil }
+        return TVPlayable(
+            id: track.id,
+            title: track.title.isEmpty ? track.filename : track.title,
+            artist: track.artist,
+            streamURL: url,
+            artworkURL: userMusicArtworkURL(for: track),
+            authToken: token
+        )
     }
 }

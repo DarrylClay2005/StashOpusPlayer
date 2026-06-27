@@ -1,88 +1,105 @@
 import SwiftUI
 
-// MARK: - TVContentView (search + results grid)
+// MARK: - Root
 
 struct TVContentView: View {
+    @StateObject private var account = TVAccount.shared
     @StateObject private var client = TVBridgeClient.shared
-    @State private var query = ""
-
-    private let columns = [GridItem(.adaptive(minimum: 280), spacing: 48)]
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                if client.isSearching {
-                    ProgressView().padding(.top, 80)
-                } else if let err = client.errorText {
-                    Text(err).foregroundStyle(.secondary).padding(.top, 80)
-                } else if client.results.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "music.note.tv").font(.system(size: 80)).foregroundStyle(.secondary)
-                        Text("Search for music to play on your Apple TV")
-                            .font(.title3).foregroundStyle(.secondary)
-                    }
-                    .padding(.top, 120)
-                } else {
-                    LazyVGrid(columns: columns, spacing: 48) {
-                        ForEach(client.results) { track in
-                            NavigationLink(value: track) {
-                                TVTrackCard(track: track)
-                            }
-                            .buttonStyle(.card)
-                        }
-                    }
-                    .padding(60)
+        if account.isLoggedIn, let token = account.token {
+            NavigationStack {
+                TabView {
+                    TVLibraryView(client: client, token: token)
+                        .tabItem { Label("My Library", systemImage: "music.note.house") }
+                    TVSearchView(client: client)
+                        .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                    TVAccountView(account: account)
+                        .tabItem { Label(account.user?.name ?? "Account", systemImage: "person.crop.circle") }
+                }
+                .navigationDestination(for: TVPlayContext.self) { ctx in
+                    TVPlayerView(context: ctx)
                 }
             }
-            .navigationTitle("Lumisound")
-            .navigationDestination(for: TVTrack.self) { track in
-                TVPlayerView(track: track, queue: client.results)
-            }
-            .searchable(text: $query, prompt: "Search YouTube")
-            .onSubmit(of: .search) {
-                Task { await client.search(query) }
-            }
+        } else {
+            TVLoginView(account: account)
         }
     }
 }
 
-// MARK: - TVTrackCard
+// MARK: - Search tab
+
+struct TVSearchView: View {
+    @ObservedObject var client: TVBridgeClient
+    @State private var query = ""
+
+    private let columns = [GridItem(.adaptive(minimum: 280), spacing: 48)]
+    private var queue: [TVPlayable] { client.results.compactMap { client.playable(from: $0) } }
+
+    var body: some View {
+        ScrollView {
+            if client.isSearching {
+                ProgressView().padding(.top, 80)
+            } else if let err = client.searchError {
+                Text(err).foregroundStyle(.secondary).padding(.top, 80)
+            } else if client.results.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 70)).foregroundStyle(.secondary)
+                    Text("Search YouTube to play on your Apple TV")
+                        .font(.title3).foregroundStyle(.secondary)
+                }
+                .padding(.top, 120)
+            } else {
+                LazyVGrid(columns: columns, spacing: 48) {
+                    ForEach(client.results) { track in
+                        NavigationLink(value: TVPlayContext(queue: queue, startID: track.id)) {
+                            TVTrackCard(track: track)
+                        }
+                        .buttonStyle(.card)
+                    }
+                }
+                .padding(60)
+            }
+        }
+        .searchable(text: $query, prompt: "Search YouTube")
+        .onSubmit(of: .search) { Task { await client.search(query) } }
+    }
+}
 
 struct TVTrackCard: View {
     let track: TVTrack
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                if let url = URL(string: track.thumbnailURL), !track.thumbnailURL.isEmpty {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image): image.resizable().scaledToFill()
-                        default: placeholder
-                        }
-                    }
-                } else {
-                    placeholder
+            TVAuthImage(url: URL(string: track.thumbnailURL), token: nil) {
+                ZStack {
+                    Color.gray.opacity(0.3)
+                    Image(systemName: "music.note").font(.system(size: 40)).foregroundStyle(.secondary)
                 }
             }
             .frame(width: 280, height: 158)
             .clipped()
 
-            Text(track.title)
-                .font(.headline)
-                .lineLimit(1)
+            Text(track.title).font(.headline).lineLimit(1)
             Text(track.artist.isEmpty ? "Unknown Artist" : track.artist)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
         }
         .frame(width: 280)
     }
+}
 
-    private var placeholder: some View {
-        ZStack {
-            Color.gray.opacity(0.3)
-            Image(systemName: "music.note").font(.system(size: 40)).foregroundStyle(.secondary)
+// MARK: - Account tab
+
+struct TVAccountView: View {
+    @ObservedObject var account: TVAccount
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Image(systemName: "person.crop.circle.fill").font(.system(size: 90)).foregroundStyle(.tint)
+            Text(account.user?.name ?? "Signed in").font(.title)
+            Button("Sign Out", role: .destructive) { account.logout() }
+                .frame(width: 320)
         }
+        .padding(80)
     }
 }

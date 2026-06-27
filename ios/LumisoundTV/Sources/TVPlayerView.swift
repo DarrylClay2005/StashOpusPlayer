@@ -1,22 +1,30 @@
 import SwiftUI
 import AVFoundation
 
+// MARK: - TVPlayContext (queue + where to start)
+
+struct TVPlayContext: Hashable {
+    let queue: [TVPlayable]
+    let startID: String
+}
+
 // MARK: - TVPlayerModel
 
 @MainActor
 final class TVPlayerModel: ObservableObject {
     @Published var isPlaying = false
     @Published var currentIndex = 0
-    @Published private(set) var queue: [TVTrack] = []
+    @Published private(set) var queue: [TVPlayable] = []
 
     let player = AVPlayer()
     private var endObserver: NSObjectProtocol?
 
-    var current: TVTrack? { queue.indices.contains(currentIndex) ? queue[currentIndex] : nil }
+    var current: TVPlayable? { queue.indices.contains(currentIndex) ? queue[currentIndex] : nil }
 
-    func start(track: TVTrack, queue: [TVTrack]) {
-        self.queue = queue
-        self.currentIndex = queue.firstIndex(of: track) ?? 0
+    func start(context: TVPlayContext) {
+        guard queue.isEmpty else { return }  // start once
+        queue = context.queue
+        currentIndex = queue.firstIndex(where: { $0.id == context.startID }) ?? 0
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         try? AVAudioSession.sharedInstance().setActive(true)
         if endObserver == nil {
@@ -30,8 +38,16 @@ final class TVPlayerModel: ObservableObject {
     }
 
     private func loadCurrent() {
-        guard let track = current, let url = TVBridgeClient.shared.streamURL(for: track) else { return }
-        player.replaceCurrentItem(with: AVPlayerItem(url: url))
+        guard let item = current else { return }
+        let asset: AVURLAsset
+        if let token = item.authToken {
+            asset = AVURLAsset(url: item.streamURL, options: [
+                "AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer \(token)"]
+            ])
+        } else {
+            asset = AVURLAsset(url: item.streamURL)
+        }
+        player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
         player.play()
         isPlaying = true
     }
@@ -69,21 +85,23 @@ final class TVPlayerModel: ObservableObject {
 // MARK: - TVPlayerView
 
 struct TVPlayerView: View {
-    let track: TVTrack
-    let queue: [TVTrack]
+    let context: TVPlayContext
     @StateObject private var model = TVPlayerModel()
 
-    private var displayed: TVTrack { model.current ?? track }
+    private var displayed: TVPlayable? {
+        model.current ?? context.queue.first(where: { $0.id == context.startID })
+    }
 
     var body: some View {
         ZStack {
+            Color.black.ignoresSafeArea()
             backdrop
             VStack(spacing: 28) {
                 artwork
                 VStack(spacing: 6) {
-                    Text(displayed.title)
+                    Text(displayed?.title ?? "")
                         .font(.title2).bold().lineLimit(1)
-                    Text(displayed.artist.isEmpty ? "Unknown Artist" : displayed.artist)
+                    Text((displayed?.artist.isEmpty ?? true) ? "Unknown Artist" : (displayed?.artist ?? ""))
                         .font(.title3).foregroundStyle(.secondary).lineLimit(1)
                 }
                 HStack(spacing: 50) {
@@ -94,38 +112,26 @@ struct TVPlayerView: View {
             }
             .padding(80)
         }
-        .onAppear { model.start(track: track, queue: queue) }
+        .onAppear { model.start(context: context) }
         .onDisappear { model.stop() }
     }
 
     @ViewBuilder private var backdrop: some View {
-        if let url = URL(string: displayed.thumbnailURL), !displayed.thumbnailURL.isEmpty {
-            AsyncImage(url: url) { img in img.resizable().scaledToFill() } placeholder: { Color.black }
-                .ignoresSafeArea()
-                .blur(radius: 60)
-                .overlay(Color.black.opacity(0.6).ignoresSafeArea())
-        } else {
-            Color.black.ignoresSafeArea()
-        }
+        TVAuthImage(url: displayed?.artworkURL, token: displayed?.authToken) { Color.black }
+            .ignoresSafeArea()
+            .blur(radius: 60)
+            .overlay(Color.black.opacity(0.6).ignoresSafeArea())
     }
 
     @ViewBuilder private var artwork: some View {
-        Group {
-            if let url = URL(string: displayed.thumbnailURL), !displayed.thumbnailURL.isEmpty {
-                AsyncImage(url: url) { img in img.resizable().scaledToFill() } placeholder: { artworkPlaceholder }
-            } else {
-                artworkPlaceholder
+        TVAuthImage(url: displayed?.artworkURL, token: displayed?.authToken) {
+            ZStack {
+                Color.gray.opacity(0.3)
+                Image(systemName: "music.note").font(.system(size: 80)).foregroundStyle(.secondary)
             }
         }
         .frame(width: 380, height: 380)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-
-    private var artworkPlaceholder: some View {
-        ZStack {
-            Color.gray.opacity(0.3)
-            Image(systemName: "music.note").font(.system(size: 80)).foregroundStyle(.secondary)
-        }
     }
 
     private func controlButton(_ symbol: String, big: Bool = false, action: @escaping () -> Void) -> some View {
