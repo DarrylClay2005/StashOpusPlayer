@@ -644,7 +644,7 @@ final class StreamingService: ObservableObject {
                     return
                 }
             }
-            let tracks = try JSONDecoder().decode([StreamTrack].self, from: data)
+            let tracks = StreamingService.dedupedByID(try JSONDecoder().decode([StreamTrack].self, from: data))
             if tracks.isEmpty {
                 // Primary resolve returned nothing — fall back to the
                 // playlist-to-individual-URLs expander (the export-style
@@ -673,6 +673,16 @@ final class StreamingService: ObservableObject {
                 searchResults = []
             }
         }
+    }
+
+    /// De-duplicates tracks by `id`, keeping the first occurrence. YouTube
+    /// playlists frequently repeat a video; duplicate ids in a SwiftUI
+    /// `ForEach(id:)` corrupt the List and can CRASH the playlist screen — so
+    /// every resolved/expanded playlist is deduped at the source. Also stops the
+    /// same track being queued/downloaded twice by "Download All".
+    static func dedupedByID(_ tracks: [StreamTrack]) -> [StreamTrack] {
+        var seen = Set<String>()
+        return tracks.filter { seen.insert($0.id).inserted }
     }
 
     /// Resolves a playlist URL to its tracks and RETURNS them, without touching
@@ -705,7 +715,7 @@ final class StreamingService: ObservableObject {
                 // Fall back to the individual-URL expander on any non-2xx.
                 return await expandPlaylistTracks(url: url, existingSongs: existingSongs)
             }
-            let tracks = try JSONDecoder().decode([StreamTrack].self, from: data)
+            let tracks = StreamingService.dedupedByID(try JSONDecoder().decode([StreamTrack].self, from: data))
             if tracks.isEmpty {
                 return await expandPlaylistTracks(url: url, existingSongs: existingSongs)
             }
@@ -742,7 +752,7 @@ final class StreamingService: ObservableObject {
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return [] }
             let decoded = try JSONDecoder().decode(ExpandResponse.self, from: data)
             let haveIDs = Set(existingSongs.compactMap { $0.sourceTrackID })
-            return decoded.items.compactMap { item -> StreamTrack? in
+            let items = decoded.items.compactMap { item -> StreamTrack? in
                 guard let id = item.id, !id.isEmpty else { return nil }
                 if haveIDs.contains("\(decoded.source):\(id)") { return nil }
                 return StreamTrack(
@@ -755,6 +765,7 @@ final class StreamingService: ObservableObject {
                     youtubeURL: item.url ?? ""
                 )
             }
+            return StreamingService.dedupedByID(items)
         } catch {
             appWarn("expandPlaylistTracks failed: \(error.localizedDescription)", category: "network")
             return []

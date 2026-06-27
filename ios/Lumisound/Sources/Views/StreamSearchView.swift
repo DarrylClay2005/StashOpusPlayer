@@ -230,6 +230,18 @@ struct StreamSearchView: View {
         .onChange(of: library.allSongs.count) { _ in
             refreshDownloadedStatus()
         }
+        // When a playlist resolves, freshly scan the local library FIRST so
+        // already-owned tracks (including ones in subfolders or restored from a
+        // backup, which a stale `allSongs` would miss) are flagged as downloaded
+        // immediately as the playlist appears — instead of showing as downloadable
+        // until some later scan happens to settle.
+        .onChange(of: streaming.isPlaylistResult) { isPlaylist in
+            guard isPlaylist else { return }
+            Task {
+                await library.scanLocalDocumentsAsync()
+                refreshDownloadedStatus()
+            }
+        }
         // Playback failures (expired CDN URL, YouTube bot-detection, network errors, etc.)
         // surface only on `player.errorMessage`, which previously had no visible home
         // outside Settings → Audio. Mirroring it into the banner here means tapping ▶
