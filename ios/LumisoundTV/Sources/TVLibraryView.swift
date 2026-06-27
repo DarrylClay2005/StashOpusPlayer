@@ -18,7 +18,13 @@ struct TVLibraryView: View {
             if client.isLoadingLibrary {
                 ProgressView("Loading your library…").padding(.top, 100)
             } else if let err = client.libraryError {
-                message(err, systemImage: "exclamationmark.icloud")
+                VStack(spacing: 20) {
+                    Image(systemName: "exclamationmark.icloud").font(.system(size: 70)).foregroundStyle(.secondary)
+                    Text(err).font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Button("Retry") { Task { await client.fetchLibrary(token: token) } }
+                        .frame(width: 260)
+                }
+                .padding(.top, 100)
             } else if client.library.isEmpty {
                 message("Your cloud library is empty.\nAdd music from the iPhone app.",
                         systemImage: "music.note.list")

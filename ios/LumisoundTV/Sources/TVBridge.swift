@@ -74,34 +74,60 @@ final class TVBridgeClient: ObservableObject {
     @Published var libraryError: String?
     @Published var libraryConfigured = true
 
+    /// In-flight search query, so a stale/slower response can't overwrite a newer one.
+    private var activeSearch = ""
+
+    // MARK: Networking
+
+    /// Performs a request, retrying once on a transient failure (timeout / 5xx
+    /// such as a gateway 502). The first call to a slow endpoint (YouTube search,
+    /// or the library's cold ffprobe pass) often times out at the gateway; the
+    /// retry hits the server's warm cache and usually returns quickly.
+    private func dataWithRetry(_ request: URLRequest, retries: Int = 1) async throws -> (Data, URLResponse) {
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode >= 500, retries > 0 {
+                return try await dataWithRetry(request, retries: retries - 1)
+            }
+            return (data, response)
+        } catch {
+            if retries > 0 { return try await dataWithRetry(request, retries: retries - 1) }
+            throw error
+        }
+    }
+
     // MARK: Search
 
     func search(_ query: String) async {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
+        activeSearch = q
         isSearching = true
         searchError = nil
-        defer { isSearching = false }
+        defer { if activeSearch == q { isSearching = false } }
 
         guard var comps = URLComponents(string: baseURL + "/api/search") else { return }
         comps.queryItems = [
             URLQueryItem(name: "q", value: q),
             URLQueryItem(name: "source", value: "youtube"),
-            URLQueryItem(name: "limit", value: "30"),
+            URLQueryItem(name: "limit", value: "25"),
         ]
         guard let url = comps.url else { return }
         do {
             var req = URLRequest(url: url)
-            req.timeoutInterval = 30
-            let (data, response) = try await URLSession.shared.data(for: req)
+            req.timeoutInterval = 60  // YouTube extraction routinely takes 20-35s
+            let (data, response) = try await dataWithRetry(req)
+            guard activeSearch == q else { return }  // a newer search superseded this one
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 searchError = "Search failed. Try again."
                 results = []
                 return
             }
             results = try JSONDecoder().decode([TVTrack].self, from: data)
+            searchError = results.isEmpty ? "No results for \"\(q)\"." : nil
         } catch {
-            searchError = error.localizedDescription
+            guard activeSearch == q else { return }
+            searchError = "Couldn’t reach the music service. Try again."
             results = []
         }
     }
@@ -121,7 +147,7 @@ final class TVBridgeClient: ObservableObject {
 
         var req = URLRequest(url: url)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.timeoutInterval = 90  // cold ffprobe pass on the server can be slow
+        req.timeoutInterval = 120  // cold ffprobe pass on the server can be slow
 
         struct Response: Decodable {
             let tracks: [UserMusicTrack]
@@ -129,11 +155,11 @@ final class TVBridgeClient: ObservableObject {
             let configured: Bool
         }
         do {
-            let (data, response) = try await URLSession.shared.data(for: req)
+            let (data, response) = try await dataWithRetry(req)
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                 libraryError = http.statusCode == 401
                     ? "Your session expired. Please log in again."
-                    : "Library error (HTTP \(http.statusCode))."
+                    : "Library is taking a while to load. Tap Retry."
                 return
             }
             let decoded = try JSONDecoder().decode(Response.self, from: data)
@@ -145,7 +171,7 @@ final class TVBridgeClient: ObservableObject {
             }
             library = decoded.tracks
         } catch {
-            libraryError = error.localizedDescription
+            libraryError = "Couldn’t load your library. Tap Retry."
             library = []
         }
     }

@@ -39,7 +39,8 @@ struct TVSearchView: View {
     var body: some View {
         ScrollView {
             if client.isSearching {
-                ProgressView().padding(.top, 80)
+                ProgressView("Searching… this can take a moment")
+                    .padding(.top, 100)
             } else if let err = client.searchError {
                 Text(err).foregroundStyle(.secondary).padding(.top, 80)
             } else if client.results.isEmpty {
@@ -63,6 +64,22 @@ struct TVSearchView: View {
         }
         .searchable(text: $query, prompt: "Search YouTube")
         .onSubmit(of: .search) { Task { await client.search(query) } }
+        // tvOS search keyboards don't reliably fire `.onSubmit(of: .search)`, so
+        // also search as you type (debounced) — otherwise typing appears to do
+        // nothing.
+        .onChange(of: query) { newValue in
+            let v = newValue
+            Task {
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                guard query == v else { return }  // user kept typing
+                if v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    client.results = []
+                    client.searchError = nil
+                } else {
+                    await client.search(v)
+                }
+            }
+        }
     }
 }
 
