@@ -15,7 +15,10 @@ struct HolographicArtworkView: View {
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     private let sparkles: [(x: CGFloat, y: CGFloat, s: CGFloat)] = (0..<7).map { i in
-        (CGFloat((i &* 89) % 250) + 25, CGFloat((i &* 137) % 250) + 25, CGFloat(5 + (i % 3) * 3))
+        let x = CGFloat((i * 89) % 250 + 25)
+        let y = CGFloat((i * 137) % 250 + 25)
+        let s = CGFloat(5 + (i % 3) * 3)
+        return (x: x, y: y, s: s)
     }
 
     var body: some View {
