@@ -1,111 +1,58 @@
 import SwiftUI
 
-// MARK: - StainedGlassArtworkView
+// MARK: - StainedGlassArtworkView — "Prism Glass"
 //
-// The cover viewed through a stained-glass window: a lattice of tinted glass
-// cells (each a translucent palette wash so the art shows through) separated by
-// dark "lead" lines, with a soft light bloom drifting across the panes while
-// playing. A decorative, architectural look unlike anything else in the set.
-
+// The cover seen through leaded stained glass: a slowly-rotating prismatic light
+// wash over the art, divided by dark leading lines.
 struct StainedGlassArtworkView: View {
     let song: Song?
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
     @State private var palette: ArtworkPalette?
-    @State private var bloom: CGFloat = -1
+    @State private var spin = false
 
-    private let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-    private let cells = 5
+    private let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+    private var tint: Color { palette?.primary ?? AppTheme.dynamicAccent }
 
     var body: some View {
-        artwork(size: 288)
+        StyleCover(song: song, size: 300, cornerRadius: 18)
             .clipShape(shape)
-            // Tinted glass cells + lead lines.
             .overlay(
-                Canvas { context, size in
-                    drawGlass(context: context, size: size)
-                }
+                AngularGradient(
+                    colors: [.red, .orange, .yellow, .green, .blue, .purple, .red],
+                    center: .center,
+                    angle: .degrees(spin ? 360 : 0)
+                )
+                .blendMode(.overlay)
+                .opacity(isPlaying ? 0.55 : 0.35)
                 .clipShape(shape)
             )
-            // Light bloom drifting diagonally across the panes.
-            .overlay(
-                GeometryReader { geo in
-                    LinearGradient(
-                        colors: [.clear, .white.opacity(0.5), .clear],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                    .frame(width: geo.size.width * 0.6)
-                    .rotationEffect(.degrees(35))
-                    .offset(x: bloom * geo.size.width, y: 0)
-                    .blendMode(.plusLighter)
-                }
-                .clipShape(shape)
-            )
-            .overlay(shape.stroke(.black.opacity(0.55), lineWidth: 4))   // frame "came"
-            .shadow(color: .black.opacity(0.4), radius: 18, x: 0, y: 10)
-            .frame(width: 320, height: 320)
-            .onAppear { animate(playing: isPlaying) }
-            .onChange(of: isPlaying) { animate(playing: $0) }
-            .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
-    }
-
-    private func drawGlass(context: GraphicsContext, size: CGSize) {
-        let cw = size.width / CGFloat(cells)
-        let ch = size.height / CGFloat(cells)
-        let primary = palette?.primary ?? AppTheme.dynamicAccent
-        let secondary = palette?.secondary ?? AppTheme.accentSoft
-        var rng = SeededRandom(seed: 0x57A1)
-
-        // Tint each cell a translucent glass color (art shows through).
-        for r in 0..<cells {
-            for c in 0..<cells {
-                let pick = rng.nextDouble()
-                let tint = pick < 0.5 ? primary : secondary
-                let alpha = 0.10 + rng.nextDouble() * 0.16
-                let rect = CGRect(x: CGFloat(c) * cw, y: CGFloat(r) * ch, width: cw, height: ch)
-                context.fill(Path(rect), with: .color(tint.opacity(alpha)))
+            .overlay(leading.clipShape(shape))
+            .overlay(shape.stroke(.black.opacity(0.5), lineWidth: 4))
+            .overlay(shape.stroke(.white.opacity(0.12), lineWidth: 1))
+            .frame(width: 300, height: 300)
+            .shadow(color: tint.opacity(0.45), radius: 26)
+            .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.0))
+            .onAppear {
+                withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) { spin = true }
             }
-        }
-
-        // Dark "lead" lines between cells.
-        let lead = Color.black.opacity(0.55)
-        for i in 1..<cells {
-            var v = Path()
-            v.move(to: CGPoint(x: CGFloat(i) * cw, y: 0))
-            v.addLine(to: CGPoint(x: CGFloat(i) * cw, y: size.height))
-            context.stroke(v, with: .color(lead), lineWidth: 3)
-
-            var h = Path()
-            h.move(to: CGPoint(x: 0, y: CGFloat(i) * ch))
-            h.addLine(to: CGPoint(x: size.width, y: CGFloat(i) * ch))
-            context.stroke(h, with: .color(lead), lineWidth: 3)
-        }
+            .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
+            .animation(.easeInOut(duration: 1.0), value: palette)
     }
 
-    private func animate(playing: Bool) {
-        if playing {
-            withAnimation(.easeInOut(duration: 4.5).repeatForever(autoreverses: false)) { bloom = 1.4 }
-        } else {
-            withAnimation(.easeOut(duration: 0.6)) { bloom = 0 }
-        }
-    }
-
-    @ViewBuilder
-    private func artwork(size: CGFloat) -> some View {
-        if let song {
-            ArtworkThumbnail(song: song, size: size)
-                .environmentObject(library)
-        } else {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(LinearGradient(colors: [AppTheme.surface, AppTheme.elevatedSurface],
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: size, height: size)
-                .overlay {
-                    Image(systemName: "music.note")
-                        .font(.system(size: size * 0.27, weight: .semibold))
-                        .foregroundStyle(AppTheme.dynamicAccent)
-                }
+    private var leading: some View {
+        Canvas { ctx, size in
+            var path = Path()
+            let sx = size.width / 4
+            let sy = size.height / 4
+            var x = sx
+            while x < size.width { path.move(to: CGPoint(x: x, y: 0)); path.addLine(to: CGPoint(x: x, y: size.height)); x += sx }
+            var y = sy
+            while y < size.height { path.move(to: CGPoint(x: 0, y: y)); path.addLine(to: CGPoint(x: size.width, y: y)); y += sy }
+            path.move(to: .zero); path.addLine(to: CGPoint(x: size.width, y: size.height))
+            path.move(to: CGPoint(x: size.width, y: 0)); path.addLine(to: CGPoint(x: 0, y: size.height))
+            ctx.stroke(path, with: .color(.black.opacity(0.4)), lineWidth: 2.5)
         }
     }
 }

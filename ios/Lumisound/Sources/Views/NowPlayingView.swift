@@ -38,172 +38,64 @@ private struct VerticalSlider: View {
     }
 }
 
-// MARK: - VinylDiscView
-
+// MARK: - VinylDiscView ("Spin")
+//
+// A clean, modern record: the cover as a circular label on a glossy black disc
+// with fine grooves and a fixed specular glint, spinning under a palette halo.
 private struct VinylDiscView: View {
     let song: Song?
     let isPlaying: Bool
-    @EnvironmentObject private var library: LibraryManager
 
-    @State private var rotation: Double     = 0
-    @State private var sheenRotation: Double = 0
-    @State private var grooveGlow           = false
-    @State private var tonearmEngaged       = false
+    @EnvironmentObject private var library: LibraryManager
+    @State private var rotation: Double = 0
+    @State private var glow = false
 
     var body: some View {
         ZStack {
-            // ── Spinning disc (art + grooves rotate together) ──
+            Circle()
+                .fill(AppTheme.dynamicAccent)
+                .frame(width: 280, height: 280)
+                .blur(radius: 52)
+                .opacity((glow ? 0.45 : 0.25) * (isPlaying ? 1.0 : 0.55))
+
             ZStack {
                 Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [Color(white: 0.08), Color(white: 0.13), Color(white: 0.06)],
-                            center: .center,
-                            startRadius: 50,
-                            endRadius: 150
-                        )
-                    )
-                    .overlay(vinylGrooves)
-
-                if let song {
-                    ArtworkThumbnail(song: song, size: 130)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(Color(white: 0.15), lineWidth: 2))
-                } else {
+                    .fill(RadialGradient(colors: [Color(white: 0.11), Color(white: 0.04)],
+                                         center: .center, startRadius: 28, endRadius: 150))
+                ForEach(0..<14) { i in
                     Circle()
-                        .fill(AppTheme.dynamicAccent.opacity(0.8))
-                        .frame(width: 130, height: 130)
-                        .overlay(
-                            Image(systemName: "music.note")
-                                .font(.system(size: 40, weight: .semibold))
-                                .foregroundStyle(.white)
-                        )
+                        .stroke(.white.opacity(0.05), lineWidth: 1)
+                        .frame(width: CGFloat(150 + i * 9), height: CGFloat(150 + i * 9))
                 }
-
+                StyleCover(song: song, size: 130, cornerRadius: 65)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color(white: 0.15), lineWidth: 2))
                 Circle()
-                    .fill(Color(white: 0.04))
-                    .frame(width: 18, height: 18)
+                    .fill(Color(white: 0.02))
+                    .frame(width: 14, height: 14)
+                    .overlay(Circle().stroke(.white.opacity(0.1), lineWidth: 1))
             }
+            .frame(width: 290, height: 290)
             .rotationEffect(.degrees(rotation))
 
-            // ── Static light sheen — simulates a fixed overhead light source ──
-            // Does NOT rotate with disc, so it feels like real reflected light.
             Circle()
-                .trim(from: 0.05, to: 0.28)
-                .stroke(
-                    LinearGradient(
-                        colors: [.white.opacity(0.20), .clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ),
-                    lineWidth: 52
-                )
-                .frame(width: 236, height: 236)
-                .rotationEffect(.degrees(sheenRotation))
-                .blendMode(.screen)
-                .allowsHitTesting(false)
-
-            // ── Groove glow ring — accent halo while playing ──
-            Circle()
-                .stroke(
-                    AppTheme.dynamicAccent.opacity(grooveGlow ? 0.18 : 0.0),
-                    lineWidth: 32
-                )
-                .frame(width: 224, height: 224)
-                .blur(radius: 8)
-                .animation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true), value: grooveGlow)
-                .allowsHitTesting(false)
-
-            // ── Tonearm — swings down onto the record while playing, lifts off
-            //    and parks toward the edge when paused (like a real turntable) ──
-            tonearm
-                .rotationEffect(.degrees(tonearmEngaged ? 34 : 16), anchor: UnitPoint(x: 0.5, y: 0.206))
-                .offset(x: 90, y: -33)
-                .animation(.easeInOut(duration: 0.9), value: tonearmEngaged)
+                .trim(from: 0.06, to: 0.22)
+                .stroke(LinearGradient(colors: [.white.opacity(0.25), .clear],
+                                       startPoint: .leading, endPoint: .trailing),
+                        lineWidth: 60)
+                .frame(width: 244, height: 244)
+                .blendMode(.plusLighter)
                 .allowsHitTesting(false)
         }
         .frame(width: 300, height: 300)
-        .shadow(
-            color: AppTheme.dynamicAccent.opacity(grooveGlow ? 0.35 : 0.08),
-            radius: grooveGlow ? 32 : 16,
-            x: 0, y: 10
-        )
-        .animation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true), value: grooveGlow)
-        .onChange(of: isPlaying) { playing in
-            if playing { startAnimations() } else { pauseAnimations() }
-        }
+        .shadow(color: AppTheme.dynamicAccent.opacity(glow ? 0.4 : 0.15), radius: glow ? 30 : 16, y: 10)
         .onAppear {
-            if isPlaying { startAnimations() }
+            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) { rotation = 360 }
+            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) { glow = true }
         }
-    }
-
-    private var vinylGrooves: some View {
-        ZStack {
-            ForEach([0.80, 0.73, 0.66, 0.59, 0.52], id: \.self) { ratio in
-                Circle()
-                    .stroke(Color(white: 0.18).opacity(0.55), lineWidth: 1)
-                    .frame(width: 300 * ratio, height: 300 * ratio)
-            }
-        }
-    }
-
-    /// A turntable tonearm: counterweight, pivot, tube and a headshell with a
-    /// stylus tip. Rotated/anchored at the pivot by the caller.
-    private var tonearm: some View {
-        VStack(spacing: 0) {
-            // Counterweight (above the pivot).
-            Capsule()
-                .fill(LinearGradient(colors: [Color(white: 0.55), Color(white: 0.3)],
-                                     startPoint: .top, endPoint: .bottom))
-                .frame(width: 17, height: 26)
-
-            // Pivot base.
-            Circle()
-                .fill(RadialGradient(colors: [Color(white: 0.6), Color(white: 0.22)],
-                                     center: .center, startRadius: 1, endRadius: 12))
-                .frame(width: 22, height: 22)
-                .overlay(Circle().stroke(Color(white: 0.12), lineWidth: 1))
-
-            // Arm tube.
-            Capsule()
-                .fill(LinearGradient(colors: [Color(white: 0.62), Color(white: 0.34)],
-                                     startPoint: .leading, endPoint: .trailing))
-                .frame(width: 6, height: 116)
-
-            // Headshell + stylus.
-            ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(Color(white: 0.18))
-                    .frame(width: 14, height: 16)
-                Circle()
-                    .fill(AppTheme.dynamicAccent)
-                    .frame(width: 5, height: 5)
-                    .offset(y: 3)
-                    .shadow(color: AppTheme.dynamicAccent.opacity(grooveGlow ? 0.8 : 0.0), radius: 4)
-            }
-        }
-        .frame(width: 22, height: 180)
-        .shadow(color: .black.opacity(0.4), radius: 6, x: 0, y: 4)
-    }
-
-    private func startAnimations() {
-        withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
-            rotation = 360
-        }
-        withAnimation(.linear(duration: 10.0).repeatForever(autoreverses: false)) {
-            sheenRotation = 360
-        }
-        grooveGlow = true
-        tonearmEngaged = true
-    }
-
-    private func pauseAnimations() {
-        withAnimation(.easeOut(duration: 0.5)) { }
-        sheenRotation = 0
-        grooveGlow = false
-        tonearmEngaged = false
     }
 }
+
 
 // MARK: - NowPlayingView
 

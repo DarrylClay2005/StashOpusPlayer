@@ -27,11 +27,11 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .vinylDisc:        return "Vinyl Disc"
+        case .vinylDisc:        return "Spin"
         case .albumArt:         return "Aurora Veil"
         case .polaroid:         return "Spotlight Stage"
         case .floatingCards:    return "Card Fan"
-        case .minimalist:       return "Editorial"
+        case .minimalist:       return "Minimal Mono"
         case .glassmorphism:    return "Frost Panels"
         case .retroCRT:         return "Glitch Wave"
         case .spectrumWaveform: return "Spectrum Bars"
@@ -44,7 +44,7 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .ripple:           return "Halo Pulse"
         case .popArt:           return "Comic Halftone"
         case .starfield:        return "Cosmos"
-        case .stainedGlass:     return "Stained Glass"
+        case .stainedGlass:     return "Prism Glass"
         }
     }
 
@@ -54,7 +54,7 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .albumArt:         return "sparkles"
         case .polaroid:         return "flashlight.on.fill"
         case .floatingCards:    return "square.stack.3d.up.fill"
-        case .minimalist:       return "newspaper"
+        case .minimalist:       return "circle.lefthalf.filled"
         case .glassmorphism:    return "sparkles.rectangle.stack"
         case .retroCRT:         return "waveform.path"
         case .spectrumWaveform: return "chart.bar.fill"
@@ -67,7 +67,7 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .ripple:           return "circle.circle.fill"
         case .popArt:           return "circle.hexagongrid.fill"
         case .starfield:        return "moon.stars.fill"
-        case .stainedGlass:     return "square.grid.3x3.fill"
+        case .stainedGlass:     return "rhombus.fill"
         }
     }
 }
