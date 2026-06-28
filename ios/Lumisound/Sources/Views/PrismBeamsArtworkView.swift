@@ -2,8 +2,8 @@ import SwiftUI
 
 // MARK: - PrismBeamsArtworkView — "Neon Trace"
 //
-// The cover ringed by a glowing neon outline that pulses, over a slowly-rotating
-// conic glow — a nightclub-sign look.
+// The cover wrapped in a bright neon outline with a strong glow, over a rotating
+// conic halo — a vivid nightclub sign.
 struct PrismBeamsArtworkView: View {
     let song: Song?
     let isPlaying: Bool
@@ -19,27 +19,30 @@ struct PrismBeamsArtworkView: View {
 
     var body: some View {
         ZStack {
+            RoundedRectangle(cornerRadius: 34, style: .continuous).fill(Color.black.opacity(0.25))
+
             RoundedRectangle(cornerRadius: 34, style: .continuous)
                 .stroke(
-                    AngularGradient(colors: [tint, tint2, .white, tint], center: .center,
+                    AngularGradient(colors: [tint, tint2, .white, tint2, tint], center: .center,
                                     angle: .degrees(spin ? 360 : 0)),
-                    lineWidth: 36
+                    lineWidth: 42
                 )
-                .blur(radius: 34)
-                .opacity(isPlaying ? 0.9 : 0.5)
+                .blur(radius: 38)
+                .opacity(isPlaying ? 1.0 : 0.6)
                 .frame(width: 300, height: 300)
 
-            StyleCover(song: song, size: 280, cornerRadius: 22)
+            StyleCover(song: song, size: 278, cornerRadius: 22)
                 .clipShape(shape)
-                .overlay(shape.stroke(.white.opacity(0.9), lineWidth: 2))
-                .overlay(shape.stroke(tint, lineWidth: 4).blur(radius: 4))
-                .shadow(color: tint.opacity(glow ? 0.95 : 0.5), radius: glow ? 34 : 16)
+                .overlay(shape.stroke(.white, lineWidth: 2.5))
+                .overlay(shape.stroke(tint, lineWidth: 6).blur(radius: 5))
+                .shadow(color: tint.opacity(glow ? 1.0 : 0.6), radius: glow ? 42 : 24)
+                .shadow(color: tint2.opacity(0.7), radius: 30)
         }
         .frame(width: 320, height: 320)
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 6, speed: 3.0))
         .onAppear {
-            withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) { spin = true }
-            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { glow = true }
+            withAnimation(.linear(duration: 6).repeatForever(autoreverses: false)) { spin = true }
+            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { glow = true }
         }
         .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
         .animation(.easeInOut(duration: 1.0), value: palette)
