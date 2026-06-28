@@ -33,36 +33,56 @@ struct LaunchView: View {
                 // App icon framed by a rotating gradient halo + live equalizer
                 // bars — a musical, animated centerpiece instead of a static icon.
                 ZStack {
+                    // Concentric "sound" rings breathing outward from the icon.
+                    ForEach(0..<3) { i in
+                        Circle()
+                            .stroke(AppTheme.dynamicAccent.opacity(logoBreathing ? 0.08 : 0.4), lineWidth: 2)
+                            .frame(width: CGFloat(150 + i * 46), height: CGFloat(150 + i * 46))
+                            .scaleEffect(logoBreathing ? 1.06 : 0.94)
+                            .opacity(logoOpacity)
+                    }
+
+                    // Soft accent glow.
+                    Circle()
+                        .fill(AppTheme.dynamicAccent)
+                        .frame(width: 160, height: 160)
+                        .blur(radius: 46)
+                        .opacity(logoOpacity * (logoBreathing ? 0.5 : 0.3))
+
+                    // Rotating gradient halo (with a gap so the sweep reads).
                     Circle()
                         .stroke(
                             AngularGradient(
-                                colors: [AppTheme.dynamicAccent, AppTheme.accentSoft, AppTheme.dynamicAccent],
+                                colors: [AppTheme.dynamicAccent, AppTheme.accentSoft, .clear, AppTheme.dynamicAccent],
                                 center: .center
                             ),
                             lineWidth: 3
                         )
-                        .frame(width: 150, height: 150)
+                        .frame(width: 138, height: 138)
                         .blur(radius: 1)
                         .rotationEffect(.degrees(ringRotation))
                         .opacity(logoOpacity)
 
+                    // Glow dot orbiting the icon.
                     Circle()
-                        .fill(AppTheme.dynamicAccent)
-                        .frame(width: 150, height: 150)
-                        .blur(radius: 40)
-                        .opacity(logoOpacity * (logoBreathing ? 0.5 : 0.3))
+                        .fill(.white)
+                        .frame(width: 10, height: 10)
+                        .shadow(color: AppTheme.dynamicAccent, radius: 8)
+                        .offset(y: -69)
+                        .rotationEffect(.degrees(ringRotation))
+                        .opacity(logoOpacity)
 
                     Image("AppIconDisplay")
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 110, height: 110)
+                        .frame(width: 104, height: 104)
                         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                .stroke(.white.opacity(0.15), lineWidth: 1)
+                                .stroke(.white.opacity(0.18), lineWidth: 1)
                         )
-                        .shadow(color: AppTheme.dynamicAccent.opacity(0.5), radius: 24, x: 0, y: 8)
-                        .scaleEffect(logoScale * (logoBreathing ? 1.03 : 1.0))
+                        .shadow(color: AppTheme.dynamicAccent.opacity(0.55), radius: 26, x: 0, y: 8)
+                        .scaleEffect(logoScale * (logoBreathing ? 1.04 : 1.0))
                         .opacity(logoOpacity)
                 }
 
