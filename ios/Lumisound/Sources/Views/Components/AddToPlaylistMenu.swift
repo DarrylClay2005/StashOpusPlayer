@@ -40,9 +40,11 @@ struct SongContextMenuContent: View {
         }
 
         // MARK: Identify Track (AcoustID) — only for imported/downloaded songs
-        // with a local file (applyMetadataCorrection can't touch Apple Music
-        // library tracks, and identification itself needs the local audio).
-        if library.importedSongs.contains(where: { $0.id == song.id }), song.url?.isFileURL == true {
+        // with a local file. `persistentID == nil` is the same "is this an
+        // imported song, not an Apple Music library track" test
+        // `removeImportedSong` documents — Apple Music tracks have a real
+        // persistentID and applyMetadataCorrection can't touch them anyway.
+        if song.persistentID == nil, song.url?.isFileURL == true {
             Button {
                 AcoustIDConfirmCenter.shared.identify(song: song)
             } label: {

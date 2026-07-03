@@ -22,7 +22,12 @@ import AVFoundation
 // (possibly lossless, tens-of-MB) file. The bridge discards the upload
 // immediately after fingerprinting it — nothing is persisted server-side.
 
-actor AcoustIDService {
+// @MainActor (not a plain `actor`, matching AccountService/StreamingService)
+// because `identify(song:)` reads AccountService.shared's MainActor-isolated
+// `isLoggedIn`/`token`/`bridgeURL` synchronously. The async network/export
+// work inside still suspends normally without blocking the UI thread.
+@MainActor
+final class AcoustIDService {
     static let shared = AcoustIDService()
 
     private init() {}
