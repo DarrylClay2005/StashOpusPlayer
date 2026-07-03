@@ -488,6 +488,20 @@ struct YoutubeApiKeyConfig: Decodable {
     }
 }
 
+/// Response shape for GET /user/acoustid-api-key — the user's personal
+/// AcoustID API key (free registration at acoustid.org), used by
+/// AcoustIDService to identify tracks with wrong/missing tags via audio
+/// fingerprint. `apiKey` is masked, same convention as `YoutubeApiKeyConfig`.
+struct AcoustIDApiKeyConfig: Decodable {
+    let configured: Bool
+    let apiKey: String?
+
+    enum CodingKeys: String, CodingKey {
+        case configured
+        case apiKey = "api_key"
+    }
+}
+
 /// One entry from GET /user/notifications.
 struct AppNotification: Decodable, Identifiable {
     let id: String
@@ -2152,6 +2166,52 @@ final class AccountService: ObservableObject {
         guard isLoggedIn else { return false }
         do {
             _ = try await makeRequest("/user/youtube-api-key", method: "DELETE")
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Fetches this account's personal AcoustID API key status (masked).
+    func fetchAcoustIDApiKey() async -> AcoustIDApiKeyConfig? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/user/acoustid-api-key")
+            return try JSONDecoder().decode(AcoustIDApiKeyConfig.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Saves (or replaces) this account's personal AcoustID API key.
+    func setAcoustIDApiKey(_ apiKey: String) async -> Bool {
+        guard isLoggedIn else { return false }
+        struct Body: Encodable { let api_key: String }
+        do {
+            _ = try await makeRequest("/user/acoustid-api-key", method: "PUT", body: Body(api_key: apiKey))
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Removes this account's personal AcoustID API key.
+    func deleteAcoustIDApiKey() async -> Bool {
+        guard isLoggedIn else { return false }
+        do {
+            _ = try await makeRequest("/user/acoustid-api-key", method: "DELETE")
             return true
         } catch let err as AccountError {
             errorMessage = err.message

@@ -39,6 +39,17 @@ struct SongContextMenuContent: View {
             Label("Add to Queue", systemImage: "text.append")
         }
 
+        // MARK: Identify Track (AcoustID) — only for imported/downloaded songs
+        // with a local file (applyMetadataCorrection can't touch Apple Music
+        // library tracks, and identification itself needs the local audio).
+        if library.importedSongs.contains(where: { $0.id == song.id }), song.url?.isFileURL == true {
+            Button {
+                AcoustIDConfirmCenter.shared.identify(song: song)
+            } label: {
+                Label("Identify Track", systemImage: "waveform.badge.magnifyingglass")
+            }
+        }
+
         Divider()
 
         // MARK: Add to Playlist submenu

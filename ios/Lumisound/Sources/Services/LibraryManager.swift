@@ -1168,6 +1168,29 @@ final class LibraryManager: ObservableObject {
         )
     }
 
+    /// Applies a user-confirmed metadata correction (e.g. from AcoustIDService
+    /// identification) to a single imported song. Unlike the periodic
+    /// re-enrichment in `reenrichSongsMissingMetadata` — which only fills
+    /// *empty* fields — this overwrites existing title/artist/album, since
+    /// the user has explicitly reviewed and confirmed the match. Only affects
+    /// the app's own record for the file (`ScanCacheService`'s cached Song),
+    /// not the file's embedded tags.
+    func applyMetadataCorrection(songID: String, title: String?, artist: String?, album: String?) {
+        guard let index = importedSongs.firstIndex(where: { $0.id == songID }) else { return }
+        var song = importedSongs[index]
+        if let title, !title.isEmpty { song.title = title }
+        if let artist, !artist.isEmpty { song.artist = artist }
+        if let album, !album.isEmpty { song.album = album }
+        importedSongs[index] = song
+
+        if let url = song.url, let stamp = ScanCacheService.fileStamp(for: url) {
+            ScanCacheService.shared.store(song: song, for: url, stamp: stamp)
+            ScanCacheService.shared.persist()
+        }
+        rebuildAllSongs()
+        ToastCenter.shared.show("Updated \"\(song.displayName)\"", category: .success, icon: "checkmark.circle")
+    }
+
     /// Debounced rebuild — cancels any pending task and schedules a new one after 0.1 s.
     /// This prevents runaway work when rapid successive mutations occur (e.g. bulk imports).
     ///

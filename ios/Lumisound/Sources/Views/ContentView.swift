@@ -165,6 +165,7 @@ struct ContentView: View {
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: toastCenter.current)
             .allowsHitTesting(false)
         }
+        .acoustIDConfirmSheet()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .fullScreenCover(isPresented: $showCarMode) {
             CarModeView()

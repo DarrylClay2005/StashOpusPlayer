@@ -415,6 +415,13 @@ CREATE TABLE IF NOT EXISTS ios_notifications (
 -- when a user hasn't set their own.
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS youtube_api_key VARCHAR(128) NULL;
 
+-- Per-user AcoustID API key (free registration at acoustid.org), used by
+-- POST /api/fingerprint/identify to look up a Chromaprint fingerprint against
+-- the AcoustID/MusicBrainz database for tracks with wrong or missing tags.
+-- No server-wide fallback -- AcoustID client keys identify an application
+-- registration, not a shared service credential, so each user brings their own.
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS acoustid_api_key VARCHAR(128) NULL;
+
 -- Per-user yt-dlp cookies (Netscape cookies.txt format), used to authenticate
 -- yt-dlp extraction (search/stream/resolve/download) as that user's YouTube
 -- session — required for age-restricted content and avoids YouTube's

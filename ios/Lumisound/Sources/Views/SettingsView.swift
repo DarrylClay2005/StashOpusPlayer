@@ -52,6 +52,12 @@ struct SettingsView: View {
     /// relaunches until a new/working key is saved or validates again.
     @AppStorage("youtube_api_key_quota_exceeded") private var youtubeKeyQuotaExceeded = false
 
+    // MARK: AcoustID API Key State
+
+    @State private var acoustIDKeyConfig: AcoustIDApiKeyConfig?
+    @State private var acoustIDKeyInput = ""
+    @State private var isSavingAcoustIDKey = false
+
     // MARK: Body
 
     /// Top-level Settings categories — replaces the old single cluttered
@@ -125,6 +131,7 @@ struct SettingsView: View {
             .task {
                 await refreshYouTubeKeyStatus()
                 startYouTubeExposureMonitor()
+                await refreshAcoustIDKeyStatus()
             }
             .onDisappear {
                 youtubeExposureTimer?.invalidate()
@@ -806,6 +813,7 @@ struct SettingsView: View {
             // key is stored server-side on the user's account.
             if account.isLoggedIn {
                 youtubeAPIKeySection
+                acoustIDAPIKeySection
             }
 
         } header: {
@@ -1064,6 +1072,89 @@ struct SettingsView: View {
         }
 
         Text("Used by Lumisound's bridge to enumerate full YouTube playlists. Falls back to a shared server key if unset. Never displayed in full once saved.")
+            .font(.caption)
+            .foregroundStyle(AppTheme.textSecondary)
+            .padding(.leading, 16)
+    }
+
+    // MARK: — AcoustID API Key Rows
+
+    private var acoustIDKeyDisplay: String {
+        guard let config = acoustIDKeyConfig, config.configured, let masked = config.apiKey else {
+            return "Not set"
+        }
+        return masked
+    }
+
+    @ViewBuilder
+    private var acoustIDAPIKeySection: some View {
+        HStack {
+            Label("AcoustID API Key", systemImage: "waveform.badge.magnifyingglass")
+                .foregroundStyle(AppTheme.textPrimary)
+            Spacer()
+            Text(acoustIDKeyDisplay)
+                .font(AppTheme.monoFont(size: 13))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+
+        if acoustIDKeyConfig?.configured != true {
+            HStack {
+                Label("Set Key", systemImage: "pencil")
+                    .foregroundStyle(AppTheme.textPrimary)
+                SecureField("Paste AcoustID API key", text: $acoustIDKeyInput)
+                    .keyboardType(.asciiCapable)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            if !acoustIDKeyInput.isEmpty {
+                Button {
+                    Task {
+                        isSavingAcoustIDKey = true
+                        let ok = await account.setAcoustIDApiKey(acoustIDKeyInput)
+                        isSavingAcoustIDKey = false
+                        if ok {
+                            acoustIDKeyInput = ""
+                            ToastCenter.shared.show("AcoustID API key saved", category: .success, icon: "waveform.badge.magnifyingglass")
+                            await refreshAcoustIDKeyStatus()
+                        } else {
+                            ToastCenter.shared.show("Couldn't save key — check connection", category: .error, icon: "exclamationmark.triangle")
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Label("Save Key", systemImage: "checkmark.circle")
+                            .foregroundStyle(AppTheme.dynamicAccent)
+                        Spacer()
+                        if isSavingAcoustIDKey {
+                            ProgressView().tint(AppTheme.dynamicAccent)
+                        }
+                    }
+                }
+                .disabled(isSavingAcoustIDKey)
+            }
+        }
+
+        if acoustIDKeyConfig?.configured == true {
+            Button(role: .destructive) {
+                Task {
+                    let ok = await account.deleteAcoustIDApiKey()
+                    if ok {
+                        ToastCenter.shared.show("AcoustID API key removed", category: .info, icon: "waveform.badge.magnifyingglass")
+                        await refreshAcoustIDKeyStatus()
+                    } else {
+                        ToastCenter.shared.show("Couldn't remove key — check connection", category: .error, icon: "exclamationmark.triangle")
+                    }
+                }
+            } label: {
+                Label("Remove Key", systemImage: "trash")
+                    .foregroundStyle(AppTheme.error)
+            }
+        }
+
+        Text("Enables \"Identify Track\" (song menu → Identify Track), which fingerprints a track's audio and looks it up against the AcoustID/MusicBrainz database — fixes wrong title/artist tags that a text search can't find. Free key at acoustid.org. No shared fallback key; each user brings their own.")
             .font(.caption)
             .foregroundStyle(AppTheme.textSecondary)
             .padding(.leading, 16)
@@ -1336,6 +1427,14 @@ struct SettingsView: View {
     private func refreshYouTubeKeyStatus() async {
         guard account.isLoggedIn else { return }
         youtubeKeyConfig = await account.fetchYoutubeApiKey()
+    }
+
+    // MARK: — AcoustID API Key Helpers
+
+    /// Refreshes the masked AcoustID API key status from the bridge.
+    private func refreshAcoustIDKeyStatus() async {
+        guard account.isLoggedIn else { return }
+        acoustIDKeyConfig = await account.fetchAcoustIDApiKey()
     }
 
     /// Starts a 5-minute repeating timer that checks whether the user's

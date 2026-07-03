@@ -1310,6 +1310,10 @@ class YoutubeApiKeyRequest(BaseModel):
     api_key: Optional[str] = None
 
 
+class AcoustIDApiKeyRequest(BaseModel):
+    api_key: Optional[str] = None
+
+
 class DiscordRpcConfigRequest(BaseModel):
     discord_client_id: str
     large_image: Optional[str] = None
@@ -3544,6 +3548,141 @@ async def acoustic_duplicates(user: dict = Depends(get_current_user)):
             groups.append([{"file": prints[k][0].name,
                             "duration": round(prints[k][1], 1)} for k in members])
     return {"scanned": len(prints), "duplicate_groups": groups}
+
+
+# ---------------------------------------------------------------------------
+# AcoustID fingerprint identification (Feature: acoustid-fingerprint-identify)
+#
+# Separate from _chromaprint above: that helper emits the RAW integer-array
+# fingerprint fpcalc uses for local bit-similarity comparison between two
+# files already on disk. AcoustID's web API instead wants fpcalc's default
+# COMPRESSED (base64-ish string) fingerprint format -- a different fpcalc
+# invocation, not just a different encoding of the same call's output.
+# ---------------------------------------------------------------------------
+
+_ACOUSTID_LOOKUP_URL = "https://api.acoustid.org/v2/lookup"
+
+
+async def _chromaprint_compressed(path: str) -> tuple[float, Optional[str]]:
+    """(duration, compressed Chromaprint fingerprint) via fpcalc, for AcoustID
+    lookup. Not cached -- unlike _chromaprint (used for a bulk duplicate scan),
+    this only ever runs once per user-initiated "Identify Track" tap."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "fpcalc", "-json", "-length", "120", path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+        if proc.returncode != 0:
+            logger.warning("fpcalc failed for %s: %s", path, err.decode(errors="replace")[-300:])
+            return 0.0, None
+        data = json.loads(out)
+        return float(data.get("duration", 0)), data.get("fingerprint")
+    except Exception as exc:
+        logger.warning("fpcalc failed for %s: %s", path, exc)
+        return 0.0, None
+
+
+def _acoustid_lookup_sync(api_key: str, duration: float, fingerprint: str) -> tuple[int, dict]:
+    """Calls AcoustID's lookup API. Synchronous (urllib) -- run via
+    asyncio.to_thread, mirrors _youtube_data_api_get_raw's error handling."""
+    query = urlencode({
+        "client": api_key,
+        "duration": str(int(round(duration))),
+        "fingerprint": fingerprint,
+        "meta": "recordings+releasegroups+compress",
+    })
+    req = urllib.request.Request(f"{_ACOUSTID_LOOKUP_URL}?{query}")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        body = exc.read()
+        try:
+            return exc.code, json.loads(body)
+        except (ValueError, json.JSONDecodeError):
+            return exc.code, {}
+
+
+def _best_acoustid_match(data: dict) -> Optional[dict]:
+    """Picks the highest-scoring result with a usable recording title from an
+    AcoustID lookup response body. Returns None if nothing usable came back."""
+    results = sorted(data.get("results") or [], key=lambda r: r.get("score", 0), reverse=True)
+    for result in results:
+        recordings = result.get("recordings") or []
+        if not recordings:
+            continue
+        recording = recordings[0]
+        title = recording.get("title")
+        if not title:
+            continue
+        artists = recording.get("artists") or []
+        release_groups = recording.get("releasegroups") or []
+        return {
+            "title": title,
+            "artist": artists[0].get("name") if artists else None,
+            "album": release_groups[0].get("title") if release_groups else None,
+            "score": result.get("score", 0),
+        }
+    return None
+
+
+@app.post("/api/fingerprint/identify")
+async def fingerprint_identify(
+    request: Request,
+    ext: str = Query("m4a", description="Source file extension, e.g. mp3/m4a/flac -- helps ffmpeg's format detection"),
+    payload: dict = Depends(get_current_user),
+):
+    """Identifies an uploaded audio clip via Chromaprint fingerprint + the
+    AcoustID/MusicBrainz database -- for fixing tracks whose title/artist tags
+    are wrong, which a text-search-based lookup (MetadataFetchService on the
+    client) can't help with since the search query itself would use the wrong
+    tags. The uploaded audio is written to a temp file only long enough to
+    fingerprint it, then deleted immediately -- unlike /user/music/upload,
+    nothing from this endpoint is kept on the server."""
+    user_id = payload["sub"]
+    api_key = await _acoustid_api_key_for_user(user_id)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No AcoustID API key configured. Add one in Settings.")
+
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty file body")
+    if len(body) > 30 * 1024 * 1024:  # 30 MB -- only ~2 min of audio is needed to fingerprint
+        raise HTTPException(status_code=413, detail="File too large (max 30 MB)")
+
+    # Sanitize: `ext` only ever needs to pick the right ffmpeg demuxer hint,
+    # so constrain it to the same allowlist /user/music/upload uses rather
+    # than trusting client input into a filename suffix.
+    ext_clean = ext.lower().lstrip(".")
+    if ext_clean not in {e.lstrip(".") for e in SUPPORTED_AUDIO_EXTS}:
+        ext_clean = "m4a"
+
+    tmp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=f".{ext_clean}", delete=False) as tmp:
+            tmp.write(body)
+            tmp_path = tmp.name
+        duration, fingerprint = await _chromaprint_compressed(tmp_path)
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    if not fingerprint or duration <= 0:
+        raise HTTPException(status_code=422, detail="Could not analyze this file (unsupported format or corrupt audio)")
+
+    status_code, lookup_data = await asyncio.to_thread(_acoustid_lookup_sync, api_key, duration, fingerprint)
+    if status_code != 200:
+        error_msg = (lookup_data.get("error") or {}).get("message", "AcoustID lookup failed")
+        raise HTTPException(status_code=502, detail=error_msg)
+
+    match = _best_acoustid_match(lookup_data)
+    if not match:
+        return {"matched": False}
+    return {"matched": True, **match}
 
 
 # ---------------------------------------------------------------------------
@@ -8304,6 +8443,72 @@ async def delete_youtube_api_key(payload: dict = Depends(get_current_user)):
                 "UPDATE ios_user_settings SET youtube_api_key = NULL WHERE user_id = %s",
                 (user_id,),
             )
+
+
+# ---------------------------------------------------------------------------
+# Per-user AcoustID API key (Feature: acoustid-fingerprint-identify)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/acoustid-api-key")
+async def get_acoustid_api_key(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT acoustid_api_key FROM ios_user_settings WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+
+    key = row[0] if row else None
+    if not key:
+        return {"configured": False, "api_key": None}
+
+    masked = key[:6] + "..." + key[-4:] if len(key) > 10 else "..."
+    return {"configured": True, "api_key": masked}
+
+
+@app.put("/user/acoustid-api-key")
+async def set_acoustid_api_key(body: AcoustIDApiKeyRequest, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    if not body.api_key:
+        raise HTTPException(status_code=400, detail="api_key is required")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_user_settings (user_id, acoustid_api_key) VALUES (%s, %s) "
+                "ON DUPLICATE KEY UPDATE acoustid_api_key = VALUES(acoustid_api_key)",
+                (user_id, body.api_key),
+            )
+    return {"status": "ok"}
+
+
+@app.delete("/user/acoustid-api-key", status_code=204)
+async def delete_acoustid_api_key(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_user_settings SET acoustid_api_key = NULL WHERE user_id = %s",
+                (user_id,),
+            )
+
+
+async def _acoustid_api_key_for_user(user_id: str) -> Optional[str]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT acoustid_api_key FROM ios_user_settings WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+    return row[0] if row and row[0] else None
 
 
 @app.post("/youtube/validate-key")
