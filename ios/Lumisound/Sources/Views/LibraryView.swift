@@ -27,6 +27,67 @@ private enum LibraryTab: String, CaseIterable {
     }
 }
 
+// MARK: - Sort enum (Songs tab)
+
+private enum LibrarySortOption: String, CaseIterable, Identifiable {
+    case titleAZ          = "title_az"
+    case artistAZ         = "artist_az"
+    case dateAddedNewest  = "date_added_newest"
+    case dateAddedOldest  = "date_added_oldest"
+    case durationLongest  = "duration_longest"
+    case durationShortest = "duration_shortest"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .titleAZ:          return "Title (A–Z)"
+        case .artistAZ:         return "Artist (A–Z)"
+        case .dateAddedNewest:  return "Date Added (Newest)"
+        case .dateAddedOldest:  return "Date Added (Oldest)"
+        case .durationLongest:  return "Duration (Longest)"
+        case .durationShortest: return "Duration (Shortest)"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .titleAZ, .artistAZ:            return "textformat"
+        case .dateAddedNewest, .dateAddedOldest: return "calendar"
+        case .durationLongest, .durationShortest: return "clock"
+        }
+    }
+
+    /// Applies this sort to a song list. `.dateAdded*` falls back to the local
+    /// file's creation/modification date (there's no persisted "date added"
+    /// field on `Song`) — streamed/cloud-only songs with no local file URL
+    /// sort to the end under `.distantPast`.
+    func apply(to songs: [Song]) -> [Song] {
+        switch self {
+        case .titleAZ:
+            return songs.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        case .artistAZ:
+            return songs.sorted { $0.artistName.localizedCaseInsensitiveCompare($1.artistName) == .orderedAscending }
+        case .dateAddedNewest:
+            return songs.sorted { Self.fileDate($0) > Self.fileDate($1) }
+        case .dateAddedOldest:
+            return songs.sorted { Self.fileDate($0) < Self.fileDate($1) }
+        case .durationLongest:
+            return songs.sorted { $0.duration > $1.duration }
+        case .durationShortest:
+            return songs.sorted { $0.duration < $1.duration }
+        }
+    }
+
+    private static func fileDate(_ song: Song) -> Date {
+        guard let url = song.url, url.isFileURL,
+              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let date = (attrs[.creationDate] as? Date) ?? (attrs[.modificationDate] as? Date)
+        else { return .distantPast }
+        return date
+    }
+}
+
 // MARK: - LibraryView
 
 struct LibraryView: View {
@@ -38,6 +99,11 @@ struct LibraryView: View {
     @EnvironmentObject private var streaming: StreamingService
 
     @AppStorage("autoCloudBackup") private var autoCloudBackup: Bool = false
+    @AppStorage("library_sort_option") private var sortOptionRaw: String = LibrarySortOption.titleAZ.rawValue
+    // Mirrors SongsTab's own @AppStorage of the same key — multi-select is
+    // only supported in the single-column List layout (see SongsTab), so the
+    // toolbar's Select entry point is gated on it too.
+    @AppStorage("library_songs_columns") private var songColumns: Int = 1
 
     @State private var selectedTab: LibraryTab = .songs
     @State private var searchText: String = ""
@@ -46,16 +112,24 @@ struct LibraryView: View {
     @State private var showOpenSharedPlaylist = false
     @State private var backupSyncTask: Task<Void, Never>?
 
+    // Songs tab multi-select
+    @State private var isSelecting = false
+    @State private var selectedSongIDs: Set<String> = []
+
+    private var sortOption: LibrarySortOption {
+        LibrarySortOption(rawValue: sortOptionRaw) ?? .titleAZ
+    }
+
     // MARK: Filtered songs for Songs tab (uses debounced search)
 
     private var filteredSongs: [Song] {
         let query = debouncedSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return library.allSongs }
-        return library.allSongs.filter { song in
+        let base = query.isEmpty ? library.allSongs : library.allSongs.filter { song in
             song.displayName.localizedCaseInsensitiveContains(query)
                 || song.artistName.localizedCaseInsensitiveContains(query)
                 || song.albumName.localizedCaseInsensitiveContains(query)
         }
+        return sortOption.apply(to: base)
     }
 
     // MARK: Body
@@ -106,7 +180,30 @@ struct LibraryView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar { toolbarItems }
-            .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
+            .safeAreaInset(edge: .bottom) {
+                if isSelecting {
+                    LibrarySelectionActionBar(
+                        selectedCount: selectedSongIDs.count,
+                        onAddToPlaylist: { playlistID in
+                            library.addSongs(ids: selectedSongIDs, toPlaylistID: playlistID)
+                            isSelecting = false
+                            selectedSongIDs.removeAll()
+                        },
+                        onDelete: {
+                            library.removeImportedSongs(ids: selectedSongIDs)
+                            isSelecting = false
+                            selectedSongIDs.removeAll()
+                        },
+                        onCancel: {
+                            isSelecting = false
+                            selectedSongIDs.removeAll()
+                        }
+                    )
+                    .environmentObject(library)
+                } else {
+                    MiniPlayerBar()
+                }
+            }
             .sheet(isPresented: $showAddMusic) {
                 AddMusicView()
                     .environmentObject(library)
@@ -154,6 +251,16 @@ struct LibraryView: View {
             .onChange(of: library.allSongs.count) { _ in
                 scheduleBackupSync()
             }
+            .onChange(of: selectedTab) { _ in
+                isSelecting = false
+                selectedSongIDs.removeAll()
+            }
+            .onChange(of: songColumns) { _ in
+                // Multi-select only applies to the single-column List layout —
+                // drop out of it if the user switches to grid mid-selection.
+                isSelecting = false
+                selectedSongIDs.removeAll()
+            }
         }
     }
 
@@ -176,7 +283,13 @@ struct LibraryView: View {
     private var tabContent: some View {
         switch selectedTab {
         case .songs:
-            SongsTab(songs: filteredSongs, searchText: $searchText, showAddMusic: $showAddMusic)
+            SongsTab(
+                songs: filteredSongs,
+                searchText: $searchText,
+                showAddMusic: $showAddMusic,
+                isSelecting: $isSelecting,
+                selectedSongIDs: $selectedSongIDs
+            )
         case .artists:
             ArtistsTab()
         case .albums:
@@ -200,6 +313,38 @@ struct LibraryView: View {
     @ToolbarContentBuilder
     private var toolbarItems: some ToolbarContent {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
+            if selectedTab == .songs && !filteredSongs.isEmpty {
+                Menu {
+                    ForEach(LibrarySortOption.allCases) { option in
+                        Button {
+                            sortOptionRaw = option.rawValue
+                        } label: {
+                            Label(option.label, systemImage: option.icon)
+                            if sortOption == option {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                }
+                .tint(AppTheme.dynamicAccent)
+
+                // Multi-select is only wired up for the single-column List
+                // layout (see SongsTab) — grid-cell taps still just play.
+                if songColumns == 1 {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            isSelecting.toggle()
+                            if !isSelecting { selectedSongIDs.removeAll() }
+                        }
+                    } label: {
+                        Text(isSelecting ? "Done" : "Select")
+                    }
+                    .tint(AppTheme.dynamicAccent)
+                }
+            }
+
             Button {
                 showOpenSharedPlaylist = true
             } label: {
@@ -242,6 +387,74 @@ struct LibraryView: View {
                 Image(systemName: "plus")
             }
             .tint(AppTheme.dynamicAccent)
+        }
+    }
+}
+
+// MARK: - Songs multi-select bulk action bar
+
+private struct LibrarySelectionActionBar: View {
+    let selectedCount: Int
+    let onAddToPlaylist: (UUID) -> Void
+    let onDelete: () -> Void
+    let onCancel: () -> Void
+
+    @EnvironmentObject private var library: LibraryManager
+    @State private var showDeleteConfirm = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button("Cancel", action: onCancel)
+                .foregroundStyle(AppTheme.textSecondary)
+
+            Spacer()
+
+            Text("\(selectedCount) selected")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Spacer()
+
+            Menu {
+                if library.playlists.isEmpty {
+                    Text("No playlists yet")
+                } else {
+                    ForEach(library.playlists) { playlist in
+                        Button {
+                            onAddToPlaylist(playlist.id)
+                        } label: {
+                            Label(playlist.name, systemImage: "music.note.list")
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "plus.rectangle.on.folder")
+                    .font(.system(size: 18, weight: .medium))
+            }
+            .disabled(selectedCount == 0)
+
+            Button(role: .destructive) {
+                showDeleteConfirm = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 18, weight: .medium))
+            }
+            .disabled(selectedCount == 0)
+        }
+        .foregroundStyle(AppTheme.dynamicAccent)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+        .overlay(Divider(), alignment: .top)
+        .confirmationDialog(
+            "Delete \(selectedCount) song\(selectedCount == 1 ? "" : "s")?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete \(selectedCount) Song\(selectedCount == 1 ? "" : "s")", role: .destructive, action: onDelete)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Songs from your Apple Music library can't be deleted this way and will be skipped.")
         }
     }
 }
@@ -302,8 +515,18 @@ private struct SongsTab: View {
     let songs: [Song]
     @Binding var searchText: String
     @Binding var showAddMusic: Bool
+    @Binding var isSelecting: Bool
+    @Binding var selectedSongIDs: Set<String>
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var library: LibraryManager
+
+    private func toggleSelection(_ song: Song) {
+        if selectedSongIDs.contains(song.id) {
+            selectedSongIDs.remove(song.id)
+        } else {
+            selectedSongIDs.insert(song.id)
+        }
+    }
 
     @AppStorage("library_songs_columns") private var songColumns: Int = 1
     /// Tracks whether the entrance animation has already fired for the current song list.
@@ -371,9 +594,26 @@ private struct SongsTab: View {
                         } else {
                             ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                                 Button {
-                                    player.play(song: song, in: songs)
+                                    if isSelecting {
+                                        toggleSelection(song)
+                                    } else {
+                                        player.play(song: song, in: songs)
+                                    }
                                 } label: {
-                                    SongRow(song: song, isCurrent: player.currentSong?.id == song.id)
+                                    HStack(spacing: 12) {
+                                        if isSelecting {
+                                            Image(systemName: selectedSongIDs.contains(song.id) ? "checkmark.circle.fill" : "circle")
+                                                .font(.system(size: 20))
+                                                .foregroundStyle(
+                                                    selectedSongIDs.contains(song.id)
+                                                        ? AppTheme.dynamicAccent
+                                                        : AppTheme.textSecondary
+                                                )
+                                                .transition(.scale.combined(with: .opacity))
+                                        }
+                                        SongRow(song: song, isCurrent: player.currentSong?.id == song.id)
+                                    }
+                                    .animation(.easeInOut(duration: 0.15), value: isSelecting)
                                 }
                                 .buttonStyle(.plain)
                                 .listRowBackground(AppTheme.surface.opacity(0.5))

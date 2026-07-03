@@ -984,6 +984,25 @@ final class LibraryManager: ObservableObject {
         ToastCenter.shared.show("Added to \"\(playlists[index].name)\"", category: .success, icon: "text.badge.plus")
     }
 
+    /// Adds multiple songs to a playlist in a single persistence write/toast —
+    /// used by Library's multi-select "Add to Playlist" bulk action instead of
+    /// looping `addSong(id:toPlaylistID:)` (which would save+toast per item).
+    /// Songs already in the playlist are skipped.
+    func addSongs(ids songIDs: Set<String>, toPlaylistID playlistID: UUID) {
+        guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
+        let toAdd = songIDs.subtracting(playlists[index].songIDs)
+        guard !toAdd.isEmpty else {
+            ToastCenter.shared.show("Already in \"\(playlists[index].name)\"", category: .info, icon: "music.note.list")
+            return
+        }
+        playlists[index].songIDs.append(contentsOf: toAdd)
+        persistence.savePlaylists(playlists)
+        ToastCenter.shared.show(
+            "Added \(toAdd.count) song\(toAdd.count == 1 ? "" : "s") to \"\(playlists[index].name)\"",
+            category: .success, icon: "text.badge.plus"
+        )
+    }
+
     func removeSong(id songID: String, fromPlaylistID playlistID: UUID) {
         guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
         playlists[index].songIDs.removeAll { $0 == songID }
@@ -1113,6 +1132,40 @@ final class LibraryManager: ObservableObject {
         persistence.savePlaylists(playlists)
         rebuildAllSongs()
         ToastCenter.shared.show("Deleted \"\(song.displayName)\"", category: .info, icon: "trash")
+    }
+
+    /// Bulk version of `removeImportedSong` for Library's multi-select "Delete"
+    /// action — one rebuild/toast instead of one per song. IDs that aren't in
+    /// `importedSongs` (e.g. Apple Music library tracks, which this can't
+    /// delete) are silently skipped rather than failing the whole batch.
+    func removeImportedSongs(ids songIDs: Set<String>) {
+        let toDelete = importedSongs.filter { songIDs.contains($0.id) }
+        guard !toDelete.isEmpty else { return }
+
+        for song in toDelete {
+            guard let url = song.url else { continue }
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                appWarn("removeImportedSongs: failed to delete file at \(url.path): \(error.localizedDescription)", category: "library")
+            }
+        }
+
+        let deletedIDs = Set(toDelete.map(\.id))
+        importedSongs.removeAll { deletedIDs.contains($0.id) }
+        favoriteSongIDs.subtract(deletedIDs)
+        persistence.saveFavorites(favoriteSongIDs)
+        for index in playlists.indices {
+            playlists[index].songIDs.removeAll { deletedIDs.contains($0) }
+        }
+        persistence.savePlaylists(playlists)
+        rebuildAllSongs()
+        ToastCenter.shared.show(
+            "Deleted \(deletedIDs.count) song\(deletedIDs.count == 1 ? "" : "s")",
+            category: .info, icon: "trash"
+        )
     }
 
     /// Debounced rebuild — cancels any pending task and schedules a new one after 0.1 s.

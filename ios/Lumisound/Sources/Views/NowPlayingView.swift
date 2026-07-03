@@ -113,6 +113,10 @@ struct NowPlayingView: View {
     @State private var artworkScale: CGFloat = 1.0
     @State private var artworkOpacity: Double = 1.0
 
+    // Artwork swipe-to-skip (horizontal drag on the artwork area)
+    @State private var artworkDragOffset: CGFloat = 0
+    @State private var artworkDragScale: CGFloat = 1.0
+
     // Track-change animation ID
     @State private var artworkAnimationID: String = ""
 
@@ -280,14 +284,17 @@ struct NowPlayingView: View {
                     .environmentObject(library)
 
                 artworkDisplay
-                    .scaleEffect(artworkScale)
+                    .scaleEffect(artworkScale * artworkDragScale)
                     .opacity(artworkOpacity)
+                    .offset(x: artworkDragOffset)
                     .animation(.spring(response: 0.4, dampingFraction: 0.65), value: artworkScale)
                     .animation(.easeInOut(duration: 0.2), value: artworkOpacity)
                     .id(artworkAnimationID)
                     .modifier(PulseModifier(isPlaying: player.isPlaying))
             }
             .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .gesture(artworkSwipeGesture)
 
             // ── Style picker (horizontal scroll, 8 chips) ────────────────
             ScrollView(.horizontal, showsIndicators: false) {
@@ -405,6 +412,42 @@ struct NowPlayingView: View {
             StainedGlassArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
         }
+    }
+
+    // MARK: - Artwork swipe-to-skip
+
+    /// Swipe left/right on the artwork to skip to the next/previous track,
+    /// mirroring the forward/backward transport buttons. Requires the drag to
+    /// be clearly horizontal so it doesn't fight a sheet's swipe-to-dismiss.
+    private var artworkSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onChanged { value in
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+                guard abs(horizontal) > abs(vertical) else { return }
+                // Rubber-band: follow the finger but taper past ~120pt so a
+                // long drag doesn't fling the artwork off-screen.
+                artworkDragOffset = horizontal * (abs(horizontal) > 120 ? 0.15 : 0.4)
+                artworkDragScale = 1.0 - min(abs(horizontal) / 800, 0.06)
+            }
+            .onEnded { value in
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+                let isHorizontalSwipe = abs(horizontal) > abs(vertical) * 1.5 && abs(horizontal) > 60
+
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                    artworkDragOffset = 0
+                    artworkDragScale = 1.0
+                }
+
+                guard isHorizontalSwipe else { return }
+                skipHaptic.impactOccurred()
+                if horizontal < 0 {
+                    player.skipToNext()
+                } else {
+                    player.skipToPrevious()
+                }
+            }
     }
 
     // MARK: - Track Info + Favorite
