@@ -183,6 +183,19 @@ final class AudioPlayerManager: ObservableObject {
         return AVAudioUnitEffect(audioComponentDescription: description)
     }()
 
+    // Spatial Audio (opt-in): HRTF-binaural rendering of the final mix as a
+    // single anchored source, head-tracked on compatible headphones. Both
+    // nodes are always attached (harmless if unused) but only wired into the
+    // signal path when `audioSettings.spatialAudioEnabled` is true — see
+    // `setSpatialAudioRouting`. `limiter` connects straight to
+    // `mainMixerNode` otherwise, exactly as before this feature existed.
+    private let environmentNode = AVAudioEnvironmentNode()
+    // AVAudioEnvironmentNode requires an AVAudioMixing-conforming input to get
+    // per-source 3D positioning; `limiter` (AVAudioUnitEffect) doesn't conform,
+    // so this mixer sits between them purely to be that positionable source.
+    private let spatialSourceMixer = AVAudioMixerNode()
+    private var isSpatialAudioRouted = false
+
     // MARK: Private — Spatial / Special-Effect Nodes
 
     private var rotationAngle: Double = 0
@@ -2142,6 +2155,8 @@ final class AudioPlayerManager: ObservableObject {
         engine.attach(reverbMixer)
         engine.attach(reverbWetMixer)
         engine.attach(limiter)
+        engine.attach(environmentNode)
+        engine.attach(spatialSourceMixer)
         configureLimiter()
         configureReverb()
 
@@ -2195,6 +2210,60 @@ final class AudioPlayerManager: ObservableObject {
         case .largeHall: return .largeHall
         case .plate: return .plate
         case .cathedral: return .cathedral
+        }
+    }
+
+    // MARK: - Spatial Audio routing
+
+    /// Wires (or unwires) `AVAudioEnvironmentNode` into the signal path.
+    /// When disabled — the default, and the only state existing users ever
+    /// see unless they opt in — `limiter` connects straight to
+    /// `mainMixerNode`, identical to the graph before this feature existed.
+    /// When enabled, the final mix is routed through `spatialSourceMixer` (the
+    /// HRTF-positionable source) and `environmentNode` (the binaural
+    /// renderer + listener), anchored as a single source in front of the
+    /// listener and head-tracked when compatible headphones are connected.
+    private func setSpatialAudioRouting(_ enabled: Bool) {
+        guard isEngineConfigured, enabled != isSpatialAudioRouted else { return }
+        isSpatialAudioRouted = enabled
+
+        engine.disconnectNodeOutput(limiter)
+        engine.disconnectNodeOutput(spatialSourceMixer)
+        engine.disconnectNodeOutput(environmentNode)
+
+        if enabled {
+            engine.connect(limiter, to: spatialSourceMixer, format: nil)
+            // Force MONO on this specific connection so AVAudioEngine downmixes
+            // the stereo bed at the boundary and the environment node treats it
+            // as a single point source — genuinely HRTF-spatialized. Leaving
+            // this connection stereo (format: nil) would instead pass it
+            // through as an unspatialized ambient bed, i.e. do nothing audible.
+            let monoFormat = AVAudioFormat(
+                standardFormatWithSampleRate: spatialSourceMixer.outputFormat(forBus: 0).sampleRate,
+                channels: 1
+            )
+            engine.connect(spatialSourceMixer, to: environmentNode, format: monoFormat)
+            engine.connect(environmentNode, to: engine.mainMixerNode, format: nil)
+
+            environmentNode.renderingAlgorithm = .HRTFHQ
+            environmentNode.listenerPosition = AVAudio3DPoint(x: 0, y: 0, z: 0)
+            environmentNode.listenerAngularOrientation = AVAudio3DAngularOrientation(yaw: 0, pitch: 0, roll: 0)
+            // Anchor the whole mix directly in front of the listener — HRTF
+            // rendering externalizes it ("outside your head") even without
+            // head tracking; tracking (when available) then keeps it anchored
+            // in place as the listener turns.
+            spatialSourceMixer.destination(forMixer: environmentNode, bus: 0)?.position = AVAudio3DPoint(x: 0, y: 0, z: -1)
+
+            if SpatialAudioService.shared.isHeadTrackingAvailable {
+                SpatialAudioService.shared.onOrientationUpdate = { [weak self] orientation in
+                    self?.environmentNode.listenerAngularOrientation = orientation
+                }
+                SpatialAudioService.shared.startTracking()
+            }
+        } else {
+            SpatialAudioService.shared.stopTracking()
+            SpatialAudioService.shared.onOrientationUpdate = nil
+            engine.connect(limiter, to: engine.mainMixerNode, format: nil)
         }
     }
 
@@ -2255,6 +2324,11 @@ final class AudioPlayerManager: ObservableObject {
             appWarn("Audio engine start failed — rebuilding: \(error.localizedDescription)", category: "audio")
             engine.reset()
             isEngineConfigured = false
+            // engine.reset() wipes all connections, including any spatial-audio
+            // routing — clear the tracking flag too so configureEngine()'s
+            // default (unrouted) connection isn't skipped by a stale "already
+            // routed" guard once applyAudioSettings() re-runs below.
+            isSpatialAudioRouted = false
             configureEngine()
             configureEqualizer()
             try? AVAudioSession.sharedInstance().setActive(true)
@@ -2526,6 +2600,8 @@ final class AudioPlayerManager: ObservableObject {
         }
         let reverbWet = min(max(audioSettings.reverbWetDryMix, 0), 100) / 100.0
         reverbWetMixer.outputVolume = audioSettings.reverbEnabled ? reverbWet : 0
+
+        setSpatialAudioRouting(audioSettings.spatialAudioEnabled ?? false)
 
         // ReplayGain + master volume/boost: re-combine the current track's analysed
         // gain (replayGainLinearGain, computed asynchronously in scheduleCurrent/

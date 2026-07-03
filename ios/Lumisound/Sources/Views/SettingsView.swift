@@ -661,6 +661,31 @@ struct SettingsView: View {
                 .padding(.leading, 16)
             }
 
+            // Spatial Audio toggle — HRTF-binaural rendering of the final mix,
+            // head-tracked on compatible headphones. Off by default.
+            // `spatialAudioEnabled` is `Bool?` (see PlaybackModels.swift for
+            // why), so Toggle needs a computed Binding<Bool> wrapper.
+            Toggle(isOn: Binding(
+                get: { player.audioSettings.spatialAudioEnabled ?? false },
+                set: { player.audioSettings.spatialAudioEnabled = $0 }
+            )) {
+                Label("Spatial Audio", systemImage: "airpods.pro")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if player.audioSettings.spatialAudioEnabled ?? false {
+                Text(
+                    SpatialAudioService.shared.isHeadTrackingAvailable
+                        ? "Externalizes the mix and anchors it in space as you turn your head. Works best with AirPods Pro/Max."
+                        : "Externalizes the mix in space. Head tracking needs compatible AirPods — without them the sound stays anchored but doesn't follow head movement."
+                )
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.leading, 16)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Player error message (if any)
             if let error = player.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle")
@@ -678,6 +703,7 @@ struct SettingsView: View {
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.replayGainEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.bassBoostEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.reverbEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.spatialAudioEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.smartCrossfadeEnabled)
     }
 

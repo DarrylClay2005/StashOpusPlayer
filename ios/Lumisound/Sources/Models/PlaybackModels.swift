@@ -111,6 +111,20 @@ struct AudioSettings: Codable, Equatable {
     /// Wet/dry mix, 0–100. Maps directly to `AVAudioUnitReverb.wetDryMix`.
     var reverbWetDryMix: Float = 18.0
     var reverbPreset: ReverbRoomPreset = .mediumRoom
+    /// Routes the final mix through `AVAudioEnvironmentNode` (HRTF binaural
+    /// rendering), externalizing the stereo image as a single anchored source
+    /// in front of the listener. Head-tracked (via `CMHeadphoneMotionManager`)
+    /// on compatible Apple headphones; a static anchor otherwise. Off by
+    /// default — opt-in, since HRTF rendering meaningfully changes the tonal
+    /// balance and only makes sense on headphones.
+    ///
+    /// Optional (unlike its sibling `Bool` settings) so decoding an
+    /// `AudioSettings` blob saved before this field existed defaults it to
+    /// `nil`/off instead of failing the whole decode — Swift's synthesized
+    /// `Decodable` only does that automatically for `Optional` properties, not
+    /// ones with a plain default value (see `PlaybackSnapshot`'s custom
+    /// decoder for the same issue with `version`). Read via `?? false`.
+    var spatialAudioEnabled: Bool? = false
 }
 
 /// Room/space presets for the live reverb effect. Mirrors a subset of
