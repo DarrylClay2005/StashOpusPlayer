@@ -115,6 +115,15 @@
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>
+        <string>fetch</string>
+    </array>
+
+    <!-- BGTaskScheduler identifier for BackgroundRefreshService's periodic
+         subscriptions/tracked-playlists check — must match the identifier
+         string passed to BGTaskScheduler.register/submit exactly. -->
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>com.lumisound.ios.refresh</string>
     </array>
 
     <!-- Live Activities — Lock Screen / Dynamic Island Now Playing -->

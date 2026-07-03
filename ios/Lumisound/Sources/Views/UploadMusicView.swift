@@ -32,6 +32,7 @@ struct UploadMusicView: View {
 
     @State private var restoringFilename: String? = nil
     @State private var showLoginSheet       = false
+    @State private var recommendationsFor: UserMusicMetadataTrack? = nil
 
     // MARK: Computed
 
@@ -76,6 +77,10 @@ struct UploadMusicView: View {
             }
             .sheet(isPresented: $showLoginSheet) {
                 LoginView()
+            }
+            .sheet(item: $recommendationsFor) { track in
+                RecommendationsSheet(seed: track, token: token)
+                    .environmentObject(streaming)
             }
             .task {
                 if account.isLoggedIn, let tok = token {
@@ -389,9 +394,27 @@ struct UploadMusicView: View {
                         .font(AppTheme.monoFont(size: 11))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
+                if let tempoKeyText = track.tempoKeyText {
+                    Text(tempoKeyText)
+                        .font(AppTheme.monoFont(size: 10))
+                        .foregroundStyle(AppTheme.dynamicAccent.opacity(0.85))
+                }
             }
 
             Spacer()
+
+            // Similar Tracks (harmonic mixing recommendations) — only offered
+            // once this track has been analyzed (needs both bpm and musicalKey).
+            if track.bpm != nil, track.musicalKey != nil {
+                Button {
+                    recommendationsFor = track
+                } label: {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 15))
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                }
+                .buttonStyle(.plain)
+            }
 
             // Delete button
             if deletingID == track.id {

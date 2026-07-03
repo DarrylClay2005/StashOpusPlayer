@@ -19,6 +19,78 @@ final class DuplicateFinderService: ObservableObject {
         return ts > 0 ? Date(timeIntervalSince1970: ts) : nil
     }()
 
+    // MARK: - Cloud library check (acoustic fingerprint, server-side)
+    //
+    // Separate from the on-device scan above: this calls the bridge's
+    // /user/library/acoustic-duplicates, which fingerprints (fpcalc/Chromaprint)
+    // every file in the user's CLOUD-backed library and groups ones that are
+    // acoustically the same recording — catches copies the title/artist match
+    // above misses (differently-tagged re-encodes, etc.). Deliberately NOT
+    // merged into `duplicateGroups`: correlating a cloud filename back to a
+    // specific local `Song` isn't reliable (backup filenames aren't guaranteed
+    // to match 1:1), so results are shown as their own informational list —
+    // scoped to what the server actually told us, no risk of mis-attributing
+    // a match to the wrong local file.
+
+    @Published private(set) var isCheckingCloud = false
+    @Published private(set) var cloudDuplicateGroups: [[CloudDuplicateFile]] = []
+    @Published private(set) var cloudCheckError: String?
+
+    struct CloudDuplicateFile: Identifiable {
+        let id = UUID()
+        let filename: String
+        let duration: TimeInterval
+    }
+
+    func checkCloudDuplicates() async {
+        guard !isCheckingCloud else { return }
+        guard let account = AccountService.shared, account.isLoggedIn, let token = account.token else {
+            cloudCheckError = "Sign in to check your cloud library."
+            return
+        }
+        isCheckingCloud = true
+        cloudCheckError = nil
+        defer { isCheckingCloud = false }
+
+        let base = account.bridgeURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: base + "/user/library/acoustic-duplicates") else {
+            cloudCheckError = "Invalid bridge URL"
+            return
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // fpcalc-scanning up to 300 cloud files can genuinely take a while —
+        // well past the ~20s timeout used for quick lookups elsewhere.
+        request.timeoutInterval = 90
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                cloudCheckError = "Server error (HTTP \(http.statusCode))"
+                return
+            }
+            let decoded = try JSONDecoder().decode(AcousticDuplicatesResponse.self, from: data)
+            cloudDuplicateGroups = decoded.duplicateGroups.map { group in
+                group.map { CloudDuplicateFile(filename: $0.file, duration: $0.duration) }
+            }
+        } catch {
+            cloudCheckError = error.localizedDescription
+        }
+    }
+
+    private struct AcousticDuplicatesResponse: Decodable {
+        let duplicateGroups: [[AcousticDuplicateEntry]]
+
+        enum CodingKeys: String, CodingKey {
+            case duplicateGroups = "duplicate_groups"
+        }
+    }
+
+    private struct AcousticDuplicateEntry: Decodable {
+        let file: String
+        let duration: Double
+    }
+
     // MARK: - Scan
 
     /// Tolerance (in seconds) used when comparing two songs' `duration` for the

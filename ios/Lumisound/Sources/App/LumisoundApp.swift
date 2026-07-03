@@ -17,6 +17,13 @@ struct LumisoundApp: App {
 
     @State private var showLaunch = true
 
+    init() {
+        // Must happen before the app finishes launching — too late if done
+        // from a View's .task/.onAppear. See BackgroundRefreshService's docs
+        // for what this actually does (and doesn't) guarantee.
+        BackgroundRefreshService.register()
+    }
+
     var body: some Scene {
         WindowGroup {
             ZStack {
@@ -132,6 +139,10 @@ struct LumisoundApp: App {
                     await TrackedPlaylistStore.shared.runAutoDownloads(
                         streaming: streaming, library: libraryManager
                     )
+
+                    // Queue the periodic background check (subscriptions +
+                    // tracked playlists) — see BackgroundRefreshService.
+                    BackgroundRefreshService.scheduleNext()
                 }
                 .onAppear {
                     bgService.loadSettings()

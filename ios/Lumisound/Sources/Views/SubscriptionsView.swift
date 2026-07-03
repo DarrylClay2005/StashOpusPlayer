@@ -20,6 +20,7 @@ struct SubscriptionsView: View {
     @State private var errorText: String?
 
     @State private var checkingID: String?
+    @State private var isCheckingAll = false
     @State private var newTracksBySubscription: [String: [StreamTrack]] = [:]
     @State private var loadingTrackID: String?
 
@@ -62,7 +63,7 @@ struct SubscriptionsView: View {
             } header: {
                 sectionHeader("Follow a Channel")
             } footer: {
-                Text("Enter a YouTube channel URL, @handle, or channel name. Lumisound periodically checks followed channels for new uploads and notifies you when they appear.")
+                Text("Enter a YouTube channel URL, @handle, or channel name. Lumisound checks followed channels for new uploads in the background (timing depends on iOS) and notifies you when they appear — or tap \"Check All\" below any time.")
             }
             .listRowBackground(AppTheme.surface)
 
@@ -158,6 +159,22 @@ struct SubscriptionsView: View {
         .background(Color.clear.ignoresSafeArea())
         .navigationTitle("Subscriptions")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if !subscriptions.isEmpty {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        checkAll()
+                    } label: {
+                        if isCheckingAll {
+                            ProgressView()
+                        } else {
+                            Text("Check All")
+                        }
+                    }
+                    .disabled(isCheckingAll || checkingID != nil)
+                }
+            }
+        }
         .task { await load() }
         .refreshable { await load() }
     }
@@ -200,6 +217,20 @@ struct SubscriptionsView: View {
         Task {
             newTracksBySubscription[sub.id] = await account.checkSubscription(id: sub.id)
             checkingID = nil
+        }
+    }
+
+    /// Checks every subscription in turn, same as tapping "Check" on each
+    /// row — this is the manual, foreground equivalent of what
+    /// `BackgroundRefreshService` runs periodically in the background.
+    private func checkAll() {
+        guard !isCheckingAll else { return }
+        isCheckingAll = true
+        Task {
+            for sub in subscriptions {
+                newTracksBySubscription[sub.id] = await account.checkSubscription(id: sub.id)
+            }
+            isCheckingAll = false
         }
     }
 

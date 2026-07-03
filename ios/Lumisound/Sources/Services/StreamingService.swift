@@ -145,9 +145,19 @@ struct UserMusicMetadataTrack: Identifiable, Codable, Hashable {
     let hasArtwork: Bool
     let uploadedAt: String?
     let artworkURL: String?
+    /// Server-computed tempo/key/loudness (see `_estimate_bpm`/`_estimate_key`/
+    /// `_measure_loudness` in ios-bridge), populated at upload time and via
+    /// `/user/music/metadata/backfill` for older uploads. `gainDb` is the
+    /// dB offset to reach the standard loudness target — see `_loudness_gain_db`.
+    /// These were previously fetched then silently dropped (missing from
+    /// CodingKeys); fixed 2026-07-04.
+    let bpm: Double?
+    let musicalKey: String?
+    let loudnessLufs: Double?
+    let gainDb: Double?
 
     enum CodingKeys: String, CodingKey {
-        case id, filename, title, artist, album, genre, year
+        case id, filename, title, artist, album, genre, year, bpm
         case originalFilename = "original_filename"
         case durationSeconds  = "duration_seconds"
         case fileSizeBytes    = "file_size_bytes"
@@ -157,6 +167,9 @@ struct UserMusicMetadataTrack: Identifiable, Codable, Hashable {
         case hasArtwork       = "has_artwork"
         case uploadedAt       = "uploaded_at"
         case artworkURL       = "artwork_url"
+        case musicalKey       = "musical_key"
+        case loudnessLufs     = "loudness_lufs"
+        case gainDb           = "gain_db"
     }
 
     var durationText: String {
@@ -169,6 +182,56 @@ struct UserMusicMetadataTrack: Identifiable, Codable, Hashable {
         guard let bytes = fileSizeBytes else { return "" }
         let mb = Double(bytes) / 1_048_576
         return String(format: "%.1f MB", mb)
+    }
+
+    /// e.g. "128 BPM · A minor" — nil if the server hasn't analyzed this
+    /// track yet (older uploads, before /user/music/metadata/backfill runs).
+    var tempoKeyText: String? {
+        var parts: [String] = []
+        if let bpm { parts.append("\(Int(bpm.rounded())) BPM") }
+        if let musicalKey, !musicalKey.isEmpty { parts.append(musicalKey) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - RecommendationsResponse  (harmonic-mixing suggestions from /user/music/recommendations)
+
+struct RecommendationsResponse: Decodable {
+    let seedBpm: Double?
+    let seedKey: String?
+    let tracks: [RecommendedTrack]
+
+    enum CodingKeys: String, CodingKey {
+        case seedBpm = "seed_bpm"
+        case seedKey = "seed_key"
+        case tracks
+    }
+}
+
+struct RecommendedTrack: Identifiable, Decodable {
+    let id: String
+    let filename: String
+    let title: String?
+    let artist: String?
+    let album: String?
+    let bpm: Double?
+    let musicalKey: String?
+    let keyCompatible: Bool
+    let bpmRatio: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, filename, title, artist, album, bpm
+        case musicalKey   = "musical_key"
+        case keyCompatible = "key_compatible"
+        case bpmRatio     = "bpm_ratio"
+    }
+
+    /// e.g. "124 BPM · A minor"
+    var tempoKeyText: String {
+        var parts: [String] = []
+        if let bpm { parts.append("\(Int(bpm.rounded())) BPM") }
+        if let musicalKey, !musicalKey.isEmpty { parts.append(musicalKey) }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -1634,7 +1697,11 @@ final class StreamingService: ObservableObject {
             mimeType: nil,
             hasArtwork: false,
             uploadedAt: nil,
-            artworkURL: nil
+            artworkURL: nil,
+            bpm: nil,
+            musicalKey: nil,
+            loudnessLufs: nil,
+            gainDb: nil
         )
     }
 
@@ -1668,6 +1735,27 @@ final class StreamingService: ObservableObject {
         userMusicMetadata = decoded.tracks
         appLog("fetchUserMusicMetadata: \(decoded.tracks.count) tracks", category: "network")
         return decoded.tracks
+    }
+
+    // MARK: - Harmonic Mixing Recommendations
+
+    /// Other cloud-backed tracks in a Camelot-compatible musical key and/or
+    /// similar tempo (half/double-time aware) to `seedID` — server does the
+    /// ranking (`/user/music/recommendations`) using each track's already-
+    /// analyzed bpm/musical_key, so both the seed and candidates need those
+    /// fields populated (run "Analyze" / the metadata backfill first if not).
+    func fetchRecommendations(seedID: String, token: String, limit: Int = 10) async throws -> RecommendationsResponse {
+        guard var request = makeRequest("/user/music/recommendations?id=\(seedID)&limit=\(limit)") else {
+            throw StreamingError.invalidURL
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw StreamingError.httpError(http.statusCode)
+        }
+        return try JSONDecoder().decode(RecommendationsResponse.self, from: data)
     }
 
     // MARK: - Auto-Backup Sync (catches songs that were imported/scanned, not just downloaded)

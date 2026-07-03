@@ -309,7 +309,7 @@ struct SettingsHelpView: View {
             HelpTopic(
                 icon: "person.crop.circle.badge.plus",
                 title: "Artist Subscriptions",
-                body: "Account → Subscriptions lets you follow a YouTube or SoundCloud channel/playlist URL by pasting it in and tapping Subscribe. Lumisound periodically checks followed channels for new uploads; when new tracks appear you get a notification and can play or queue them straight from the Subscriptions screen via \"Check Now\"."
+                body: "Account → Subscriptions lets you follow a YouTube or SoundCloud channel/playlist URL by pasting it in and tapping Subscribe. Lumisound checks followed channels for new uploads in the background on a schedule iOS controls (so timing varies — it's not instant), plus any time you tap \"Check Now\". When new tracks appear you get a notification and can play or queue them straight from the Subscriptions screen."
             ),
             HelpTopic(
                 icon: "music.note.list",

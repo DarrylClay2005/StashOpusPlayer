@@ -31,6 +31,12 @@ final class LibraryManager: ObservableObject {
     private let artwork: ArtworkService
     private let importer = DocumentImportService()
 
+    // Mirrors `AccountService.shared`/`StreamingService.shared` — gives
+    // `BackgroundRefreshService` (invoked directly by iOS via BGTaskScheduler,
+    // with no SwiftUI environment access) a way to reach the live library
+    // instance for auto-downloading newly-found tracked-playlist tracks.
+    static weak var shared: LibraryManager?
+
     /// Tracks how many scans (media library, local documents, watched folders,
     /// specific-directory) are currently in flight. `isScanning` reflects
     /// whether *any* of them are running, so the launch screen and library UI
@@ -76,6 +82,7 @@ final class LibraryManager: ObservableObject {
     init(persistence: PersistenceService = .shared, artwork: ArtworkService = .shared) {
         self.persistence = persistence
         self.artwork = artwork
+        Self.shared = self
         favoriteSongIDs = persistence.loadFavorites()
         playlists = persistence.loadPlaylists()
         // Show last session's library immediately — see `loadPersistedSnapshot`.

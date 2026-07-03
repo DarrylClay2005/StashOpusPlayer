@@ -6,6 +6,7 @@ struct DuplicateFilesView: View {
 
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var folderService: MusicFolderService
+    @EnvironmentObject private var account: AccountService
     @StateObject private var service = DuplicateFinderService.shared
 
     @State private var pendingDeletion: (songID: String, title: String)?
@@ -108,6 +109,57 @@ struct DuplicateFilesView: View {
                 }
                 .listRowBackground(AppTheme.surface)
             }
+
+            // Cloud library check — separate from the on-device scan above,
+            // compares audio content directly (server-side fingerprinting) for
+            // cloud-backed files instead of matching by title/artist.
+            Section {
+                Button {
+                    Task { await service.checkCloudDuplicates() }
+                } label: {
+                    HStack {
+                        Label("Check Cloud Library", systemImage: "waveform.badge.magnifyingglass")
+                            .foregroundStyle(AppTheme.dynamicAccent)
+                        Spacer()
+                        if service.isCheckingCloud {
+                            ProgressView().tint(AppTheme.dynamicAccent)
+                        }
+                    }
+                }
+                .disabled(service.isCheckingCloud || !account.isLoggedIn)
+
+                if !account.isLoggedIn {
+                    Text("Sign in to check your cloud-backed library.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                } else if let error = service.cloudCheckError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.error)
+                }
+
+                ForEach(Array(service.cloudDuplicateGroups.enumerated()), id: \.offset) { _, group in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(group.count) matching files")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.warning)
+                        ForEach(group) { file in
+                            Text(file.filename)
+                                .font(AppTheme.monoFont(size: 11))
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            } header: {
+                sectionHeader("Cloud Library (Audio Fingerprint)")
+            } footer: {
+                Text("Compares your cloud-backed files' audio content directly, catching copies the title/artist check above misses (e.g. differently tagged re-encodes). Files are listed by name — manage them from Settings → My Music. Can take a while for large libraries.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .listRowBackground(AppTheme.surface)
 
             // Duplicate groups
             if !service.duplicateGroups.isEmpty {

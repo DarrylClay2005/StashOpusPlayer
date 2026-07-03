@@ -1648,6 +1648,19 @@ final class AccountService: ObservableObject {
         }
     }
 
+    /// Checks every subscribed channel for new uploads, one after another
+    /// (each check is its own request; the server creates the in-app
+    /// notification for any new track, same as tapping "Check Now" per
+    /// channel). Used by both the Subscriptions screen's "Check All" and
+    /// `BackgroundRefreshService`'s periodic background run.
+    func checkAllSubscriptions() async {
+        guard isLoggedIn else { return }
+        let subscriptions = await fetchSubscriptions()
+        for subscription in subscriptions {
+            _ = await checkSubscription(id: subscription.id)
+        }
+    }
+
     // MARK: - Discover Mix
 
     /// Fetches a "Discover Mix" of suggested tracks seeded from the user's
