@@ -9,7 +9,7 @@ struct StreamTrack: Identifiable, Codable, Hashable {
     let artist: String
     let durationSeconds: Int
     let thumbnailURL: String
-    let source: String       // "youtube" or "soundcloud"
+    let source: String       // "youtube", "soundcloud", or "bandcamp"
     let youtubeURL: String   // canonical URL for sharing
 
     var duration: TimeInterval { TimeInterval(durationSeconds) }
@@ -389,7 +389,14 @@ final class StreamingService: ObservableObject {
         let t = text.lowercased()
         guard t.hasPrefix("http") else { return false }
         let isYouTube = t.contains("youtube.com") || t.contains("youtu.be")
-        return isYouTube && (t.contains("list=") || t.contains("/playlist"))
+        if isYouTube {
+            return t.contains("list=") || t.contains("/playlist")
+        }
+        // Bandcamp has no search extractor (unlike YouTube/SoundCloud), so a
+        // pasted track/album/artist URL is the only way to pull in a Bandcamp
+        // track — route it straight to resolvePlaylist instead of treating it
+        // as a (futile) search query.
+        return t.contains("bandcamp.com")
     }
 
     // MARK: - Search
@@ -798,7 +805,7 @@ final class StreamingService: ObservableObject {
             URLQueryItem(name: "source", value: track.source),
             URLQueryItem(name: "format", value: preferredFormat),
         ]
-        if track.source == "soundcloud" {
+        if track.source == "soundcloud" || track.source == "bandcamp" {
             queryItems.append(URLQueryItem(name: "url", value: track.youtubeURL))
         }
 
@@ -1016,7 +1023,7 @@ final class StreamingService: ObservableObject {
             URLQueryItem(name: "thumbnail", value: track.thumbnailURL),
             URLQueryItem(name: "duration", value: String(track.durationSeconds)),
         ]
-        if track.source == "soundcloud" {
+        if track.source == "soundcloud" || track.source == "bandcamp" {
             queryItems.append(URLQueryItem(name: "url", value: track.youtubeURL))
         }
         // Per-user aria2 preference (Settings → yt-dlp). Off by default — the

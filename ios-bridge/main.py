@@ -612,8 +612,12 @@ async def _ytdlp_cookie_args(user_id: Optional[str] = None) -> list[str]:
 
 
 def _source_from_url(url: str) -> str:
-    """Classify a track/playlist URL as 'soundcloud' or 'youtube' (default)."""
-    return "soundcloud" if "soundcloud.com" in url else "youtube"
+    """Classify a track/playlist URL as 'soundcloud', 'bandcamp', or 'youtube' (default)."""
+    if "soundcloud.com" in url:
+        return "soundcloud"
+    if "bandcamp.com" in url:
+        return "bandcamp"
+    return "youtube"
 
 
 async def _ytdlp_listing_args(target: str, source: str, user_id: Optional[str] = None) -> list[str]:
@@ -680,7 +684,11 @@ async def _run_ytdlp(*args: str, timeout: float = 30.0) -> list[dict]:
 def _parse_track(entry: dict, source: str) -> dict:
     """Normalise a yt-dlp flat-playlist or full dump into a StreamTrack dict."""
     track_id = entry.get("id") or entry.get("webpage_url_basename") or ""
-    title = entry.get("title") or entry.get("fulltitle") or "Unknown Title"
+    # 'track' is the clean song title where an extractor provides one (e.g.
+    # Bandcamp's full --dump-json 'title' is "Artist - Track", redundant with
+    # the 'artist' field below — 'track' has just "Track"). Falls through to
+    # 'title'/'fulltitle' for extractors (YouTube, SoundCloud) that don't set it.
+    title = entry.get("track") or entry.get("title") or entry.get("fulltitle") or "Unknown Title"
 
     # Artist: uploader / channel / artist tag, in priority order.
     # SoundCloud flat-playlist entries often use uploader_id rather than uploader.
@@ -1481,8 +1489,8 @@ async def search(
 async def stream(
     request: Request,
     id: str = Query(..., description="Video/track ID"),
-    source: str = Query("youtube", description="youtube or soundcloud"),
-    url: Optional[str] = Query(None, description="Full URL (required for soundcloud)"),
+    source: str = Query("youtube", description="youtube, soundcloud, or bandcamp"),
+    url: Optional[str] = Query(None, description="Full URL (required for soundcloud/bandcamp)"),
     format: str = Query("m4a", description="Audio format: mp3, m4a, flac, opus, best"),
 ):
     await check_auth(request)
@@ -1490,10 +1498,10 @@ async def stream(
     source = source.lower()
     format = format.lower()
 
-    if source == "soundcloud":
+    if source in ("soundcloud", "bandcamp"):
         if not url:
             raise HTTPException(
-                status_code=400, detail="url parameter required for soundcloud source"
+                status_code=400, detail=f"url parameter required for {source} source"
             )
         await _reject_ssrf_targets(url)
         target_url = url
@@ -1519,8 +1527,8 @@ _PROXY_URL_TTL = 5 * 3600  # under the ~6h googlevideo URL validity
 async def stream_proxy(
     request: Request,
     id: str = Query(..., description="Video/track ID"),
-    source: str = Query("youtube", description="youtube or soundcloud"),
-    url: Optional[str] = Query(None, description="Full URL (required for soundcloud)"),
+    source: str = Query("youtube", description="youtube, soundcloud, or bandcamp"),
+    url: Optional[str] = Query(None, description="Full URL (required for soundcloud/bandcamp)"),
     format: str = Query("m4a", description="Audio format"),
 ):
     """Proxies the extracted audio through the bridge instead of handing the app
@@ -1533,9 +1541,9 @@ async def stream_proxy(
     source = source.lower()
     format = format.lower()
 
-    if source == "soundcloud":
+    if source in ("soundcloud", "bandcamp"):
         if not url:
-            raise HTTPException(status_code=400, detail="url parameter required for soundcloud source")
+            raise HTTPException(status_code=400, detail=f"url parameter required for {source} source")
         await _reject_ssrf_targets(url)
         target_url = url
     else:
@@ -1701,8 +1709,8 @@ async def _get_raw_url(
 async def download_track(
     request: Request,
     id: str = Query(..., description="Video/track ID"),
-    source: str = Query("youtube", description="youtube or soundcloud"),
-    url: Optional[str] = Query(None, description="Full URL (required for soundcloud)"),
+    source: str = Query("youtube", description="youtube, soundcloud, or bandcamp"),
+    url: Optional[str] = Query(None, description="Full URL (required for soundcloud/bandcamp)"),
     format: str = Query("m4a", description="Audio format: mp3, m4a, flac, opus, best"),
     title: Optional[str] = Query(None, description="Safe filename hint (no extension)"),
     artist: Optional[str] = Query(None, description="Artist name, recorded in download history"),
@@ -1760,10 +1768,10 @@ async def download_track(
         logger.info("download_track: skipping %s:%s — already owned (manifest/inventory)", source, id)
         return Response(status_code=204)
 
-    if source == "soundcloud":
+    if source in ("soundcloud", "bandcamp"):
         if not url:
             raise HTTPException(
-                status_code=400, detail="url parameter required for soundcloud source"
+                status_code=400, detail=f"url parameter required for {source} source"
             )
         await _reject_ssrf_targets(url)
         target_url = url
@@ -2332,12 +2340,13 @@ async def resolve_playlist(
     if cached is not None:
         return _filter_existing_tracks(cached, source, existing_ids, inventory_ids)
 
-    # SoundCloud flat-playlist entries are sparse (often missing artist/duration/
-    # thumbnails) — use full --dump-json for complete metadata, same as /api/search.
-    # Note: unlike _ytdlp_listing_args (used for /api/search), resolve wants
-    # full playlist mode here — no --no-playlist/--cache-dir, since the target
-    # *is* the playlist we're enumerating.
-    if source == "soundcloud":
+    # SoundCloud/Bandcamp flat-playlist entries are sparse (often missing
+    # artist/duration/thumbnail/webpage_url) — use full --dump-json for
+    # complete metadata, same as /api/search. Note: unlike _ytdlp_listing_args
+    # (used for /api/search), resolve wants full playlist mode here — no
+    # --no-playlist/--cache-dir, since the target *is* the playlist we're
+    # enumerating.
+    if source in ("soundcloud", "bandcamp"):
         args = ["--dump-json", url]
     else:
         args = ["--dump-json", "--flat-playlist", *(await _ytdlp_cookie_args(user_id)), url]
@@ -2383,7 +2392,7 @@ async def _extract_playlist_items(request: Request, url: str, limit: int) -> tup
                 logger.warning("playlist extract: Data API failed, falling back to yt-dlp: %s", exc)
 
     if not tracks:
-        args = (["--dump-json", url] if source == "soundcloud"
+        args = (["--dump-json", url] if source in ("soundcloud", "bandcamp")
                 else ["--dump-json", "--flat-playlist", *(await _ytdlp_cookie_args(user_id)), url])
         try:
             entries = await _run_ytdlp(*args, timeout=120.0)

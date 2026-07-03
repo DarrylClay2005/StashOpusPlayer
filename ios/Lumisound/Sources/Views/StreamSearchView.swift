@@ -472,7 +472,7 @@ struct StreamSearchView: View {
         Group {
             if trendingQueries.isEmpty {
                 Spacer()
-                Text("Search YouTube or SoundCloud, or paste a playlist URL.")
+                Text("Search YouTube or SoundCloud, or paste a playlist URL — including a Bandcamp track or album link.")
                     .font(AppTheme.bodyFont(size: 14))
                     .foregroundStyle(AppTheme.textSecondary)
                     .multilineTextAlignment(.center)
@@ -1337,15 +1337,27 @@ private struct StreamTrackRow: View {
     }
 
     private var sourceIcon: String {
-        track.source == "soundcloud" ? "cloud.fill" : "play.rectangle.fill"
+        switch track.source {
+        case "soundcloud": return "cloud.fill"
+        case "bandcamp":   return "music.note.list"
+        default:           return "play.rectangle.fill"
+        }
     }
 
     private var sourceTint: Color {
-        track.source == "soundcloud" ? Color.orange : Color.red
+        switch track.source {
+        case "soundcloud": return Color.orange
+        case "bandcamp":   return Color.cyan
+        default:           return Color.red
+        }
     }
 
     private var sourceLabelForTrack: String {
-        track.source == "soundcloud" ? "SoundCloud" : "YouTube"
+        switch track.source {
+        case "soundcloud": return "SoundCloud"
+        case "bandcamp":   return "Bandcamp"
+        default:           return "YouTube"
+        }
     }
 }
 
