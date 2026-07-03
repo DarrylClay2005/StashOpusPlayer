@@ -46,7 +46,7 @@ struct RippleArtworkView: View {
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 6, speed: 3.0))
         .onAppear { pulse = isPlaying }
         .onChange(of: isPlaying) { pulse = $0 }
-        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
+        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
         .animation(.easeInOut(duration: 1.0), value: palette)
     }
 }

@@ -38,7 +38,7 @@ struct TicketStubArtworkView: View {
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.2))
         .onAppear { active = isPlaying }
         .onChange(of: isPlaying) { active = $0 }
-        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
+        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
         .animation(.easeInOut(duration: 1.0), value: palette)
     }
 }

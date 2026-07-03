@@ -48,6 +48,6 @@ struct AmbientArtworkBackground: View {
     }
 
     private func loadPalette() async {
-        palette = await ArtworkPaletteLoader.palette(for: song, library: library)
+        palette = await ArtworkPaletteLoader.palette(for: song)
     }
 }

@@ -2,7 +2,6 @@ import Foundation
 import UIKit
 import PhotosUI
 import SwiftUI
-import ImageIO
 
 // MARK: - BackgroundAnimation
 
@@ -175,16 +174,7 @@ final class BackgroundService: ObservableObject {
     /// gallery (up to 150 photos) from decoding hundreds of MB of full-res
     /// bitmaps and spiking memory. Returns nil if the data isn't a decodable image.
     static func downsampledImage(from data: Data, maxDimension: CGFloat = 1280) -> UIImage? {
-        let sourceOpts = [kCGImageSourceShouldCache: false] as CFDictionary
-        guard let src = CGImageSourceCreateWithData(data as CFData, sourceOpts) else { return nil }
-        let thumbOpts: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxDimension,
-        ]
-        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, thumbOpts as CFDictionary) else { return nil }
-        return UIImage(cgImage: cg)
+        ImageDownsampler.downsampled(from: data, maxPixelSize: maxDimension)
     }
 
     func addImages(_ newImages: [UIImage]) {

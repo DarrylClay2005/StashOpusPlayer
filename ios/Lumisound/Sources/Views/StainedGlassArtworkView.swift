@@ -37,7 +37,7 @@ struct StainedGlassArtworkView: View {
             .onAppear {
                 withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) { spin = true }
             }
-            .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
+            .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
             .animation(.easeInOut(duration: 1.0), value: palette)
     }
 

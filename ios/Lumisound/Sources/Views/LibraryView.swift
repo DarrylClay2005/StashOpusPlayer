@@ -313,6 +313,14 @@ private struct SongsTab: View {
         Array(repeating: GridItem(.flexible(), spacing: 12), count: songColumns)
     }
 
+    /// Physical pixel size to prefetch artwork thumbnails at for whichever
+    /// layout (`List` rows vs. grid cells) is currently showing — must match
+    /// what `ArtworkThumbnail` actually requests, or the prefetched bucket
+    /// goes unread and scrolling still shows a placeholder flash.
+    private var prefetchPixelSize: CGFloat {
+        songColumns == 1 ? 192 : 768
+    }
+
     /// Spotify/Apple-Music-style action bar above the song list.
     private var songsActionHeader: some View {
         HStack(spacing: 12) {
@@ -386,7 +394,7 @@ private struct SongsTab: View {
                                     let lower = max(0, index - 8)
                                     let upper = min(songs.count, index + 24)
                                     guard lower < upper else { return }
-                                    ArtworkService.shared.prefetch(songs: Array(songs[lower..<upper]))
+                                    ArtworkService.shared.prefetch(songs: Array(songs[lower..<upper]), pixelSize: 192)
                                 }
                             }
                         }
@@ -433,13 +441,13 @@ private struct SongsTab: View {
             }
         }
         .onAppear {
-            // Warm the first 30 songs' artwork at background priority so grid
-            // cells have images ready before the user scrolls to them.
-            ArtworkService.shared.prefetch(songs: Array(songs.prefix(30)))
+            // Warm the first 30 songs' artwork at background priority so
+            // rows/cells have images ready before the user scrolls to them.
+            ArtworkService.shared.prefetch(songs: Array(songs.prefix(30)), pixelSize: prefetchPixelSize)
         }
         .onChange(of: songs.count) { _ in
             // Re-trigger prefetch when the song list grows (e.g. after a scan).
-            ArtworkService.shared.prefetch(songs: Array(songs.prefix(30)))
+            ArtworkService.shared.prefetch(songs: Array(songs.prefix(30)), pixelSize: prefetchPixelSize)
         }
         // Native search field — replaces a custom inline bar toggled from the
         // toolbar. That approach competed for space with 6 other trailing nav-bar

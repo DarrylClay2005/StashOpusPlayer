@@ -38,7 +38,7 @@ struct EditorialArtworkView: View {
         }
         .frame(width: 320, height: 340)
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 3.2))
-        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
+        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
         .animation(.easeInOut(duration: 1.0), value: palette)
         .animation(.linear(duration: 0.3), value: progress)
     }

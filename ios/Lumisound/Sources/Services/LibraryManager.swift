@@ -221,7 +221,7 @@ final class LibraryManager: ObservableObject {
             // are still missing cached artwork (e.g. imported before
             // embedded-artwork extraction existed, or whose video frame
             // extraction previously failed transiently).
-            if ArtworkService.shared.artwork(for: current) == nil {
+            if !ArtworkService.shared.hasCachedArtwork(for: current) {
                 if await ArtworkService.shared.loadArtwork(for: current) != nil {
                     artworkFilledCount += 1
                 }
@@ -995,10 +995,6 @@ final class LibraryManager: ObservableObject {
         guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
         playlists[index].songIDs = newIDs
         persistence.savePlaylists(playlists)
-    }
-
-    func artwork(for song: Song) -> UIImage? {
-        artwork.artwork(for: song)
     }
 
     /// True if `allSongs` already contains a song matching `title`/`artist`

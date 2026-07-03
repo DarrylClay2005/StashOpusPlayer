@@ -42,15 +42,13 @@ final class PhoneWatchSync: NSObject, ObservableObject {
     }
 
     /// Downsizes artwork to a small JPEG so it fits comfortably in the
-    /// application-context payload.
-    private static func thumbnailJPEG(_ image: UIImage, maxDim: CGFloat = 140) -> Data? {
-        let size = image.size
-        guard size.width > 0, size.height > 0 else { return nil }
-        let scale = min(1, maxDim / max(size.width, size.height))
-        let target = CGSize(width: max(1, size.width * scale), height: max(1, size.height * scale))
-        let renderer = UIGraphicsImageRenderer(size: target)
-        let small = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
-        return small.jpegData(compressionQuality: 0.5)
+    /// application-context payload. `maxDim` is in physical pixels — the
+    /// previous naive resize (no explicit renderer scale) silently rendered
+    /// at the phone's screen scale, tripling the payload's pixel dimensions
+    /// (140 → 420px). 240px covers the watch's artwork slot (~120pt @2x)
+    /// exactly.
+    private static func thumbnailJPEG(_ image: UIImage, maxDim: CGFloat = 240) -> Data? {
+        ImageDownsampler.jpegData(image, maxPixelSize: maxDim, compressionQuality: 0.5)
     }
 
     private func handle(_ payload: [String: Any]) {

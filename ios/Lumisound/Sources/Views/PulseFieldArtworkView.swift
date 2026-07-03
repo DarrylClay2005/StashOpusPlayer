@@ -52,7 +52,7 @@ struct PulseFieldArtworkView: View {
         .frame(width: 320, height: 380)
         .onAppear { active = isPlaying }
         .onChange(of: isPlaying) { active = $0 }
-        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
+        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
         .animation(.easeInOut(duration: 1.0), value: palette)
     }
 }

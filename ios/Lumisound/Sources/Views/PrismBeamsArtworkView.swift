@@ -44,7 +44,7 @@ struct PrismBeamsArtworkView: View {
             withAnimation(.linear(duration: 6).repeatForever(autoreverses: false)) { spin = true }
             withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { glow = true }
         }
-        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
+        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
         .animation(.easeInOut(duration: 1.0), value: palette)
     }
 }

@@ -60,7 +60,7 @@ struct OrigamiArtworkView: View {
         .onAppear {
             withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) { sweep = true }
         }
-        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
+        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
         .animation(.easeInOut(duration: 1.0), value: palette)
     }
 }

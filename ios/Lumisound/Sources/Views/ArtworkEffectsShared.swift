@@ -8,13 +8,14 @@ import SwiftUI
 /// that was previously duplicated verbatim across nine artwork views.
 enum ArtworkPaletteLoader {
     @MainActor
-    static func palette(for song: Song?, library: LibraryManager) async -> ArtworkPalette? {
+    static func palette(for song: Song?) async -> ArtworkPalette? {
         guard let song else { return nil }
-        var image = library.artwork(for: song)
-        if image == nil {
-            image = await ArtworkService.shared.loadArtwork(for: song)
-        }
-        guard let image else { return nil }
+        // Goes straight to the async path: a synchronous `LibraryManager`
+        // lookup would read and decode the disk-cache JPEG on the MainActor,
+        // hitching the UI on every track change. `loadArtwork`'s memory-cache
+        // hit is just as fast, and its disk/remote fallbacks run off the main
+        // thread.
+        guard let image = await ArtworkService.shared.loadArtwork(for: song) else { return nil }
         return ArtworkColorExtractor.palette(from: image)
     }
 }

@@ -61,7 +61,7 @@ struct StarfieldArtworkView: View {
             withAnimation(.linear(duration: 70).repeatForever(autoreverses: false)) { rotate = true }
             withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { twinkle = true }
         }
-        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
+        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
         .animation(.easeInOut(duration: 1.0), value: palette)
     }
 }

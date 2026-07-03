@@ -53,7 +53,7 @@ struct TiltCardArtworkView: View {
         .onAppear {
             withAnimation(.easeInOut(duration: 3.6).repeatForever(autoreverses: true)) { tilt = true }
         }
-        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song, library: library) }
+        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
         .animation(.easeInOut(duration: 1.0), value: palette)
     }
 }

@@ -9,6 +9,13 @@ final class ArtworkService {
     private let memoryCache = NSCache<NSString, UIImage>()
     private let diskCacheURL: URL
 
+    /// Small decoded-image cache for list/grid thumbnails. Rows only need
+    /// ~100–540 physical px, but `memoryCache` stores full
+    /// `artworkCacheDimension` decodes (~5.5 MB each) — serving rows from those
+    /// churns the big cache while scrolling and re-decodes constantly.
+    /// Bucketed thumbnails are 10–100× cheaper. Configured in `init`.
+    private let thumbnailCache = NSCache<NSString, UIImage>()
+
     /// Thread-safe cache for MPMediaLibrary lookups keyed by persistentID.
     private let mediaQueryCache = NSCache<NSNumber, UIImage>()
 
@@ -58,9 +65,12 @@ final class ArtworkService {
     /// one-time purge of disk-cached artwork written under the old settings, so
     /// upgrading users see the quality improvement without having to find and
     /// tap "Clear Artwork Cache" in Settings themselves.
-    // v3: artwork is now letterbox-trimmed + square-cropped on cache write, so
-    // purge older entries that were stored 16:9/letterboxed.
-    private static let cacheFormatVersion = 3
+    // v4: resize/crop renders previously inherited the device's screen scale
+    // (UIGraphicsImageRenderer's default format), so the "1200px" cap actually
+    // wrote 3600×3600 files on @3x devices — 9× the intended pixels on disk and
+    // ~52 MB per decoded image in memory. Purge so entries regenerate at the
+    // true capped size.
+    private static let cacheFormatVersion = 4
     private static let cacheVersionFileName = ".cache_format_version"
 
     private init() {
@@ -75,6 +85,17 @@ final class ArtworkService {
         // automatically under memory pressure and when countLimit is exceeded.
         memoryCache.countLimit = 200
         memoryCache.totalCostLimit = 100 * 1024 * 1024   // 100 MB (was 50; video frames are large)
+
+        // Row/grid thumbnails are small (≤768px → ≤2.4 MB each, list rows
+        // ≤0.15 MB), so a high count limit still stays well under the cost
+        // cap — a whole library's worth of visible-row art can stay resident.
+        thumbnailCache.countLimit = 1000
+        thumbnailCache.totalCostLimit = 48 * 1024 * 1024
+
+        // Media-library lookups were previously unbounded; cap them like the
+        // main cache so a huge Apple Music library can't accumulate freely.
+        mediaQueryCache.countLimit = 200
+        mediaQueryCache.totalCostLimit = 100 * 1024 * 1024
     }
 
     /// Wipes previously-cached artwork files once per `cacheFormatVersion` bump,
@@ -119,6 +140,23 @@ final class ArtworkService {
         return nil
     }
 
+    /// Whether cached artwork exists for `song`, without decoding anything —
+    /// for "is artwork missing?" checks (e.g. LibraryManager's import
+    /// maintenance pass), where calling `artwork(for:)` would decode every
+    /// existing entry into the memory cache just to throw the result away.
+    /// Checks the file's size (a cheap `stat`, not a decode) rather than mere
+    /// existence, so a zero-byte file left by an interrupted write still
+    /// reads as "missing" and gets regenerated instead of silently persisting
+    /// as permanently-broken artwork.
+    func hasCachedArtwork(for song: Song) -> Bool {
+        let key = cacheKey(for: song)
+        if memoryCache.object(forKey: key as NSString) != nil { return true }
+        let path = diskPath(key: key)
+        guard let size = try? FileManager.default.attributesOfItem(atPath: path.path)[.size] as? Int
+        else { return false }
+        return size > 0
+    }
+
     /// Stores `image` in both memory and disk cache under `key`.
     /// Used by DocumentImportService to persist video-frame thumbnails so they
     /// survive app restarts and NSCache evictions.
@@ -127,9 +165,7 @@ final class ArtworkService {
         // both caches so the in-memory and on-disk copies match (previously the
         // raw, possibly non-square image went into memory while the squared one
         // went to disk — the artwork appeared to "re-crop" after a relaunch).
-        let processed = resizedImage(image, maxDimension: Self.artworkCacheDimension)
-        setMemoryCache(processed, forKey: key)
-        saveToDisk(image: processed, key: key)
+        _ = persistFullArtwork(image, forKey: key)
     }
 
     /// Fetches a remote image and writes it to both memory and disk cache under `key`.
@@ -165,39 +201,26 @@ final class ArtworkService {
            let thumbnailURL = URL(string: cacheKeyStr) {
             appLog("Artwork: fetching remote thumbnail for \"\(song.displayName)\"", category: "artwork")
             if let image = await fetchRemoteImage(url: thumbnailURL, headers: song.httpHeaders) {
-                // Cache and return the same downsized copy that lands on disk — caching the
-                // full-resolution decode here (often far larger than artworkCacheDimension)
-                // let just a few entries blow through totalCostLimit, forcing constant
-                // evict/redecode churn while scrolling artwork-heavy views.
-                let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
-                setMemoryCache(resized, forKey: key)
-                saveToDisk(image: resized, key: key)
-                return resized
+                appLog("Artwork: remote thumbnail found for \"\(song.displayName)\"", category: "artwork")
+                return persistFullArtwork(image, forKey: key)
             }
             appWarn("Artwork: remote fetch failed for \"\(song.displayName)\"", category: "artwork")
         }
 
         if let persistentID = song.persistentID {
-            let image = await fetchMediaLibraryArtwork(persistentID: persistentID)
-            if let image {
+            if let image = await fetchMediaLibraryArtwork(persistentID: persistentID) {
                 appLog("Artwork: media library hit for \"\(song.displayName)\"", category: "artwork")
-                setMemoryCache(image, forKey: key)
-            } else {
-                appLog("Artwork: media library miss for \"\(song.displayName)\"", category: "artwork")
+                return persistFullArtwork(image, forKey: key)
             }
-            return image
+            appLog("Artwork: media library miss for \"\(song.displayName)\"", category: "artwork")
+            return nil
         }
 
         if let url = song.url {
             // Try embedded asset artwork (works for m4a, mp3, flac with embedded tags).
             if let image = await fetchAssetArtwork(url: url) {
                 appLog("Artwork: embedded tag found for \"\(song.displayName)\"", category: "artwork")
-                // Embedded tags are frequently full-resolution (3000×3000+) — downsize
-                // before caching/returning so memory cost matches the disk copy.
-                let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
-                setMemoryCache(resized, forKey: key)
-                saveToDisk(image: resized, key: key)
-                return resized
+                return persistFullArtwork(image, forKey: key)
             }
 
             // Tracks downloaded via the bridge are tagged with the original
@@ -208,20 +231,14 @@ final class ArtworkService {
             if let thumbnailURL = await fetchEmbeddedThumbnailURL(url: url),
                let image = await fetchRemoteImage(url: thumbnailURL) {
                 appLog("Artwork: recovered embedded LUMISOUND_THUMBNAIL for \"\(song.displayName)\"", category: "artwork")
-                let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
-                setMemoryCache(resized, forKey: key)
-                saveToDisk(image: resized, key: key)
-                return resized
+                return persistFullArtwork(image, forKey: key)
             }
 
             // For local video files, extract the first frame as artwork.
             if Self.videoExtensions.contains(url.pathExtension.lowercased()) {
                 appLog("Artwork: extracting video frame for \"\(song.displayName)\"", category: "artwork")
                 if let image = await extractVideoFrame(url: url) {
-                    let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
-                    setMemoryCache(resized, forKey: key)
-                    saveToDisk(image: resized, key: key)
-                    return resized
+                    return persistFullArtwork(image, forKey: key)
                 }
                 appWarn("Artwork: video frame extraction failed for \"\(song.displayName)\"", category: "artwork")
             }
@@ -231,15 +248,29 @@ final class ArtworkService {
         appLog("Artwork: querying iTunes for \"\(song.displayName)\" by \(song.artistName)", category: "artwork")
         if let image = await fetchITunesArtwork(title: song.title, artist: song.artist) {
             appLog("Artwork: iTunes match found for \"\(song.displayName)\"", category: "artwork")
-            let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
-            setMemoryCache(resized, forKey: key)
-            saveToDisk(image: resized, key: key)
-            return resized
+            return persistFullArtwork(image, forKey: key)
         }
 
         markNoArtwork(key)
         appWarn("Artwork: no source found for \"\(song.displayName)\"", category: "artwork")
         return nil
+    }
+
+    /// Resizes, memory-caches, disk-caches, and invalidates any stale bucketed
+    /// thumbnails for `image` under `key` — the common tail of every
+    /// `loadArtwork` source branch. Centralizing this also fixes a case the
+    /// branches used to handle inconsistently: media-library-sourced artwork
+    /// was never written to disk (so `loadThumbnail`'s cheap ImageIO disk path
+    /// could never engage for it, forcing a full `MPMediaQuery` on every
+    /// bucket-cache miss), and none of the branches invalidated stale
+    /// bucketed thumbnails when re-fetching art for a key that already had
+    /// some cached.
+    private func persistFullArtwork(_ image: UIImage, forKey key: String) -> UIImage {
+        let resized = resizedImage(image, maxDimension: Self.artworkCacheDimension)
+        setMemoryCache(resized, forKey: key)
+        saveToDisk(image: resized, key: key)
+        invalidateThumbnails(forKey: key)
+        return resized
     }
 
     // MARK: - Cache Management
@@ -249,18 +280,118 @@ final class ArtworkService {
     func clearCache() {
         memoryCache.removeAllObjects()
         mediaQueryCache.removeAllObjects()
+        thumbnailCache.removeAllObjects()
         clearNoArtworkKeys()
     }
 
-    /// Warms the memory cache for the given songs at background priority.
-    /// Skips any song whose artwork is already cached; does not force-store entries
-    /// when the cache is at capacity — NSCache will evict as needed.
-    func prefetch(songs: [Song]) {
+    /// Warms the thumbnail cache — and, for songs with no disk entry yet, the
+    /// full pipeline that seeds it — at background priority. Used for
+    /// scroll-ahead prefetch in list/grid views, which display bucketed
+    /// thumbnails; warming full `artworkCacheDimension` decodes here (the old
+    /// behaviour) churned ~5.5 MB decodes per row the visible cells never read.
+    /// Skips songs already warmed; NSCache evicts as needed at capacity.
+    ///
+    /// `pixelSize` has no default — callers must pass the actual physical
+    /// pixel size their cells render at (a mismatched default previously
+    /// warmed a bucket no visible cell read, defeating the prefetch).
+    func prefetch(songs: [Song], pixelSize: CGFloat) {
         Task(priority: .background) {
             for song in songs {
-                guard artwork(for: song) == nil else { continue }
-                _ = await loadArtwork(for: song)
+                guard thumbnail(for: song, pixelSize: pixelSize) == nil else { continue }
+                _ = await loadThumbnail(for: song, pixelSize: pixelSize)
             }
+        }
+    }
+
+    // MARK: - Thumbnails
+
+    /// Pixel-size buckets thumbnails are rendered at, so one cached copy is
+    /// shared by every row/grid size that maps into the same bucket. Requests
+    /// larger than the biggest bucket fall through to the full-size pipeline.
+    ///
+    /// 192 covers every `SongRow` style (32–60pt) at @2x and @3x, so all list
+    /// rows share ONE bucket. 384 covers 3-column grid cells; 768 covers
+    /// 2-column grid cells and the 256pt album/folder grids at @3x (which
+    /// would otherwise fall through to full ~5.5 MB decodes per visible cell).
+    private static let thumbnailBuckets: [CGFloat] = [192, 384, 768]
+
+    private func thumbnailBucket(forPixelSize pixelSize: CGFloat) -> CGFloat? {
+        Self.thumbnailBuckets.first { $0 >= pixelSize }
+    }
+
+    private func thumbnailCacheKey(_ key: String, bucket: CGFloat) -> NSString {
+        "\(key)#thumb\(Int(bucket))" as NSString
+    }
+
+    /// Synchronous, memory-only thumbnail lookup — the fast path views use to
+    /// avoid a placeholder flash for artwork that's already been rendered.
+    /// `pixelSize` is in physical pixels (point size × display scale). Falls
+    /// back to downscaling a full-size image already resident in
+    /// `memoryCache` (e.g. loaded for Now Playing) rather than reporting a
+    /// miss — cheap relative to a disk read + decode, and avoids a
+    /// placeholder flash for art the app already has decoded.
+    func thumbnail(for song: Song, pixelSize: CGFloat) -> UIImage? {
+        let key = cacheKey(for: song)
+        guard let bucket = thumbnailBucket(forPixelSize: pixelSize) else {
+            return memoryCache.object(forKey: key as NSString)
+        }
+        return thumbnailFromCaches(key: key, bucket: bucket)
+    }
+
+    /// Async thumbnail load for list/grid cells. Downsamples straight from the
+    /// disk-cache JPEG via ImageIO (never decodes the full-size image) off the
+    /// main thread; only falls back to the full `loadArtwork` pipeline when no
+    /// disk entry exists yet. `pixelSize` is in physical pixels.
+    func loadThumbnail(for song: Song, pixelSize: CGFloat) async -> UIImage? {
+        let key = cacheKey(for: song)
+        guard let bucket = thumbnailBucket(forPixelSize: pixelSize) else {
+            return await loadArtwork(for: song)
+        }
+        if let cached = thumbnailFromCaches(key: key, bucket: bucket) { return cached }
+
+        // ImageIO returns nil for a missing/unreadable file, so there's no
+        // need to `fileExists`-check first — this saves a stat per miss on
+        // the scroll hot path.
+        let path = diskPath(key: key)
+        let thumb = await Task.detached(priority: .userInitiated) {
+            ImageDownsampler.downsampled(at: path, maxPixelSize: bucket)
+        }.value
+        if let thumb {
+            setThumbnailCache(thumb, forKey: thumbnailCacheKey(key, bucket: bucket))
+            return thumb
+        }
+
+        // No disk entry yet — run the full pipeline (which seeds the disk
+        // cache), then scale its result down to the bucket.
+        guard let full = await loadArtwork(for: song) else { return nil }
+        let thumb2 = ImageDownsampler.downscaled(full, maxPixelSize: bucket)
+        setThumbnailCache(thumb2, forKey: thumbnailCacheKey(key, bucket: bucket))
+        return thumb2
+    }
+
+    /// Shared fast path for both `thumbnail(for:)` and `loadThumbnail(for:)`:
+    /// checks the bucketed cache, then falls back to downscaling a resident
+    /// full-size image rather than reporting a miss.
+    private func thumbnailFromCaches(key: String, bucket: CGFloat) -> UIImage? {
+        let tKey = thumbnailCacheKey(key, bucket: bucket)
+        if let cached = thumbnailCache.object(forKey: tKey) { return cached }
+        guard let full = memoryCache.object(forKey: key as NSString) else { return nil }
+        let thumb = ImageDownsampler.downscaled(full, maxPixelSize: bucket)
+        setThumbnailCache(thumb, forKey: tKey)
+        return thumb
+    }
+
+    private func setThumbnailCache(_ image: UIImage, forKey key: NSString) {
+        let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
+        thumbnailCache.setObject(image, forKey: key, cost: cost)
+    }
+
+    /// Drops every bucketed thumbnail derived from `key` — called when the
+    /// full-size artwork under that key is replaced, so rows don't keep
+    /// serving a stale rendition.
+    private func invalidateThumbnails(forKey key: String) {
+        for bucket in Self.thumbnailBuckets {
+            thumbnailCache.removeObject(forKey: thumbnailCacheKey(key, bucket: bucket))
         }
     }
 
@@ -302,7 +433,10 @@ final class ArtworkService {
     }
 
     private func setMemoryCache(_ image: UIImage, forKey key: String) {
-        let cost = Int(image.size.width * image.size.height * 4)
+        // Cost in real pixels — `size` is in points, so ignoring `scale` would
+        // undercount a @3x image's decoded footprint by 9× and let the cache
+        // blow far past `totalCostLimit`.
+        let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
         memoryCache.setObject(image, forKey: key as NSString, cost: cost)
     }
 
@@ -315,13 +449,12 @@ final class ArtworkService {
         //    no bars passes through both steps unchanged.
         let trimmed = trimmedLetterbox(image)
         let squared = squareCropped(trimmed)
-        let size = squared.size
-        guard size.width > maxDimension || size.height > maxDimension else { return squared }
-        let scale = min(maxDimension / size.width, maxDimension / size.height)
-        let newSize = CGSize(width: (size.width * scale).rounded(),
-                             height: (size.height * scale).rounded())
-        let renderer = UIGraphicsImageRenderer(size: newSize)
-        return renderer.image { _ in squared.draw(in: CGRect(origin: .zero, size: newSize)) }
+        // `ImageDownsampler.downscaled` works in real pixels (size × scale)
+        // and renders at scale 1 — `UIImage.size` alone is in points, so a
+        // scale-3 image measured against a pixel cap without this would slip
+        // through at 3× the intended pixel count (e.g. MPMediaItemArtwork
+        // returns screen-scale images).
+        return ImageDownsampler.downscaled(squared, maxPixelSize: maxDimension)
     }
 
     /// Returns the largest centered square crop of `image`. A no-op for images
@@ -332,7 +465,11 @@ final class ArtworkService {
         let h = image.size.height
         guard w > 0, h > 0, abs(w - h) > 0.5 else { return image }
         let side = min(w, h)
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+        // Preserve the source's scale so cropping never *increases* pixel count
+        // (the default renderer format would re-render at screen scale).
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
         return renderer.image { _ in
             // Center the source so equal amounts are cropped from both edges of
             // the longer dimension.
@@ -421,7 +558,7 @@ final class ArtworkService {
             return cached.size == .zero ? nil : cached
         }
 
-        let image = await Task.detached(priority: .utility) {
+        let raw = await Task.detached(priority: .utility) {
             let predicate = MPMediaPropertyPredicate(
                 value: NSNumber(value: persistentID),
                 forProperty: MPMediaItemPropertyPersistentID
@@ -432,7 +569,14 @@ final class ArtworkService {
             return item.artwork?.image(at: CGSize(width: Self.artworkCacheDimension, height: Self.artworkCacheDimension))
         }.value
 
-        mediaQueryCache.setObject(image ?? noArtworkSentinel, forKey: cacheKey)
+        // MPMediaItemArtwork interprets the requested size in points and returns
+        // a screen-scale image — cap it to real pixels like every other source.
+        let image = raw.map { resizedImage($0, maxDimension: Self.artworkCacheDimension) }
+        // Cost in real pixels, matching `setMemoryCache` — otherwise every
+        // entry defaults to cost 0 and `totalCostLimit` never triggers
+        // eviction; only `countLimit` would bound this cache.
+        let cost = image.map { Int($0.size.width * $0.scale * $0.size.height * $0.scale * 4) } ?? 0
+        mediaQueryCache.setObject(image ?? noArtworkSentinel, forKey: cacheKey, cost: cost)
         return image
     }
 

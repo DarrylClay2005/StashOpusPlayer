@@ -63,7 +63,7 @@ final class WidgetDataService {
         ud.set(Date().timeIntervalSinceReferenceDate, forKey: "widget_anchor_date")
 
         if let artwork,
-           let data = artwork.jpegData(compressionQuality: 0.85),
+           let data = Self.widgetSizedJPEG(artwork),
            let container = FileManager.default.containerURL(
                forSecurityApplicationGroupIdentifier: appGroupID
            ) {
@@ -107,6 +107,16 @@ final class WidgetDataService {
     }
 
     // MARK: - Private Helpers
+
+    /// Downscales artwork to widget size before writing it to the App Group.
+    /// Widget extensions run under a hard ~30 MB memory cap, and the widget
+    /// decodes this file with `UIImage(contentsOfFile:)` — handing it the
+    /// app's full-size cache entry risks getting the widget process killed
+    /// mid-render (blank artwork). 640px comfortably covers the largest
+    /// widget artwork slot at @3x while decoding to ~1.6 MB.
+    private static func widgetSizedJPEG(_ image: UIImage, maxPixelSize: CGFloat = 640) -> Data? {
+        ImageDownsampler.jpegData(image, maxPixelSize: maxPixelSize, compressionQuality: 0.85)
+    }
 
     private func logMissingAppGroupOnce() {
         guard !loggedMissingAppGroup else { return }
