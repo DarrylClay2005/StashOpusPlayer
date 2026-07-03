@@ -502,7 +502,6 @@ struct LumisoundWidgetEntryView: View {
 
 // MARK: - Widget Configuration
 
-@main
 struct LumisoundWidget: Widget {
     let kind = "LumisoundWidget"
 
@@ -521,5 +520,17 @@ struct LumisoundWidget: Widget {
             .accessoryRectangular,
             .accessoryInline,
         ])
+    }
+}
+
+// MARK: - Widget Bundle Entry Point
+
+@main
+struct LumisoundWidgetBundle: WidgetBundle {
+    var body: some Widget {
+        LumisoundWidget()
+        if #available(iOS 16.1, *) {
+            LumisoundLiveActivity()
+        }
     }
 }

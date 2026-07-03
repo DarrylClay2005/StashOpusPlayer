@@ -117,6 +117,10 @@
         <string>audio</string>
     </array>
 
+    <!-- Live Activities — Lock Screen / Dynamic Island Now Playing -->
+    <key>NSSupportsLiveActivities</key>
+    <true/>
+
     <!-- Privacy usage descriptions -->
     <key>NSAppleMusicUsageDescription</key>
     <string>Lumisound reads your music library to display and play your songs.</string>

@@ -89,6 +89,10 @@ final class WidgetDataService {
 
         appLog("WidgetDataService: pushed \"\(song?.displayName ?? "nil")\" (playing=\(isPlaying))", category: "widget")
         reloadTimelinesThrottled()
+
+        if #available(iOS 16.1, *) {
+            LiveActivityManager.update(song: song, isPlaying: isPlaying, position: position, duration: duration)
+        }
     }
 
     /// Lightweight update: writes the play/pause state plus the current
@@ -104,6 +108,10 @@ final class WidgetDataService {
         ud.set(duration, forKey: "widget_duration")
         ud.set(Date().timeIntervalSinceReferenceDate, forKey: "widget_anchor_date")
         reloadTimelinesThrottled()
+
+        if #available(iOS 16.1, *) {
+            LiveActivityManager.updatePlayState(isPlaying: isPlaying, position: position, duration: duration)
+        }
     }
 
     // MARK: - Private Helpers
