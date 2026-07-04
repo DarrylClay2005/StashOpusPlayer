@@ -11,6 +11,7 @@ import Combine
 
 enum SmartField: String, Codable, CaseIterable, Identifiable {
     case title, artist, album, genre, year, duration, bpm, favorite, source
+    case playCount, daysSincePlayed, daysSinceAdded
 
     var id: String { rawValue }
 
@@ -25,13 +26,16 @@ enum SmartField: String, Codable, CaseIterable, Identifiable {
         case .bpm: return "BPM"
         case .favorite: return "Favorite"
         case .source: return "Source"
+        case .playCount: return "Play Count"
+        case .daysSincePlayed: return "Days Since Played"
+        case .daysSinceAdded: return "Days Since Added"
         }
     }
 
     var kind: SmartFieldKind {
         switch self {
         case .title, .artist, .album, .genre: return .text
-        case .year, .duration, .bpm: return .number
+        case .year, .duration, .bpm, .playCount, .daysSincePlayed, .daysSinceAdded: return .number
         case .favorite: return .boolean
         case .source: return .source
         }
@@ -100,6 +104,7 @@ enum SmartMatch: String, Codable, CaseIterable, Identifiable {
 
 enum SmartSort: String, Codable, CaseIterable, Identifiable {
     case titleAsc, artistAsc, yearDesc, bpmAsc, durationAsc, random
+    case playCountDesc, recentlyPlayedDesc, recentlyAddedDesc
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -109,6 +114,9 @@ enum SmartSort: String, Codable, CaseIterable, Identifiable {
         case .bpmAsc: return "BPM (low→high)"
         case .durationAsc: return "Duration (short→long)"
         case .random: return "Random"
+        case .playCountDesc: return "Most Played"
+        case .recentlyPlayedDesc: return "Recently Played"
+        case .recentlyAddedDesc: return "Recently Added"
         }
     }
 }
@@ -126,6 +134,7 @@ struct SmartPlaylist: Codable, Identifiable, Equatable {
 
     /// Returns the songs from `songs` that satisfy this playlist's rules, sorted
     /// and limited. `favorites` is `LibraryManager.favoriteSongIDs`.
+    @MainActor
     func evaluate(over songs: [Song], favorites: Set<String>) -> [Song] {
         let filtered = songs.filter { matches($0, favorites: favorites) }
         let sorted = sortSongs(filtered)
@@ -133,12 +142,14 @@ struct SmartPlaylist: Codable, Identifiable, Equatable {
         return sorted
     }
 
+    @MainActor
     func matches(_ song: Song, favorites: Set<String>) -> Bool {
         guard !rules.isEmpty else { return true }
         let results = rules.map { evaluate(rule: $0, song: song, favorites: favorites) }
         return match == .all ? results.allSatisfy { $0 } : results.contains(true)
     }
 
+    @MainActor
     private func evaluate(rule: SmartRule, song: Song, favorites: Set<String>) -> Bool {
         switch rule.field.kind {
         case .text:
@@ -179,11 +190,22 @@ struct SmartPlaylist: Codable, Identifiable, Equatable {
         }
     }
 
+    @MainActor
     private func numberValue(of field: SmartField, in song: Song) -> Double? {
         switch field {
         case .year:     return Double(song.year.trimmingCharacters(in: .whitespaces))
         case .duration: return song.duration > 0 ? song.duration : nil
         case .bpm:      return song.bpm
+        case .playCount:
+            return Double(PlayHistoryStore.shared.playCount(for: song.id))
+        case .daysSincePlayed:
+            guard let lastPlayed = PlayHistoryStore.shared.lastPlayedAt(for: song.id) else {
+                return .greatestFiniteMagnitude // never played — treat as "longest ago"
+            }
+            return Date().timeIntervalSince(lastPlayed) / 86400
+        case .daysSinceAdded:
+            guard let dateAdded = song.dateAdded else { return nil }
+            return Date().timeIntervalSince(dateAdded) / 86400
         default:        return nil
         }
     }
@@ -195,6 +217,7 @@ struct SmartPlaylist: Codable, Identifiable, Equatable {
         return .local
     }
 
+    @MainActor
     private func sortSongs(_ songs: [Song]) -> [Song] {
         switch sort {
         case .titleAsc:    return songs.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
@@ -203,6 +226,15 @@ struct SmartPlaylist: Codable, Identifiable, Equatable {
         case .bpmAsc:      return songs.sorted { ($0.bpm ?? 0) < ($1.bpm ?? 0) }
         case .durationAsc: return songs.sorted { $0.duration < $1.duration }
         case .random:      return songs.shuffled()
+        case .playCountDesc:
+            return songs.sorted { PlayHistoryStore.shared.playCount(for: $0.id) > PlayHistoryStore.shared.playCount(for: $1.id) }
+        case .recentlyPlayedDesc:
+            return songs.sorted {
+                (PlayHistoryStore.shared.lastPlayedAt(for: $0.id) ?? .distantPast)
+                    > (PlayHistoryStore.shared.lastPlayedAt(for: $1.id) ?? .distantPast)
+            }
+        case .recentlyAddedDesc:
+            return songs.sorted { ($0.dateAdded ?? .distantPast) > ($1.dateAdded ?? .distantPast) }
         }
     }
 }
@@ -218,8 +250,50 @@ final class SmartPlaylistStore: ObservableObject {
     @Published private(set) var playlists: [SmartPlaylist] = []
 
     private let key = "smartPlaylists.v1"
+    private static let seededDefaultsKey = "smartPlaylists.seededDefaults.v1"
 
-    init() { load() }
+    init() {
+        load()
+        seedDefaultsIfNeeded()
+    }
+
+    /// Adds four starter smart playlists (Recently Added, Most Played,
+    /// Forgotten Favorites, Quick Listens) the first time this ever runs on
+    /// a device — all built from ordinary rules, so users can edit/delete
+    /// them like anything else they'd create themselves. Gated on a flag
+    /// rather than "playlists.isEmpty" so deleting all of them later
+    /// doesn't bring them back.
+    private func seedDefaultsIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: Self.seededDefaultsKey) else { return }
+        UserDefaults.standard.set(true, forKey: Self.seededDefaultsKey)
+        guard playlists.isEmpty else { return }
+        playlists = [
+            SmartPlaylist(
+                name: "Recently Added", icon: "clock.badge.checkmark", match: .all,
+                rules: [SmartRule(field: .daysSinceAdded, op: .lessThan, number: 30)],
+                sort: .recentlyAddedDesc
+            ),
+            SmartPlaylist(
+                name: "Most Played", icon: "flame.fill", match: .all,
+                rules: [SmartRule(field: .playCount, op: .greaterThan, number: 0)],
+                limit: 100, sort: .playCountDesc
+            ),
+            SmartPlaylist(
+                name: "Forgotten Favorites", icon: "heart.slash", match: .all,
+                rules: [
+                    SmartRule(field: .favorite, op: .isTrue),
+                    SmartRule(field: .daysSincePlayed, op: .greaterThan, number: 60),
+                ],
+                sort: .recentlyPlayedDesc
+            ),
+            SmartPlaylist(
+                name: "Quick Listens", icon: "bolt.fill", match: .all,
+                rules: [SmartRule(field: .duration, op: .lessThan, number: 180)],
+                sort: .durationAsc
+            ),
+        ]
+        save()
+    }
 
     func add(_ playlist: SmartPlaylist) {
         playlists.append(playlist)

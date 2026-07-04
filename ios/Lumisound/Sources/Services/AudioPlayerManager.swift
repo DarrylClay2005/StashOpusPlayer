@@ -2748,6 +2748,10 @@ final class AudioPlayerManager: ObservableObject {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled, let self else { return }
             guard self.currentSong?.id == song.id else { return }
+            // Local play-history for the on-device Smart Playlists/Stats
+            // features — same "still on this track 5s later" threshold as
+            // the server-bound log below, so an instant skip doesn't count.
+            PlayHistoryStore.shared.recordPlay(songID: song.id)
             await AccountService.shared?.logPlay(
                 song: song,
                 listenSeconds: Int(self.position),

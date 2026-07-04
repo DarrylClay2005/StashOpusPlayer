@@ -321,6 +321,7 @@ struct DocumentImportService {
         // playlist entry that referenced the old ID. Keying on the relative path
         // keeps the same song's identity stable across rescans and reinstalls.
         let stableID = ScanCacheService.documentsRelativePath(for: url).map { "local:\($0)" }
+        let dateAdded = (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
 
         var song = Song(
             id: stableID ?? UUID().uuidString,
@@ -335,7 +336,8 @@ struct DocumentImportService {
             genre: genre,
             bitrate: bitrate,
             sampleRate: sampleRate,
-            sourceTrackID: sourceTrackID
+            sourceTrackID: sourceTrackID,
+            dateAdded: dateAdded
         )
 
         appLog("Metadata: \"\(song.title)\" by \(song.artist.isEmpty ? "unknown" : song.artist) [\(fileExt), \(String(format: "%.0f", song.duration))s]", category: "library")

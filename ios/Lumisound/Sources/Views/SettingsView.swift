@@ -340,6 +340,12 @@ struct SettingsView: View {
                     .foregroundStyle(AppTheme.textPrimary)
             }
 
+            // On-device listening stats — no server/account involved
+            NavigationLink(destination: ListeningStatsView()) {
+                Label("Listening Stats", systemImage: "chart.bar.fill")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+
             // Force metadata sync
             Button {
                 Task {

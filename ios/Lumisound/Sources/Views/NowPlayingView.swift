@@ -7,10 +7,11 @@ import UIKit
 // instead of one long vertical wall, so the core playback stays prominent and
 // the extras are organized — the layout big music apps use.
 private enum NowPlayingPanel: String, CaseIterable, Identifiable {
-    case controls = "Controls"
-    case sound    = "Sound"
-    case queue    = "Queue"
-    case lyrics   = "Lyrics"
+    case controls   = "Controls"
+    case sound      = "Sound"
+    case queue      = "Queue"
+    case lyrics     = "Lyrics"
+    case bookmarks  = "Marks"
     var id: String { rawValue }
 }
 
@@ -71,6 +72,10 @@ struct NowPlayingView: View {
     @State private var showEQ = true
     @State private var showLyrics = false
     @State private var showLyricsSyncEditor = false
+    // Bumped after add/remove so the view re-reads BookmarkStore (which
+    // isn't an ObservableObject — it's a plain persisted store, same shape
+    // as DownloadLedgerStore/PlayHistoryStore).
+    @State private var bookmarksRefreshToken = UUID()
 
     // Artwork style. Falls back to the default below both for first-time
     // users AND for anyone whose saved rawValue predates the 2026-07 visual
@@ -242,6 +247,8 @@ struct NowPlayingView: View {
             queuePreviewSection
         case .lyrics:
             lyricsSection
+        case .bookmarks:
+            bookmarksSection
         }
     }
 
@@ -1465,6 +1472,84 @@ struct NowPlayingView: View {
                 .environmentObject(player)
                 .environmentObject(progress)
         }
+    }
+
+    // MARK: - Bookmarks
+
+    private var bookmarksSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                addBookmarkAtCurrentPosition()
+            } label: {
+                Label("Add Bookmark at \(formattedBookmarkTime(progress.position))", systemImage: "bookmark.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.dynamicAccent)
+            }
+            .disabled(player.currentSong == nil)
+
+            if bookmarksForCurrentSong.isEmpty {
+                Text("No bookmarks on this track yet.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                ForEach(bookmarksForCurrentSong) { bookmark in
+                    bookmarkRow(bookmark)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .panelStyle()
+    }
+
+    private var bookmarksForCurrentSong: [TrackBookmark] {
+        guard let songID = player.currentSong?.id else { return [] }
+        return BookmarkStore.shared.bookmarks(for: songID)
+    }
+
+    private func bookmarkRow(_ bookmark: TrackBookmark) -> some View {
+        HStack {
+            Button {
+                player.seek(to: bookmark.timestamp)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "play.circle")
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                    Text(bookmark.label)
+                        .font(.subheadline)
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    Text(formattedBookmarkTime(bookmark.timestamp))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                guard let songID = player.currentSong?.id else { return }
+                BookmarkStore.shared.removeBookmark(songID: songID, bookmarkID: bookmark.id)
+                bookmarksRefreshToken = UUID()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(AppTheme.textSecondary.opacity(0.6))
+            }
+        }
+    }
+
+    private func addBookmarkAtCurrentPosition() {
+        guard let songID = player.currentSong?.id else { return }
+        BookmarkStore.shared.addBookmark(
+            songID: songID,
+            timestamp: progress.position,
+            label: "Bookmark at \(formattedBookmarkTime(progress.position))"
+        )
+        bookmarksRefreshToken = UUID()
+    }
+
+    private func formattedBookmarkTime(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total = Int(seconds.rounded())
+        return "\(total / 60):\(String(format: "%02d", total % 60))"
     }
 
     // MARK: - Helpers

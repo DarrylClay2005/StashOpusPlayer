@@ -30,6 +30,13 @@ struct Song: Identifiable, Hashable, Codable {
     /// features don't need to re-decode the file on every access. `nil` until
     /// analysis has run for this track.
     var bpm: Double?
+    /// When this track was added — `MPMediaItemPropertyDateAdded` for Apple
+    /// Music library items, the file's creation date for imported/downloaded
+    /// files. `nil` if neither was available. Used for the "Recently Added"
+    /// smart playlist; not authoritative for anything else. Songs are
+    /// re-scanned fresh each launch (see `LibraryManager`), so this is
+    /// re-read from the source each time rather than persisted separately.
+    var dateAdded: Date?
 
     init(
         id: String = UUID().uuidString,
@@ -47,7 +54,8 @@ struct Song: Identifiable, Hashable, Codable {
         sampleRate: Int = 0,
         sourceTrackID: String? = nil,
         httpHeaders: [String: String]? = nil,
-        bpm: Double? = nil
+        bpm: Double? = nil,
+        dateAdded: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -65,6 +73,7 @@ struct Song: Identifiable, Hashable, Codable {
         self.sourceTrackID = sourceTrackID
         self.httpHeaders = httpHeaders
         self.bpm = bpm
+        self.dateAdded = dateAdded
     }
 
     var displayName: String {
@@ -102,7 +111,8 @@ extension Song {
             artworkCacheKey: String(mediaItem.persistentID),
             trackNumber: mediaItem.albumTrackNumber,
             year: "",
-            genre: mediaItem.genre ?? ""
+            genre: mediaItem.genre ?? "",
+            dateAdded: mediaItem.dateAdded
         )
     }
 }
