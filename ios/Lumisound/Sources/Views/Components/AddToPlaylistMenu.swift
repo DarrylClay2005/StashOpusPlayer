@@ -52,6 +52,15 @@ struct SongContextMenuContent: View {
             }
         }
 
+        // MARK: Make a Clip — same "local file, not DRM Apple Music" gate as Identify Track
+        if song.url?.isFileURL == true {
+            Button {
+                ClipMakerCenter.shared.present(song: song)
+            } label: {
+                Label("Make a Clip", systemImage: "scissors")
+            }
+        }
+
         Divider()
 
         // MARK: Add to Playlist submenu

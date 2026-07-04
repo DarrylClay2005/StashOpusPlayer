@@ -32,6 +32,10 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
     case moltenGlassDrip
     case confettiBurstLoop
     case shadowPuppetSilhouette
+    // 19th style, added alongside the 2026-07 local-features batch — a
+    // genuine real-time FFT spectrum reacting to actual playback (not a
+    // decorative animation like the other 18), via AudioVisualizerService.
+    case liveSpectrum
 
     var id: String { rawValue }
 
@@ -55,6 +59,7 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .moltenGlassDrip:       return "Molten Glass Drip"
         case .confettiBurstLoop:     return "Confetti Burst"
         case .shadowPuppetSilhouette: return "Shadow Puppet"
+        case .liveSpectrum:           return "Live Spectrum"
         }
     }
 
@@ -78,6 +83,7 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .moltenGlassDrip:       return "flame.fill"
         case .confettiBurstLoop:     return "party.popper.fill"
         case .shadowPuppetSilhouette: return "theatermasks.fill"
+        case .liveSpectrum:           return "waveform"
         }
     }
 }

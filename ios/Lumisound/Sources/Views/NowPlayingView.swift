@@ -391,6 +391,10 @@ struct NowPlayingView: View {
         case .shadowPuppetSilhouette:
             ShadowPuppetSilhouetteArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
+
+        case .liveSpectrum:
+            LiveSpectrumArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
         }
     }
 

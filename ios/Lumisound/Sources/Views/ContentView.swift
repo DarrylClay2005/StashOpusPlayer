@@ -166,6 +166,7 @@ struct ContentView: View {
             .allowsHitTesting(false)
         }
         .acoustIDConfirmSheet()
+        .clipMakerSheet()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .fullScreenCover(isPresented: $showCarMode) {
             CarModeView()

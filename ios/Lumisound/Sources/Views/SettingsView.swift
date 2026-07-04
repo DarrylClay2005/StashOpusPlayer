@@ -346,6 +346,12 @@ struct SettingsView: View {
                     .foregroundStyle(AppTheme.textPrimary)
             }
 
+            // Wake-up alarm that fades in music — no server/account involved
+            NavigationLink(destination: SleepWakeAlarmView()) {
+                Label("Wake-Up Alarm", systemImage: "alarm")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+
             // Force metadata sync
             Button {
                 Task {

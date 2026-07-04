@@ -341,9 +341,15 @@ final class AudioPlayerManager: ObservableObject {
     // route becomes available again.
     private var pausedByRouteChange = false
 
+    // Mirrors `LibraryManager.shared` — gives App Intents (invoked directly
+    // by iOS/Siri via the AppIntents framework, with no SwiftUI environment
+    // access) a way to reach the live player instance.
+    static weak var shared: AudioPlayerManager?
+
     // MARK: Init / Deinit
 
     init() {
+        Self.shared = self
         configureAudioSession()
         configureEngine()
         configureEqualizer()
@@ -2509,6 +2515,30 @@ final class AudioPlayerManager: ObservableObject {
 
     private func removeKaraokeTap() {
         engine.outputNode.removeTap(onBus: 0)
+    }
+
+    // MARK: - Visualizer Tap
+    //
+    // Deliberately installed on `mainMixerNode`, NOT `outputNode` — Karaoke's
+    // tap already owns `outputNode` bus 0, and a node only supports one tap
+    // per bus at a time (installing a second silently replaces the first).
+    // Using a different node entirely means this can run independently of
+    // Karaoke Mode with no conflict.
+
+    private var visualizerTapInstalled = false
+
+    func startVisualizerTap(handler: @escaping (AVAudioPCMBuffer) -> Void) {
+        guard !visualizerTapInstalled else { return }
+        visualizerTapInstalled = true
+        engine.mainMixerNode.installTap(onBus: 0, bufferSize: 2048, format: nil) { buffer, _ in
+            handler(buffer)
+        }
+    }
+
+    func stopVisualizerTap() {
+        guard visualizerTapInstalled else { return }
+        visualizerTapInstalled = false
+        engine.mainMixerNode.removeTap(onBus: 0)
     }
 
     /// Applies stereo center-channel cancellation in-place to a PCM buffer.
