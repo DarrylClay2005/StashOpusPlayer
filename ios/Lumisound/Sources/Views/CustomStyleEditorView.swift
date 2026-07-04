@@ -176,12 +176,14 @@ struct CustomStyleEditorView: View {
 
     @ViewBuilder
     private var decorationSection: some View {
-        Section("Decoration") {
+        Section {
             Picker("Effect", selection: $draft.decoration) {
                 ForEach(CustomNowPlayingStyle.Decoration.allCases) { deco in
                     Label(deco.label, systemImage: deco.iconName).tag(deco)
                 }
             }
+        } header: {
+            Text("Decoration")
         } footer: {
             if draft.decoration == .waveform {
                 Text("Reacts to the actual audio in real time — silent/still when paused.")

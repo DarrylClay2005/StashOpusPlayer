@@ -122,9 +122,10 @@ struct CustomStyleArtworkView: View {
 
     private func glowRingDecoration(t: TimeInterval) -> some View {
         let phase = ArtworkClock.pingPong(Date(timeIntervalSinceReferenceDate: t), legDuration: 1.6)
+        let ringSize: CGFloat = config.coverSize + 20 + phase * 25
         return Circle()
             .stroke(accentColor.opacity(0.5), lineWidth: 3)
-            .frame(width: config.coverSize + 20 + phase * 25, height: config.coverSize + 20 + phase * 25)
+            .frame(width: ringSize, height: ringSize)
             .opacity(1 - phase * 0.7)
     }
 
