@@ -354,11 +354,13 @@ async def lifespan(app: FastAPI):
     app_logs_janitor = asyncio.create_task(_app_logs_janitor())
     subscription_poller = asyncio.create_task(_subscription_polling_loop())
     duplicate_scanner = asyncio.create_task(_duplicate_scan_loop())
+    weekly_mix_generator = asyncio.create_task(_weekly_mix_loop())
     yield
     janitor.cancel()
     app_logs_janitor.cancel()
     subscription_poller.cancel()
     duplicate_scanner.cancel()
+    weekly_mix_generator.cancel()
     # Shutdown: close the DB connection pool (Fix 8)
     import db as _db_module
     pool = _db_module._pool
@@ -1270,6 +1272,16 @@ class UpdateRoomRequest(BaseModel):
     is_playing: Optional[bool] = None
 
 
+class RoomChatRequest(BaseModel):
+    message: str
+
+
+class RoomQueueAddRequest(BaseModel):
+    track_url: Optional[str] = None
+    title: str
+    artist: Optional[str] = None
+
+
 class SubscribeChannelRequest(BaseModel):
     channel_url: str
     channel_name: Optional[str] = None
@@ -2107,6 +2119,11 @@ async def _do_download_job(
             )
         except Exception:
             logger.exception("Failed to record download history for user %s", user_id)
+        # Feature: generalized outbound webhooks. Fire-and-forget — a broken
+        # webhook URL must never affect the download itself.
+        asyncio.create_task(_fire_user_webhooks(user_id, "download_complete", {
+            "source": source, "source_id": id, "title": title or id, "artist": artist or "",
+        }))
 
     content_type_map = {
         "mp3":  "audio/mpeg",
@@ -3654,6 +3671,9 @@ async def _duplicate_scan_loop() -> None:
                         "duplicate scan: found %d duplicate group(s) for user %s",
                         len(result["duplicate_groups"]), user_id,
                     )
+                    await _fire_user_webhooks(user_id, "duplicate_found", {
+                        "duplicate_group_count": len(result["duplicate_groups"]),
+                    })
         except Exception:
             logger.exception("duplicate scan loop: pass failed")
 
@@ -5808,9 +5828,50 @@ async def get_music_waveform(
     return {"metadata_id": metadata_id, "peaks": json.loads(row[0])}
 
 
+_STREAM_QUALITY_BITRATES = {"low": "64k", "medium": "128k"}
+
+
+async def _transcode_to_temp(source_path: pathlib.Path, bitrate: str) -> Optional[pathlib.Path]:
+    """Transcodes `source_path` to a temp AAC (.m4a) file at `bitrate`
+    (Feature: adaptive-bitrate streaming — a lower-bitrate stream for
+    cellular/slow connections instead of always the original file).
+    Transcodes to a real temp file (served via FileResponse) rather than
+    piping ffmpeg's output live, so HTTP Range/seek support — which the
+    client already depends on for the original-quality path — keeps working
+    unchanged. Returns None on failure; callers should fall back to serving
+    the original file at full quality rather than failing playback outright."""
+    out_path = pathlib.Path(tempfile.gettempdir()) / f"transcode_{uuid.uuid4().hex}.m4a"
+    cmd = [
+        "ffmpeg", "-hide_banner", "-nostats", "-v", "quiet",
+        "-i", str(source_path),
+        "-c:a", "aac", "-b:a", bitrate,
+        "-movflags", "+faststart",
+        "-y", str(out_path),
+    ]
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_exec(*cmd)
+        await asyncio.wait_for(proc.wait(), timeout=60.0)
+    except Exception as exc:
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+        logger.warning("_transcode_to_temp: failed for %s: %s", source_path.name, exc)
+        out_path.unlink(missing_ok=True)
+        return None
+    if proc.returncode != 0 or not out_path.exists():
+        out_path.unlink(missing_ok=True)
+        return None
+    return out_path
+
+
 @app.get("/user/music/stream")
 async def stream_user_music(
     path: str = Query(..., description="Relative path within user's music dir"),
+    quality: Optional[str] = Query(
+        None, description="'low' (64kbps) or 'medium' (128kbps) for a smaller adaptive-bitrate "
+                           "transcode; omit for the original file at full quality"
+    ),
     user: dict = Depends(get_current_user),
 ):
     """Streams an audio file from the authenticated user's personal music directory.
@@ -5852,10 +5913,28 @@ async def stream_user_music(
     # file the client receives as the exact original, then delete that temp
     # AFTER the response is sent — so only the compressed copy remains on disk.
     servable_path, temp_cleanup = _materialize_user_music_file(full_path)
-    background = BackgroundTask(_safe_unlink, temp_cleanup) if temp_cleanup else None
+    cleanup_paths: list[pathlib.Path] = [temp_cleanup] if temp_cleanup else []
+    media_type = _audio_media_type(ext)
+    out_filename = full_path.name
+
+    if quality in _STREAM_QUALITY_BITRATES:
+        transcoded = await _transcode_to_temp(servable_path, _STREAM_QUALITY_BITRATES[quality])
+        if transcoded is not None:
+            servable_path = transcoded
+            cleanup_paths.append(transcoded)
+            media_type = "audio/mp4"
+            out_filename = full_path.stem + ".m4a"
+        # else: fall through and serve the original at full quality — a
+        # failed transcode should never mean "no audio at all".
+
+    def _cleanup_all() -> None:
+        for p in cleanup_paths:
+            _safe_unlink(p)
+
+    background = BackgroundTask(_cleanup_all) if cleanup_paths else None
     return FileResponse(
-        path=str(servable_path), media_type=_audio_media_type(ext),
-        filename=full_path.name, headers=headers, background=background,
+        path=str(servable_path), media_type=media_type,
+        filename=out_filename, headers=headers, background=background,
     )
 
 
@@ -6212,6 +6291,153 @@ async def smart_playlists(user: dict = Depends(get_current_user)):
             {"name": "Sleep", "key": "sleep", "tracks": buckets["sleep"]},
         ]
     }
+
+
+# ---------------------------------------------------------------------------
+# Feature: personalized "Discover Weekly"-style mix. Distinct from
+# smart-playlists above (static BPM buckets, recomputed fresh every request)
+# — this is actually personalized to real play history (favorite artists
+# recently), and its result is cached/regenerated weekly by
+# _weekly_mix_loop rather than computed live every time.
+# ---------------------------------------------------------------------------
+
+_WEEKLY_MIX_SIZE = 25
+
+
+async def _generate_weekly_mix_core(user_id: str) -> list[dict]:
+    """Builds a personalized mix from the user's own uploaded library,
+    biased toward artists they've actually played recently (last 90 days).
+    Falls back to a random sample of their library if there's no play
+    history yet (e.g. a brand new account)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT artist, COUNT(*) AS plays
+                FROM ios_play_history
+                WHERE user_id = %s AND played_at >= NOW() - INTERVAL 90 DAY
+                  AND artist IS NOT NULL AND artist != ''
+                GROUP BY artist
+                ORDER BY plays DESC
+                LIMIT 10
+                """,
+                (user_id,),
+            )
+            top_artists = [r[0] for r in await cur.fetchall()]
+
+            if top_artists:
+                placeholders = ",".join(["%s"] * len(top_artists))
+                await cur.execute(
+                    f"""
+                    SELECT id, title, artist, album, bpm, musical_key
+                    FROM ios_user_music_metadata
+                    WHERE user_id = %s AND artist IN ({placeholders})
+                    ORDER BY RAND()
+                    LIMIT %s
+                    """,
+                    (user_id, *top_artists, _WEEKLY_MIX_SIZE),
+                )
+                rows = await cur.fetchall()
+            else:
+                rows = []
+
+            # Top up with a random sample if favorite-artist tracks weren't
+            # enough to fill the mix (small library, or few plays so far).
+            if len(rows) < _WEEKLY_MIX_SIZE:
+                seen_ids = {r[0] for r in rows}
+                await cur.execute(
+                    "SELECT id, title, artist, album, bpm, musical_key FROM ios_user_music_metadata "
+                    "WHERE user_id = %s ORDER BY RAND() LIMIT %s",
+                    (user_id, _WEEKLY_MIX_SIZE),
+                )
+                for r in await cur.fetchall():
+                    if r[0] not in seen_ids and len(rows) < _WEEKLY_MIX_SIZE:
+                        rows.append(r)
+                        seen_ids.add(r[0])
+
+    return [
+        {"metadata_id": r[0], "title": r[1], "artist": r[2], "album": r[3], "bpm": r[4], "musical_key": r[5]}
+        for r in rows
+    ]
+
+
+@app.get("/user/music/weekly-mix")
+async def get_weekly_mix(
+    force_regenerate: bool = Query(False, description="Bypass the cached weekly mix and generate fresh"),
+    user: dict = Depends(get_current_user),
+):
+    """Returns this user's personalized weekly mix — cached and regenerated
+    weekly by _weekly_mix_loop, so opening this doesn't recompute it live
+    every time. Pass force_regenerate=true to build a fresh one now."""
+    user_id = user["sub"]
+
+    if not force_regenerate:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT track_ids_json, generated_at FROM ios_weekly_mix_cache WHERE user_id = %s",
+                    (user_id,),
+                )
+                row = await cur.fetchone()
+        if row:
+            return {"tracks": json.loads(row[0]), "generated_at": row[1].isoformat() if row[1] else None}
+
+    tracks = await _generate_weekly_mix_core(user_id)
+    await _save_weekly_mix_cache(user_id, tracks)
+    return {"tracks": tracks, "generated_at": None}
+
+
+async def _save_weekly_mix_cache(user_id: str, tracks: list[dict]) -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_weekly_mix_cache (user_id, track_ids_json)
+                VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE track_ids_json = VALUES(track_ids_json), generated_at = NOW()
+                """,
+                (user_id, json.dumps(tracks)),
+            )
+
+
+_WEEKLY_MIX_INTERVAL_SECONDS = 3600  # check hourly which user (if any) is due
+_WEEKLY_MIX_STALE_DAYS = 7
+
+
+async def _weekly_mix_loop() -> None:
+    """Regenerates one due user's weekly mix per tick — same one-at-a-time
+    throttling rationale as _duplicate_scan_loop."""
+    while True:
+        await asyncio.sleep(_WEEKLY_MIX_INTERVAL_SECONDS)
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT m.user_id
+                        FROM ios_user_music_metadata m
+                        LEFT JOIN ios_weekly_mix_cache c ON c.user_id = m.user_id
+                        WHERE c.user_id IS NULL OR c.generated_at < NOW() - INTERVAL %s DAY
+                        GROUP BY m.user_id
+                        ORDER BY MIN(c.generated_at) IS NULL DESC, MIN(c.generated_at) ASC
+                        LIMIT 1
+                        """,
+                        (_WEEKLY_MIX_STALE_DAYS,),
+                    )
+                    row = await cur.fetchone()
+
+            if not row:
+                continue
+            user_id = row[0]
+            tracks = await _generate_weekly_mix_core(user_id)
+            await _save_weekly_mix_cache(user_id, tracks)
+            logger.info("weekly mix: regenerated %d track(s) for user %s", len(tracks), user_id)
+        except Exception:
+            logger.exception("weekly mix loop: pass failed")
 
 
 # ---------------------------------------------------------------------------
@@ -6727,13 +6953,14 @@ async def update_room(
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT host_user_id FROM ios_listen_rooms WHERE room_code = %s",
+                "SELECT id, host_user_id, title, artist FROM ios_listen_rooms WHERE room_code = %s",
                 (room_code.upper(),),
             )
             row = await cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Room not found")
-            if row[0] != user_id:
+            room_id, host_user_id, prev_title, prev_artist = row
+            if host_user_id != user_id:
                 raise HTTPException(status_code=403, detail="Only the host can update this room")
 
             updates: list[str] = []
@@ -6753,7 +6980,215 @@ async def update_room(
                     params,
                 )
 
+            # Feature: persistent room history — log a track-change event so
+            # guests joining late (or reopening the room) can see what's
+            # played, not just the current instantaneous state.
+            track_changed = (
+                (body.title is not None and body.title != prev_title)
+                or (body.artist is not None and body.artist != prev_artist)
+            )
+            if track_changed:
+                await cur.execute(
+                    "INSERT INTO ios_room_events (room_id, user_id, event_type, title, artist) "
+                    "VALUES (%s, %s, 'track_change', %s, %s)",
+                    (room_id, user_id, body.title or prev_title, body.artist or prev_artist),
+                )
+
     return {"status": "updated"}
+
+
+@app.get("/rooms/{room_code}/events")
+async def get_room_events(
+    room_code: str,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Returns recent history (track changes + chat messages) for a shared
+    listening room, so guests joining late — or reopening the room — see
+    what's already happened (Feature: persistent room history). No auth
+    required, matching GET /rooms/{code} — guests without an account can
+    follow a shared listening session."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT id FROM ios_listen_rooms WHERE room_code = %s", (room_code.upper(),))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Room not found")
+            room_id = row[0]
+
+            await cur.execute(
+                """
+                SELECT event_type, title, artist, message, created_at
+                FROM ios_room_events
+                WHERE room_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (room_id, limit),
+            )
+            rows = await cur.fetchall()
+
+    events = [
+        {
+            "event_type": r[0],
+            "title": r[1],
+            "artist": r[2],
+            "message": r[3],
+            "created_at": r[4].isoformat() if r[4] else None,
+        }
+        for r in rows
+    ]
+    events.reverse()  # oldest first, matching normal chat-log reading order
+    return {"events": events}
+
+
+@app.post("/rooms/{room_code}/chat", status_code=201)
+async def post_room_chat(
+    room_code: str,
+    body: RoomChatRequest,
+    payload: dict = Depends(get_current_user),
+):
+    """Posts a chat message to a shared listening room's history."""
+    user_id = payload["sub"]
+    if not body.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT id FROM ios_listen_rooms WHERE room_code = %s", (room_code.upper(),))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Room not found")
+            room_id = row[0]
+
+            await cur.execute(
+                "INSERT INTO ios_room_events (room_id, user_id, event_type, message) "
+                "VALUES (%s, %s, 'chat', %s)",
+                (room_id, user_id, body.message.strip()[:1000]),
+            )
+
+    return {"status": "posted"}
+
+
+@app.get("/rooms/{room_code}/queue")
+async def get_room_queue(room_code: str):
+    """Returns a shared listening room's collaborative up-next queue, sorted
+    by votes (Feature: collaborative room queue). No auth required, matching
+    GET /rooms/{code}."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT id FROM ios_listen_rooms WHERE room_code = %s", (room_code.upper(),))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Room not found")
+            room_id = row[0]
+
+            await cur.execute(
+                """
+                SELECT id, track_url, title, artist, votes, added_by_user_id, added_at
+                FROM ios_room_queue WHERE room_id = %s
+                ORDER BY votes DESC, added_at ASC
+                """,
+                (room_id,),
+            )
+            rows = await cur.fetchall()
+
+    return {
+        "queue": [
+            {
+                "id": r[0],
+                "track_url": r[1],
+                "title": r[2],
+                "artist": r[3],
+                "votes": r[4],
+                "added_by_user_id": r[5],
+                "added_at": r[6].isoformat() if r[6] else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.post("/rooms/{room_code}/queue", status_code=201)
+async def add_room_queue_item(
+    room_code: str,
+    body: RoomQueueAddRequest,
+    payload: dict = Depends(get_current_user),
+):
+    """Suggests a track for a shared listening room's collaborative up-next
+    queue (Feature: collaborative room queue) — any room member can add one,
+    independent of the host's own device queue."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT id FROM ios_listen_rooms WHERE room_code = %s", (room_code.upper(),))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Room not found")
+            room_id = row[0]
+
+            item_id = str(uuid.uuid4())
+            await cur.execute(
+                "INSERT INTO ios_room_queue (id, room_id, added_by_user_id, track_url, title, artist) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (item_id, room_id, user_id, body.track_url, body.title, body.artist),
+            )
+
+    return {"id": item_id}
+
+
+@app.post("/rooms/{room_code}/queue/{item_id}/vote")
+async def vote_room_queue_item(room_code: str, item_id: str, payload: dict = Depends(get_current_user)):
+    """Upvotes a suggested track in a shared listening room's collaborative
+    queue. One vote per call (the client debounces repeat taps); does not
+    track per-user vote state, so this is a lightweight "how popular is this
+    suggestion" signal rather than a strict one-vote-per-user tally."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE ios_room_queue q
+                JOIN ios_listen_rooms r ON r.id = q.room_id
+                SET q.votes = q.votes + 1
+                WHERE q.id = %s AND r.room_code = %s
+                """,
+                (item_id, room_code.upper()),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Queue item not found")
+
+    return {"status": "voted"}
+
+
+@app.delete("/rooms/{room_code}/queue/{item_id}", status_code=204)
+async def remove_room_queue_item(room_code: str, item_id: str, payload: dict = Depends(get_current_user)):
+    """Removes a track from a shared listening room's collaborative queue —
+    only the person who added it or the room's host can remove it."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT q.added_by_user_id, r.host_user_id
+                FROM ios_room_queue q
+                JOIN ios_listen_rooms r ON r.id = q.room_id
+                WHERE q.id = %s AND r.room_code = %s
+                """,
+                (item_id, room_code.upper()),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Queue item not found")
+            added_by_user_id, host_user_id = row
+            if user_id not in (added_by_user_id, host_user_id):
+                raise HTTPException(status_code=403, detail="Only the host or the person who added this track can remove it")
+
+            await cur.execute("DELETE FROM ios_room_queue WHERE id = %s", (item_id,))
 
 
 # ---------------------------------------------------------------------------
@@ -6813,6 +7248,7 @@ async def _refresh_playlist_source_core(
                 "WHERE id = %s AND user_id = %s",
                 (new_count, playlist_id, user_id),
             )
+            playlist_name = None
             if notify and new_count > 0:
                 await cur.execute("SELECT name FROM ios_user_playlists WHERE id = %s", (playlist_id,))
                 row = await cur.fetchone()
@@ -6823,6 +7259,11 @@ async def _refresh_playlist_source_core(
                     "Tap to review and import",
                     {"playlist_id": playlist_id, "new_count": new_count},
                 )
+
+    if notify and new_count > 0:
+        await _fire_user_webhooks(user_id, "playlist_update", {
+            "playlist_id": playlist_id, "playlist_name": playlist_name, "new_count": new_count,
+        })
 
     return {"remote_count": remote_count, "local_count": local_count, "new_count": new_count}
 
@@ -7778,6 +8219,117 @@ async def _post_discord_webhook(webhook_url: str, payload: dict) -> None:
     await asyncio.to_thread(_post)
 
 
+class UserWebhookRequest(BaseModel):
+    event_type: str
+    webhook_url: str
+
+
+# Feature: generalized outbound webhooks — beyond the Discord-only
+# ios_discord_webhooks, a user can point any event type at any URL (Zapier,
+# Home Assistant, ntfy, their own server, etc.).
+_WEBHOOK_EVENT_TYPES = frozenset({"download_complete", "new_upload", "playlist_update", "duplicate_found"})
+
+
+@app.post("/user/webhooks", status_code=201)
+async def create_user_webhook(body: UserWebhookRequest, payload: dict = Depends(get_current_user)):
+    """Registers an outbound webhook for a given event type. A user can have
+    multiple webhooks for the same event type (e.g. one to Zapier, one to
+    their own server) — all enabled ones fire."""
+    if body.event_type not in _WEBHOOK_EVENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"event_type must be one of {sorted(_WEBHOOK_EVENT_TYPES)}")
+    await _reject_ssrf_targets(body.webhook_url)
+
+    user_id = payload["sub"]
+    webhook_id = str(uuid.uuid4())
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_user_webhooks (id, user_id, event_type, webhook_url) VALUES (%s, %s, %s, %s)",
+                (webhook_id, user_id, body.event_type, body.webhook_url),
+            )
+    return {"id": webhook_id}
+
+
+@app.get("/user/webhooks")
+async def list_user_webhooks(payload: dict = Depends(get_current_user)):
+    """Lists this user's registered outbound webhooks."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, event_type, webhook_url, enabled, created_at FROM ios_user_webhooks WHERE user_id = %s",
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+    return {
+        "webhooks": [
+            {
+                "id": r[0], "event_type": r[1], "webhook_url": r[2],
+                "enabled": bool(r[3]), "created_at": r[4].isoformat() if r[4] else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.delete("/user/webhooks/{webhook_id}", status_code=204)
+async def delete_user_webhook(webhook_id: str, payload: dict = Depends(get_current_user)):
+    """Deletes one of this user's registered webhooks."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM ios_user_webhooks WHERE id = %s AND user_id = %s",
+                (webhook_id, user_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Webhook not found")
+
+
+async def _post_generic_webhook(webhook_url: str, event_type: str, data: dict) -> None:
+    """Same fire-and-forget urllib-in-a-thread pattern as
+    _post_discord_webhook, just with a plain JSON envelope instead of a
+    Discord embed."""
+    def _post() -> None:
+        try:
+            body = json.dumps({"event": event_type, "data": data, "timestamp": time.time()}).encode("utf-8")
+            req = urllib.request.Request(
+                webhook_url, data=body,
+                headers={"Content-Type": "application/json", "User-Agent": "Lumisound-iOS-Bridge/1.0"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10)
+        except Exception as exc:
+            logger.debug("_post_generic_webhook failed for event %s: %s", event_type, exc)
+
+    await asyncio.to_thread(_post)
+
+
+async def _fire_user_webhooks(user_id: str, event_type: str, data: dict) -> None:
+    """Fires every one of this user's enabled webhooks registered for
+    `event_type`. Best-effort/non-blocking — failures are logged, never
+    raised, so a broken webhook URL can't break the feature that triggered
+    it (a download completing, a subscription finding a new upload, etc.)."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT webhook_url FROM ios_user_webhooks WHERE user_id = %s AND event_type = %s AND enabled = TRUE",
+                    (user_id, event_type),
+                )
+                rows = await cur.fetchall()
+    except Exception as exc:
+        logger.debug("_fire_user_webhooks: lookup failed for %s/%s: %s", user_id, event_type, exc)
+        return
+
+    for (webhook_url,) in rows:
+        await _post_generic_webhook(webhook_url, event_type, data)
+
+
 async def _notify_now_playing_discord(user_id: str, title: str, artist: Optional[str], bpm: Optional[float] = None) -> None:
     try:
         pool = await get_pool()
@@ -8081,6 +8633,11 @@ async def _check_subscription_core(
                     track["title"],
                     {"track": track, "subscription_id": sub_id},
                 )
+
+    if new_tracks:
+        await _fire_user_webhooks(user_id, "new_upload", {
+            "subscription_id": sub_id, "channel_name": channel_name, "tracks": new_tracks,
+        })
 
     return new_tracks
 
