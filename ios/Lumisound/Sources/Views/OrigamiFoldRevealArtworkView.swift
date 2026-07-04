@@ -11,29 +11,29 @@ struct OrigamiFoldRevealArtworkView: View {
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-    @State private var fold = false
 
     private let size: CGFloat = 240
     private let stripCount = 3
     private var stripHeight: CGFloat { size / CGFloat(stripCount) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            strip(0, anchor: .bottom, sign: 1)
-            strip(1, anchor: .top, sign: -1)
-            strip(2, anchor: .top, sign: 1)
+        TimelineView(.animation) { timeline in
+            let fold = -7 + 14 * ArtworkClock.pingPong(timeline.date, legDuration: 2.4)
+
+            VStack(spacing: 0) {
+                strip(0, anchor: .bottom, sign: 1, foldDegrees: fold)
+                strip(1, anchor: .top, sign: -1, foldDegrees: fold)
+                strip(2, anchor: .top, sign: 1, foldDegrees: fold)
+            }
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.white.opacity(0.2), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.5), radius: 22, y: 14)
         }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(0.2), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.5), radius: 22, y: 14)
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.4))
-        .onAppear {
-            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { fold = true }
-        }
     }
 
     /// One horizontal slice of the full cover, shown via a top-aligned crop of
@@ -41,7 +41,7 @@ struct OrigamiFoldRevealArtworkView: View {
     /// — an explicit, unambiguous "sprite sheet slice" (alignment: .top means
     /// the crop window always starts from the offset content's top edge, so
     /// the math doesn't depend on any implicit centering behavior).
-    private func strip(_ index: Int, anchor: UnitPoint, sign: CGFloat) -> some View {
+    private func strip(_ index: Int, anchor: UnitPoint, sign: CGFloat, foldDegrees: Double) -> some View {
         StyleCover(song: song, size: size, cornerRadius: 0)
             .offset(y: -CGFloat(index) * stripHeight)
             .frame(width: size, height: stripHeight, alignment: .top)
@@ -53,7 +53,7 @@ struct OrigamiFoldRevealArtworkView: View {
                 )
             )
             .rotation3DEffect(
-                .degrees((fold ? 7 : -7) * sign),
+                .degrees(foldDegrees * sign),
                 axis: (x: 1, y: 0, z: 0),
                 anchor: anchor,
                 perspective: 0.5

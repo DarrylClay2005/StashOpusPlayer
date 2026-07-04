@@ -20,6 +20,40 @@ enum ArtworkPaletteLoader {
     }
 }
 
+// MARK: - ArtworkClock (wall-clock-driven ambient animation phases)
+
+/// Computes ambient-loop animation phases directly from elapsed wall-clock
+/// time instead of persisting them in `@State` via
+/// `withAnimation(...repeatForever...)`. The old flip-a-flag-once-and-let-the-
+/// curve-repeat pattern relies on a Core Animation transaction staying alive
+/// indefinitely — but `NowPlayingView` re-renders every 0.25–0.5s while
+/// playing (`PlaybackProgress.position` ticks that often), and that frequent
+/// re-rendering was observed to freeze `repeatForever` animations mid-cycle
+/// across every Now Playing artwork style. Deriving the phase fresh from
+/// `TimelineView`'s `context.date` on every redraw sidesteps the whole
+/// problem: there's no in-flight animation to interrupt, just a value
+/// recomputed from elapsed time. Every artwork style's `body` should be
+/// wrapped in `TimelineView(.animation) { timeline in ... }` and read phases
+/// via these helpers instead of animating `@State` directly.
+enum ArtworkClock {
+    /// A smooth 0→1→0 oscillation, matching the shape of the old
+    /// `.easeInOut(duration: legDuration).repeatForever(autoreverses: true)`
+    /// (`legDuration` = time for one direction of travel).
+    static func pingPong(_ date: Date, legDuration: Double) -> Double {
+        guard legDuration > 0 else { return 0 }
+        let t = date.timeIntervalSinceReferenceDate
+        return 0.5 - 0.5 * cos(.pi * t / legDuration)
+    }
+
+    /// A linearly looping 0..<1 ramp, matching the shape of the old
+    /// `.linear(duration: cycleDuration).repeatForever(autoreverses: false)`.
+    static func loop(_ date: Date, cycleDuration: Double) -> Double {
+        guard cycleDuration > 0 else { return 0 }
+        let t = date.timeIntervalSinceReferenceDate
+        return t.truncatingRemainder(dividingBy: cycleDuration) / cycleDuration
+    }
+}
+
 // MARK: - FloatModifier (shared utility for gentle vertical float)
 
 struct FloatModifier: ViewModifier {
@@ -27,29 +61,13 @@ struct FloatModifier: ViewModifier {
     let amount: CGFloat
     let speed: Double
 
-    @State private var floating = false
-
     func body(content: Content) -> some View {
-        content
-            .offset(y: floating ? -amount : 0)
-            .onChange(of: isPlaying) { playing in
-                if playing {
-                    withAnimation(.easeInOut(duration: speed).repeatForever(autoreverses: true)) {
-                        floating = true
-                    }
-                } else {
-                    withAnimation(.easeOut(duration: 0.4)) {
-                        floating = false
-                    }
-                }
-            }
-            .onAppear {
-                if isPlaying {
-                    withAnimation(.easeInOut(duration: speed).repeatForever(autoreverses: true)) {
-                        floating = true
-                    }
-                }
-            }
+        TimelineView(.animation(paused: !isPlaying)) { timeline in
+            let phase = ArtworkClock.pingPong(timeline.date, legDuration: speed)
+            content
+                .offset(y: isPlaying ? -amount * phase : 0)
+                .animation(.easeOut(duration: 0.4), value: isPlaying)
+        }
     }
 }
 

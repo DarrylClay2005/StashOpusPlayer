@@ -9,33 +9,33 @@ struct ChalkboardSketchArtworkView: View {
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-    @State private var trimEnd: CGFloat = 0
 
     private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(red: 0.09, green: 0.13, blue: 0.1))
-                .overlay(FilmGrainOverlay().opacity(0.5))
+        TimelineView(.animation) { timeline in
+            let trimEnd = ArtworkClock.pingPong(timeline.date, legDuration: 3.4)
 
-            StyleCover(song: song, size: 210, cornerRadius: 14)
-                .saturation(0.35)
-                .contrast(1.05)
-                .clipShape(shape)
-                .overlay(shape.stroke(.white.opacity(0.5), lineWidth: 3))
-                .shadow(color: .black.opacity(0.4), radius: 12, y: 8)
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color(red: 0.09, green: 0.13, blue: 0.1))
+                    .overlay(FilmGrainOverlay().opacity(0.5))
 
-            shape
-                .trim(from: 0, to: trimEnd)
-                .stroke(.white.opacity(0.85), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [1, 3]))
-                .frame(width: 224, height: 224)
+                StyleCover(song: song, size: 210, cornerRadius: 14)
+                    .saturation(0.35)
+                    .contrast(1.05)
+                    .clipShape(shape)
+                    .overlay(shape.stroke(.white.opacity(0.5), lineWidth: 3))
+                    .shadow(color: .black.opacity(0.4), radius: 12, y: 8)
+
+                shape
+                    .trim(from: 0, to: trimEnd)
+                    .stroke(.white.opacity(0.85), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [1, 3]))
+                    .frame(width: 224, height: 224)
+            }
+            .frame(width: 300, height: 300)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
-        .frame(width: 300, height: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 3.8))
-        .onAppear {
-            withAnimation(.easeInOut(duration: 3.4).repeatForever(autoreverses: true)) { trimEnd = 1 }
-        }
     }
 }

@@ -10,8 +10,6 @@ struct DiscoMirrorBallArtworkView: View {
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-    @State private var orbitAngle: Double = 0
-    @State private var flicker = false
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
 
@@ -30,37 +28,38 @@ struct DiscoMirrorBallArtworkView: View {
     ]
 
     var body: some View {
-        ZStack {
-            RadialGradient(
-                colors: [Color(white: 0.14), Color(white: 0.02)],
-                center: .center, startRadius: 20, endRadius: 200
-            )
+        TimelineView(.animation) { timeline in
+            let orbitAngle = ArtworkClock.loop(timeline.date, cycleDuration: 9) * 360
+            let flicker = 0.35 + 0.6 * ArtworkClock.pingPong(timeline.date, legDuration: 0.9)
 
-            ForEach(Array(spots.enumerated()), id: \.offset) { _, spot in
-                let radians = (orbitAngle + spot.phase) * .pi / 180
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(.white)
-                    .frame(width: 5, height: 5)
-                    .shadow(color: .white, radius: 6)
-                    .opacity(flicker ? 0.95 : 0.35)
-                    .offset(
-                        x: spot.baseX + cos(radians) * spot.orbitRadius,
-                        y: spot.baseY + sin(radians) * spot.orbitRadius
-                    )
+            ZStack {
+                RadialGradient(
+                    colors: [Color(white: 0.14), Color(white: 0.02)],
+                    center: .center, startRadius: 20, endRadius: 200
+                )
+
+                ForEach(Array(spots.enumerated()), id: \.offset) { _, spot in
+                    let radians = (orbitAngle + spot.phase) * .pi / 180
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(.white)
+                        .frame(width: 5, height: 5)
+                        .shadow(color: .white, radius: 6)
+                        .opacity(flicker)
+                        .offset(
+                            x: spot.baseX + cos(radians) * spot.orbitRadius,
+                            y: spot.baseY + sin(radians) * spot.orbitRadius
+                        )
+                }
+
+                StyleCover(song: song, size: 220, cornerRadius: 20)
+                    .clipShape(shape)
+                    .overlay(shape.stroke(.white.opacity(0.2), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.55), radius: 22, y: 14)
+                    .shadow(color: .white.opacity(0.15), radius: 30)
             }
-
-            StyleCover(song: song, size: 220, cornerRadius: 20)
-                .clipShape(shape)
-                .overlay(shape.stroke(.white.opacity(0.2), lineWidth: 1))
-                .shadow(color: .black.opacity(0.55), radius: 22, y: 14)
-                .shadow(color: .white.opacity(0.15), radius: 30)
+            .frame(width: 300, height: 300)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         }
-        .frame(width: 300, height: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.6))
-        .onAppear {
-            withAnimation(.linear(duration: 9).repeatForever(autoreverses: false)) { orbitAngle = 360 }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { flicker = true }
-        }
     }
 }

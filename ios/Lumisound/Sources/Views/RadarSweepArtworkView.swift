@@ -10,8 +10,6 @@ struct RadarSweepArtworkView: View {
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-    @State private var sweepAngle: Double = 0
-    @State private var blipPulse = false
 
     private let shape = RoundedRectangle(cornerRadius: 90, style: .continuous)
 
@@ -23,56 +21,57 @@ struct RadarSweepArtworkView: View {
     ]
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(RadialGradient(colors: [Color(red: 0.02, green: 0.1, blue: 0.05), .black],
-                                      center: .center, startRadius: 10, endRadius: 160))
+        TimelineView(.animation) { timeline in
+            let sweepAngle = ArtworkClock.loop(timeline.date, cycleDuration: 3.2) * 360
+            let blipPulse = 0.3 + 0.65 * ArtworkClock.pingPong(timeline.date, legDuration: 1.4)
 
-            ForEach(1..<5, id: \.self) { i in
+            ZStack {
                 Circle()
-                    .stroke(.green.opacity(0.28), lineWidth: 1)
-                    .frame(width: CGFloat(i) * 70, height: CGFloat(i) * 70)
-            }
+                    .fill(RadialGradient(colors: [Color(red: 0.02, green: 0.1, blue: 0.05), .black],
+                                          center: .center, startRadius: 10, endRadius: 160))
 
-            // Sweep wedge: an explicit pie-slice Path (center → arc → back to
-            // center), filled with a gradient that fades from bright at the
-            // leading edge to transparent at the trailing edge.
-            SweepWedge(spanDegrees: 45)
-                .fill(
-                    AngularGradient(
-                        colors: [.green.opacity(0), .green.opacity(0.6)],
-                        center: .center,
-                        startAngle: .degrees(-45), endAngle: .degrees(0)
+                ForEach(1..<5, id: \.self) { i in
+                    Circle()
+                        .stroke(.green.opacity(0.28), lineWidth: 1)
+                        .frame(width: CGFloat(i) * 70, height: CGFloat(i) * 70)
+                }
+
+                // Sweep wedge: an explicit pie-slice Path (center → arc → back to
+                // center), filled with a gradient that fades from bright at the
+                // leading edge to transparent at the trailing edge.
+                SweepWedge(spanDegrees: 45)
+                    .fill(
+                        AngularGradient(
+                            colors: [.green.opacity(0), .green.opacity(0.6)],
+                            center: .center,
+                            startAngle: .degrees(-45), endAngle: .degrees(0)
+                        )
                     )
-                )
-                .frame(width: 280, height: 280)
-                .rotationEffect(.degrees(sweepAngle))
+                    .frame(width: 280, height: 280)
+                    .rotationEffect(.degrees(sweepAngle))
 
-            ForEach(Array(contacts.enumerated()), id: \.offset) { _, contact in
-                Circle()
-                    .fill(.green)
-                    .frame(width: 6, height: 6)
-                    .shadow(color: .green, radius: 5)
-                    .opacity(blipPulse ? 0.95 : 0.3)
-                    .offset(
-                        x: cos(contact.angle * .pi / 180) * contact.radius * 140,
-                        y: sin(contact.angle * .pi / 180) * contact.radius * 140
-                    )
+                ForEach(Array(contacts.enumerated()), id: \.offset) { _, contact in
+                    Circle()
+                        .fill(.green)
+                        .frame(width: 6, height: 6)
+                        .shadow(color: .green, radius: 5)
+                        .opacity(blipPulse)
+                        .offset(
+                            x: cos(contact.angle * .pi / 180) * contact.radius * 140,
+                            y: sin(contact.angle * .pi / 180) * contact.radius * 140
+                        )
+                }
+
+                StyleCover(song: song, size: 150, cornerRadius: 75)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(.green.opacity(0.6), lineWidth: 2))
+                    .shadow(color: .green.opacity(0.5), radius: 20)
             }
-
-            StyleCover(song: song, size: 150, cornerRadius: 75)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(.green.opacity(0.6), lineWidth: 2))
-                .shadow(color: .green.opacity(0.5), radius: 20)
+            .frame(width: 300, height: 300)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(.green.opacity(0.3), lineWidth: 1))
         }
-        .frame(width: 300, height: 300)
-        .clipShape(Circle())
-        .overlay(Circle().stroke(.green.opacity(0.3), lineWidth: 1))
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 4.0))
-        .onAppear {
-            withAnimation(.linear(duration: 3.2).repeatForever(autoreverses: false)) { sweepAngle = 360 }
-            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { blipPulse = true }
-        }
     }
 }
 

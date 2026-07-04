@@ -10,7 +10,6 @@ struct CometOrbitArtworkView: View {
 
     @EnvironmentObject private var library: LibraryManager
     @State private var palette: ArtworkPalette?
-    @State private var orbitAngle: Double = 0
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     private let orbitRadiusX: CGFloat = 150
@@ -22,38 +21,39 @@ struct CometOrbitArtworkView: View {
     private var cometColor: Color { palette?.secondary ?? .cyan }
 
     var body: some View {
-        ZStack {
-            ForEach(0..<tailSteps, id: \.self) { i in
-                let t = Double(i) / Double(tailSteps)
-                let angle = (orbitAngle - Double(i) * 6) * .pi / 180
+        TimelineView(.animation) { timeline in
+            let orbitAngle = ArtworkClock.loop(timeline.date, cycleDuration: 6) * 360
+
+            ZStack {
+                ForEach(0..<tailSteps, id: \.self) { i in
+                    let t = Double(i) / Double(tailSteps)
+                    let angle = (orbitAngle - Double(i) * 6) * .pi / 180
+                    Circle()
+                        .fill(cometColor)
+                        .frame(width: 9 - CGFloat(i) * 1.0, height: 9 - CGFloat(i) * 1.0)
+                        .opacity((1 - t) * 0.8)
+                        .blur(radius: CGFloat(i) * 0.4)
+                        .offset(x: cos(angle) * orbitRadiusX, y: sin(angle) * orbitRadiusY)
+                }
+
                 Circle()
-                    .fill(cometColor)
-                    .frame(width: 9 - CGFloat(i) * 1.0, height: 9 - CGFloat(i) * 1.0)
-                    .opacity((1 - t) * 0.8)
-                    .blur(radius: CGFloat(i) * 0.4)
-                    .offset(x: cos(angle) * orbitRadiusX, y: sin(angle) * orbitRadiusY)
+                    .fill(.white)
+                    .frame(width: 11, height: 11)
+                    .shadow(color: cometColor, radius: 10)
+                    .offset(
+                        x: cos(orbitAngle * .pi / 180) * orbitRadiusX,
+                        y: sin(orbitAngle * .pi / 180) * orbitRadiusY
+                    )
+
+                StyleCover(song: song, size: 190, cornerRadius: 20)
+                    .clipShape(shape)
+                    .overlay(shape.stroke(.white.opacity(0.22), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
+                    .shadow(color: cometColor.opacity(0.4), radius: 22)
             }
-
-            Circle()
-                .fill(.white)
-                .frame(width: 11, height: 11)
-                .shadow(color: cometColor, radius: 10)
-                .offset(
-                    x: cos(orbitAngle * .pi / 180) * orbitRadiusX,
-                    y: sin(orbitAngle * .pi / 180) * orbitRadiusY
-                )
-
-            StyleCover(song: song, size: 190, cornerRadius: 20)
-                .clipShape(shape)
-                .overlay(shape.stroke(.white.opacity(0.22), lineWidth: 1))
-                .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
-                .shadow(color: cometColor.opacity(0.4), radius: 22)
+            .frame(width: 300, height: 300)
         }
-        .frame(width: 300, height: 300)
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.6))
-        .onAppear {
-            withAnimation(.linear(duration: 6).repeatForever(autoreverses: false)) { orbitAngle = 360 }
-        }
         .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
         .animation(.easeInOut(duration: 1.0), value: palette)
     }

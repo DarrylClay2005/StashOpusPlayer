@@ -38,20 +38,29 @@ struct QueueView: View {
                 ToolbarItemGroup(placement: .navigationBarLeading) {
                     // Shuffle toggle
                     Button {
-                        player.toggleShuffle()
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                            player.toggleShuffle()
+                        }
                     } label: {
                         Image(systemName: "shuffle")
                             .foregroundStyle(player.shuffleEnabled ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                             .fontWeight(player.shuffleEnabled ? .bold : .regular)
+                            .scaleEffect(player.shuffleEnabled ? 1.1 : 1.0)
                     }
+                    .animation(.spring(response: 0.3, dampingFraction: 0.6), value: player.shuffleEnabled)
                     // Repeat cycle button
                     Button {
-                        player.cycleRepeatMode()
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                            player.cycleRepeatMode()
+                        }
                     } label: {
                         Image(systemName: repeatIcon)
                             .foregroundStyle(player.repeatMode != .off ? AppTheme.dynamicAccent : AppTheme.textSecondary)
                             .fontWeight(player.repeatMode != .off ? .bold : .regular)
+                            .contentTransition(.opacity)
+                            .scaleEffect(player.repeatMode != .off ? 1.1 : 1.0)
                     }
+                    .animation(.spring(response: 0.3, dampingFraction: 0.6), value: player.repeatMode)
                 }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     if account.isLoggedIn {
@@ -146,6 +155,7 @@ struct QueueView: View {
                     ? AppTheme.dynamicAccent.opacity(0.12)
                     : Color.clear
             )
+            .animation(.easeInOut(duration: 0.25), value: player.currentIndex)
             .listRowSeparatorTint(AppTheme.surface)
         }
         .onMove { source, destination in

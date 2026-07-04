@@ -9,39 +9,39 @@ struct BioluminescentTideArtworkView: View {
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-    @State private var phase: CGFloat = 0
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.02, green: 0.05, blue: 0.12), Color(red: 0.03, green: 0.12, blue: 0.16)],
-                startPoint: .top, endPoint: .bottom
-            )
+        TimelineView(.animation) { timeline in
+            let phase = ArtworkClock.loop(timeline.date, cycleDuration: 6) * 2 * .pi
 
-            wave(amplitude: 14, frequency: 1.4, baseline: 0.68, phaseOffset: 0, color: .cyan, opacity: 0.35)
-            wave(amplitude: 10, frequency: 1.9, baseline: 0.78, phaseOffset: 2.1, color: .teal, opacity: 0.4)
-            wave(amplitude: 8, frequency: 2.4, baseline: 0.88, phaseOffset: 4.3, color: .mint, opacity: 0.45)
+            ZStack {
+                LinearGradient(
+                    colors: [Color(red: 0.02, green: 0.05, blue: 0.12), Color(red: 0.03, green: 0.12, blue: 0.16)],
+                    startPoint: .top, endPoint: .bottom
+                )
 
-            StyleCover(song: song, size: 190, cornerRadius: 20)
-                .clipShape(shape)
-                .overlay(shape.stroke(.white.opacity(0.25), lineWidth: 1))
-                .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
-                .shadow(color: .cyan.opacity(0.45), radius: 26)
-                .offset(y: -30)
+                wave(amplitude: 14, frequency: 1.4, baseline: 0.68, phaseOffset: 0, phase: phase, color: .cyan, opacity: 0.35)
+                wave(amplitude: 10, frequency: 1.9, baseline: 0.78, phaseOffset: 2.1, phase: phase, color: .teal, opacity: 0.4)
+                wave(amplitude: 8, frequency: 2.4, baseline: 0.88, phaseOffset: 4.3, phase: phase, color: .mint, opacity: 0.45)
+
+                StyleCover(song: song, size: 190, cornerRadius: 20)
+                    .clipShape(shape)
+                    .overlay(shape.stroke(.white.opacity(0.25), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
+                    .shadow(color: .cyan.opacity(0.45), radius: 26)
+                    .offset(y: -30)
+            }
+            .frame(width: 300, height: 300)
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         }
-        .frame(width: 300, height: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 6, speed: 4.2))
-        .onAppear {
-            withAnimation(.linear(duration: 6).repeatForever(autoreverses: false)) { phase = 2 * .pi }
-        }
     }
 
     /// One glowing sine-wave band, drawn as a filled shape from the wave line
     /// down to the bottom edge, scrolling horizontally via `phase`.
-    private func wave(amplitude: CGFloat, frequency: CGFloat, baseline: CGFloat, phaseOffset: CGFloat, color: Color, opacity: Double) -> some View {
+    private func wave(amplitude: CGFloat, frequency: CGFloat, baseline: CGFloat, phaseOffset: CGFloat, phase: CGFloat, color: Color, opacity: Double) -> some View {
         Canvas { context, size in
             let baseY = size.height * baseline
             var path = Path()

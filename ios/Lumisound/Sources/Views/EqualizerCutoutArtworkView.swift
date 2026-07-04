@@ -12,7 +12,6 @@ struct EqualizerCutoutArtworkView: View {
 
     @EnvironmentObject private var library: LibraryManager
     @State private var palette: ArtworkPalette?
-    @State private var pulseScale: CGFloat = 0.55
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     private let barCount = 14
@@ -28,49 +27,39 @@ struct EqualizerCutoutArtworkView: View {
     private var c2: Color { palette?.secondary ?? AppTheme.accentSoft }
 
     var body: some View {
-        StyleCover(song: song, size: 300, cornerRadius: 20)
-            .clipShape(shape)
-            .overlay(alignment: .bottom) {
-                LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 130)
-            }
-            .overlay(alignment: .bottom) {
-                HStack(alignment: .bottom, spacing: 5) {
-                    ForEach(Array(barRatios.enumerated()), id: \.offset) { i, ratio in
-                        RoundedRectangle(cornerRadius: 2, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [i.isMultiple(of: 2) ? c1 : c2, .white.opacity(0.85)],
-                                    startPoint: .bottom, endPoint: .top
-                                )
-                            )
-                            .frame(height: max(6, 90 * ratio * pulseScale))
-                    }
-                }
-                .frame(height: 90, alignment: .bottom)
-                .padding(.bottom, 14)
-            }
-            .overlay(shape.stroke(.white.opacity(0.18), lineWidth: 1))
-            .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
-            .shadow(color: c1.opacity(0.35), radius: 22)
-            .frame(width: 300, height: 300)
-            .onAppear {
-                if isPlaying { startPulsing() }
-            }
-            .onChange(of: isPlaying) { playing in
-                if playing {
-                    startPulsing()
-                } else {
-                    withAnimation(.easeOut(duration: 0.4)) { pulseScale = 0.4 }
-                }
-            }
-            .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
-            .animation(.easeInOut(duration: 1.0), value: palette)
-    }
+        TimelineView(.animation(paused: !isPlaying)) { timeline in
+            let raw = ArtworkClock.pingPong(timeline.date, legDuration: 0.55)
+            let pulseScale = isPlaying ? 0.55 + raw * 0.45 : 0.4
 
-    private func startPulsing() {
-        withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
-            pulseScale = 1.0
+            StyleCover(song: song, size: 300, cornerRadius: 20)
+                .clipShape(shape)
+                .overlay(alignment: .bottom) {
+                    LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 130)
+                }
+                .overlay(alignment: .bottom) {
+                    HStack(alignment: .bottom, spacing: 5) {
+                        ForEach(Array(barRatios.enumerated()), id: \.offset) { i, ratio in
+                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [i.isMultiple(of: 2) ? c1 : c2, .white.opacity(0.85)],
+                                        startPoint: .bottom, endPoint: .top
+                                    )
+                                )
+                                .frame(height: max(6, 90 * ratio * pulseScale))
+                        }
+                    }
+                    .frame(height: 90, alignment: .bottom)
+                    .padding(.bottom, 14)
+                }
+                .overlay(shape.stroke(.white.opacity(0.18), lineWidth: 1))
+                .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
+                .shadow(color: c1.opacity(0.35), radius: 22)
+                .frame(width: 300, height: 300)
+                .animation(.easeOut(duration: 0.4), value: isPlaying)
         }
+        .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
+        .animation(.easeInOut(duration: 1.0), value: palette)
     }
 }

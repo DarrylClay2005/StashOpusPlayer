@@ -11,7 +11,6 @@ struct VinylCrateStackArtworkView: View {
 
     @EnvironmentObject private var library: LibraryManager
     @State private var palette: ArtworkPalette?
-    @State private var settle = false
 
     private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
     private var c1: Color { palette?.primary ?? AppTheme.dynamicAccent }
@@ -22,30 +21,31 @@ struct VinylCrateStackArtworkView: View {
     }
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(red: 0.05, green: 0.05, blue: 0.07))
+        TimelineView(.animation) { timeline in
+            let p = ArtworkClock.pingPong(timeline.date, legDuration: 3.0)
 
-            ForEach(Array(sleeves.enumerated()), id: \.offset) { i, sleeve in
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(sleeve.color)
-                    .frame(width: 190, height: 190)
-                    .rotationEffect(.degrees(sleeve.angle + (settle ? 2 : -2)))
-                    .offset(x: sleeve.offsetX + (settle ? 4 : -4), y: CGFloat(i) * 3)
-                    .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color(red: 0.05, green: 0.05, blue: 0.07))
+
+                ForEach(Array(sleeves.enumerated()), id: \.offset) { i, sleeve in
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(sleeve.color)
+                        .frame(width: 190, height: 190)
+                        .rotationEffect(.degrees(sleeve.angle + (-2 + 4 * p)))
+                        .offset(x: sleeve.offsetX + (-4 + 8 * p), y: CGFloat(i) * 3)
+                        .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+                }
+
+                StyleCover(song: song, size: 200, cornerRadius: 10)
+                    .clipShape(shape)
+                    .overlay(shape.stroke(.white.opacity(0.25), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.55), radius: 18, y: 10)
             }
-
-            StyleCover(song: song, size: 200, cornerRadius: 10)
-                .clipShape(shape)
-                .overlay(shape.stroke(.white.opacity(0.25), lineWidth: 1))
-                .shadow(color: .black.opacity(0.55), radius: 18, y: 10)
+            .frame(width: 300, height: 300)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
-        .frame(width: 300, height: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 3.8))
-        .onAppear {
-            withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) { settle = true }
-        }
         .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
         .animation(.easeInOut(duration: 1.0), value: palette)
     }

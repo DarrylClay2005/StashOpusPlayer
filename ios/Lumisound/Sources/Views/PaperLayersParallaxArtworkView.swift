@@ -11,7 +11,6 @@ struct PaperLayersParallaxArtworkView: View {
 
     @EnvironmentObject private var library: LibraryManager
     @State private var palette: ArtworkPalette?
-    @State private var drift = false
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     private var c1: Color { palette?.primary ?? AppTheme.dynamicAccent }
@@ -28,35 +27,36 @@ struct PaperLayersParallaxArtworkView: View {
     }
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(Color(red: 0.06, green: 0.06, blue: 0.08))
+        TimelineView(.animation) { timeline in
+            ZStack {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(Color(red: 0.06, green: 0.06, blue: 0.08))
 
-            ForEach(Array(layers.enumerated()), id: \.offset) { i, layer in
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(layer.color)
-                    .frame(width: layer.size, height: layer.size)
-                    .rotationEffect(.degrees(layer.rotation + (drift ? 3 : -3)))
-                    .offset(
-                        x: drift ? layer.driftAmount : -layer.driftAmount,
-                        y: drift ? -layer.driftAmount * 0.6 : layer.driftAmount * 0.6
-                    )
-                    .animation(
-                        .easeInOut(duration: layer.speed).repeatForever(autoreverses: true),
-                        value: drift
-                    )
-                    .id(i)
+                ForEach(Array(layers.enumerated()), id: \.offset) { i, layer in
+                    // Each layer has its own independent period (`layer.speed`
+                    // as the one-way leg duration) — larger/further-back layers
+                    // drift slower, for the parallax cue.
+                    let p = ArtworkClock.pingPong(timeline.date, legDuration: layer.speed)
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(layer.color)
+                        .frame(width: layer.size, height: layer.size)
+                        .rotationEffect(.degrees(layer.rotation + (-3 + 6 * p)))
+                        .offset(
+                            x: layer.driftAmount * (-1 + 2 * p),
+                            y: layer.driftAmount * 0.6 * (1 - 2 * p)
+                        )
+                        .id(i)
+                }
+
+                StyleCover(song: song, size: 200, cornerRadius: 18)
+                    .clipShape(shape)
+                    .overlay(shape.stroke(.white.opacity(0.25), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
             }
-
-            StyleCover(song: song, size: 200, cornerRadius: 18)
-                .clipShape(shape)
-                .overlay(shape.stroke(.white.opacity(0.25), lineWidth: 1))
-                .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
+            .frame(width: 300, height: 300)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         }
-        .frame(width: 300, height: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.6))
-        .onAppear { drift = true }
         .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
         .animation(.easeInOut(duration: 1.0), value: palette)
     }

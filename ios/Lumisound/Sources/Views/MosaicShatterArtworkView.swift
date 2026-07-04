@@ -10,7 +10,6 @@ struct MosaicShatterArtworkView: View {
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-    @State private var shatter: CGFloat = 0
 
     private let gridSize: CGFloat = 240
     private let columns = 4
@@ -35,31 +34,32 @@ struct MosaicShatterArtworkView: View {
     }()
 
     var body: some View {
-        ZStack {
-            ForEach(Array(tiles.enumerated()), id: \.offset) { _, tile in
-                StyleCover(song: song, size: gridSize, cornerRadius: 0)
-                    .offset(x: -CGFloat(tile.col) * tileSize, y: -CGFloat(tile.row) * tileSize)
-                    .frame(width: tileSize, height: tileSize, alignment: .topLeading)
-                    .clipped()
-                    .overlay(Rectangle().stroke(.black.opacity(0.25), lineWidth: 0.5))
-                    .rotationEffect(.degrees(tile.angle * shatter))
-                    .offset(x: tile.dx * shatter * 5, y: tile.dy * shatter * 5)
-                    .position(
-                        x: (CGFloat(tile.col) + 0.5) * tileSize,
-                        y: (CGFloat(tile.row) + 0.5) * tileSize
-                    )
+        TimelineView(.animation) { timeline in
+            let shatter = ArtworkClock.pingPong(timeline.date, legDuration: 2.6)
+
+            ZStack {
+                ForEach(Array(tiles.enumerated()), id: \.offset) { _, tile in
+                    StyleCover(song: song, size: gridSize, cornerRadius: 0)
+                        .offset(x: -CGFloat(tile.col) * tileSize, y: -CGFloat(tile.row) * tileSize)
+                        .frame(width: tileSize, height: tileSize, alignment: .topLeading)
+                        .clipped()
+                        .overlay(Rectangle().stroke(.black.opacity(0.25), lineWidth: 0.5))
+                        .rotationEffect(.degrees(tile.angle * shatter))
+                        .offset(x: tile.dx * shatter * 5, y: tile.dy * shatter * 5)
+                        .position(
+                            x: (CGFloat(tile.col) + 0.5) * tileSize,
+                            y: (CGFloat(tile.row) + 0.5) * tileSize
+                        )
+                }
             }
+            .frame(width: gridSize, height: gridSize)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.white.opacity(0.2), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.5), radius: 22, y: 14)
         }
-        .frame(width: gridSize, height: gridSize)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(0.2), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.5), radius: 22, y: 14)
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.4))
-        .onAppear {
-            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) { shatter = 1 }
-        }
     }
 }

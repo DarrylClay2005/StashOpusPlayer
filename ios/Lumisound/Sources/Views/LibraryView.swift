@@ -610,6 +610,7 @@ private struct SongsTab: View {
                                                         : AppTheme.textSecondary
                                                 )
                                                 .transition(.scale.combined(with: .opacity))
+                                                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: selectedSongIDs)
                                         }
                                         SongRow(song: song, isCurrent: player.currentSong?.id == song.id)
                                     }

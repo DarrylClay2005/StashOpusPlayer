@@ -1679,34 +1679,13 @@ struct NowPlayingView: View {
 
 private struct PulseModifier: ViewModifier {
     let isPlaying: Bool
-    @State private var pulsing = false
 
     func body(content: Content) -> some View {
-        content
-            .scaleEffect(pulsing ? 1.022 : 1.0)
-            .onChange(of: isPlaying) { playing in
-                if playing {
-                    withAnimation(
-                        .easeInOut(duration: 1.8)
-                            .repeatForever(autoreverses: true)
-                    ) {
-                        pulsing = true
-                    }
-                } else {
-                    withAnimation(.easeOut(duration: 0.4)) {
-                        pulsing = false
-                    }
-                }
-            }
-            .onAppear {
-                if isPlaying {
-                    withAnimation(
-                        .easeInOut(duration: 1.8)
-                            .repeatForever(autoreverses: true)
-                    ) {
-                        pulsing = true
-                    }
-                }
-            }
+        TimelineView(.animation(paused: !isPlaying)) { timeline in
+            let phase = ArtworkClock.pingPong(timeline.date, legDuration: 1.8)
+            content
+                .scaleEffect(isPlaying ? 1.0 + 0.022 * phase : 1.0)
+                .animation(.easeOut(duration: 0.4), value: isPlaying)
+        }
     }
 }

@@ -9,7 +9,6 @@ struct ConfettiBurstLoopArtworkView: View {
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-    @State private var burst: CGFloat = 0
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     private let confettiColors: [Color] = [.pink, .yellow, .cyan, .purple, .green, .orange]
@@ -31,33 +30,34 @@ struct ConfettiBurstLoopArtworkView: View {
     }()
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(Color(red: 0.07, green: 0.05, blue: 0.1))
+        TimelineView(.animation) { timeline in
+            let burst = ArtworkClock.loop(timeline.date, cycleDuration: 3.0)
 
-            ForEach(Array(pieces.enumerated()), id: \.offset) { _, piece in
-                // Each piece's own progress loops 0...1 continuously, offset
-                // by its phase, so the bursts are staggered rather than synced.
-                let t = (burst + piece.phase).truncatingRemainder(dividingBy: 1)
-                let radians = piece.angle * .pi / 180
-                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                    .fill(confettiColors[piece.colorIndex])
-                    .frame(width: piece.size, height: piece.size * 0.5)
-                    .rotationEffect(.degrees(piece.spin * Double(t)))
-                    .opacity(Double(1 - t))
-                    .offset(x: cos(radians) * piece.distance * t, y: sin(radians) * piece.distance * t)
+            ZStack {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(Color(red: 0.07, green: 0.05, blue: 0.1))
+
+                ForEach(Array(pieces.enumerated()), id: \.offset) { _, piece in
+                    // Each piece's own progress loops 0...1 continuously, offset
+                    // by its phase, so the bursts are staggered rather than synced.
+                    let t = (burst + piece.phase).truncatingRemainder(dividingBy: 1)
+                    let radians = piece.angle * .pi / 180
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(confettiColors[piece.colorIndex])
+                        .frame(width: piece.size, height: piece.size * 0.5)
+                        .rotationEffect(.degrees(piece.spin * Double(t)))
+                        .opacity(Double(1 - t))
+                        .offset(x: cos(radians) * piece.distance * t, y: sin(radians) * piece.distance * t)
+                }
+
+                StyleCover(song: song, size: 190, cornerRadius: 20)
+                    .clipShape(shape)
+                    .overlay(shape.stroke(.white.opacity(0.22), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
             }
-
-            StyleCover(song: song, size: 190, cornerRadius: 20)
-                .clipShape(shape)
-                .overlay(shape.stroke(.white.opacity(0.22), lineWidth: 1))
-                .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
+            .frame(width: 300, height: 300)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         }
-        .frame(width: 300, height: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.6))
-        .onAppear {
-            withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) { burst = 1 }
-        }
     }
 }

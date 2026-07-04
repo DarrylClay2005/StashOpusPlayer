@@ -9,7 +9,6 @@ struct FrostedIceCrystalArtworkView: View {
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-    @State private var growth: CGFloat = 0.3
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
 
@@ -37,41 +36,42 @@ struct FrostedIceCrystalArtworkView: View {
     ]
 
     var body: some View {
-        ZStack {
-            StyleCover(song: song, size: 300, cornerRadius: 20)
+        TimelineView(.animation) { timeline in
+            let growth = 0.3 + 0.7 * ArtworkClock.pingPong(timeline.date, legDuration: 4.2)
+
+            ZStack {
+                StyleCover(song: song, size: 300, cornerRadius: 20)
+                    .clipShape(shape)
+
+                LinearGradient(
+                    colors: [Color(red: 0.75, green: 0.9, blue: 1.0).opacity(0.35), .clear],
+                    startPoint: .top, endPoint: .bottom
+                )
                 .clipShape(shape)
 
-            LinearGradient(
-                colors: [Color(red: 0.75, green: 0.9, blue: 1.0).opacity(0.35), .clear],
-                startPoint: .top, endPoint: .bottom
-            )
-            .clipShape(shape)
-
-            Canvas { context, _ in
-                for needle in needles {
-                    drawBranch(context: context, needle: needle, scale: 1.0)
-                    drawBranch(context: context, needle: needle, scale: 0.6, sideways: true)
+                Canvas { context, _ in
+                    for needle in needles {
+                        drawBranch(context: context, needle: needle, growth: growth, scale: 1.0)
+                        drawBranch(context: context, needle: needle, growth: growth, scale: 0.6, sideways: true)
+                    }
                 }
+                .frame(width: 300, height: 300)
+
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(.white.opacity(0.35), lineWidth: 1)
             }
             .frame(width: 300, height: 300)
-
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(.white.opacity(0.35), lineWidth: 1)
+            .clipShape(shape)
+            .shadow(color: .black.opacity(0.4), radius: 18, y: 10)
+            .shadow(color: Color(red: 0.6, green: 0.85, blue: 1.0).opacity(0.35), radius: 24)
         }
-        .frame(width: 300, height: 300)
-        .clipShape(shape)
-        .shadow(color: .black.opacity(0.4), radius: 18, y: 10)
-        .shadow(color: Color(red: 0.6, green: 0.85, blue: 1.0).opacity(0.35), radius: 24)
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 3.6))
-        .onAppear {
-            withAnimation(.easeInOut(duration: 4.2).repeatForever(autoreverses: true)) { growth = 1.0 }
-        }
     }
 
     /// Draws one straight needle (or, for `sideways`, a shorter offshoot at a
     /// perpendicular angle from its midpoint) from `start` toward
     /// `start + (dx,dy) * length * growth`.
-    private func drawBranch(context: GraphicsContext, needle: Needle, scale: CGFloat, sideways: Bool = false) {
+    private func drawBranch(context: GraphicsContext, needle: Needle, growth: CGFloat, scale: CGFloat, sideways: Bool = false) {
         let end = CGPoint(
             x: needle.start.x + needle.dx * needle.length * growth * scale,
             y: needle.start.y + needle.dy * needle.length * growth * scale

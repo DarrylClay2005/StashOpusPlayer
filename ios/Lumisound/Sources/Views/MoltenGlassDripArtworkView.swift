@@ -9,7 +9,6 @@ struct MoltenGlassDripArtworkView: View {
     let isPlaying: Bool
 
     @EnvironmentObject private var library: LibraryManager
-    @State private var drip: CGFloat = 0.2
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
 
@@ -21,37 +20,38 @@ struct MoltenGlassDripArtworkView: View {
     ]
 
     var body: some View {
-        ZStack {
-            RadialGradient(
-                colors: [Color(red: 0.32, green: 0.08, blue: 0.02), Color(red: 0.08, green: 0.01, blue: 0.02)],
-                center: .center, startRadius: 20, endRadius: 210
-            )
+        TimelineView(.animation) { timeline in
+            let drip = 0.2 + 0.8 * ArtworkClock.pingPong(timeline.date, legDuration: 3.6)
 
-            StyleCover(song: song, size: 210, cornerRadius: 20)
-                .clipShape(shape)
-                .overlay(shape.stroke(.orange.opacity(0.5), lineWidth: 2))
-                .shadow(color: .orange.opacity(0.5), radius: 24)
-                .shadow(color: .red.opacity(0.3), radius: 34)
+            ZStack {
+                RadialGradient(
+                    colors: [Color(red: 0.32, green: 0.08, blue: 0.02), Color(red: 0.08, green: 0.01, blue: 0.02)],
+                    center: .center, startRadius: 20, endRadius: 210
+                )
 
-            // Drips hang from the cover's bottom edge (y ≈ 105 from center,
-            // for a 210pt cover), lengthening/shortening together via `drip`.
-            ForEach(Array(drips.enumerated()), id: \.offset) { _, d in
-                let length = d.baseLength + (d.maxLength - d.baseLength) * drip
-                Capsule()
-                    .fill(
-                        LinearGradient(colors: [.yellow, .orange, .red.opacity(0.7)],
-                                       startPoint: .top, endPoint: .bottom)
-                    )
-                    .frame(width: d.width, height: length)
-                    .offset(x: (d.x - 0.5) * 210, y: 105 + length / 2)
-                    .blur(radius: 0.6)
+                StyleCover(song: song, size: 210, cornerRadius: 20)
+                    .clipShape(shape)
+                    .overlay(shape.stroke(.orange.opacity(0.5), lineWidth: 2))
+                    .shadow(color: .orange.opacity(0.5), radius: 24)
+                    .shadow(color: .red.opacity(0.3), radius: 34)
+
+                // Drips hang from the cover's bottom edge (y ≈ 105 from center,
+                // for a 210pt cover), lengthening/shortening together via `drip`.
+                ForEach(Array(drips.enumerated()), id: \.offset) { _, d in
+                    let length = d.baseLength + (d.maxLength - d.baseLength) * drip
+                    Capsule()
+                        .fill(
+                            LinearGradient(colors: [.yellow, .orange, .red.opacity(0.7)],
+                                           startPoint: .top, endPoint: .bottom)
+                        )
+                        .frame(width: d.width, height: length)
+                        .offset(x: (d.x - 0.5) * 210, y: 105 + length / 2)
+                        .blur(radius: 0.6)
+                }
             }
+            .frame(width: 300, height: 300)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         }
-        .frame(width: 300, height: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 4.0))
-        .onAppear {
-            withAnimation(.easeInOut(duration: 3.6).repeatForever(autoreverses: true)) { drip = 1 }
-        }
     }
 }
