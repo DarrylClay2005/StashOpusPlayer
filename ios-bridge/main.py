@@ -352,9 +352,13 @@ async def lifespan(app: FastAPI):
     await cleanup_orphan_temp_dirs()
     janitor = asyncio.create_task(_auth_attempts_janitor())
     app_logs_janitor = asyncio.create_task(_app_logs_janitor())
+    subscription_poller = asyncio.create_task(_subscription_polling_loop())
+    duplicate_scanner = asyncio.create_task(_duplicate_scan_loop())
     yield
     janitor.cancel()
     app_logs_janitor.cancel()
+    subscription_poller.cancel()
+    duplicate_scanner.cancel()
     # Shutdown: close the DB connection pool (Fix 8)
     import db as _db_module
     pool = _db_module._pool
@@ -3512,15 +3516,14 @@ def _fp_similarity(a: list[int], b: list[int]) -> float:
     return 1.0 - diff / (n * 32)
 
 
-@app.get("/user/library/acoustic-duplicates")
-async def acoustic_duplicates(user: dict = Depends(get_current_user)):
-    """Groups files in the user's cloud library that are acoustically the same
-    recording (fingerprint match ≥ 0.85, within 15s duration), regardless of
-    metadata — the audio-level complement to the on-device title/artist finder."""
-    user_id = user["sub"]
+async def _scan_acoustic_duplicates_core(user_id: str) -> Optional[dict]:
+    """Core "find acoustic duplicates in this user's library" logic, shared
+    by the on-demand endpoint and the periodic _duplicate_scan_loop
+    background task (Feature: proactive background duplicate scanning).
+    Returns None if user music storage isn't configured on this server."""
     music_dir = _user_music_dir(user_id)
     if music_dir is None:
-        raise HTTPException(status_code=503, detail="User music storage not configured")
+        return None
     try:
         files = sorted(p for p in music_dir.rglob("*")
                        if p.is_file() and p.suffix.lower() in SUPPORTED_AUDIO_EXTS)
@@ -3554,6 +3557,105 @@ async def acoustic_duplicates(user: dict = Depends(get_current_user)):
             groups.append([{"file": prints[k][0].name,
                             "duration": round(prints[k][1], 1)} for k in members])
     return {"scanned": len(prints), "duplicate_groups": groups}
+
+
+async def _save_duplicate_scan_cache(user_id: str, result: dict) -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_duplicate_scan_cache (user_id, groups_json)
+                VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE groups_json = VALUES(groups_json), scanned_at = NOW()
+                """,
+                (user_id, json.dumps(result)),
+            )
+
+
+@app.get("/user/library/acoustic-duplicates")
+async def acoustic_duplicates(
+    force_rescan: bool = Query(False, description="Bypass the cached background scan and compute live"),
+    user: dict = Depends(get_current_user),
+):
+    """Groups files in the user's cloud library that are acoustically the same
+    recording (fingerprint match ≥ 0.85, within 15s duration), regardless of
+    metadata — the audio-level complement to the on-device title/artist finder.
+    Serves the cached result from the periodic background scan (Feature:
+    proactive duplicate scanning) when available, since computing this live
+    took a while for big libraries (every file needs fingerprinting). Pass
+    force_rescan=true to bypass the cache and compute fresh right now."""
+    user_id = user["sub"]
+
+    if not force_rescan:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT groups_json, scanned_at FROM ios_duplicate_scan_cache WHERE user_id = %s",
+                    (user_id,),
+                )
+                row = await cur.fetchone()
+        if row:
+            groups_json, scanned_at = row
+            data = json.loads(groups_json)
+            return {
+                "scanned": data.get("scanned", 0),
+                "duplicate_groups": data.get("duplicate_groups", []),
+                "cached": True,
+                "scanned_at": scanned_at.isoformat() if scanned_at else None,
+            }
+
+    result = await _scan_acoustic_duplicates_core(user_id)
+    if result is None:
+        raise HTTPException(status_code=503, detail="User music storage not configured")
+    await _save_duplicate_scan_cache(user_id, result)
+    return {**result, "cached": False, "scanned_at": None}
+
+
+_DUPLICATE_SCAN_INTERVAL_SECONDS = 3600  # check hourly which user (if any) is due
+_DUPLICATE_SCAN_STALE_HOURS = 24
+
+
+async def _duplicate_scan_loop() -> None:
+    """Rescans one due user's library per tick — deliberately one-at-a-time
+    since fingerprinting every file is CPU-bound and this shares the host
+    with the Discord music bots. Populates ios_duplicate_scan_cache so
+    GET /user/library/acoustic-duplicates is instant instead of
+    re-fingerprinting the whole library on every request."""
+    while True:
+        await asyncio.sleep(_DUPLICATE_SCAN_INTERVAL_SECONDS)
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT m.user_id
+                        FROM ios_user_music_metadata m
+                        LEFT JOIN ios_duplicate_scan_cache c ON c.user_id = m.user_id
+                        WHERE c.user_id IS NULL OR c.scanned_at < NOW() - INTERVAL %s HOUR
+                        GROUP BY m.user_id
+                        ORDER BY MIN(c.scanned_at) IS NULL DESC, MIN(c.scanned_at) ASC
+                        LIMIT 1
+                        """,
+                        (_DUPLICATE_SCAN_STALE_HOURS,),
+                    )
+                    row = await cur.fetchone()
+
+            if not row:
+                continue
+            user_id = row[0]
+            result = await _scan_acoustic_duplicates_core(user_id)
+            if result is not None:
+                await _save_duplicate_scan_cache(user_id, result)
+                if result["duplicate_groups"]:
+                    logger.info(
+                        "duplicate scan: found %d duplicate group(s) for user %s",
+                        len(result["duplicate_groups"]), user_id,
+                    )
+        except Exception:
+            logger.exception("duplicate scan loop: pass failed")
 
 
 # ---------------------------------------------------------------------------
@@ -5607,6 +5709,9 @@ async def upload_user_music(
             loudness_lufs = await _measure_loudness(analysis_path)
             bpm = await _estimate_bpm(analysis_path)
             musical_key = await _estimate_key(analysis_path)
+            waveform = await _compute_waveform(analysis_path)
+
+    waveform_json = json.dumps(waveform) if waveform else None
 
     # Populate ios_user_music_metadata when metadata is provided
     try:
@@ -5617,8 +5722,9 @@ async def upload_user_music(
                     INSERT INTO ios_user_music_metadata
                         (id, user_id, filename, original_filename, title, artist, album,
                          genre, year, duration_seconds, file_size_bytes, bitrate,
-                         sample_rate, mime_type, has_artwork, loudness_lufs, bpm, musical_key)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         sample_rate, mime_type, has_artwork, loudness_lufs, bpm, musical_key,
+                         waveform_json)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         filename = VALUES(filename),
                         title = IF(VALUES(title) IS NULL, title, VALUES(title)),
@@ -5633,7 +5739,8 @@ async def upload_user_music(
                         mime_type = VALUES(mime_type),
                         loudness_lufs = IF(VALUES(loudness_lufs) IS NULL, loudness_lufs, VALUES(loudness_lufs)),
                         bpm = IF(VALUES(bpm) IS NULL, bpm, VALUES(bpm)),
-                        musical_key = IF(VALUES(musical_key) IS NULL, musical_key, VALUES(musical_key))
+                        musical_key = IF(VALUES(musical_key) IS NULL, musical_key, VALUES(musical_key)),
+                        waveform_json = IF(VALUES(waveform_json) IS NULL, waveform_json, VALUES(waveform_json))
                     """,
                     (
                         content_hash,
@@ -5654,6 +5761,7 @@ async def upload_user_music(
                         loudness_lufs,
                         bpm,
                         musical_key,
+                        waveform_json,
                     ),
                 )
     except Exception as exc:
@@ -5668,9 +5776,36 @@ async def upload_user_music(
         "gain_db": _loudness_gain_db(loudness_lufs),
         "bpm": bpm,
         "musical_key": musical_key,
+        "waveform": waveform,
         "metadata_id": content_hash,
         "size": len(body),
     }
+
+
+@app.get("/user/music/waveform")
+async def get_music_waveform(
+    metadata_id: str = Query(..., description="The metadata_id/content hash returned by upload"),
+    user: dict = Depends(get_current_user),
+):
+    """Returns the precomputed waveform peak data for a previously-uploaded
+    track (Feature: server-side waveform), so the client's scrubber doesn't
+    need to decode the whole file locally. 404 if the track has no analyzed
+    waveform yet (e.g. uploaded before this feature existed — re-upload to
+    backfill, same as loudness/BPM/key)."""
+    user_id = user["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT waveform_json FROM ios_user_music_metadata WHERE id = %s AND user_id = %s",
+                (metadata_id, user_id),
+            )
+            row = await cur.fetchone()
+
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="No waveform data for this track")
+
+    return {"metadata_id": metadata_id, "peaks": json.loads(row[0])}
 
 
 @app.get("/user/music/stream")
@@ -5913,10 +6048,10 @@ async def backfill_user_music_metadata(
     limit: int = Query(5, ge=1, le=20, description="Max number of tracks to analyze in this call"),
     user: dict = Depends(get_current_user),
 ):
-    """Runs loudness/BPM/musical-key analysis for uploaded tracks that are
-    missing one or more of these fields — e.g. tracks uploaded before this
-    analysis existed. Processes up to `limit` tracks per call; call repeatedly
-    (e.g. from a settings screen) until `remaining` is 0."""
+    """Runs loudness/BPM/musical-key/waveform analysis for uploaded tracks
+    that are missing one or more of these fields — e.g. tracks uploaded
+    before this analysis existed. Processes up to `limit` tracks per call;
+    call repeatedly (e.g. from a settings screen) until `remaining` is 0."""
     user_id = user["sub"]
     music_dir = _user_music_dir(user_id)
     if music_dir is None:
@@ -5929,7 +6064,7 @@ async def backfill_user_music_metadata(
                 """
                 SELECT id, filename FROM ios_user_music_metadata
                 WHERE user_id = %s
-                  AND (loudness_lufs IS NULL OR bpm IS NULL OR musical_key IS NULL)
+                  AND (loudness_lufs IS NULL OR bpm IS NULL OR musical_key IS NULL OR waveform_json IS NULL)
                 """,
                 (user_id,),
             )
@@ -5950,15 +6085,18 @@ async def backfill_user_music_metadata(
                     loudness_lufs = await _measure_loudness(full_path)
                     bpm = await _estimate_bpm(full_path)
                     musical_key = await _estimate_key(full_path)
+                    waveform = await _compute_waveform(full_path)
+                waveform_json = json.dumps(waveform) if waveform else None
                 await cur.execute(
                     """
                     UPDATE ios_user_music_metadata
                     SET loudness_lufs = IF(loudness_lufs IS NULL, %s, loudness_lufs),
                         bpm = IF(bpm IS NULL, %s, bpm),
-                        musical_key = IF(musical_key IS NULL, %s, musical_key)
+                        musical_key = IF(musical_key IS NULL, %s, musical_key),
+                        waveform_json = IF(waveform_json IS NULL, %s, waveform_json)
                     WHERE id = %s AND user_id = %s
                     """,
-                    (loudness_lufs, bpm, musical_key, metadata_id, user_id),
+                    (loudness_lufs, bpm, musical_key, waveform_json, metadata_id, user_id),
                 )
                 processed += 1
 
@@ -6647,6 +6785,48 @@ async def set_playlist_source(
     return {"status": "ok"}
 
 
+async def _refresh_playlist_source_core(
+    playlist_id: str, user_id: str, source_url: str, local_count: int, notify: bool = False
+) -> dict:
+    """Core "refresh one tracked playlist" logic, shared by the on-demand
+    POST /user/playlists/{id}/refresh endpoint and the periodic
+    _subscription_polling_loop background task (Feature: scheduled
+    background polling). `notify` is only set True from the background
+    loop — the on-demand endpoint already puts the result in front of the
+    user immediately, so it doesn't need a duplicate notification."""
+    try:
+        entries = await _run_ytdlp("--dump-json", "--flat-playlist", "--no-warnings", *(await _ytdlp_cookie_args(user_id)), source_url, timeout=60.0)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=408, detail="Playlist refresh timed out")
+    except Exception as exc:
+        logger.error("refresh_playlist_source: yt-dlp error: %s", exc)
+        raise HTTPException(status_code=404, detail="Could not resolve playlist source")
+
+    remote_count = len(entries)
+    new_count = max(0, remote_count - local_count)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_user_playlists SET source_checked_at = NOW(), source_new_count = %s "
+                "WHERE id = %s AND user_id = %s",
+                (new_count, playlist_id, user_id),
+            )
+            if notify and new_count > 0:
+                await cur.execute("SELECT name FROM ios_user_playlists WHERE id = %s", (playlist_id,))
+                row = await cur.fetchone()
+                playlist_name = row[0] if row else "a tracked playlist"
+                await _create_notification(
+                    cur, user_id, "playlist_source_update",
+                    f"{new_count} new track{'s' if new_count != 1 else ''} in \"{playlist_name}\"",
+                    "Tap to review and import",
+                    {"playlist_id": playlist_id, "new_count": new_count},
+                )
+
+    return {"remote_count": remote_count, "local_count": local_count, "new_count": new_count}
+
+
 @app.post("/user/playlists/{playlist_id}/refresh")
 async def refresh_playlist_source(
     playlist_id: str,
@@ -6676,26 +6856,98 @@ async def refresh_playlist_source(
             )
             (local_count,) = await cur.fetchone()
 
-    try:
-        entries = await _run_ytdlp("--dump-json", "--flat-playlist", "--no-warnings", *(await _ytdlp_cookie_args(user_id)), source_url, timeout=60.0)
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=408, detail="Playlist refresh timed out")
-    except Exception as exc:
-        logger.error("refresh_playlist_source: yt-dlp error: %s", exc)
-        raise HTTPException(status_code=404, detail="Could not resolve playlist source")
+    return await _refresh_playlist_source_core(playlist_id, user_id, source_url, local_count)
 
-    remote_count = len(entries)
-    new_count = max(0, remote_count - local_count)
 
+# ---------------------------------------------------------------------------
+# Feature: scheduled background polling for subscriptions/tracked playlists.
+# Previously both were ONLY checked on-demand when the client explicitly
+# tapped "Check" — this periodically re-checks whatever is due (registered
+# in the `lifespan` background-task list alongside the existing janitors)
+# so a new upload/track surfaces as a notification without the app needing
+# to be open. Batched + throttled so a large number of subscriptions across
+# all users can't trigger a burst of concurrent yt-dlp processes.
+# ---------------------------------------------------------------------------
+
+_SUBSCRIPTION_POLL_INTERVAL_SECONDS = 1800  # check every 30 min what's due
+_SUBSCRIPTION_STALE_HOURS = 4  # matches the on-device BackgroundRefreshService cadence
+_SUBSCRIPTION_POLL_BATCH_SIZE = 10
+
+
+async def _subscription_polling_loop() -> None:
+    while True:
+        await asyncio.sleep(_SUBSCRIPTION_POLL_INTERVAL_SECONDS)
+        try:
+            await _poll_due_subscriptions()
+        except Exception:
+            logger.exception("subscription polling loop: subscriptions pass failed")
+        try:
+            await _poll_due_tracked_playlists()
+        except Exception:
+            logger.exception("subscription polling loop: tracked playlists pass failed")
+
+
+async def _poll_due_subscriptions() -> None:
+    pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "UPDATE ios_user_playlists SET source_checked_at = NOW(), source_new_count = %s "
-                "WHERE id = %s AND user_id = %s",
-                (new_count, playlist_id, user_id),
+                """
+                SELECT id, user_id, channel_url, channel_name, last_video_id, channel_id
+                FROM ios_artist_subscriptions
+                WHERE last_checked_at IS NULL OR last_checked_at < NOW() - INTERVAL %s HOUR
+                ORDER BY last_checked_at IS NULL DESC, last_checked_at ASC
+                LIMIT %s
+                """,
+                (_SUBSCRIPTION_STALE_HOURS, _SUBSCRIPTION_POLL_BATCH_SIZE),
             )
+            rows = await cur.fetchall()
 
-    return {"remote_count": remote_count, "local_count": local_count, "new_count": new_count}
+    for sub_id, user_id, channel_url, channel_name, last_video_id, channel_id in rows:
+        try:
+            new_tracks = await _check_subscription_core(
+                sub_id, user_id, channel_url, channel_name, last_video_id, channel_id
+            )
+            if new_tracks:
+                logger.info(
+                    "subscription polling: %d new track(s) for subscription %s (user %s)",
+                    len(new_tracks), sub_id, user_id,
+                )
+        except Exception:
+            logger.exception("subscription polling: check failed for subscription %s", sub_id)
+
+
+async def _poll_due_tracked_playlists() -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT p.id, p.user_id, p.source_url, COUNT(t.id)
+                FROM ios_user_playlists p
+                LEFT JOIN ios_playlist_tracks t ON t.playlist_id = p.id
+                WHERE p.source_url IS NOT NULL
+                  AND (p.source_checked_at IS NULL OR p.source_checked_at < NOW() - INTERVAL %s HOUR)
+                GROUP BY p.id, p.user_id, p.source_url
+                ORDER BY p.source_checked_at IS NULL DESC, p.source_checked_at ASC
+                LIMIT %s
+                """,
+                (_SUBSCRIPTION_STALE_HOURS, _SUBSCRIPTION_POLL_BATCH_SIZE),
+            )
+            rows = await cur.fetchall()
+
+    for playlist_id, user_id, source_url, local_count in rows:
+        try:
+            result = await _refresh_playlist_source_core(
+                playlist_id, user_id, source_url, local_count, notify=True
+            )
+            if result["new_count"] > 0:
+                logger.info(
+                    "playlist polling: %d new track(s) for playlist %s (user %s)",
+                    result["new_count"], playlist_id, user_id,
+                )
+        except Exception:
+            logger.exception("playlist polling: refresh failed for playlist %s", playlist_id)
 
 
 # ---------------------------------------------------------------------------
@@ -7115,6 +7367,59 @@ async def _estimate_bpm(path: pathlib.Path) -> Optional[float]:
         return None
 
     return round(60.0 * frame_rate / best_lag, 1)
+
+
+# ---------------------------------------------------------------------------
+# Waveform peak-data precomputation (Feature: server-side waveform)
+# ---------------------------------------------------------------------------
+
+_WAVEFORM_POINTS = 200
+
+
+async def _compute_waveform(path: pathlib.Path) -> Optional[list[float]]:
+    """Computes ~200 normalized (0.0-1.0) peak values spanning the whole
+    track, for the client's scrubber waveform — saves it from decoding the
+    entire file locally just to draw one. Same ffmpeg-raw-PCM-decode +
+    pure-Python approach as `_estimate_bpm` (no numpy in the bridge's
+    runtime image). Unlike `_estimate_bpm`/`_measure_loudness` (which only
+    need the first ~60s), this decodes the whole file since the waveform
+    needs to represent the full track."""
+    cmd = [
+        "ffmpeg", "-hide_banner", "-nostats", "-v", "quiet",
+        "-i", str(path),
+        "-ac", "1", "-ar", "11025",
+        "-f", "s16le", "-",
+    ]
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        raw, _ = await asyncio.wait_for(proc.communicate(), timeout=90.0)
+    except Exception as exc:
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            await proc.communicate()
+        logger.warning("_compute_waveform: ffmpeg decode failed for %s: %s", path.name, exc)
+        return None
+
+    samples = array.array("h")
+    samples.frombytes(raw[: len(raw) - (len(raw) % 2)])
+    total = len(samples)
+    if total == 0:
+        return None
+
+    bucket_size = max(1, total // _WAVEFORM_POINTS)
+    peaks: list[float] = []
+    for i in range(0, total, bucket_size):
+        chunk = samples[i:i + bucket_size]
+        if not chunk:
+            continue
+        peak = max(abs(s) for s in chunk)
+        peaks.append(round(peak / 32768.0, 4))
+    return peaks[:_WAVEFORM_POINTS]
 
 
 # ---------------------------------------------------------------------------
@@ -7709,24 +8014,19 @@ async def delete_subscription(sub_id: str, payload: dict = Depends(get_current_u
                 raise HTTPException(status_code=404, detail="Subscription not found")
 
 
-@app.post("/user/subscriptions/{sub_id}/check")
-async def check_subscription(sub_id: str, payload: dict = Depends(get_current_user)):
-    """Re-resolves a channel's latest uploads and reports any new videos since
-    the last check, creating an in-app notification for each."""
-    user_id = payload["sub"]
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                "SELECT channel_url, channel_name, last_video_id, channel_id "
-                "FROM ios_artist_subscriptions WHERE id = %s AND user_id = %s",
-                (sub_id, user_id),
-            )
-            row = await cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="Subscription not found")
-            channel_url, channel_name, last_video_id, channel_id = row
-
+async def _check_subscription_core(
+    sub_id: str,
+    user_id: str,
+    channel_url: str,
+    channel_name: Optional[str],
+    last_video_id: Optional[str],
+    channel_id: Optional[str],
+) -> list[dict]:
+    """Core "check one subscription" logic, shared by the on-demand
+    POST /user/subscriptions/{id}/check endpoint and the periodic
+    _subscription_polling_loop background task (Feature: scheduled
+    background polling) — previously subscriptions were ONLY re-checked
+    when the client explicitly tapped "Check", never automatically."""
     tracks: list[dict] = []
     if channel_id:
         api_key = await _youtube_api_key_for_user(user_id)
@@ -7782,6 +8082,30 @@ async def check_subscription(sub_id: str, payload: dict = Depends(get_current_us
                     {"track": track, "subscription_id": sub_id},
                 )
 
+    return new_tracks
+
+
+@app.post("/user/subscriptions/{sub_id}/check")
+async def check_subscription(sub_id: str, payload: dict = Depends(get_current_user)):
+    """Re-resolves a channel's latest uploads and reports any new videos since
+    the last check, creating an in-app notification for each."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT channel_url, channel_name, last_video_id, channel_id "
+                "FROM ios_artist_subscriptions WHERE id = %s AND user_id = %s",
+                (sub_id, user_id),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Subscription not found")
+            channel_url, channel_name, last_video_id, channel_id = row
+
+    new_tracks = await _check_subscription_core(
+        sub_id, user_id, channel_url, channel_name, last_video_id, channel_id
+    )
     return {"new_tracks": new_tracks}
 
 
