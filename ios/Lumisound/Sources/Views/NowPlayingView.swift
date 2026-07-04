@@ -300,28 +300,28 @@ struct NowPlayingView: View {
             MosaicShatterArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .retroCRT:
-            RetroCRTArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .circuitPulse:
+            CircuitPulseArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .spectrumWaveform:
-            PulseFieldArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .radarSweep:
+            RadarSweepArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .cassetteTape:
-            TicketStubArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .discoMirrorBall:
+            DiscoMirrorBallArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .neonGlow:
-            PrismBeamsArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .frostedIceCrystal:
+            FrostedIceCrystalArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .auraGlow:
-            LiquidAuraArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .bioluminescentTide:
+            BioluminescentTideArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .tiltCard:
-            TiltCardArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .cometOrbit:
+            CometOrbitArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
         case .marquee:

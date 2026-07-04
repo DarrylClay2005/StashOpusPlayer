@@ -15,12 +15,14 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
     case liquidBlobFrame
     case origamiFoldReveal
     case mosaicShatter
-    case retroCRT
-    case spectrumWaveform
-    case cassetteTape
-    case neonGlow
-    case auraGlow
-    case tiltCard
+    // Batch 2 of the visual overhaul — replaces retroCRT/spectrumWaveform/
+    // cassetteTape/neonGlow/auraGlow/tiltCard.
+    case circuitPulse
+    case radarSweep
+    case discoMirrorBall
+    case frostedIceCrystal
+    case bioluminescentTide
+    case cometOrbit
     // Distinctive styles, each its own visual concept
     case marquee
     case holographic
@@ -39,12 +41,12 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .liquidBlobFrame:   return "Liquid Blob Frame"
         case .origamiFoldReveal: return "Origami Fold"
         case .mosaicShatter:     return "Mosaic Shatter"
-        case .retroCRT:         return "Glitch Wave"
-        case .spectrumWaveform: return "Spectrum Bars"
-        case .cassetteTape:     return "Radial Spectrum"
-        case .neonGlow:         return "Neon Trace"
-        case .auraGlow:         return "Lava Lamp"
-        case .tiltCard:         return "Depth Parallax"
+        case .circuitPulse:      return "Circuit Pulse"
+        case .radarSweep:        return "Radar Sweep"
+        case .discoMirrorBall:   return "Disco Mirror Ball"
+        case .frostedIceCrystal: return "Frosted Ice Crystal"
+        case .bioluminescentTide: return "Bioluminescent Tide"
+        case .cometOrbit:        return "Comet Orbit"
         case .marquee:          return "Marquee Bulbs"
         case .holographic:      return "Foil Shimmer"
         case .ripple:           return "Halo Pulse"
@@ -62,12 +64,12 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .liquidBlobFrame:   return "drop.circle.fill"
         case .origamiFoldReveal: return "triangle.fill"
         case .mosaicShatter:     return "square.grid.3x3.fill"
-        case .retroCRT:         return "waveform.path"
-        case .spectrumWaveform: return "chart.bar.fill"
-        case .cassetteTape:     return "waveform.circle.fill"
-        case .neonGlow:         return "bolt.fill"
-        case .auraGlow:         return "drop.fill"
-        case .tiltCard:         return "rotate.3d"
+        case .circuitPulse:      return "cpu.fill"
+        case .radarSweep:        return "dot.radiowaves.left.and.right"
+        case .discoMirrorBall:   return "sparkles"
+        case .frostedIceCrystal: return "snowflake"
+        case .bioluminescentTide: return "water.waves"
+        case .cometOrbit:        return "circle.dotted"
         case .marquee:          return "lightbulb.fill"
         case .holographic:      return "rainbow"
         case .ripple:           return "circle.circle.fill"
