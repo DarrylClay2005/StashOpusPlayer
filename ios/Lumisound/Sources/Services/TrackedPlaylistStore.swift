@@ -128,7 +128,14 @@ final class TrackedPlaylistStore: ObservableObject {
         for pl in due {
             await library.scanLocalDocumentsAsync()
             let tracks = await streaming.fetchPlaylistTracks(url: pl.url, existingSongs: [])
-            let toGet = tracks.filter { !library.hasLocalCopy(of: $0) }
+            // Build the fast-path lookups ONCE before filtering — calling
+            // hasLocalCopy(of:) per track (O(library) each) over a big
+            // playlist was an O(tracks × library) main-thread hang long
+            // enough to trip the watchdog. Same fix as
+            // TrackedPlaylistDetailView.recomputeLocalCopies.
+            let localSourceIDs = library.localSourceIDs()
+            let identityIndex = library.importedIdentityIndex()
+            let toGet = tracks.filter { !library.hasLocalCopy(of: $0, localSourceIDs: localSourceIDs, identityIndex: identityIndex) }
             var got = 0
             for track in toGet {
                 if (try? await streaming.downloadToLibrary(track: track, existingSongs: library.allSongs)) != nil {

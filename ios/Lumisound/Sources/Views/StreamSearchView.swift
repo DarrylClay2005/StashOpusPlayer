@@ -1013,10 +1013,19 @@ struct StreamSearchView: View {
             // what's already imported.
             await library.scanLocalDocumentsAsync()
 
+            // Build the fast-path lookups ONCE before checking every track —
+            // hasLocalCopy(of:) alone is O(library) per call, so checking it
+            // per track over a big "Download All" batch was an
+            // O(tracks × library) main-thread hang long enough to trip the
+            // watchdog (the same "opening a big playlist crashes" bug fixed
+            // in TrackedPlaylistDetailView/TrackedPlaylistStore).
+            let localSourceIDs = library.localSourceIDs()
+            let identityIndex = library.importedIdentityIndex()
+
             var toDownload: [StreamTrack] = []
             var skipped = 0
             for track in tracks {
-                if library.hasLocalCopy(of: track) {
+                if library.hasLocalCopy(of: track, localSourceIDs: localSourceIDs, identityIndex: identityIndex) {
                     skipped += 1
                     downloadedTrackIDs.insert(track.id)
                     downloadAllDone += 1

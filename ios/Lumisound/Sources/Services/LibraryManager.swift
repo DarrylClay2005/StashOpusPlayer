@@ -1103,6 +1103,41 @@ final class LibraryManager: ObservableObject {
         return isAlreadyImported(title: track.title, artist: track.artist, duration: dur)
     }
 
+    /// Precomputed set of every locally-imported song's `sourceTrackID`
+    /// ("source:id"), for O(1) membership checks — pairs with
+    /// `importedIdentityIndex()` in `hasLocalCopy(of:localSourceIDs:identityIndex:)`.
+    func localSourceIDs() -> Set<String> {
+        Set(allSongs.compactMap { $0.sourceTrackID })
+    }
+
+    /// O(1)-per-track variant of `hasLocalCopy(of:)` for checking MANY tracks
+    /// in a loop (e.g. resolving a tracked playlist with hundreds of tracks).
+    /// `hasLocalCopy(of:)` alone is O(library) per call — fine for a single
+    /// check, but calling it once per track over a big playlist is the exact
+    /// O(results × library) main-thread hang that trips the watchdog (see
+    /// `importedIdentityIndex`'s doc comment, and `StreamSearchView
+    /// .refreshDownloadedStatus` for the same fix already applied there).
+    /// Build `localSourceIDs`/`identityIndex` ONCE before the loop:
+    /// ```
+    /// let ids = library.localSourceIDs()
+    /// let index = library.importedIdentityIndex()
+    /// tracks.filter { !library.hasLocalCopy(of: $0, localSourceIDs: ids, identityIndex: index) }
+    /// ```
+    func hasLocalCopy(of track: StreamTrack, localSourceIDs: Set<String>, identityIndex: ImportedIdentityIndex) -> Bool {
+        let sourceID = "\(track.source):\(track.id)"
+        if localSourceIDs.contains(sourceID) { return true }
+        // Ledger fallback only applies to the rare track whose embedded
+        // LUMISOUND_ID didn't round-trip — not the common path, so leaving
+        // this as an O(library) lookup (like `hasLocalCopy(of:)` does) is
+        // fine; it doesn't reintroduce the O(results × library) hang.
+        if let fn = DownloadLedgerStore.shared.filename(for: sourceID),
+           allSongs.contains(where: { $0.url?.lastPathComponent == fn }) {
+            return true
+        }
+        let dur: TimeInterval? = track.durationSeconds > 0 ? TimeInterval(track.durationSeconds) : nil
+        return identityIndex.contains(title: track.title, artist: track.artist, duration: dur)
+    }
+
     /// Permanently removes a locally-imported/downloaded song: deletes its
     /// backing file, drops it from `importedSongs`/`allSongs`, and removes any
     /// references to it from playlists and favorites. Used by the duplicate
