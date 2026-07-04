@@ -77,18 +77,42 @@ struct NowPlayingView: View {
     // as DownloadLedgerStore/PlayHistoryStore).
     @State private var bookmarksRefreshToken = UUID()
 
-    // Artwork style. Falls back to the default below both for first-time
-    // users AND for anyone whose saved rawValue predates the 2026-07 visual
-    // overhaul (the old case names — including the even-older boolean
-    // `nowPlaying_showVinylDisc` key this used to migrate from — no longer
-    // exist in any form, so there's nothing left to migrate).
-    @State private var artworkStyle: NowPlayingArtworkStyle = {
-        if let raw = UserDefaults.standard.string(forKey: "nowPlaying_artworkStyle"),
-           let style = NowPlayingArtworkStyle(rawValue: raw) {
-            return style
+    // Artwork style selection — a String rather than `NowPlayingArtworkStyle`
+    // directly, since it now needs to represent EITHER one of the 19
+    // built-in cases (by rawValue) OR a user-created `CustomNowPlayingStyle`
+    // (by its UUID id) — see `selectedBuiltinStyle`/`selectedCustomStyle`.
+    // Falls back to the default below both for first-time users AND for
+    // anyone whose saved value predates the 2026-07 visual overhaul (the
+    // old case names no longer exist in any form).
+    @State private var artworkStyleSelection: String =
+        UserDefaults.standard.string(forKey: "nowPlaying_artworkStyle") ?? NowPlayingArtworkStyle.kaleidoscopeBloom.rawValue
+    @ObservedObject private var customStyleStore = CustomStyleStore.shared
+    @ObservedObject private var hiddenStylesStore = HiddenStylesStore.shared
+    @State private var showCustomStyleEditor = false
+    @State private var editingCustomStyle: CustomNowPlayingStyle?
+    @State private var showStyleManager = false
+
+    private var selectedBuiltinStyle: NowPlayingArtworkStyle? {
+        NowPlayingArtworkStyle(rawValue: artworkStyleSelection)
+    }
+
+    private var selectedCustomStyle: CustomNowPlayingStyle? {
+        customStyleStore.style(withID: artworkStyleSelection)
+    }
+
+    private var visibleBuiltinStyles: [NowPlayingArtworkStyle] {
+        NowPlayingArtworkStyle.allCases.filter { !hiddenStylesStore.isHidden($0.rawValue) }
+    }
+
+    /// Applies a style selection and persists it — shared by the picker
+    /// chips and the "apply" action from the style manager sheet.
+    private func selectStyle(_ selectionID: String) {
+        artworkStyleSelection = selectionID
+        UserDefaults.standard.set(selectionID, forKey: "nowPlaying_artworkStyle")
+        if let playlistID = player.currentPlaylistID {
+            library.setPreferredArtworkStyle(selectionID, forPlaylistID: playlistID)
         }
-        return .kaleidoscopeBloom
-    }()
+    }
 
     // Seeker style
     @State private var seekerStyle: SeekerStyle = {
@@ -153,10 +177,9 @@ struct NowPlayingView: View {
         .onChange(of: player.currentPlaylistID) { playlistID in
             guard let playlistID,
                   let playlist = library.playlists.first(where: { $0.id == playlistID }),
-                  let raw = playlist.preferredArtworkStyle,
-                  let style = NowPlayingArtworkStyle(rawValue: raw)
+                  let raw = playlist.preferredArtworkStyle
             else { return }
-            artworkStyle = style
+            artworkStyleSelection = raw
         }
         .onAppear {
             seekHaptic.prepare()
@@ -274,38 +297,39 @@ struct NowPlayingView: View {
             .contentShape(Rectangle())
             .gesture(artworkSwipeGesture)
 
-            // ── Style picker (horizontal scroll, 8 chips) ────────────────
+            // ── Style picker (horizontal scroll: built-ins + custom + add/manage) ──
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(NowPlayingArtworkStyle.allCases) { style in
-                        Button {
-                            artworkStyle = style
-                            UserDefaults.standard.set(style.rawValue, forKey: "nowPlaying_artworkStyle")
-                            // Remember this choice against the playlist currently
-                            // playing (if any), so reopening it later re-applies it.
-                            if let playlistID = player.currentPlaylistID {
-                                library.setPreferredArtworkStyle(style.rawValue, forPlaylistID: playlistID)
-                            }
-                        } label: {
-                            VStack(spacing: 4) {
-                                Image(systemName: style.iconName)
-                                    .font(.system(size: 14, weight: .medium))
-                                Text(style.displayName)
-                                    .font(.system(size: 11, weight: .medium))
-                            }
-                            .foregroundStyle(artworkStyle == style ? .white : AppTheme.textSecondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(
-                                artworkStyle == style
-                                    ? AppTheme.dynamicAccent
-                                    : AppTheme.surface,
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            )
+                    ForEach(visibleBuiltinStyles) { style in
+                        styleChip(
+                            icon: style.iconName, name: style.displayName,
+                            isSelected: artworkStyleSelection == style.rawValue
+                        ) {
+                            selectStyle(style.rawValue)
                         }
-                        .buttonStyle(.plain)
-                        .animation(.easeInOut(duration: 0.18), value: artworkStyle)
                     }
+                    ForEach(customStyleStore.styles) { custom in
+                        styleChip(
+                            icon: custom.iconName, name: custom.name,
+                            isSelected: artworkStyleSelection == custom.id
+                        ) {
+                            selectStyle(custom.id)
+                        }
+                        .contextMenu {
+                            Button {
+                                editingCustomStyle = custom
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) {
+                                customStyleStore.remove(id: custom.id)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                    addStyleChip
+                    manageStylesButton
                 }
                 .padding(.horizontal, 2)
                 .padding(.vertical, 2)
@@ -313,13 +337,92 @@ struct NowPlayingView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
+        .sheet(item: $editingCustomStyle) { style in
+            CustomStyleEditorView(style: style, previewSong: player.currentSong) { saved in
+                customStyleStore.update(saved)
+                selectStyle(saved.id)
+            }
+            .environmentObject(library)
+        }
+        .sheet(isPresented: $showStyleManager) {
+            StyleManagerView()
+                .environmentObject(library)
+        }
+    }
+
+    private func styleChip(icon: String, name: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .medium))
+                Text(name)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(isSelected ? .white : AppTheme.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                isSelected ? AppTheme.dynamicAccent : AppTheme.surface,
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.18), value: isSelected)
+    }
+
+    private var addStyleChip: some View {
+        Button {
+            editingCustomStyle = CustomNowPlayingStyle()
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .medium))
+                Text("New Style")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(AppTheme.dynamicAccent)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(AppTheme.dynamicAccent.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var manageStylesButton: some View {
+        Button {
+            showStyleManager = true
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: 32, height: 32)
+                .background(AppTheme.surface, in: Circle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Artwork display (switches on style)
 
     @ViewBuilder
     private var artworkDisplay: some View {
-        switch artworkStyle {
+        if let builtinStyle = selectedBuiltinStyle {
+            builtinArtworkDisplay(for: builtinStyle)
+        } else if let custom = selectedCustomStyle {
+            CustomStyleArtworkView(song: player.currentSong, isPlaying: player.isPlaying, config: custom)
+                .environmentObject(library)
+        } else {
+            KaleidoscopeBloomArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+        }
+    }
+
+    @ViewBuilder
+    private func builtinArtworkDisplay(for style: NowPlayingArtworkStyle) -> some View {
+        switch style {
         case .kaleidoscopeBloom:
             KaleidoscopeBloomArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
