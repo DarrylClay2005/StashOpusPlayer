@@ -38,65 +38,6 @@ private struct VerticalSlider: View {
     }
 }
 
-// MARK: - VinylDiscView ("Spin")
-//
-// A clean, modern record: the cover as a circular label on a glossy black disc
-// with fine grooves and a fixed specular glint, spinning under a palette halo.
-private struct VinylDiscView: View {
-    let song: Song?
-    let isPlaying: Bool
-
-    @EnvironmentObject private var library: LibraryManager
-    @State private var rotation: Double = 0
-    @State private var glow = false
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(AppTheme.dynamicAccent)
-                .frame(width: 280, height: 280)
-                .blur(radius: 52)
-                .opacity((glow ? 0.45 : 0.25) * (isPlaying ? 1.0 : 0.55))
-
-            ZStack {
-                Circle()
-                    .fill(RadialGradient(colors: [Color(white: 0.11), Color(white: 0.04)],
-                                         center: .center, startRadius: 28, endRadius: 150))
-                ForEach(0..<14) { i in
-                    Circle()
-                        .stroke(.white.opacity(0.05), lineWidth: 1)
-                        .frame(width: CGFloat(150 + i * 9), height: CGFloat(150 + i * 9))
-                }
-                StyleCover(song: song, size: 130, cornerRadius: 65)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(Color(white: 0.15), lineWidth: 2))
-                Circle()
-                    .fill(Color(white: 0.02))
-                    .frame(width: 14, height: 14)
-                    .overlay(Circle().stroke(.white.opacity(0.1), lineWidth: 1))
-            }
-            .frame(width: 290, height: 290)
-            .rotationEffect(.degrees(rotation))
-
-            Circle()
-                .trim(from: 0.06, to: 0.22)
-                .stroke(LinearGradient(colors: [.white.opacity(0.25), .clear],
-                                       startPoint: .leading, endPoint: .trailing),
-                        lineWidth: 60)
-                .frame(width: 244, height: 244)
-                .blendMode(.plusLighter)
-                .allowsHitTesting(false)
-        }
-        .frame(width: 300, height: 300)
-        .shadow(color: AppTheme.dynamicAccent.opacity(glow ? 0.4 : 0.15), radius: glow ? 30 : 16, y: 10)
-        .onAppear {
-            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) { rotation = 360 }
-            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) { glow = true }
-        }
-    }
-}
-
-
 // MARK: - NowPlayingView
 
 struct NowPlayingView: View {
@@ -131,19 +72,17 @@ struct NowPlayingView: View {
     @State private var showLyrics = false
     @State private var showLyricsSyncEditor = false
 
-    // Artwork style — migrates old Bool key to the new enum key on first use
+    // Artwork style. Falls back to the default below both for first-time
+    // users AND for anyone whose saved rawValue predates the 2026-07 visual
+    // overhaul (the old case names — including the even-older boolean
+    // `nowPlaying_showVinylDisc` key this used to migrate from — no longer
+    // exist in any form, so there's nothing left to migrate).
     @State private var artworkStyle: NowPlayingArtworkStyle = {
-        // 1. New key takes priority
         if let raw = UserDefaults.standard.string(forKey: "nowPlaying_artworkStyle"),
            let style = NowPlayingArtworkStyle(rawValue: raw) {
             return style
         }
-        // 2. Migrate old bool key: true → .vinylDisc, false → .albumArt
-        if let oldBool = UserDefaults.standard.object(forKey: "nowPlaying_showVinylDisc") as? Bool {
-            return oldBool ? .vinylDisc : .albumArt
-        }
-        // 3. Default
-        return .vinylDisc
+        return .kaleidoscopeBloom
     }()
 
     // Seeker style
@@ -337,31 +276,28 @@ struct NowPlayingView: View {
     @ViewBuilder
     private var artworkDisplay: some View {
         switch artworkStyle {
-        case .vinylDisc:
-            VinylDiscView(song: player.currentSong, isPlaying: player.isPlaying)
-
-        case .albumArt:
-            AlbumArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .kaleidoscopeBloom:
+            KaleidoscopeBloomArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .polaroid:
-            OrigamiArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .synthwaveHorizon:
+            SynthwaveHorizonArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .floatingCards:
-            FloatingCardsArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .equalizerCutout:
+            EqualizerCutoutArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .minimalist:
-            EditorialArtworkView(
-                song: player.currentSong,
-                isPlaying: player.isPlaying,
-                progress: progress.duration > 0 ? progress.position / progress.duration : 0
-            )
-            .environmentObject(library)
+        case .liquidBlobFrame:
+            LiquidBlobFrameArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
 
-        case .glassmorphism:
-            GlassmorphismArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .origamiFoldReveal:
+            OrigamiFoldRevealArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .mosaicShatter:
+            MosaicShatterArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
         case .retroCRT:

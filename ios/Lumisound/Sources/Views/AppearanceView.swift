@@ -19,7 +19,7 @@ struct AppearanceView: View {
     @State private var refreshToken = UUID()
 
     @AppStorage("panel_opacity")             private var panelOpacity: Double = 1.0
-    @AppStorage("nowPlaying_artworkStyle")   private var artworkStyleRaw: String = NowPlayingArtworkStyle.vinylDisc.rawValue
+    @AppStorage("nowPlaying_artworkStyle")   private var artworkStyleRaw: String = NowPlayingArtworkStyle.kaleidoscopeBloom.rawValue
     @AppStorage("nowPlaying_seekerStyle")    private var seekerStyleRaw: String  = SeekerStyle.waveform.rawValue
     @AppStorage("library_cardStyle")         private var cardStyleRaw: String    = SongCardStyle.compact.rawValue
 

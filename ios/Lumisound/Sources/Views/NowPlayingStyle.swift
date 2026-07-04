@@ -3,12 +3,18 @@ import SwiftUI
 // MARK: - NowPlayingArtworkStyle
 
 enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
-    case vinylDisc
-    case albumArt
-    case polaroid
-    case floatingCards
-    case minimalist
-    case glassmorphism
+    // Batch 1 of a full visual overhaul (2026-07) — replaces the original
+    // vinylDisc/albumArt/polaroid/floatingCards/minimalist/glassmorphism
+    // styles with entirely new concepts + animations. Existing users' saved
+    // style preference (persisted by rawValue) won't match any new case and
+    // falls back to the default — expected, since the old styles no longer
+    // exist in any form.
+    case kaleidoscopeBloom
+    case synthwaveHorizon
+    case equalizerCutout
+    case liquidBlobFrame
+    case origamiFoldReveal
+    case mosaicShatter
     case retroCRT
     case spectrumWaveform
     case cassetteTape
@@ -27,12 +33,12 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .vinylDisc:        return "Spin"
-        case .albumArt:         return "Aurora Veil"
-        case .polaroid:         return "Spotlight Stage"
-        case .floatingCards:    return "Card Fan"
-        case .minimalist:       return "Minimal Mono"
-        case .glassmorphism:    return "Frost Panels"
+        case .kaleidoscopeBloom: return "Kaleidoscope Bloom"
+        case .synthwaveHorizon:  return "Synthwave Horizon"
+        case .equalizerCutout:   return "Equalizer Cutout"
+        case .liquidBlobFrame:   return "Liquid Blob Frame"
+        case .origamiFoldReveal: return "Origami Fold"
+        case .mosaicShatter:     return "Mosaic Shatter"
         case .retroCRT:         return "Glitch Wave"
         case .spectrumWaveform: return "Spectrum Bars"
         case .cassetteTape:     return "Radial Spectrum"
@@ -50,12 +56,12 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
 
     var iconName: String {
         switch self {
-        case .vinylDisc:        return "opticaldisc"
-        case .albumArt:         return "sparkles"
-        case .polaroid:         return "flashlight.on.fill"
-        case .floatingCards:    return "square.stack.3d.up.fill"
-        case .minimalist:       return "circle.lefthalf.filled"
-        case .glassmorphism:    return "sparkles.rectangle.stack"
+        case .kaleidoscopeBloom: return "hexagon.fill"
+        case .synthwaveHorizon:  return "sun.horizon.fill"
+        case .equalizerCutout:   return "chart.bar.fill"
+        case .liquidBlobFrame:   return "drop.circle.fill"
+        case .origamiFoldReveal: return "triangle.fill"
+        case .mosaicShatter:     return "square.grid.3x3.fill"
         case .retroCRT:         return "waveform.path"
         case .spectrumWaveform: return "chart.bar.fill"
         case .cassetteTape:     return "waveform.circle.fill"
