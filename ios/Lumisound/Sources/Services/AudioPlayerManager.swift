@@ -46,6 +46,11 @@ final class AudioPlayerManager: ObservableObject {
         }
     }
     @Published private(set) var currentIndex = 0
+    /// Which playlist (if any) the current queue was started from — lets
+    /// Now Playing auto-apply that playlist's remembered artwork style.
+    /// Cleared whenever a queue is set without a playlist context (Library,
+    /// search results, a single song tapped outside a playlist, etc.).
+    @Published private(set) var currentPlaylistID: UUID?
     @Published private(set) var isPlaying = false {
         didSet {
             guard isPlaying != oldValue else { return }
@@ -461,9 +466,10 @@ final class AudioPlayerManager: ObservableObject {
 
     // MARK: - Public Playback Controls
 
-    func setQueue(_ songs: [Song], startIndex: Int = 0, autoplay: Bool = true) {
+    func setQueue(_ songs: [Song], startIndex: Int = 0, autoplay: Bool = true, playlistID: UUID? = nil) {
         guard !songs.isEmpty else { return }
         queue = songs
+        currentPlaylistID = playlistID
         currentIndex = min(max(startIndex, 0), songs.count - 1)
         currentSong = queue[currentIndex]
         position = 0
@@ -482,12 +488,12 @@ final class AudioPlayerManager: ObservableObject {
         applyAutoEQIfNeeded(bpm: currentSong?.bpm ?? bpmCache[currentSong?.id ?? ""])
     }
 
-    func play(song: Song, in songs: [Song]) {
+    func play(song: Song, in songs: [Song], playlistID: UUID? = nil) {
         let source = songs.isEmpty ? [song] : songs
         let index = source.firstIndex(where: { $0.id == song.id }) ?? 0
         appLog("Play: \"\(song.displayName)\" by \(song.artistName) (\(source.count) in queue)", category: "audio")
         appBreadcrumb("Playing \"\(song.displayName)\"")
-        setQueue(source, startIndex: index, autoplay: true)
+        setQueue(source, startIndex: index, autoplay: true, playlistID: playlistID)
     }
 
     func togglePlayPause() {

@@ -334,6 +334,12 @@ struct SettingsView: View {
                     .foregroundStyle(AppTheme.textPrimary)
             }
 
+            // Local playlist/favorites backup — no server/account involved
+            NavigationLink(destination: LibraryBackupView()) {
+                Label("Backup & Restore", systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+
             // Force metadata sync
             Button {
                 Task {

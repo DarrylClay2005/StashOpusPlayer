@@ -36,6 +36,16 @@ final class ArtistImageService {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     }
 
+    /// Clears the in-memory image cache and the "no match" lookup set — used
+    /// by `CacheManagerService` when the user clears the on-disk cache
+    /// directory, so stale hits/misses aren't served from memory afterward.
+    func clearCache() {
+        memoryCache.removeAllObjects()
+        noImageLock.lock()
+        noImageKeys.removeAll()
+        noImageLock.unlock()
+    }
+
     /// Returns a cached image (memory or disk) without making a network request.
     func cachedImage(for artist: String) -> UIImage? {
         let key = cacheKey(for: artist)

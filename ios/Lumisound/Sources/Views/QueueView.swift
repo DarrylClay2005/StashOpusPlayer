@@ -145,7 +145,11 @@ struct QueueView: View {
     private var queueItems: some View {
         ForEach(Array(player.queue.enumerated()), id: \.element.id) { index, song in
             Button {
-                player.setQueue(player.queue, startIndex: index, autoplay: true)
+                // Jumping to a different index within the SAME already-loaded
+                // queue — preserve whatever playlist context it came from
+                // (this used to always clear it, wiping the Now Playing
+                // theme memory just by tapping a different row in Queue).
+                player.setQueue(player.queue, startIndex: index, autoplay: true, playlistID: player.currentPlaylistID)
             } label: {
                 queueRowContent(index: index, song: song)
             }

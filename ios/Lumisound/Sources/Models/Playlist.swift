@@ -9,14 +9,20 @@ struct Playlist: Identifiable, Hashable, Codable {
     var folder: String?
     /// Free-form tags for filtering/labeling playlists.
     var tags: [String]
+    /// Remembers the last Now Playing artwork style used while this playlist
+    /// was the active playback context, so reopening it later re-applies the
+    /// same look automatically. `nil` means "no preference yet" — falls back
+    /// to the user's global default style.
+    var preferredArtworkStyle: String?
 
-    init(id: UUID = UUID(), name: String, songIDs: [Song.ID] = [], createdAt: Date = Date(), folder: String? = nil, tags: [String] = []) {
+    init(id: UUID = UUID(), name: String, songIDs: [Song.ID] = [], createdAt: Date = Date(), folder: String? = nil, tags: [String] = [], preferredArtworkStyle: String? = nil) {
         self.id = id
         self.name = name
         self.songIDs = songIDs
         self.createdAt = createdAt
         self.folder = folder
         self.tags = tags
+        self.preferredArtworkStyle = preferredArtworkStyle
     }
 
     var songCount: Int {
@@ -24,7 +30,7 @@ struct Playlist: Identifiable, Hashable, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, songIDs, createdAt, folder, tags
+        case id, name, songIDs, createdAt, folder, tags, preferredArtworkStyle
     }
 
     init(from decoder: Decoder) throws {
@@ -35,5 +41,6 @@ struct Playlist: Identifiable, Hashable, Codable {
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         folder = try container.decodeIfPresent(String.self, forKey: .folder)
         tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        preferredArtworkStyle = try container.decodeIfPresent(String.self, forKey: .preferredArtworkStyle)
     }
 }

@@ -145,6 +145,14 @@ struct NowPlayingView: View {
             triggerTrackInfoAnimation()
             loadLyrics()
         }
+        .onChange(of: player.currentPlaylistID) { playlistID in
+            guard let playlistID,
+                  let playlist = library.playlists.first(where: { $0.id == playlistID }),
+                  let raw = playlist.preferredArtworkStyle,
+                  let style = NowPlayingArtworkStyle(rawValue: raw)
+            else { return }
+            artworkStyle = style
+        }
         .onAppear {
             seekHaptic.prepare()
             playHaptic.prepare()
@@ -266,6 +274,11 @@ struct NowPlayingView: View {
                         Button {
                             artworkStyle = style
                             UserDefaults.standard.set(style.rawValue, forKey: "nowPlaying_artworkStyle")
+                            // Remember this choice against the playlist currently
+                            // playing (if any), so reopening it later re-applies it.
+                            if let playlistID = player.currentPlaylistID {
+                                library.setPreferredArtworkStyle(style.rawValue, forPlaylistID: playlistID)
+                            }
                         } label: {
                             VStack(spacing: 4) {
                                 Image(systemName: style.iconName)

@@ -12,6 +12,8 @@ struct PlaylistDetailView: View {
     @State private var showingAddSongs = false
     @State private var showShareSheet = false
     @State private var showOrganizeSheet = false
+    @State private var m3uExportURL: URL?
+    @State private var showM3UShareSheet = false
 
     // Always look up the live playlist so mutations (add/remove/reorder) are reflected immediately.
     private var currentPlaylist: Playlist {
@@ -68,7 +70,7 @@ struct PlaylistDetailView: View {
                 // Play All button
                 Section {
                     Button {
-                        player.setQueue(songs, startIndex: 0, autoplay: true)
+                        player.setQueue(songs, startIndex: 0, autoplay: true, playlistID: currentPlaylist.id)
                     } label: {
                         Label("Play All", systemImage: "play.fill")
                             .font(.subheadline.weight(.semibold))
@@ -84,7 +86,7 @@ struct PlaylistDetailView: View {
                 ForEach(songs) { song in
                     Button {
                         if !isEditing {
-                            player.play(song: song, in: songs)
+                            player.play(song: song, in: songs, playlistID: currentPlaylist.id)
                         }
                     } label: {
                         SongRow(song: song, isCurrent: player.currentSong?.id == song.id)
@@ -128,8 +130,17 @@ struct PlaylistDetailView: View {
         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                Button {
-                    showOrganizeSheet = true
+                Menu {
+                    Button {
+                        showOrganizeSheet = true
+                    } label: {
+                        Label("Organize", systemImage: "folder.badge.gearshape")
+                    }
+                    Button {
+                        exportM3U()
+                    } label: {
+                        Label("Export as M3U", systemImage: "doc.text")
+                    }
                 } label: {
                     Image(systemName: "folder.badge.gearshape")
                 }
@@ -174,6 +185,34 @@ struct PlaylistDetailView: View {
                 .environmentObject(streaming)
                 .environmentObject(library)
         }
+        .sheet(isPresented: $showM3UShareSheet) {
+            if let m3uExportURL {
+                RewindShareSheet(items: [m3uExportURL])
+            }
+        }
+    }
+
+    /// Generates a UTF-8 M3U playlist file and opens the share sheet for it.
+    /// Songs backed by an actual local file (imported/downloaded) get their
+    /// real path; Apple Music library items have no exportable file, so they
+    /// get a metadata-only comment line instead — still a readable record of
+    /// what was in the playlist, just not something another app can resolve.
+    private func exportM3U() {
+        var lines = ["#EXTM3U"]
+        for song in songs {
+            lines.append("#EXTINF:\(Int(song.duration.rounded())),\(song.artistName) - \(song.title)")
+            if let url = song.url {
+                lines.append(url.path)
+            } else {
+                lines.append("# (Apple Music library item — no exportable file)")
+            }
+        }
+        guard let data = lines.joined(separator: "\n").data(using: .utf8) else { return }
+        let safeName = currentPlaylist.name.replacingOccurrences(of: "/", with: "-")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safeName).m3u8")
+        guard (try? data.write(to: url, options: .atomic)) != nil else { return }
+        m3uExportURL = url
+        showM3UShareSheet = true
     }
 
     private func reorder(newIDs: [Song.ID]) {
