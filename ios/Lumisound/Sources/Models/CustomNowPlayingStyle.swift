@@ -102,35 +102,41 @@ struct CustomNowPlayingStyle: Codable, Identifiable, Equatable {
     var shadowStyle: ShadowStyle = .soft
 
     enum Decoration: String, Codable, CaseIterable, Identifiable {
-        case none, glowRing, particles, sweep, bars, waveform, blobs
+        case none, glowRing, particles, sweep, bars, waveform, blobs, confetti, vinylGrooves, lightRays
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .none:      return "None"
-            case .glowRing:  return "Glow Ring"
-            case .particles: return "Floating Particles"
-            case .sweep:     return "Light Sweep"
-            case .bars:      return "Equalizer Bars"
-            case .waveform:  return "Live Waveform"
-            case .blobs:     return "Color Blobs"
+            case .none:         return "None"
+            case .glowRing:     return "Glow Ring"
+            case .particles:    return "Floating Particles"
+            case .sweep:        return "Light Sweep"
+            case .bars:         return "Equalizer Bars"
+            case .waveform:     return "Live Waveform"
+            case .blobs:        return "Color Blobs"
+            case .confetti:     return "Confetti"
+            case .vinylGrooves: return "Vinyl Grooves"
+            case .lightRays:    return "Light Rays"
             }
         }
         var iconName: String {
             switch self {
-            case .none:      return "circle.dashed"
-            case .glowRing:  return "circle.dotted"
-            case .particles: return "sparkles"
-            case .sweep:     return "dot.radiowaves.left.and.right"
-            case .bars:      return "chart.bar.fill"
-            case .waveform:  return "waveform"
-            case .blobs:     return "drop.circle.fill"
+            case .none:         return "circle.dashed"
+            case .glowRing:     return "circle.dotted"
+            case .particles:    return "sparkles"
+            case .sweep:        return "dot.radiowaves.left.and.right"
+            case .bars:         return "chart.bar.fill"
+            case .waveform:     return "waveform"
+            case .blobs:        return "drop.circle.fill"
+            case .confetti:     return "party.popper.fill"
+            case .vinylGrooves: return "circle.circle"
+            case .lightRays:    return "sun.max.fill"
             }
         }
     }
     var decoration: Decoration = .glowRing
 
     enum CoverAnimation: String, Codable, CaseIterable, Identifiable {
-        case none, float, pulse, rotate, sway
+        case none, float, pulse, rotate, sway, bounce, tilt
         var id: String { rawValue }
         var label: String {
             switch self {
@@ -139,6 +145,8 @@ struct CustomNowPlayingStyle: Codable, Identifiable, Equatable {
             case .pulse:  return "Pulse"
             case .rotate: return "Rotate"
             case .sway:   return "Sway"
+            case .bounce: return "Bounce"
+            case .tilt:   return "Tilt"
             }
         }
     }

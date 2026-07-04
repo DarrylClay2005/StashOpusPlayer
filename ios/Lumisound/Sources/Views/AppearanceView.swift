@@ -14,6 +14,9 @@ struct AppearanceView: View {
     /// audio settings change (see `AccountService.pullSync`'s theme-color comment),
     /// so a fresh install on another device could miss it entirely.
     @EnvironmentObject private var account: AccountService
+    /// Needed to present `LibraryStyleEditorView`/`LibraryStyleManagerView`
+    /// as sheets with a full environment (they render `SongContextMenuContent`).
+    @EnvironmentObject private var player: AudioPlayerManager
 
     @State private var customColor: Color = AppTheme.dynamicAccent
     @State private var refreshToken = UUID()
@@ -22,6 +25,18 @@ struct AppearanceView: View {
     @AppStorage("nowPlaying_artworkStyle")   private var artworkStyleRaw: String = NowPlayingArtworkStyle.kaleidoscopeBloom.rawValue
     @AppStorage("nowPlaying_seekerStyle")    private var seekerStyleRaw: String  = SeekerStyle.waveform.rawValue
     @AppStorage("library_cardStyle")         private var cardStyleRaw: String    = SongCardStyle.compact.rawValue
+
+    // Song Card style — the same String-selection pattern as Now Playing's
+    // artwork style: either a built-in `SongCardStyle` rawValue or a
+    // user-created `CustomLibraryRowStyle`'s UUID.
+    @ObservedObject private var customLibraryStyleStore = CustomLibraryStyleStore.shared
+    @ObservedObject private var hiddenCardStylesStore = HiddenCardStylesStore.shared
+    @State private var editingCustomLibraryStyle: CustomLibraryRowStyle?
+    @State private var showLibraryStyleManager = false
+
+    private var visibleBuiltinCardStyles: [SongCardStyle] {
+        SongCardStyle.allCases.filter { !hiddenCardStylesStore.isHidden($0.rawValue) }
+    }
 
     // MARK: Preset Swatches
 
@@ -276,27 +291,36 @@ struct AppearanceView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(SongCardStyle.allCases) { style in
-                        Button {
+                    ForEach(visibleBuiltinCardStyles) { style in
+                        cardStyleChip(
+                            icon: style.iconName, name: style.displayName,
+                            isSelected: cardStyleRaw == style.rawValue
+                        ) {
                             cardStyleRaw = style.rawValue
-                        } label: {
-                            VStack(spacing: 4) {
-                                Image(systemName: style.iconName)
-                                    .font(.system(size: 13, weight: .medium))
-                                Text(style.displayName)
-                                    .font(.system(size: 10, weight: .medium))
-                            }
-                            .foregroundStyle(cardStyleRaw == style.rawValue ? .white : AppTheme.textSecondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(
-                                cardStyleRaw == style.rawValue ? AppTheme.dynamicAccent : AppTheme.elevatedSurface,
-                                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            )
                         }
-                        .buttonStyle(.plain)
-                        .animation(.easeInOut(duration: 0.15), value: cardStyleRaw)
                     }
+                    ForEach(customLibraryStyleStore.styles) { custom in
+                        cardStyleChip(
+                            icon: custom.iconName, name: custom.name,
+                            isSelected: cardStyleRaw == custom.id
+                        ) {
+                            cardStyleRaw = custom.id
+                        }
+                        .contextMenu {
+                            Button {
+                                editingCustomLibraryStyle = custom
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) {
+                                customLibraryStyleStore.remove(id: custom.id)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                    addCardStyleChip
+                    manageCardStylesButton
                 }
                 .padding(.bottom, 2)
             }
@@ -310,6 +334,74 @@ struct AppearanceView: View {
         }
         .padding(.vertical, 6)
         .listRowBackground(AppTheme.surface)
+        .sheet(item: $editingCustomLibraryStyle) { style in
+            LibraryStyleEditorView(style: style, previewSong: library.allSongs.first) { saved in
+                customLibraryStyleStore.update(saved)
+                cardStyleRaw = saved.id
+            }
+            .environmentObject(library)
+            .environmentObject(player)
+        }
+        .sheet(isPresented: $showLibraryStyleManager) {
+            LibraryStyleManagerView()
+                .environmentObject(library)
+                .environmentObject(player)
+        }
+    }
+
+    private func cardStyleChip(icon: String, name: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .medium))
+                Text(name)
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(isSelected ? .white : AppTheme.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                isSelected ? AppTheme.dynamicAccent : AppTheme.elevatedSurface,
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
+    }
+
+    private var addCardStyleChip: some View {
+        Button {
+            editingCustomLibraryStyle = CustomLibraryRowStyle()
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .medium))
+                Text("New Style")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(AppTheme.dynamicAccent)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(AppTheme.dynamicAccent.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var manageCardStylesButton: some View {
+        Button {
+            showLibraryStyleManager = true
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: 30, height: 30)
+                .background(AppTheme.elevatedSurface, in: Circle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var seekerStylePicker: some View {

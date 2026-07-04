@@ -117,6 +117,12 @@ struct CustomStyleArtworkView: View {
             waveformDecoration
         case .blobs:
             blobsDecoration(t: t)
+        case .confetti:
+            confettiDecoration(t: t)
+        case .vinylGrooves:
+            vinylGroovesDecoration(t: t)
+        case .lightRays:
+            lightRaysDecoration(t: t)
         }
     }
 
@@ -200,6 +206,63 @@ struct CustomStyleArtworkView: View {
                 .offset(x: 80 - phase * 20, y: 80 + phase * 10)
         }
     }
+
+    private func confettiDecoration(t: TimeInterval) -> some View {
+        let fallPhase: CGFloat = CGFloat(ArtworkClock.loop(Date(timeIntervalSinceReferenceDate: t), cycleDuration: 6))
+        let colors: [Color] = [accentColor, config.customAccentColor.color, .white]
+        var rng = SeededRandom(seed: 4_242)
+        let pieces: [(CGFloat, CGFloat, CGFloat, Color)] = (0..<14).map { i in
+            let startX = CGFloat(rng.nextDouble()) * 260 - 130
+            let speed: CGFloat = 0.6 + CGFloat(rng.nextDouble()) * 0.8
+            let spin: CGFloat = CGFloat(rng.nextDouble()) * 360
+            let color = colors[i % colors.count]
+            return (startX, speed, spin, color)
+        }
+        return ZStack {
+            ForEach(Array(pieces.enumerated()), id: \.offset) { _, piece in
+                let (startX, speed, spin, color) = piece
+                let travel: CGFloat = fallPhase * speed
+                let y: CGFloat = -160 + travel.truncatingRemainder(dividingBy: 1) * 320
+                let rotation: Double = Double(spin + travel * 720)
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(color)
+                    .frame(width: 6, height: 9)
+                    .rotationEffect(.degrees(rotation))
+                    .offset(x: startX, y: y)
+            }
+        }
+    }
+
+    private func vinylGroovesDecoration(t: TimeInterval) -> some View {
+        let angle = ArtworkClock.loop(Date(timeIntervalSinceReferenceDate: t), cycleDuration: 20) * 360
+        let baseSize: CGFloat = CGFloat(config.coverSize)
+        return ZStack {
+            ForEach(0..<5, id: \.self) { i in
+                let ringSize: CGFloat = baseSize - CGFloat(i) * 22
+                Circle()
+                    .stroke(accentColor.opacity(0.18), lineWidth: 1.5)
+                    .frame(width: ringSize, height: ringSize)
+            }
+        }
+        .rotationEffect(.degrees(angle))
+    }
+
+    private func lightRaysDecoration(t: TimeInterval) -> some View {
+        let angle = ArtworkClock.loop(Date(timeIntervalSinceReferenceDate: t), cycleDuration: 14) * 360
+        let phase = ArtworkClock.pingPong(Date(timeIntervalSinceReferenceDate: t), legDuration: 2.2)
+        let rayOpacity = 0.12 + phase * 0.15
+        return ZStack {
+            ForEach(0..<8, id: \.self) { i in
+                let rayAngle = Double(i) * 45
+                Rectangle()
+                    .fill(accentColor.opacity(rayOpacity))
+                    .frame(width: 3, height: 340)
+                    .rotationEffect(.degrees(rayAngle))
+            }
+        }
+        .rotationEffect(.degrees(angle))
+        .mask(Circle().frame(width: 320, height: 320))
+    }
 }
 
 // MARK: - Shape type erasure (coverShape needs to return either Circle or RoundedRectangle)
@@ -251,6 +314,16 @@ private struct CoverAnimationModifier: ViewModifier {
             content.rotationEffect(.degrees(loopPhase * 360))
         case .sway:
             content.rotationEffect(.degrees(-4 + 8 * phase))
+        case .bounce:
+            let squashX: CGFloat = 1.0 + 0.05 * phase
+            let squashY: CGFloat = 1.0 - 0.05 * phase
+            content
+                .offset(y: -18 * phase)
+                .scaleEffect(x: squashX, y: squashY)
+        case .tilt:
+            let tiltAngle: Double = -6 + 12 * phase
+            content
+                .rotation3DEffect(.degrees(tiltAngle), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
         }
     }
 }

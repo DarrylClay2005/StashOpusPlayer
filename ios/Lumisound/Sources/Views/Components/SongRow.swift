@@ -65,11 +65,16 @@ struct SongRow: View {
 
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
+    @ObservedObject private var customStyleStore = CustomLibraryStyleStore.shared
 
     @AppStorage("library_cardStyle") private var cardStyleRaw: String = SongCardStyle.compact.rawValue
 
-    private var style: SongCardStyle {
-        SongCardStyle(rawValue: cardStyleRaw) ?? .compact
+    private var style: SongCardStyle? {
+        SongCardStyle(rawValue: cardStyleRaw)
+    }
+
+    private var customStyle: CustomLibraryRowStyle? {
+        customStyleStore.style(withID: cardStyleRaw)
     }
 
     private var resolvedSubtitle: String {
@@ -77,22 +82,33 @@ struct SongRow: View {
     }
 
     var body: some View {
-        Group {
-            switch style {
-            case .compact:     compactBody
-            case .comfortable: comfortableBody
-            case .card:        cardBody
-            case .minimal:     minimalBody
-            }
-        }
-        .contentShape(Rectangle())
-        // Animate the "now playing" highlight (accent text/background/border)
-        // transitioning in or out, instead of snapping instantly.
-        .animation(.easeInOut(duration: 0.25), value: isCurrent)
-        .contextMenu {
-            SongContextMenuContent(song: song)
+        if let customStyle {
+            // CustomLibraryRowView applies its own contentShape/animation/contextMenu,
+            // so it's returned directly rather than wrapped a second time below.
+            CustomLibraryRowView(song: song, isCurrent: isCurrent, config: customStyle, subtitle: subtitle)
                 .environmentObject(library)
                 .environmentObject(player)
+        } else {
+            builtinBody
+                .contentShape(Rectangle())
+                // Animate the "now playing" highlight (accent text/background/border)
+                // transitioning in or out, instead of snapping instantly.
+                .animation(.easeInOut(duration: 0.25), value: isCurrent)
+                .contextMenu {
+                    SongContextMenuContent(song: song)
+                        .environmentObject(library)
+                        .environmentObject(player)
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var builtinBody: some View {
+        switch style ?? .compact {
+        case .compact:     compactBody
+        case .comfortable: comfortableBody
+        case .card:        cardBody
+        case .minimal:     minimalBody
         }
     }
 
@@ -248,12 +264,31 @@ struct SongGridCell: View {
 
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
+    @ObservedObject private var customStyleStore = CustomLibraryStyleStore.shared
+
+    @AppStorage("library_cardStyle") private var cardStyleRaw: String = SongCardStyle.compact.rawValue
+
+    private var customStyle: CustomLibraryRowStyle? {
+        customStyleStore.style(withID: cardStyleRaw)
+    }
 
     private var resolvedSubtitle: String {
         subtitle ?? song.artistName
     }
 
     var body: some View {
+        if let customStyle {
+            // CustomLibraryGridCellView applies its own animation/contextMenu,
+            // so it's returned directly rather than wrapped a second time below.
+            CustomLibraryGridCellView(song: song, isCurrent: isCurrent, config: customStyle, subtitle: subtitle, trackNumber: trackNumber)
+                .environmentObject(library)
+                .environmentObject(player)
+        } else {
+            builtinBody
+        }
+    }
+
+    private var builtinBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             // GeometryReader ensures the artwork fills the actual column width instead of
             // being locked to a hardcoded size, which caused clipping/spacing issues.
