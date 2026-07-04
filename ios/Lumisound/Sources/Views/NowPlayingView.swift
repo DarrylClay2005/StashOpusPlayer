@@ -126,6 +126,7 @@ struct NowPlayingView: View {
     private let selectHaptic = UISelectionFeedbackGenerator()
 
     @State private var selectedPanel: NowPlayingPanel = .controls
+    @Namespace private var panelPickerNamespace
 
     var body: some View {
         NavigationStack {
@@ -179,13 +180,36 @@ struct NowPlayingView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    /// A custom sliding-pill segmented control — the accent capsule glides
+    /// between labels via a shared `matchedGeometryEffect` instead of the
+    /// native segmented control's instant cross-fade.
     private var panelPicker: some View {
-        Picker("Controls", selection: $selectedPanel) {
+        HStack(spacing: 4) {
             ForEach(NowPlayingPanel.allCases) { panel in
-                Text(panel.rawValue).tag(panel)
+                Button {
+                    selectHaptic.selectionChanged()
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        selectedPanel = panel
+                    }
+                } label: {
+                    Text(panel.rawValue)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(selectedPanel == panel ? .white : AppTheme.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background {
+                            if selectedPanel == panel {
+                                Capsule(style: .continuous)
+                                    .fill(AppTheme.dynamicAccent)
+                                    .matchedGeometryEffect(id: "panelPickerPill", in: panelPickerNamespace)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
             }
         }
-        .pickerStyle(.segmented)
+        .padding(3)
+        .background(AppTheme.surface.opacity(0.6), in: Capsule(style: .continuous))
         .padding(.top, 4)
     }
 

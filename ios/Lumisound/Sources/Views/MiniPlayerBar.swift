@@ -19,6 +19,12 @@ struct MiniPlayerBar: View {
     private let skipHaptic  = UIImpactFeedbackGenerator(style: .medium)
     private let heartHaptic = UIImpactFeedbackGenerator(style: .soft)
 
+    // One-shot burst ring shown when a song is favorited from the mini
+    // player — not looping, so it's unrelated to the repeatForever-freeze
+    // bug class fixed elsewhere; it just plays out once and holds at rest.
+    @State private var heartBurstScale: CGFloat = 1.0
+    @State private var heartBurstOpacity: Double = 0
+
     var body: some View {
         if player.currentSong != nil {
             barContent
@@ -110,12 +116,28 @@ struct MiniPlayerBar: View {
                     heartHaptic.impactOccurred()
                     library.toggleFavorite(songID: song.id)
                 } label: {
-                    Image(systemName: library.isFavorite(songID: song.id) ? "heart.fill" : "heart")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(library.isFavorite(songID: song.id) ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                    ZStack {
+                        Circle()
+                            .stroke(AppTheme.dynamicAccent, lineWidth: 1.5)
+                            .frame(width: 16, height: 16)
+                            .scaleEffect(heartBurstScale)
+                            .opacity(heartBurstOpacity)
+                        Image(systemName: library.isFavorite(songID: song.id) ? "heart.fill" : "heart")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(library.isFavorite(songID: song.id) ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+                    }
                 }
                 .buttonStyle(.plain)
                 .animation(.spring(response: 0.3, dampingFraction: 0.55), value: library.isFavorite(songID: song.id))
+                .onChange(of: library.isFavorite(songID: song.id)) { isFavorite in
+                    guard isFavorite else { return }
+                    heartBurstScale = 1.0
+                    heartBurstOpacity = 0.8
+                    withAnimation(.easeOut(duration: 0.45)) {
+                        heartBurstScale = 2.2
+                        heartBurstOpacity = 0
+                    }
+                }
             }
 
             // Play / Pause

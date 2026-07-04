@@ -85,6 +85,30 @@ struct PressableButtonStyle: ButtonStyle {
     }
 }
 
+// MARK: - ShimmerOverlay
+
+/// A diagonal light sweep that loops continuously across whatever it's
+/// overlaid on — used for loading/placeholder states (artwork not yet
+/// fetched, skeleton rows) throughout the app. Driven by
+/// `TimelineView`/`ArtworkClock` like the Now Playing ambient loops, for the
+/// same reason: immune to freezing from frequent parent re-renders.
+struct ShimmerOverlay: View {
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let t = ArtworkClock.loop(timeline.date, cycleDuration: 1.4)
+            GeometryReader { geo in
+                LinearGradient(
+                    colors: [.clear, .white.opacity(0.25), .clear],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: geo.size.width * 0.5)
+                .offset(x: -geo.size.width * 0.5 + t * geo.size.width * 1.5)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 // MARK: - FilmGrainOverlay
 
 /// A static, tiled speckle pattern drawn once with `Canvas` to suggest paper

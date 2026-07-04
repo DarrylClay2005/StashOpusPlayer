@@ -463,13 +463,14 @@ private struct LibrarySelectionActionBar: View {
 
 private struct LibraryTabBar: View {
     @Binding var selectedTab: LibraryTab
+    @Namespace private var pillNamespace
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(LibraryTab.allCases, id: \.self) { tab in
                     Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                             selectedTab = tab
                         }
                     } label: {
@@ -494,6 +495,7 @@ private struct LibraryTabBar: View {
                                             )
                                         )
                                         .shadow(color: AppTheme.dynamicAccent.opacity(0.4), radius: 6, x: 0, y: 3)
+                                        .matchedGeometryEffect(id: "libraryTabPill", in: pillNamespace)
                                 } else {
                                     Capsule(style: .continuous)
                                         .fill(AppTheme.surface.opacity(0.6))

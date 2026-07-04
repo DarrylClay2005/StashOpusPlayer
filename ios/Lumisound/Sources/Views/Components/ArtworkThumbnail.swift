@@ -45,6 +45,10 @@ struct ArtworkThumbnail: View {
                             .font(.system(size: size * 0.35, weight: .medium))
                             .foregroundStyle(AppTheme.dynamicAccent)
                     }
+                    .overlay(
+                        ShimmerOverlay()
+                            .clipShape(RoundedRectangle(cornerRadius: max(4, size * 0.1), style: .continuous))
+                    )
                     .frame(width: size, height: size)
             }
         }
