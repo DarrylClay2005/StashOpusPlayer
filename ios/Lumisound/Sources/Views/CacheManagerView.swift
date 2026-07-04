@@ -13,230 +13,23 @@ struct CacheManagerView: View {
     @State private var savedBytes: Int64 = 0
     @State private var showSavedBanner = false
 
+    /// Each cache category's `Section` is its own computed property (rather
+    /// than all inline in one `List { ... }`) — with 8 sections' worth of
+    /// nested HStack/VStack/Button/Label content, the Swift type-checker
+    /// timed out trying to infer the whole `body` as a single expression
+    /// ("unable to type-check this expression in reasonable time"). Breaking
+    /// it up gives the checker a much smaller expression to solve per piece.
     var body: some View {
         List {
-            // MARK: Artwork Cache
-            Section {
-                HStack {
-                    Label("Cached Images", systemImage: "photo.on.rectangle.angled")
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(CacheManagerService.formattedSize(cacheManager.artworkCacheSize))
-                            .font(AppTheme.monoFont(size: 14))
-                            .foregroundStyle(AppTheme.textSecondary)
-                        Text("\(cacheManager.artworkCacheCount) files")
-                            .font(.caption2)
-                            .foregroundStyle(AppTheme.textSecondary)
-                    }
-                }
-
-                Button(role: .destructive) {
-                    showClearArtworkConfirm = true
-                } label: {
-                    Label("Clear Artwork Cache", systemImage: "trash")
-                        .foregroundStyle(AppTheme.error)
-                }
-                .disabled(cacheManager.artworkCacheSize == 0)
-            } header: {
-                sectionHeader("Artwork Cache")
-            } footer: {
-                Text("Album art thumbnails stored on disk for fast loading. Safe to clear — art is re-fetched as needed.")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .listRowBackground(AppTheme.surface)
-
-            // MARK: Temp Download Files
-            Section {
-                HStack {
-                    Label("Temp Downloads", systemImage: "arrow.down.circle.dotted")
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    Text(CacheManagerService.formattedSize(cacheManager.tempFilesSize))
-                        .font(AppTheme.monoFont(size: 14))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-
-                Button(role: .destructive) {
-                    showClearTempConfirm = true
-                } label: {
-                    Label("Clear Temp Files", systemImage: "trash")
-                        .foregroundStyle(AppTheme.error)
-                }
-                .disabled(cacheManager.tempFilesSize == 0)
-            } header: {
-                sectionHeader("Temporary Files")
-            } footer: {
-                Text("Partial download folders left behind if a stream download was interrupted. Safe to clear when not actively downloading.")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .listRowBackground(AppTheme.surface)
-
-            // MARK: Artist Image Cache
-            Section {
-                HStack {
-                    Label("Artist Photos", systemImage: "person.crop.square")
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(CacheManagerService.formattedSize(cacheManager.artistImageCacheSize))
-                            .font(AppTheme.monoFont(size: 14))
-                            .foregroundStyle(AppTheme.textSecondary)
-                        Text("\(cacheManager.artistImageCacheCount) files")
-                            .font(.caption2)
-                            .foregroundStyle(AppTheme.textSecondary)
-                    }
-                }
-
-                Button(role: .destructive) {
-                    showClearArtistImagesConfirm = true
-                } label: {
-                    Label("Clear Artist Photo Cache", systemImage: "trash")
-                        .foregroundStyle(AppTheme.error)
-                }
-                .disabled(cacheManager.artistImageCacheSize == 0)
-            } header: {
-                sectionHeader("Artist Photos")
-            } footer: {
-                Text("Artist profile pictures fetched from Deezer, stored on disk for fast loading. Safe to clear — re-fetched as needed.")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .listRowBackground(AppTheme.surface)
-
-            // MARK: Transcode Cache
-            Section {
-                HStack {
-                    Label("Transcode Work Files", systemImage: "waveform")
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    Text(CacheManagerService.formattedSize(cacheManager.transcodeCacheSize))
-                        .font(AppTheme.monoFont(size: 14))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-
-                Button(role: .destructive) {
-                    showClearTranscodeConfirm = true
-                } label: {
-                    Label("Clear Transcode Cache", systemImage: "trash")
-                        .foregroundStyle(AppTheme.error)
-                }
-                .disabled(cacheManager.transcodeCacheSize == 0)
-            } header: {
-                sectionHeader("Transcode Cache")
-            } footer: {
-                Text("Temporary files created while converting audio formats (e.g. AcoustID fingerprinting, format export). Safe to clear when nothing is actively processing.")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .listRowBackground(AppTheme.surface)
-
-            // MARK: Orphaned Files
-            Section {
-                HStack {
-                    Label("Orphaned Files", systemImage: "questionmark.folder")
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    if cacheManager.isScanningOrphans {
-                        ProgressView().tint(AppTheme.dynamicAccent)
-                    } else {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(CacheManagerService.formattedSize(cacheManager.orphanedFilesSize))
-                                .font(AppTheme.monoFont(size: 14))
-                                .foregroundStyle(AppTheme.textSecondary)
-                            Text("\(cacheManager.orphanedFiles.count) files")
-                                .font(.caption2)
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
-                    }
-                }
-
-                if !cacheManager.orphanedFiles.isEmpty {
-                    Button(role: .destructive) {
-                        showDeleteOrphansConfirm = true
-                    } label: {
-                        Label("Delete Orphaned Files", systemImage: "trash")
-                            .foregroundStyle(AppTheme.error)
-                    }
-                }
-            } header: {
-                sectionHeader("Orphaned Files")
-            } footer: {
-                Text("Files sitting in Imported Music that nothing in your library currently references — leftovers from a removed song, or files added outside the app. Not counted above; scanned separately since it needs to check against your library.")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .listRowBackground(AppTheme.surface)
-
-            // MARK: Downloaded Music
-            Section {
-                HStack {
-                    Label("Imported Music", systemImage: "music.note")
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    Text(CacheManagerService.formattedSize(cacheManager.downloadedMusicSize))
-                        .font(AppTheme.monoFont(size: 14))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-            } header: {
-                sectionHeader("Downloaded Music")
-            } footer: {
-                Text("Songs in your app's Documents folder. To remove individual tracks, use the Library view.")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .listRowBackground(AppTheme.surface)
-
-            // MARK: Bridge Cache (informational)
-            Section {
-                HStack {
-                    Label("Bridge Server Cache", systemImage: "server.rack")
-                        .foregroundStyle(AppTheme.textPrimary)
-                    Spacer()
-                    Text("Managed on server")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-            } header: {
-                sectionHeader("Remote")
-            } footer: {
-                Text("yt-dlp streaming cache is stored server-side and managed automatically.")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .listRowBackground(AppTheme.surface)
-
-            // MARK: Clear All
-            let clearableSize = cacheManager.artworkCacheSize + cacheManager.tempFilesSize
-                + cacheManager.artistImageCacheSize + cacheManager.transcodeCacheSize
-            if clearableSize > 0 {
-                Section {
-                    Button(role: .destructive) {
-                        showClearAllConfirm = true
-                    } label: {
-                        Label("Clear All Cache", systemImage: "trash")
-                            .foregroundStyle(AppTheme.error)
-                    }
-                } header: {
-                    sectionHeader("Actions")
-                } footer: {
-                    Text("Clears all cache categories above in one tap (\(CacheManagerService.formattedSize(clearableSize))). Your downloaded music is never affected.")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .listRowBackground(AppTheme.surface)
-            }
-
-            // MARK: Saved banner
-            if showSavedBanner {
-                Section {
-                    Label("\(CacheManagerService.formattedSize(savedBytes)) freed", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(AppTheme.success)
-                }
-                .listRowBackground(Color.clear)
-            }
+            artworkCacheSection
+            tempFilesSection
+            artistImageSection
+            transcodeSection
+            orphanedFilesSection
+            downloadedMusicSection
+            bridgeCacheSection
+            clearAllSection
+            savedBannerSection
         }
         .scrollContentBackground(.hidden)
         .background(AppTheme.background.ignoresSafeArea())
@@ -339,14 +132,259 @@ struct CacheManagerView: View {
             titleVisibility: .visible
         ) {
             Button("Clear All", role: .destructive) {
-                let freed = cacheManager.artworkCacheSize + cacheManager.tempFilesSize
-                    + cacheManager.artistImageCacheSize + cacheManager.transcodeCacheSize
+                let freed = totalClearableSize
                 cacheManager.clearAll()
                 flashSavedBanner(bytes: freed)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Album art, artist photos, temp downloads, and transcode work files will all be cleared/re-fetched as needed. Your downloaded music and orphaned files are not affected — orphaned files must be deleted separately above.")
+        }
+    }
+
+    // MARK: - Sections
+
+    @ViewBuilder
+    private var artworkCacheSection: some View {
+        Section {
+            HStack {
+                Label("Cached Images", systemImage: "photo.on.rectangle.angled")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(CacheManagerService.formattedSize(cacheManager.artworkCacheSize))
+                        .font(AppTheme.monoFont(size: 14))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Text("\(cacheManager.artworkCacheCount) files")
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+
+            Button(role: .destructive) {
+                showClearArtworkConfirm = true
+            } label: {
+                Label("Clear Artwork Cache", systemImage: "trash")
+                    .foregroundStyle(AppTheme.error)
+            }
+            .disabled(cacheManager.artworkCacheSize == 0)
+        } header: {
+            sectionHeader("Artwork Cache")
+        } footer: {
+            Text("Album art thumbnails stored on disk for fast loading. Safe to clear — art is re-fetched as needed.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
+    @ViewBuilder
+    private var tempFilesSection: some View {
+        Section {
+            HStack {
+                Label("Temp Downloads", systemImage: "arrow.down.circle.dotted")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                Text(CacheManagerService.formattedSize(cacheManager.tempFilesSize))
+                    .font(AppTheme.monoFont(size: 14))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Button(role: .destructive) {
+                showClearTempConfirm = true
+            } label: {
+                Label("Clear Temp Files", systemImage: "trash")
+                    .foregroundStyle(AppTheme.error)
+            }
+            .disabled(cacheManager.tempFilesSize == 0)
+        } header: {
+            sectionHeader("Temporary Files")
+        } footer: {
+            Text("Partial download folders left behind if a stream download was interrupted. Safe to clear when not actively downloading.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
+    @ViewBuilder
+    private var artistImageSection: some View {
+        Section {
+            HStack {
+                Label("Artist Photos", systemImage: "person.crop.square")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(CacheManagerService.formattedSize(cacheManager.artistImageCacheSize))
+                        .font(AppTheme.monoFont(size: 14))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Text("\(cacheManager.artistImageCacheCount) files")
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+
+            Button(role: .destructive) {
+                showClearArtistImagesConfirm = true
+            } label: {
+                Label("Clear Artist Photo Cache", systemImage: "trash")
+                    .foregroundStyle(AppTheme.error)
+            }
+            .disabled(cacheManager.artistImageCacheSize == 0)
+        } header: {
+            sectionHeader("Artist Photos")
+        } footer: {
+            Text("Artist profile pictures fetched from Deezer, stored on disk for fast loading. Safe to clear — re-fetched as needed.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
+    @ViewBuilder
+    private var transcodeSection: some View {
+        Section {
+            HStack {
+                Label("Transcode Work Files", systemImage: "waveform")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                Text(CacheManagerService.formattedSize(cacheManager.transcodeCacheSize))
+                    .font(AppTheme.monoFont(size: 14))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Button(role: .destructive) {
+                showClearTranscodeConfirm = true
+            } label: {
+                Label("Clear Transcode Cache", systemImage: "trash")
+                    .foregroundStyle(AppTheme.error)
+            }
+            .disabled(cacheManager.transcodeCacheSize == 0)
+        } header: {
+            sectionHeader("Transcode Cache")
+        } footer: {
+            Text("Temporary files created while converting audio formats (e.g. AcoustID fingerprinting, format export). Safe to clear when nothing is actively processing.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
+    @ViewBuilder
+    private var orphanedFilesSection: some View {
+        Section {
+            HStack {
+                Label("Orphaned Files", systemImage: "questionmark.folder")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                if cacheManager.isScanningOrphans {
+                    ProgressView().tint(AppTheme.dynamicAccent)
+                } else {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(CacheManagerService.formattedSize(cacheManager.orphanedFilesSize))
+                            .font(AppTheme.monoFont(size: 14))
+                            .foregroundStyle(AppTheme.textSecondary)
+                        Text("\(cacheManager.orphanedFiles.count) files")
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+            }
+
+            if !cacheManager.orphanedFiles.isEmpty {
+                Button(role: .destructive) {
+                    showDeleteOrphansConfirm = true
+                } label: {
+                    Label("Delete Orphaned Files", systemImage: "trash")
+                        .foregroundStyle(AppTheme.error)
+                }
+            }
+        } header: {
+            sectionHeader("Orphaned Files")
+        } footer: {
+            Text("Files sitting in Imported Music that nothing in your library currently references — leftovers from a removed song, or files added outside the app. Not counted above; scanned separately since it needs to check against your library.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
+    @ViewBuilder
+    private var downloadedMusicSection: some View {
+        Section {
+            HStack {
+                Label("Imported Music", systemImage: "music.note")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                Text(CacheManagerService.formattedSize(cacheManager.downloadedMusicSize))
+                    .font(AppTheme.monoFont(size: 14))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        } header: {
+            sectionHeader("Downloaded Music")
+        } footer: {
+            Text("Songs in your app's Documents folder. To remove individual tracks, use the Library view.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
+    @ViewBuilder
+    private var bridgeCacheSection: some View {
+        Section {
+            HStack {
+                Label("Bridge Server Cache", systemImage: "server.rack")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                Text("Managed on server")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        } header: {
+            sectionHeader("Remote")
+        } footer: {
+            Text("yt-dlp streaming cache is stored server-side and managed automatically.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
+    private var totalClearableSize: Int64 {
+        cacheManager.artworkCacheSize + cacheManager.tempFilesSize
+            + cacheManager.artistImageCacheSize + cacheManager.transcodeCacheSize
+    }
+
+    @ViewBuilder
+    private var clearAllSection: some View {
+        if totalClearableSize > 0 {
+            Section {
+                Button(role: .destructive) {
+                    showClearAllConfirm = true
+                } label: {
+                    Label("Clear All Cache", systemImage: "trash")
+                        .foregroundStyle(AppTheme.error)
+                }
+            } header: {
+                sectionHeader("Actions")
+            } footer: {
+                Text("Clears all cache categories above in one tap (\(CacheManagerService.formattedSize(totalClearableSize))). Your downloaded music is never affected.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .listRowBackground(AppTheme.surface)
+        }
+    }
+
+    @ViewBuilder
+    private var savedBannerSection: some View {
+        if showSavedBanner {
+            Section {
+                Label("\(CacheManagerService.formattedSize(savedBytes)) freed", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(AppTheme.success)
+            }
+            .listRowBackground(Color.clear)
         }
     }
 
