@@ -75,6 +75,12 @@ USER_MUSIC_DIR: str = os.getenv("USER_MUSIC_DIR", "")
 # deliberate, post-verification opt-in rather than silently changing how every
 # user's backups are stored.
 USER_MUSIC_COMPRESSION: bool = os.getenv("USER_MUSIC_COMPRESSION", "0") in ("1", "true", "True", "yes")
+# Server-wide default per-user storage quota, in bytes. 0 (the default) means
+# unlimited — matches the established preference (the 500-item library cap
+# was removed unconditionally in an earlier session) of not being
+# restrictive unless an admin deliberately opts into a cap. A specific user's
+# quota can still be overridden via ios_user_settings.storage_quota_bytes.
+USER_MUSIC_QUOTA_BYTES: int = int(os.getenv("USER_MUSIC_QUOTA_BYTES", "0"))
 SUPPORTED_AUDIO_EXTS: frozenset[str] = frozenset({
     ".mp3", ".m4a", ".aac", ".wav", ".aif", ".aiff",
     ".flac", ".opus", ".ogg", ".caf", ".mp4", ".m4v",
@@ -5154,6 +5160,69 @@ def _user_music_dir(user_id: str) -> Optional[pathlib.Path]:
 
 
 # ---------------------------------------------------------------------------
+# Feature: per-user storage quota
+# ---------------------------------------------------------------------------
+
+
+async def _get_user_quota_bytes(user_id: str) -> int:
+    """Returns this user's effective quota in bytes (0 = unlimited): their
+    per-user override if set, otherwise the server-wide default."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT storage_quota_bytes FROM ios_user_settings WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+    if row and row[0]:
+        return int(row[0])
+    return USER_MUSIC_QUOTA_BYTES
+
+
+async def _compute_storage_usage(user_id: str) -> dict:
+    """Sums bytes used by this user's uploaded music (from the metadata
+    table, already tracked at upload time) and gallery images (stat'd
+    directly — no size column is tracked for those)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COALESCE(SUM(file_size_bytes), 0), COUNT(*) FROM ios_user_music_metadata WHERE user_id = %s",
+                (user_id,),
+            )
+            music_bytes, music_count = await cur.fetchone()
+
+    gallery_bytes = 0
+    gallery_dir = _user_gallery_dir(user_id)
+    if gallery_dir is not None and gallery_dir.exists():
+        for entry in gallery_dir.iterdir():
+            if entry.is_file():
+                try:
+                    gallery_bytes += entry.stat().st_size
+                except OSError:
+                    pass
+
+    return {
+        "music_bytes": int(music_bytes),
+        "music_count": int(music_count),
+        "gallery_bytes": gallery_bytes,
+        "used_bytes": int(music_bytes) + gallery_bytes,
+    }
+
+
+@app.get("/user/storage/usage")
+async def get_storage_usage(user: dict = Depends(get_current_user)):
+    """Reports this user's cloud storage usage and quota (0 = unlimited)."""
+    user_id = user["sub"]
+    usage = await _compute_storage_usage(user_id)
+    quota = await _get_user_quota_bytes(user_id)
+    usage["quota_bytes"] = quota
+    usage["quota_exceeded"] = bool(quota) and usage["used_bytes"] > quota
+    return usage
+
+
+# ---------------------------------------------------------------------------
 # Per-user music compression (gzip, reversible/lossless). See
 # USER_MUSIC_COMPRESSION. Stored files keep their original name/extension but
 # may contain gzip bytes; readers detect this by the gzip magic header and
@@ -5339,6 +5408,69 @@ async def get_user_music(
     return {"tracks": tracks[:limit], "total": total, "configured": True}
 
 
+@app.get("/user/music/search")
+async def search_user_music(
+    q: str = Query(..., min_length=1, max_length=200),
+    limit: int = Query(50, ge=1, le=200),
+    user: dict = Depends(get_current_user),
+):
+    """Fast, relevance-ranked search over the user's uploaded music library,
+    querying the already-populated `ios_user_music_metadata` table via a
+    MariaDB FULLTEXT index — unlike /user/music's `search` param, which walks
+    the whole filesystem and runs ffprobe on every file on every request.
+    Falls back to a LIKE scan when FULLTEXT natural-language mode returns
+    nothing, since it ignores short words/stopwords that a plain substring
+    search would still match (e.g. a one-word title)."""
+    user_id = user["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, filename, title, artist, album, genre, duration_seconds,
+                       has_artwork, bpm, musical_key
+                FROM ios_user_music_metadata
+                WHERE user_id = %s
+                  AND MATCH(title, artist, album) AGAINST (%s IN NATURAL LANGUAGE MODE)
+                ORDER BY MATCH(title, artist, album) AGAINST (%s IN NATURAL LANGUAGE MODE) DESC
+                LIMIT %s
+                """,
+                (user_id, q, q, limit),
+            )
+            rows = await cur.fetchall()
+
+            if not rows:
+                like_q = f"%{q}%"
+                await cur.execute(
+                    """
+                    SELECT id, filename, title, artist, album, genre, duration_seconds,
+                           has_artwork, bpm, musical_key
+                    FROM ios_user_music_metadata
+                    WHERE user_id = %s AND (title LIKE %s OR artist LIKE %s OR album LIKE %s)
+                    LIMIT %s
+                    """,
+                    (user_id, like_q, like_q, like_q, limit),
+                )
+                rows = await cur.fetchall()
+
+    results = [
+        {
+            "metadata_id": r[0],
+            "filename": r[1],
+            "title": r[2],
+            "artist": r[3],
+            "album": r[4],
+            "genre": r[5],
+            "duration": r[6] or 0.0,
+            "has_artwork": bool(r[7]),
+            "bpm": r[8],
+            "musical_key": r[9],
+        }
+        for r in rows
+    ]
+    return {"results": results, "total": len(results)}
+
+
 @app.post("/user/music/upload", status_code=201)
 async def upload_user_music(
     request: Request,
@@ -5392,6 +5524,15 @@ async def upload_user_music(
         raise HTTPException(status_code=400, detail="Empty file body")
     if len(body) > 100 * 1024 * 1024:  # 100 MB
         raise HTTPException(status_code=413, detail="File too large (max 100 MB)")
+
+    quota_bytes = await _get_user_quota_bytes(user_id)
+    if quota_bytes:
+        current_usage = await _compute_storage_usage(user_id)
+        if current_usage["used_bytes"] + len(body) > quota_bytes:
+            raise HTTPException(
+                status_code=507,
+                detail=f"Storage quota exceeded ({current_usage['used_bytes']} + {len(body)} > {quota_bytes} bytes)",
+            )
 
     # Compute content SHA-256 as the metadata row ID. Offloaded to a thread —
     # hashing a 100 MB body synchronously on the event loop would stall every
@@ -6119,6 +6260,20 @@ async def delete_gallery_image(
 # ---------------------------------------------------------------------------
 
 
+def _lyrics_cache_id(title: str, artist: str) -> str:
+    """Stable cache key for a title/artist pair — case/whitespace-insensitive
+    so trivial formatting differences don't fragment the cache."""
+    key = f"{title.strip().lower()}|{artist.strip().lower()}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+class LyricsCorrectionRequest(BaseModel):
+    title: str
+    artist: str = ""
+    synced_lyrics: Optional[str] = None
+    plain_lyrics: Optional[str] = None
+
+
 @app.get("/api/lyrics")
 async def get_lyrics(
     request: Request,
@@ -6126,9 +6281,37 @@ async def get_lyrics(
     artist: str = Query("", max_length=200),
     duration: Optional[int] = Query(None, description="Track duration in seconds, improves matching"),
 ):
-    """Fetches synced (LRC) or plain lyrics for a track from the public
-    lrclib.net API. Returns 404 if no match is found."""
+    """Fetches synced (LRC) or plain lyrics for a track, checking a local
+    cache first (Feature: lyrics caching) before falling back to the public
+    lrclib.net API — previously this re-fetched from lrclib on every single
+    request, even for the same song looked up repeatedly (e.g. every time
+    Now Playing opens). A user-submitted correction (PUT this endpoint) takes
+    precedence and is never overwritten by a later automatic fetch. Returns
+    404 if no match is found (and caches that outcome too, so a track with no
+    lyrics doesn't keep re-hitting lrclib.net on every playback)."""
     await check_auth(request)
+
+    cache_id = _lyrics_cache_id(title, artist)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT synced_lyrics, plain_lyrics, found FROM ios_lyrics_cache WHERE id = %s",
+                (cache_id,),
+            )
+            cached = await cur.fetchone()
+
+    if cached:
+        synced_lyrics, plain_lyrics, found = cached
+        if not found:
+            raise HTTPException(status_code=404, detail="No lyrics found")
+        return {
+            "title": title,
+            "artist": artist,
+            "synced_lyrics": synced_lyrics,
+            "plain_lyrics": plain_lyrics,
+            "instrumental": False,
+        }
 
     params = {"track_name": title, "artist_name": artist}
     if duration:
@@ -6145,7 +6328,31 @@ async def get_lyrics(
             return None
 
     data = await asyncio.to_thread(_fetch)
-    if not data or (not data.get("syncedLyrics") and not data.get("plainLyrics")):
+    found_result = bool(data and (data.get("syncedLyrics") or data.get("plainLyrics")))
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    INSERT INTO ios_lyrics_cache (id, title, artist, synced_lyrics, plain_lyrics, found)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        synced_lyrics = IF(is_user_submitted, synced_lyrics, VALUES(synced_lyrics)),
+                        plain_lyrics = IF(is_user_submitted, plain_lyrics, VALUES(plain_lyrics)),
+                        found = IF(is_user_submitted, found, VALUES(found))
+                    """,
+                    (
+                        cache_id, title, artist,
+                        data.get("syncedLyrics") if data else None,
+                        data.get("plainLyrics") if data else None,
+                        found_result,
+                    ),
+                )
+    except Exception as exc:
+        logger.warning("get_lyrics: cache write failed for %s/%s: %s", title, artist, exc)
+
+    if not found_result:
         raise HTTPException(status_code=404, detail="No lyrics found")
 
     return {
@@ -6155,6 +6362,34 @@ async def get_lyrics(
         "plain_lyrics": data.get("plainLyrics") or None,
         "instrumental": bool(data.get("instrumental", False)),
     }
+
+
+@app.put("/api/lyrics")
+async def submit_lyrics_correction(request: Request, body: LyricsCorrectionRequest):
+    """Submits a user-provided lyrics correction — stored server-side so it
+    syncs across the user's devices, and preferred over (never overwritten
+    by) any later automatic lrclib fetch for the same title/artist."""
+    await check_auth(request)
+    if not body.synced_lyrics and not body.plain_lyrics:
+        raise HTTPException(status_code=400, detail="Provide synced_lyrics and/or plain_lyrics")
+
+    cache_id = _lyrics_cache_id(body.title, body.artist)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_lyrics_cache (id, title, artist, synced_lyrics, plain_lyrics, found, is_user_submitted)
+                VALUES (%s, %s, %s, %s, %s, TRUE, TRUE)
+                ON DUPLICATE KEY UPDATE
+                    synced_lyrics = VALUES(synced_lyrics),
+                    plain_lyrics = VALUES(plain_lyrics),
+                    found = TRUE,
+                    is_user_submitted = TRUE
+                """,
+                (cache_id, body.title, body.artist, body.synced_lyrics, body.plain_lyrics),
+            )
+    return {"status": "saved"}
 
 
 # ---------------------------------------------------------------------------

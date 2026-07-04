@@ -566,3 +566,116 @@ CREATE TABLE IF NOT EXISTS ios_user_library_inventory (
     PRIMARY KEY (user_id, source_id),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+
+-- ---------------------------------------------------------------------------
+-- 10 more server-side features (2026-07-04)
+-- ---------------------------------------------------------------------------
+
+-- Feature: full-text search over the user's own uploaded music library.
+-- /user/music's `search` param scans the whole filesystem + runs ffprobe on
+-- every file on every request — slow for big libraries and no typo
+-- tolerance. This FULLTEXT index lets /user/music/search query the
+-- already-populated metadata table directly instead.
+ALTER TABLE ios_user_music_metadata ADD FULLTEXT INDEX IF NOT EXISTS ft_search (title, artist, album);
+
+-- Feature: per-user storage quota override. NULL/0 means "use the server
+-- default" (USER_MUSIC_QUOTA_BYTES env var, itself unlimited unless the
+-- admin sets it) — this column exists only so a specific user's quota can
+-- be raised/lowered without changing the server-wide default.
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS storage_quota_bytes BIGINT NULL;
+
+-- Feature: server-side lyrics cache. /api/lyrics previously re-fetched from
+-- lrclib.net on every single request, even for the same song looked up
+-- repeatedly (every time Now Playing opens). Cached indefinitely since
+-- lyrics for a given track essentially never change; a user-submitted
+-- correction (is_user_submitted) overwrites the lrclib result and is never
+-- evicted by a later automatic re-fetch.
+CREATE TABLE IF NOT EXISTS ios_lyrics_cache (
+    id VARCHAR(64) PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    artist VARCHAR(255) NOT NULL,
+    synced_lyrics MEDIUMTEXT NULL,
+    plain_lyrics MEDIUMTEXT NULL,
+    found BOOLEAN NOT NULL DEFAULT FALSE,
+    is_user_submitted BOOLEAN NOT NULL DEFAULT FALSE,
+    submitted_by_user_id VARCHAR(36) NULL,
+    cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_title_artist (title, artist)
+);
+
+-- Feature: server-side waveform peak-data precomputation, alongside the
+-- existing loudness/BPM/key analysis at upload time — saves the client from
+-- decoding the whole file locally just to draw a scrubber waveform. Stored
+-- as a JSON array of ~200 normalized (0.0-1.0) peak values.
+ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS waveform_json MEDIUMTEXT NULL;
+
+-- Feature: cached acoustic-duplicate scan results, computed by a periodic
+-- background job (see _duplicate_scan_loop) instead of live on every
+-- GET /user/library/acoustic-duplicates request, which was slow for large
+-- libraries (re-fingerprinting everything on demand).
+CREATE TABLE IF NOT EXISTS ios_duplicate_scan_cache (
+    user_id VARCHAR(36) PRIMARY KEY,
+    groups_json MEDIUMTEXT NOT NULL,
+    scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Feature: generalized outbound webhooks (beyond the existing Discord-only
+-- ios_discord_webhooks). One row per (user, event type) so a user can point
+-- different events at different URLs — e.g. downloads to one Zapier hook,
+-- subscription-alerts to a Home Assistant endpoint.
+CREATE TABLE IF NOT EXISTS ios_user_webhooks (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    event_type VARCHAR(40) NOT NULL,
+    webhook_url TEXT NOT NULL,
+    enabled BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user_event (user_id, event_type),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Feature: persistent listening-room chat/history — ios_listen_rooms only
+-- tracks the host's current track/position; this records track changes and
+-- chat messages so guests joining late (or reopening the room) see history.
+CREATE TABLE IF NOT EXISTS ios_room_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    room_id VARCHAR(36) NOT NULL,
+    user_id VARCHAR(36) NULL,
+    event_type VARCHAR(20) NOT NULL,
+    title TEXT NULL,
+    artist TEXT NULL,
+    message TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_room_created (room_id, created_at),
+    FOREIGN KEY (room_id) REFERENCES ios_listen_rooms(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE SET NULL
+);
+
+-- Feature: collaborative room queue — members can add/vote on tracks for a
+-- shared listening room's "up next" order, independent of the host's own
+-- device queue.
+CREATE TABLE IF NOT EXISTS ios_room_queue (
+    id VARCHAR(36) PRIMARY KEY,
+    room_id VARCHAR(36) NOT NULL,
+    added_by_user_id VARCHAR(36) NULL,
+    track_url TEXT,
+    title TEXT NOT NULL,
+    artist TEXT,
+    votes INT DEFAULT 0,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_room_votes (room_id, votes),
+    FOREIGN KEY (room_id) REFERENCES ios_listen_rooms(id) ON DELETE CASCADE,
+    FOREIGN KEY (added_by_user_id) REFERENCES ios_users(id) ON DELETE SET NULL
+);
+
+-- Feature: personalized history-based weekly mix (distinct from the existing
+-- static tempo-bucket ios_user_music_metadata-derived smart-playlists) —
+-- caches the generated track-id list per user, regenerated weekly by
+-- _weekly_mix_loop rather than computed per-request.
+CREATE TABLE IF NOT EXISTS ios_weekly_mix_cache (
+    user_id VARCHAR(36) PRIMARY KEY,
+    track_ids_json MEDIUMTEXT NOT NULL,
+    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
