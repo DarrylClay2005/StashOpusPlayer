@@ -324,28 +324,28 @@ struct NowPlayingView: View {
             CometOrbitArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .marquee:
-            MarqueeArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .paperLayersParallax:
+            PaperLayersParallaxArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .holographic:
-            HolographicArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .chalkboardSketch:
+            ChalkboardSketchArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .ripple:
-            RippleArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .vinylCrateStack:
+            VinylCrateStackArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .popArt:
-            PopArtArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .moltenGlassDrip:
+            MoltenGlassDripArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .starfield:
-            StarfieldArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .confettiBurstLoop:
+            ConfettiBurstLoopArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
 
-        case .stainedGlass:
-            StainedGlassArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+        case .shadowPuppetSilhouette:
+            ShadowPuppetSilhouetteArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
         }
     }

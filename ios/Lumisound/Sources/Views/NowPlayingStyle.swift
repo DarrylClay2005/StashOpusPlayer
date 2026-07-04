@@ -23,13 +23,15 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
     case frostedIceCrystal
     case bioluminescentTide
     case cometOrbit
-    // Distinctive styles, each its own visual concept
-    case marquee
-    case holographic
-    case ripple
-    case popArt
-    case starfield
-    case stainedGlass
+    // Batch 3 (final) of the visual overhaul — replaces marquee/holographic/
+    // ripple/popArt/starfield/stainedGlass. All 18 styles have now been
+    // replaced at least once since the original set.
+    case paperLayersParallax
+    case chalkboardSketch
+    case vinylCrateStack
+    case moltenGlassDrip
+    case confettiBurstLoop
+    case shadowPuppetSilhouette
 
     var id: String { rawValue }
 
@@ -47,12 +49,12 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .frostedIceCrystal: return "Frosted Ice Crystal"
         case .bioluminescentTide: return "Bioluminescent Tide"
         case .cometOrbit:        return "Comet Orbit"
-        case .marquee:          return "Marquee Bulbs"
-        case .holographic:      return "Foil Shimmer"
-        case .ripple:           return "Halo Pulse"
-        case .popArt:           return "Comic Halftone"
-        case .starfield:        return "Cosmos"
-        case .stainedGlass:     return "Prism Glass"
+        case .paperLayersParallax:   return "Paper Layers"
+        case .chalkboardSketch:      return "Chalkboard Sketch"
+        case .vinylCrateStack:       return "Vinyl Crate Stack"
+        case .moltenGlassDrip:       return "Molten Glass Drip"
+        case .confettiBurstLoop:     return "Confetti Burst"
+        case .shadowPuppetSilhouette: return "Shadow Puppet"
         }
     }
 
@@ -70,12 +72,12 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .frostedIceCrystal: return "snowflake"
         case .bioluminescentTide: return "water.waves"
         case .cometOrbit:        return "circle.dotted"
-        case .marquee:          return "lightbulb.fill"
-        case .holographic:      return "rainbow"
-        case .ripple:           return "circle.circle.fill"
-        case .popArt:           return "circle.hexagongrid.fill"
-        case .starfield:        return "moon.stars.fill"
-        case .stainedGlass:     return "rhombus.fill"
+        case .paperLayersParallax:   return "square.stack.fill"
+        case .chalkboardSketch:      return "pencil.and.outline"
+        case .vinylCrateStack:       return "square.stack.3d.down.right.fill"
+        case .moltenGlassDrip:       return "flame.fill"
+        case .confettiBurstLoop:     return "party.popper.fill"
+        case .shadowPuppetSilhouette: return "theatermasks.fill"
         }
     }
 }
