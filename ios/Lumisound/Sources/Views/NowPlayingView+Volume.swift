@@ -6,7 +6,15 @@ extension NowPlayingView {
     // MARK: - Volume
 
     var volumeSection: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 4) {
+            // Purely decorative ambient bars (a fake sine wave, not driven by
+            // real audio analysis) — deliberately NOT reusing
+            // AudioVisualizerService's live FFT tap here, since that tap is
+            // shared/idempotent-guarded and already has other consumers (e.g.
+            // the "Live Spectrum" artwork style); a second independent
+            // start()/stop() caller could cut the tap out from under them.
+            AmbientEqualizerBars(isPlaying: player.isPlaying)
+
             HStack(spacing: 10) {
                 Image(systemName: "speaker.fill")
                     .font(.caption)
@@ -36,5 +44,33 @@ extension NowPlayingView {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+// MARK: - AmbientEqualizerBars
+
+/// A small row of animated bars behind the volume slider — purely decorative
+/// (a fake sine wave keyed off wall-clock time), not real audio analysis.
+/// See `volumeSection`'s comment for why this deliberately avoids
+/// `AudioVisualizerService`'s shared FFT tap.
+private struct AmbientEqualizerBars: View {
+    let isPlaying: Bool
+    private let barCount = 16
+
+    var body: some View {
+        TimelineView(.animation(paused: !isPlaying)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 3) {
+                ForEach(0..<barCount, id: \.self) { i in
+                    let phase = Double(i) * 0.45
+                    let h = isPlaying ? (0.2 + 0.8 * (0.5 + 0.5 * sin(t * 3.2 + phase))) : 0.15
+                    Capsule()
+                        .fill(AppTheme.dynamicAccent.opacity(0.35))
+                        .frame(height: 18 * CGFloat(h))
+                }
+            }
+            .frame(height: 18, alignment: .center)
+            .animation(.easeInOut(duration: 0.2), value: isPlaying)
+        }
     }
 }

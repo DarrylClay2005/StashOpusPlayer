@@ -14,6 +14,10 @@ struct AchievementsView: View {
     /// (set when the user taps a badge cell).
     @State private var selectedBadge: Badge?
 
+    /// Set true for a few seconds by `checkForNewBadges()` whenever at least
+    /// one badge newly unlocks — drives a one-shot confetti burst overlay.
+    @State private var showConfetti = false
+
     var body: some View {
         List {
             Section {
@@ -82,6 +86,7 @@ struct AchievementsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(GalleryBackgroundView().ignoresSafeArea())
+        .overlay(ConfettiOverlay(isActive: showConfetti).ignoresSafeArea())
         .navigationTitle("Achievements")
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -195,6 +200,14 @@ struct AchievementsView: View {
         let merged = earned.union(currentBadges)
         if let encoded = try? JSONEncoder().encode(merged) {
             defaults.set(encoded, forKey: "earnedBadges")
+        }
+
+        // Celebratory confetti burst — resets itself after playing out so a
+        // later unlock in the same session can retrigger it.
+        showConfetti = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            showConfetti = false
         }
 
         // Only toast for badges we recognize (skip silently for any future
