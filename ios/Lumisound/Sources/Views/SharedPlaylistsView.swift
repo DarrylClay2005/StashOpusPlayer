@@ -145,7 +145,10 @@ private struct SharedPlaylistDetailView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        // `.plain`, not `.insetGrouped` — see FavoritesView's identical fix;
+        // `.insetGrouped` splits each Section into a separate floating card
+        // with the background showing fully through the gaps.
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color.clear.ignoresSafeArea())
         .navigationTitle(summary.name)

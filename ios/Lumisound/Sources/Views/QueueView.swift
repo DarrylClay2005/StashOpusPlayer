@@ -119,6 +119,12 @@ struct QueueView: View {
                 queueFooter
             }
         }
+        // Without an explicit style this defaults to a grouped-card look
+        // (gaps between rows showing the gallery background through) — the
+        // same "split into disconnected pieces" bug fixed in FavoritesView
+        // et al., just via the implicit default instead of an explicit
+        // `.insetGrouped`.
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color.clear)
     }
