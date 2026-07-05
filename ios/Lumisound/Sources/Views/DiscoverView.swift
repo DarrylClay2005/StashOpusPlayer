@@ -11,6 +11,7 @@ struct DiscoverView: View {
 
     @State private var isLoading = false
     @State private var selectedTab: Tab = .trending
+    @Namespace private var pillNamespace
 
     private enum Tab: String, CaseIterable, Identifiable {
         case trending = "Trending"
@@ -18,15 +19,51 @@ struct DiscoverView: View {
         var id: String { rawValue }
     }
 
+    /// Custom pill selector matching LibraryTabBar's visual language — the
+    /// native `.segmented` Picker this replaced rendered with stock iOS
+    /// colors and no accent tint, the only place in the app still using a
+    /// default-styled control instead of the app's own pill/capsule design.
+    private var tabSelector: some View {
+        HStack(spacing: 8) {
+            ForEach(Tab.allCases) { tab in
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        selectedTab = tab
+                    }
+                } label: {
+                    Text(tab.rawValue)
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(selectedTab == tab ? .white : AppTheme.textSecondary)
+                        .background {
+                            if selectedTab == tab {
+                                Capsule(style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .shadow(color: AppTheme.dynamicAccent.opacity(0.4), radius: 6, x: 0, y: 3)
+                                    .matchedGeometryEffect(id: "discoverTabPill", in: pillNamespace)
+                            } else {
+                                Capsule(style: .continuous)
+                                    .fill(AppTheme.surface.opacity(0.6))
+                                    .overlay(Capsule().stroke(.white.opacity(0.06), lineWidth: 1))
+                            }
+                        }
+                }
+                .buttonStyle(PressableButtonStyle())
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $selectedTab) {
-                ForEach(Tab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding()
+            tabSelector
 
             List {
                 if account.isLoggedIn {
