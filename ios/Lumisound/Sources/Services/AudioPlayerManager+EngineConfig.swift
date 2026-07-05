@@ -169,6 +169,64 @@ extension AudioPlayerManager {
         engine.connect(limiter, to: engine.mainMixerNode, format: nil)
 
         isEngineConfigured = true
+
+        // If the karaoke unit finished its async instantiation before this
+        // (re)configuration ran — e.g. on an engine-reset rebuild, where the
+        // unit already exists from an earlier launch — re-attach it now.
+        // Otherwise `configureKaraokeUnit`'s completion handler wires it in
+        // itself once instantiation completes.
+        if let karaokeUnit {
+            wireKaraokeUnitIntoGraph(karaokeUnit)
+        }
+    }
+
+    /// Registers and asynchronously instantiates `KaraokeAudioUnit`, a custom
+    /// in-process Audio Unit performing real stereo center-channel
+    /// cancellation. Async instantiation is unavoidable for a custom
+    /// component (unlike `limiter`/`nightModeCompressor`, which wrap
+    /// pre-registered Apple system components and can be built synchronously)
+    /// — see `KaraokeAudioUnit`'s doc comment. Runs once, from `init()`.
+    func configureKaraokeUnit() {
+        AUAudioUnit.registerSubclass(
+            KaraokeAudioUnit.self,
+            as: .karaokeCancellation,
+            name: "Lumisound Karaoke",
+            version: 1
+        )
+        AVAudioUnit.instantiate(with: .karaokeCancellation, options: []) { [weak self] avAudioUnit, error in
+            guard let self else { return }
+            guard let avAudioUnit else {
+                if let error {
+                    appError("Failed to instantiate Karaoke audio unit: \(error.localizedDescription)", category: "audio")
+                }
+                return
+            }
+            Task { @MainActor in
+                (avAudioUnit.auAudioUnit as? KaraokeAudioUnit)?.level = self.pendingKaraokeLevel
+                avAudioUnit.auAudioUnit.shouldBypassEffect = !self.isKaraokeActive
+                self.karaokeUnit = avAudioUnit
+                self.wireKaraokeUnitIntoGraph(avAudioUnit)
+            }
+        }
+    }
+
+    /// Attaches (or re-attaches, after an `engine.reset()` rebuild) `unit`
+    /// and splices it between `mainMixerNode` and `outputNode` — the single
+    /// point every playback path (normal, spatial-audio-routed, mono-downmixed)
+    /// converges on before reaching the hardware, matching what the old
+    /// (broken) tap on `outputNode` was trying to reach. No-ops until
+    /// `configureEngine()` has run at least once. Pauses the engine around
+    /// the graph mutation defensively — this can be invoked from the async
+    /// instantiation callback, which may fire while playback is running.
+    func wireKaraokeUnitIntoGraph(_ unit: AVAudioUnit) {
+        guard isEngineConfigured else { return }
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.pause() }
+        engine.attach(unit)
+        engine.disconnectNodeOutput(engine.mainMixerNode)
+        engine.connect(engine.mainMixerNode, to: unit, format: nil)
+        engine.connect(unit, to: engine.outputNode, format: nil)
+        if wasRunning { try? engine.start() }
     }
 
     /// Loads the default factory preset and zeroes the wet/dry mix — the real

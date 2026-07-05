@@ -135,30 +135,25 @@ extension AudioPlayerManager {
     }
 
     // MARK: - Karaoke (center-channel cancellation)
+    //
+    // Toggled via `shouldBypassEffect` on the real insert node (`karaokeUnit`,
+    // see AudioPlayerManager+EngineConfig.swift / KaraokeAudioUnit.swift)
+    // rather than installing/removing a tap — a tap's buffer is a read-only
+    // copy, and mutating it has zero effect on actual playback, which is
+    // exactly why Karaoke used to silently do nothing.
 
     func enableKaraoke(level: Float = 1.0) {
         guard !isKaraokeActive else { return }
         isKaraokeActive = true
-        installKaraokeTap(level: level)
+        pendingKaraokeLevel = level
+        guard let karaokeUnit else { return }  // applied once instantiation completes
+        (karaokeUnit.auAudioUnit as? KaraokeAudioUnit)?.level = level
+        karaokeUnit.auAudioUnit.shouldBypassEffect = false
     }
 
     func disableKaraoke() {
         guard isKaraokeActive else { return }
         isKaraokeActive = false
-        removeKaraokeTap()
-    }
-
-    /// Installs a tap on the engine's output node that rewrites the stereo PCM frames
-    /// in-place with L-R center-cancellation, avoiding any graph topology changes at runtime.
-    func installKaraokeTap(level: Float) {
-        let outputNode = engine.outputNode
-        outputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
-            guard let self, self.isKaraokeActive else { return }
-            self.applyCenterCancellation(to: buffer, level: level)
-        }
-    }
-
-    func removeKaraokeTap() {
-        engine.outputNode.removeTap(onBus: 0)
+        karaokeUnit?.auAudioUnit.shouldBypassEffect = true
     }
 }
