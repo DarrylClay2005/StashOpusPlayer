@@ -169,7 +169,9 @@ struct LocalFolderDetailView: View {
                             .padding(.horizontal, 16)
                         }
                     }
-                    .padding(.bottom, 16)
+                    // Extra clearance below the last row — see SongsTab's
+                    // identical fix (MiniPlayerBar + tab bar clearance).
+                    .padding(.bottom, 120)
                 }
             }
         }

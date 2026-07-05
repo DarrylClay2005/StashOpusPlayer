@@ -166,7 +166,13 @@ struct SongsTab: View {
                                 }
                             }
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 12)
+                            .padding(.top, 12)
+                            // Extra clearance below the last row — a plain
+                            // ScrollView's grid content was settling close
+                            // enough to the MiniPlayerBar + tab bar that the
+                            // last row could still peek through their
+                            // translucent material while scrolling.
+                            .padding(.bottom, 120)
                         }
                     }
                     .background(Color.clear.ignoresSafeArea())

@@ -29,7 +29,10 @@ struct AlbumsTab: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.top, 12)
+                // Extra clearance below the last row — see SongsTab's
+                // identical fix.
+                .padding(.bottom, 120)
             }
         }
         .background(Color.clear.ignoresSafeArea())
