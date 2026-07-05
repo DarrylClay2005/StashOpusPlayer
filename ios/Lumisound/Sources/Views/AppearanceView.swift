@@ -319,8 +319,6 @@ struct AppearanceView: View {
                             }
                         }
                     }
-                    addCardStyleChip
-                    manageCardStylesButton
                 }
                 .padding(.bottom, 2)
             }
@@ -331,6 +329,32 @@ struct AppearanceView: View {
                     .id(cardStyleRaw)
                     .padding(.top, 2)
             }
+
+            // Always-visible (never requires scrolling the chip row to find,
+            // unlike the small trailing chips this replaced) entry points for
+            // creating and managing custom row styles.
+            HStack(spacing: 10) {
+                Button {
+                    editingCustomLibraryStyle = CustomLibraryRowStyle()
+                } label: {
+                    Label("New Style", systemImage: "plus.circle.fill")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .tint(AppTheme.dynamicAccent)
+
+                Button {
+                    showLibraryStyleManager = true
+                } label: {
+                    Label("Manage Styles", systemImage: "slider.horizontal.3")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .tint(AppTheme.textSecondary)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 4)
         }
         .padding(.vertical, 6)
         .listRowBackground(AppTheme.surface)
@@ -367,41 +391,6 @@ struct AppearanceView: View {
         }
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.15), value: isSelected)
-    }
-
-    private var addCardStyleChip: some View {
-        Button {
-            editingCustomLibraryStyle = CustomLibraryRowStyle()
-        } label: {
-            VStack(spacing: 4) {
-                Image(systemName: "plus")
-                    .font(.system(size: 13, weight: .medium))
-                Text("New Style")
-                    .font(.system(size: 10, weight: .medium))
-            }
-            .foregroundStyle(AppTheme.dynamicAccent)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(AppTheme.dynamicAccent.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var manageCardStylesButton: some View {
-        Button {
-            showLibraryStyleManager = true
-        } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(AppTheme.textSecondary)
-                .frame(width: 30, height: 30)
-                .background(AppTheme.elevatedSurface, in: Circle())
-        }
-        .buttonStyle(.plain)
     }
 
     private var seekerStylePicker: some View {
