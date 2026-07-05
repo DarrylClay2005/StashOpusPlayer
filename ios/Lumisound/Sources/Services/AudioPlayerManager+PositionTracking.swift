@@ -22,10 +22,6 @@ extension AudioPlayerManager {
         timer = nil
     }
 
-    /// Counts 0.5s timer ticks so `pushPlaybackStateToBridge()` runs roughly
-    /// every 5s during playback, instead of on every tick.
-    var bridgePushTickCounter = 0
-
     func timerTick() {
         updatePositionFromPlayer()
 
@@ -73,10 +69,6 @@ extension AudioPlayerManager {
         )
     }
 
-    /// Cancelled/rescheduled on every track change; the in-flight task for the
-    /// previous track.
-    var historyLogTask: Task<Void, Never>?
-
     /// Logs the current track to `/user/history` (`AccountService.logPlay`)
     /// ~5s after it starts playing — long enough to filter out rapid skips,
     /// but soon enough that a linked Discord "Now Playing" webhook and any
@@ -101,8 +93,6 @@ extension AudioPlayerManager {
             )
         }
     }
-
-    var queuePushTask: Task<Void, Never>?
 
     /// Mirrors the "up next" queue to the bridge (`/user/queue`), debounced so
     /// rapid changes (drag-reorder, batch removals) don't fire a request per

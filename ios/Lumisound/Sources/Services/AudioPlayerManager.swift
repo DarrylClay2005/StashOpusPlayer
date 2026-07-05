@@ -347,6 +347,20 @@ final class AudioPlayerManager: ObservableObject {
     // access) a way to reach the live player instance.
     static weak var shared: AudioPlayerManager?
 
+    // MARK: Internal — State Used By Extensions (must be stored on the type
+    // itself; extensions in AudioPlayerManager+*.swift cannot hold stored
+    // properties, so anything they need to persist across calls lives here)
+
+    let playbackStateKey = "playback_state_v1"
+    var visualizerTapInstalled = false
+    /// Counts 0.5s timer ticks so `pushPlaybackStateToBridge()` runs roughly
+    /// every 5s during playback, instead of on every tick.
+    var bridgePushTickCounter = 0
+    /// Cancelled/rescheduled on every track change; the in-flight task for the
+    /// previous track.
+    var historyLogTask: Task<Void, Never>?
+    var queuePushTask: Task<Void, Never>?
+
     // MARK: Init / Deinit
 
     init() {
@@ -403,7 +417,7 @@ final class AudioPlayerManager: ObservableObject {
 
 // MARK: - AVAudioFile Convenience
 
-private extension AVAudioFile {
+extension AVAudioFile {
     var duration: TimeInterval {
         Double(length) / processingFormat.sampleRate
     }

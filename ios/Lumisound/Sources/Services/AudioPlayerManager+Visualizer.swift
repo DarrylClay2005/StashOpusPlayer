@@ -14,8 +14,6 @@ extension AudioPlayerManager {
     // Using a different node entirely means this can run independently of
     // Karaoke Mode with no conflict.
 
-    var visualizerTapInstalled = false
-
     func startVisualizerTap(handler: @escaping (AVAudioPCMBuffer) -> Void) {
         guard !visualizerTapInstalled else { return }
         visualizerTapInstalled = true

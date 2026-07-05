@@ -8,8 +8,6 @@ extension AudioPlayerManager {
 
     // MARK: - Persistence
 
-    let playbackStateKey = "playback_state_v1"
-
     func savePlaybackState() {
         let snapshot = PlaybackSnapshot(
             version: PlaybackSnapshot.currentVersion,
