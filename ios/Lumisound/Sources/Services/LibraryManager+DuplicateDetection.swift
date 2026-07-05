@@ -30,7 +30,7 @@ extension LibraryManager {
     /// to trip the iOS watchdog (which presents as a crash). Build this index
     /// ONCE, then query it per candidate in O(1).
     struct ImportedIdentityIndex {
-        filelet byKey: [String: [TimeInterval]]
+        let byKey: [String: [TimeInterval]]
         func contains(title: String, artist: String, duration: TimeInterval?) -> Bool {
             let key = DuplicateFinderService.normalize(title) + "|" + DuplicateFinderService.normalize(artist)
             guard key != "|", let durations = byKey[key] else { return false }
