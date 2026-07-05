@@ -149,7 +149,7 @@ struct MiniPlayerBar: View {
                     Circle()
                         .fill(
                             LinearGradient(
-                                colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
+                                colors: [AppTheme.dynamicAccent, AppTheme.dynamicAccentSecondary],
                                 startPoint: .topLeading, endPoint: .bottomTrailing
                             )
                         )
@@ -202,7 +202,7 @@ private struct MiniPlayerProgressBar: View {
                 Capsule()
                     .fill(
                         LinearGradient(
-                            colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
+                            colors: [AppTheme.dynamicAccent, AppTheme.dynamicAccentSecondary],
                             startPoint: .leading, endPoint: .trailing
                         )
                     )

@@ -1,11 +1,31 @@
 import SwiftUI
 
+// MARK: - LaunchScreenStyle
+
+enum LaunchScreenStyle: String, CaseIterable, Identifiable, Codable {
+    case aurora
+    case minimalist
+
+    var id: String { rawValue }
+    var displayName: String { self == .aurora ? "Aurora" : "Minimalist" }
+}
+
 // MARK: - LaunchView
 
 struct LaunchView: View {
     @EnvironmentObject private var account: AccountService
     @EnvironmentObject private var library: LibraryManager
     @Binding var isLoading: Bool
+
+    @AppStorage("launch_screen_style") private var launchStyleRaw: String = LaunchScreenStyle.aurora.rawValue
+    @AppStorage("app_reduce_motion") private var reduceMotion = false
+
+    /// Reduce Motion always wins over the chosen style — it drops the launch
+    /// screen straight to a static icon + fade-in, no continuous background/
+    /// ring/breathing animation.
+    private var isMinimalist: Bool {
+        reduceMotion || LaunchScreenStyle(rawValue: launchStyleRaw) == .minimalist
+    }
 
     @State private var showPrompt = false
     @State private var showLoginSheet = false
@@ -25,7 +45,12 @@ struct LaunchView: View {
         ZStack {
             // Animated ambient backdrop — drifting accent-colored aurora blobs
             // over the base background, giving the launch screen depth/motion.
-            LaunchAuroraBackground(animate: auroraShift)
+            // Minimalist style / Reduce Motion: just the flat background, no drift.
+            if isMinimalist {
+                AppTheme.background.ignoresSafeArea()
+            } else {
+                LaunchAuroraBackground(animate: auroraShift)
+            }
 
             VStack(spacing: 24) {
                 Spacer()
@@ -33,44 +58,46 @@ struct LaunchView: View {
                 // App icon framed by a rotating gradient halo + live equalizer
                 // bars — a musical, animated centerpiece instead of a static icon.
                 ZStack {
-                    // Concentric "sound" rings breathing outward from the icon.
-                    ForEach(0..<3) { i in
+                    if !isMinimalist {
+                        // Concentric "sound" rings breathing outward from the icon.
+                        ForEach(0..<3) { i in
+                            Circle()
+                                .stroke(AppTheme.dynamicAccent.opacity(logoBreathing ? 0.08 : 0.4), lineWidth: 2)
+                                .frame(width: CGFloat(150 + i * 46), height: CGFloat(150 + i * 46))
+                                .scaleEffect(logoBreathing ? 1.06 : 0.94)
+                                .opacity(logoOpacity)
+                        }
+
+                        // Soft accent glow.
                         Circle()
-                            .stroke(AppTheme.dynamicAccent.opacity(logoBreathing ? 0.08 : 0.4), lineWidth: 2)
-                            .frame(width: CGFloat(150 + i * 46), height: CGFloat(150 + i * 46))
-                            .scaleEffect(logoBreathing ? 1.06 : 0.94)
+                            .fill(AppTheme.dynamicAccent)
+                            .frame(width: 160, height: 160)
+                            .blur(radius: 46)
+                            .opacity(logoOpacity * (logoBreathing ? 0.5 : 0.3))
+
+                        // Rotating gradient halo (with a gap so the sweep reads).
+                        Circle()
+                            .stroke(
+                                AngularGradient(
+                                    colors: [AppTheme.dynamicAccent, AppTheme.dynamicAccentSecondary, .clear, AppTheme.dynamicAccent],
+                                    center: .center
+                                ),
+                                lineWidth: 3
+                            )
+                            .frame(width: 138, height: 138)
+                            .blur(radius: 1)
+                            .rotationEffect(.degrees(ringRotation))
+                            .opacity(logoOpacity)
+
+                        // Glow dot orbiting the icon.
+                        Circle()
+                            .fill(.white)
+                            .frame(width: 10, height: 10)
+                            .shadow(color: AppTheme.dynamicAccent, radius: 8)
+                            .offset(y: -69)
+                            .rotationEffect(.degrees(ringRotation))
                             .opacity(logoOpacity)
                     }
-
-                    // Soft accent glow.
-                    Circle()
-                        .fill(AppTheme.dynamicAccent)
-                        .frame(width: 160, height: 160)
-                        .blur(radius: 46)
-                        .opacity(logoOpacity * (logoBreathing ? 0.5 : 0.3))
-
-                    // Rotating gradient halo (with a gap so the sweep reads).
-                    Circle()
-                        .stroke(
-                            AngularGradient(
-                                colors: [AppTheme.dynamicAccent, AppTheme.accentSoft, .clear, AppTheme.dynamicAccent],
-                                center: .center
-                            ),
-                            lineWidth: 3
-                        )
-                        .frame(width: 138, height: 138)
-                        .blur(radius: 1)
-                        .rotationEffect(.degrees(ringRotation))
-                        .opacity(logoOpacity)
-
-                    // Glow dot orbiting the icon.
-                    Circle()
-                        .fill(.white)
-                        .frame(width: 10, height: 10)
-                        .shadow(color: AppTheme.dynamicAccent, radius: 8)
-                        .offset(y: -69)
-                        .rotationEffect(.degrees(ringRotation))
-                        .opacity(logoOpacity)
 
                     Image("AppIconDisplay")
                         .resizable()
@@ -86,8 +113,9 @@ struct LaunchView: View {
                         .opacity(logoOpacity)
                 }
 
-                // Live equalizer bars under the icon (animate while the screen is up).
-                LaunchEqualizerBars(animate: logoBreathing)
+                // Live equalizer bars under the icon (animate while the screen is up;
+                // static (flat) bars in Minimalist style / Reduce Motion).
+                LaunchEqualizerBars(animate: logoBreathing && !isMinimalist)
                     .frame(height: 22)
                     .opacity(contentOpacity)
 
@@ -104,7 +132,7 @@ struct LaunchView: View {
                                 Circle()
                                     .fill(
                                         LinearGradient(
-                                            colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
+                                            colors: [AppTheme.dynamicAccent, AppTheme.dynamicAccentSecondary],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
                                         )
@@ -263,20 +291,23 @@ struct LaunchView: View {
                 logoScale = 1.0
                 logoOpacity = 1.0
             }
-            // Continuous rotating halo + drifting aurora for as long as the
-            // launch screen is visible.
-            withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) {
-                ringRotation = 360
-            }
-            withAnimation(.easeInOut(duration: 6).repeatForever(autoreverses: true)) {
-                auroraShift = true
-            }
-            // Start a subtle breathing pulse on the icon once the entrance
-            // spring has settled, for as long as the launch screen is up.
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 600_000_000)
-                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
-                    logoBreathing = true
+            // Continuous rotating halo + drifting aurora + breathing pulse —
+            // skipped entirely in Minimalist style / Reduce Motion, where
+            // none of the elements they drive are even shown.
+            if !isMinimalist {
+                withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) {
+                    ringRotation = 360
+                }
+                withAnimation(.easeInOut(duration: 6).repeatForever(autoreverses: true)) {
+                    auroraShift = true
+                }
+                // Start a subtle breathing pulse on the icon once the entrance
+                // spring has settled, for as long as the launch screen is up.
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                        logoBreathing = true
+                    }
                 }
             }
             Task { @MainActor in
@@ -411,7 +442,7 @@ private struct LaunchEqualizerBars: View {
                     Capsule()
                         .fill(
                             LinearGradient(
-                                colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
+                                colors: [AppTheme.dynamicAccent, AppTheme.dynamicAccentSecondary],
                                 startPoint: .bottom, endPoint: .top
                             )
                         )

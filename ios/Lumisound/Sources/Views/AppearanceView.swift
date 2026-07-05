@@ -19,12 +19,19 @@ struct AppearanceView: View {
     @EnvironmentObject private var player: AudioPlayerManager
 
     @State private var customColor: Color = AppTheme.dynamicAccent
+    @State private var customSecondaryColor: Color = AppTheme.dynamicAccentSecondary
     @State private var refreshToken = UUID()
 
     @AppStorage("panel_opacity")             private var panelOpacity: Double = 1.0
     @AppStorage("nowPlaying_artworkStyle")   private var artworkStyleRaw: String = NowPlayingArtworkStyle.kaleidoscopeBloom.rawValue
     @AppStorage("nowPlaying_seekerStyle")    private var seekerStyleRaw: String  = SeekerStyle.waveform.rawValue
     @AppStorage("library_cardStyle")         private var cardStyleRaw: String    = SongCardStyle.compact.rawValue
+    @AppStorage("app_background_theme")      private var backgroundThemeRaw: String = AppBackgroundTheme.default.rawValue
+    @AppStorage("app_font_style")            private var fontStyleRaw: String   = AppFontStyle.system.rawValue
+    @AppStorage("launch_screen_style")       private var launchScreenStyleRaw: String = LaunchScreenStyle.aurora.rawValue
+    @AppStorage("tab_transition_style")      private var tabTransitionStyleRaw: String = TabTransitionStyle.scalePop.rawValue
+    @AppStorage("panel_material_style")      private var panelMaterialRaw: String = PanelMaterialStyle.solid.rawValue
+    @AppStorage("app_reduce_motion")         private var reduceMotion: Bool = false
 
     // Song Card style — the same String-selection pattern as Now Playing's
     // artwork style: either a built-in `SongCardStyle` rawValue or a
@@ -86,8 +93,68 @@ struct AppearanceView: View {
                         account.schedulePush(library: library)
                     }
                     .listRowBackground(AppTheme.surface)
+
+                ColorPicker("Gradient Secondary Color", selection: $customSecondaryColor, supportsOpacity: false)
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .onChange(of: customSecondaryColor) { newColor in
+                        AppTheme.saveAccentSecondaryColor(newColor)
+                        refreshToken = UUID()
+                    }
+                    .listRowBackground(AppTheme.surface)
             } header: {
                 sectionHeader("Custom")
+            } footer: {
+                Text("The secondary color pairs with your accent color wherever it's shown as a gradient — the mini player and launch screen.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            // MARK: — Background Theme
+            Section {
+                backgroundThemePicker
+            } header: {
+                sectionHeader("Background Theme")
+            } footer: {
+                Text("Changes the app's background and surface colors everywhere.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            // MARK: — Launch Screen
+            Section {
+                Picker("Style", selection: $launchScreenStyleRaw) {
+                    ForEach(LaunchScreenStyle.allCases) { style in
+                        Text(style.displayName).tag(style.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .tint(AppTheme.dynamicAccent)
+            } header: {
+                sectionHeader("Launch Screen")
+            } footer: {
+                Text("Minimalist skips the animated background/halo — also used automatically when Reduce Motion is on.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            // MARK: — Tab Switch Transition
+            Section {
+                Picker("Style", selection: $tabTransitionStyleRaw) {
+                    ForEach(TabTransitionStyle.allCases) { style in
+                        Text(style.displayName).tag(style.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .tint(AppTheme.dynamicAccent)
+            } header: {
+                sectionHeader("Tab Switch Transition")
+            }
+
+            // MARK: — Font Style
+            Section {
+                fontStylePicker
+            } header: {
+                sectionHeader("Font Style")
             }
 
             // MARK: — Player Style Defaults
@@ -116,10 +183,25 @@ struct AppearanceView: View {
             // MARK: — Interface
             Section {
                 panelOpacityRow
+
+                Picker(selection: $panelMaterialRaw) {
+                    ForEach(PanelMaterialStyle.allCases) { style in
+                        Text(style.displayName).tag(style.rawValue)
+                    }
+                } label: {
+                    Label("Panel Style", systemImage: "square.on.square")
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+
+                Toggle(isOn: $reduceMotion) {
+                    Label("Reduce Motion", systemImage: "figure.walk.motion")
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .tint(AppTheme.dynamicAccent)
             } header: {
                 sectionHeader("Interface")
             } footer: {
-                Text("Controls how opaque the playback panels appear. Lower values give a more transparent look.")
+                Text("Reduce Motion simplifies the launch screen and background photo transitions for anyone sensitive to on-screen motion.")
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }
@@ -128,7 +210,17 @@ struct AppearanceView: View {
             Section {
                 Button(role: .destructive) {
                     AppTheme.resetAccentColor()
+                    AppTheme.resetAccentSecondaryColor()
+                    AppTheme.resetBackgroundTheme()
+                    AppTheme.resetFontStyle()
                     customColor = AppTheme.accent
+                    customSecondaryColor = AppTheme.accentSoft
+                    backgroundThemeRaw = AppBackgroundTheme.default.rawValue
+                    fontStyleRaw = AppFontStyle.system.rawValue
+                    panelMaterialRaw = PanelMaterialStyle.solid.rawValue
+                    launchScreenStyleRaw = LaunchScreenStyle.aurora.rawValue
+                    tabTransitionStyleRaw = TabTransitionStyle.scalePop.rawValue
+                    reduceMotion = false
                     panelOpacity = 1.0
                     refreshToken = UUID()
                     account.schedulePush(library: library)
@@ -150,6 +242,7 @@ struct AppearanceView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             customColor = AppTheme.dynamicAccent
+            customSecondaryColor = AppTheme.dynamicAccentSecondary
         }
     }
 
@@ -243,6 +336,72 @@ struct AppearanceView: View {
             }
         }
         .padding(.vertical, 8)
+        .listRowBackground(AppTheme.surface)
+    }
+
+    private var backgroundThemePicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(AppBackgroundTheme.allCases) { theme in
+                    let isSelected = backgroundThemeRaw == theme.rawValue
+                    Button {
+                        backgroundThemeRaw = theme.rawValue
+                        refreshToken = UUID()
+                    } label: {
+                        VStack(spacing: 6) {
+                            ZStack {
+                                Circle()
+                                    .fill(theme.background)
+                                    .frame(width: 40, height: 40)
+                                Circle()
+                                    .fill(theme.elevatedSurface)
+                                    .frame(width: 18, height: 18)
+                                    .offset(x: 10, y: 10)
+                                if isSelected {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(isSelected ? AppTheme.dynamicAccent : .clear, lineWidth: 2)
+                                    .frame(width: 46, height: 46)
+                            )
+                            Text(theme.displayName)
+                                .font(AppTheme.monoFont(size: 10))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
+    private var fontStylePicker: some View {
+        HStack(spacing: 8) {
+            ForEach(AppFontStyle.allCases) { style in
+                let isSelected = fontStyleRaw == style.rawValue
+                Button {
+                    fontStyleRaw = style.rawValue
+                    refreshToken = UUID()
+                } label: {
+                    Text("Aa")
+                        .font(.system(size: 16, weight: .semibold, design: style.design))
+                        .foregroundStyle(isSelected ? .white : AppTheme.textPrimary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            isSelected ? AppTheme.dynamicAccent : AppTheme.elevatedSurface,
+                            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
         .listRowBackground(AppTheme.surface)
     }
 
