@@ -1,0 +1,418 @@
+import Foundation
+import UIKit
+
+extension StreamingService {
+
+    // MARK: - Download to Library
+
+    /// Downloads a stream track's audio permanently to `downloadDirectory` (or
+    /// `destinationDir` if provided — used by folder-structure restore to place
+    /// redownloaded tracks back into their original watched-folder path) using
+    /// the `/api/download` endpoint (which embeds metadata and thumbnail into
+    /// the file). If the file already exists it is returned immediately without
+    /// re-downloading.
+    ///
+    /// `existingSongs` (typically `LibraryManager.allSongs`) enables pre-download
+    /// dedupe: if a song in `existingSongs` shares this track's `sourceTrackID`
+    /// ("\(track.source):\(track.id)") and its local file passes
+    /// `CorruptFileFinderService.isValidAudioFile(at:)`, the download is skipped
+    /// entirely and that song's existing file URL is returned. If the matching
+    /// local file is missing or corrupt, the download proceeds normally to
+    /// replace it. Pass `[]` (the default) to disable this check.
+    func downloadToLibrary(track: StreamTrack, destinationDir: URL? = nil, existingSongs: [Song] = []) async throws -> URL {
+        let sourceTrackID = "\(track.source):\(track.id)"
+
+        // Pre-download dedupe — skip entirely if we already have a valid copy
+        // of this exact source track (matched by sourceTrackID/LUMISOUND_ID).
+        if let match = existingSongs.first(where: { $0.sourceTrackID == sourceTrackID }),
+           let existingURL = match.url,
+           FileManager.default.fileExists(atPath: existingURL.path) {
+            if CorruptFileFinderService.isValidAudioFile(at: existingURL) {
+                appLog("downloadToLibrary: skipping \"\(track.title)\" — valid existing copy at \(existingURL.lastPathComponent)", category: "network")
+                DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: existingURL.lastPathComponent)
+                return existingURL
+            } else {
+                appWarn("downloadToLibrary: existing copy of \"\(track.title)\" is corrupt — redownloading to replace it", category: "network")
+            }
+        }
+
+        appLog("Download started: \"\(track.title)\" [fmt: \(preferredFormat)]", category: "network")
+        let fmt = preferredFormat
+        let requestedExt = fileExtension(for: fmt)
+
+        let importDir = destinationDir ?? downloadDirectory
+        do {
+            try FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)
+        } catch {
+            appWarn("downloadToLibrary: could not create download dir: \(error)", category: "network")
+        }
+
+        // Build a filesystem-safe filename from the track title (max 100 chars).
+        let safeName = String(
+            track.title
+                .replacingOccurrences(of: "/", with: "-")
+                .replacingOccurrences(of: ":", with: "-")
+                .prefix(100)
+        )
+
+        // Check for an existing download under the requested extension before hitting
+        // the network — the actual extension is only known after the response arrives
+        // (see below), so this is just the common-case fast path.
+        let provisionalDestURL = importDir.appendingPathComponent("\(safeName).\(requestedExt)")
+        if FileManager.default.fileExists(atPath: provisionalDestURL.path) {
+            appLog("downloadToLibrary: already exists, skipping \(provisionalDestURL.lastPathComponent)", category: "network")
+            DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: provisionalDestURL.lastPathComponent)
+            return provisionalDestURL
+        }
+
+        // Hit the /api/download endpoint which runs yt-dlp with metadata embedding.
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "id",       value: track.id),
+            URLQueryItem(name: "source",   value: track.source),
+            URLQueryItem(name: "format",   value: fmt),
+            URLQueryItem(name: "title",    value: safeName),
+            URLQueryItem(name: "artist",   value: track.artist),
+            URLQueryItem(name: "thumbnail", value: track.thumbnailURL),
+            URLQueryItem(name: "duration", value: String(track.durationSeconds)),
+        ]
+        if track.source == "soundcloud" || track.source == "bandcamp" {
+            queryItems.append(URLQueryItem(name: "url", value: track.youtubeURL))
+        }
+        // Per-user aria2 preference (Settings → yt-dlp). Off by default — the
+        // bridge uses its native downloader unless this is true. Only send when
+        // enabled to keep the default request unchanged.
+        if UserDefaults.standard.bool(forKey: "ytdlp_use_aria2") {
+            queryItems.append(URLQueryItem(name: "use_aria2", value: "true"))
+        }
+        // Per-user download tuning (Settings → yt-dlp). Throttle controls the
+        // anti-bot sleep (0 = fastest); concurrent fragments parallelises large
+        // downloads. Only send when they differ from the bridge defaults.
+        let throttle = UserDefaults.standard.object(forKey: "ytdlp_throttle_seconds") as? Int ?? 5
+        if throttle != 5 {
+            queryItems.append(URLQueryItem(name: "throttle_seconds", value: String(max(0, min(60, throttle)))))
+        }
+        let concurrentFrags = UserDefaults.standard.object(forKey: "ytdlp_concurrent_fragments") as? Int ?? 1
+        if concurrentFrags > 1 {
+            queryItems.append(URLQueryItem(name: "concurrent_fragments", value: String(min(16, concurrentFrags))))
+        }
+        // Defense-in-depth: also tell the bridge what the client already has, so
+        // a stale/incomplete `existingSongs` snapshot still gets server-side dedupe.
+        // Exclude this track's own ID — if we got this far the pre-download check
+        // above either found no local copy or found a corrupt one that needs
+        // replacing, so the server must not skip *this* download.
+        let manifest = existingTrackManifest(songs: existingSongs.filter { $0.sourceTrackID != sourceTrackID })
+        if !manifest.isEmpty {
+            queryItems.append(URLQueryItem(name: "existing_ids", value: manifest))
+        }
+
+        var components = URLComponents()
+        components.path = "/api/download"
+        components.queryItems = queryItems
+
+        guard var request = makeRequest(components.string ?? "/api/download") else {
+            throw StreamingError.invalidURL
+        }
+        // Lets the bridge record this download in the account's server-side
+        // download history (My Library search, previously-downloaded restore).
+        if let accountToken = AccountService.shared?.token {
+            request.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
+        }
+
+        // Big playlists hammer the bridge's yt-dlp pipeline hard enough that some
+        // tracks come back truncated or with invalid audio data even though the
+        // HTTP transfer "succeeds". Retry the whole download a few times — with a
+        // fresh temp file and a full integrity check each time — before giving up,
+        // so a single flaky fetch doesn't leave a corrupt file in the library.
+        let maxAttempts = 3
+        var lastError: Error = StreamingError.corruptDownload
+
+        for attempt in 1...maxAttempts {
+            do {
+                let destURL = try await attemptDownload(
+                    track: track,
+                    request: request,
+                    safeName: safeName,
+                    requestedExt: requestedExt,
+                    importDir: importDir
+                )
+                if attempt != 1 {
+                    appLog("downloadToLibrary: succeeded for \"\(track.title)\" on attempt \(attempt)/\(maxAttempts)", category: "network")
+                }
+                DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
+                return destURL
+            } catch let error as StreamingError {
+                switch error {
+                case .incompleteDownload, .corruptDownload:
+                    lastError = error
+                    appWarn("downloadToLibrary: attempt \(attempt)/\(maxAttempts) failed for \"\(track.title)\": \(error.localizedDescription)", category: "network")
+                    continue
+                default:
+                    // Not-found / timeout / HTTP errors are unlikely to be fixed by retrying.
+                    throw error
+                }
+            }
+        }
+
+        throw lastError
+    }
+
+    /// Performs a single download attempt for `downloadToLibrary`, including the
+    /// HTTP request, completeness check, move-into-place, and an `AVAudioFile`
+    /// integrity check on the final file. Throws `.incompleteDownload` or
+    /// `.corruptDownload` on failure so the caller can retry.
+    func attemptDownload(
+        track: StreamTrack,
+        request: URLRequest,
+        safeName: String,
+        requestedExt: String,
+        importDir: URL
+    ) async throws -> URL {
+        // /api/download is async: it returns a job_id immediately (status 202)
+        // instead of holding the connection open for the whole yt-dlp run. A
+        // synchronous design here routinely exceeded the Cloudflare Tunnel's
+        // ~100s edge timeout for normal-length tracks, causing 524s followed by
+        // from-scratch retries that piled onto the bridge and made every
+        // subsequent request slower (a runaway retry storm).
+        var startRequest = request
+        startRequest.timeoutInterval = 30
+
+        let startData: Data
+        let startResponse: URLResponse
+        do {
+            (startData, startResponse) = try await URLSession.shared.data(for: startRequest)
+        } catch {
+            // A raw URLError (e.g. .timedOut) here isn't a StreamingError, so the
+            // outer retry loop's `catch let error as StreamingError` wouldn't see
+            // it — the whole downloadToLibrary call would abort with no retry at
+            // all. Map it to .incompleteDownload so a flaky/slow start request
+            // (the bridge under load) gets retried like any other transient failure.
+            appWarn("downloadToLibrary: network error starting job for \"\(track.title)\": \(error.localizedDescription) — will retry", category: "network")
+            throw StreamingError.incompleteDownload
+        }
+        guard let startHTTP = startResponse as? HTTPURLResponse else {
+            throw StreamingError.invalidURL
+        }
+
+        switch startHTTP.statusCode {
+        case 202:
+            break
+        case 408:
+            appWarn("downloadToLibrary: timeout for \"\(track.title)\"", category: "network")
+            throw StreamingError.timeout
+        case 404:
+            appWarn("downloadToLibrary: not found for \"\(track.title)\"", category: "network")
+            throw StreamingError.notFound(track.title)
+        case 502, 503, 504, 524:
+            appWarn("downloadToLibrary: gateway error \(startHTTP.statusCode) for \"\(track.title)\" — will retry", category: "network")
+            throw StreamingError.incompleteDownload
+        default:
+            // Includes 204 ("client already has this track" per existing_ids) —
+            // this track's own id is excluded from that manifest, so 204 here
+            // would be unexpected; treat it like an incomplete result so the
+            // retry loop re-fetches rather than adopting an empty file.
+            appWarn("downloadToLibrary: unexpected start status \(startHTTP.statusCode) for \"\(track.title)\"", category: "network")
+            throw StreamingError.incompleteDownload
+        }
+
+        struct StartPayload: Decodable { let job_id: String }
+        guard let start = try? JSONDecoder().decode(StartPayload.self, from: startData) else {
+            throw StreamingError.incompleteDownload
+        }
+
+        guard let statusURL = jobPollURL(from: startRequest, path: "/api/download/status", jobID: start.job_id),
+              let resultURL = jobPollURL(from: startRequest, path: "/api/download/result", jobID: start.job_id) else {
+            throw StreamingError.invalidURL
+        }
+
+        var statusRequest = startRequest
+        statusRequest.url = statusURL
+
+        struct StatusPayload: Decodable { let status: String; let code: Int?; let detail: String? }
+
+        // Poll every 3s for up to 5 minutes — matches the previous client-side
+        // timeout, but each poll is a trivial dict lookup (<1s), so this never
+        // approaches the tunnel's ~100s edge timeout regardless of how long
+        // yt-dlp itself takes on the bridge.
+        let deadline = Date().addingTimeInterval(300)
+        pollLoop: while true {
+            if Date() > deadline {
+                appWarn("downloadToLibrary: job poll timed out for \"\(track.title)\"", category: "network")
+                throw StreamingError.incompleteDownload
+            }
+            let data: Data
+            let resp: URLResponse
+            do {
+                (data, resp) = try await URLSession.shared.data(for: statusRequest)
+            } catch {
+                // A single slow/timed-out status poll (the bridge can be briefly
+                // CPU-busy under load) shouldn't abort the whole job — wait and
+                // poll again rather than letting a raw URLError escape uncaught.
+                appWarn("downloadToLibrary: network error polling status for \"\(track.title)\": \(error.localizedDescription) — retrying poll", category: "network")
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                continue pollLoop
+            }
+            guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
+                  let status = try? JSONDecoder().decode(StatusPayload.self, from: data) else {
+                throw StreamingError.incompleteDownload
+            }
+            switch status.status {
+            case "pending":
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                continue pollLoop
+            case "done":
+                break pollLoop
+            case "error":
+                switch status.code {
+                case 408:
+                    appWarn("downloadToLibrary: timeout for \"\(track.title)\"", category: "network")
+                    throw StreamingError.timeout
+                case 404:
+                    appWarn("downloadToLibrary: not found for \"\(track.title)\"", category: "network")
+                    throw StreamingError.notFound(track.title)
+                case 502, 503, 504, 524:
+                    appWarn("downloadToLibrary: job failed with gateway error \(status.code ?? 0) for \"\(track.title)\" — will retry", category: "network")
+                    throw StreamingError.incompleteDownload
+                default:
+                    appError("downloadToLibrary: job failed (\(status.code ?? 0)) for \"\(track.title)\": \(status.detail ?? "")", category: "network")
+                    throw StreamingError.httpError(status.code ?? 500)
+                }
+            default:
+                throw StreamingError.incompleteDownload
+            }
+        }
+
+        var resultRequest = startRequest
+        resultRequest.url = resultURL
+        resultRequest.timeoutInterval = 120
+
+        let downloadedURL: URL
+        let response: URLResponse
+        do {
+            (downloadedURL, response) = try await BackgroundDownloadManager.run(
+                named: "lumisound.download.\(safeName)"
+            ) {
+                try await URLSession.shared.download(for: resultRequest)
+            }
+        } catch {
+            // Same as the start/poll requests: a raw URLError here would otherwise
+            // escape uncaught and abort the whole pipeline instead of retrying.
+            appWarn("downloadToLibrary: network error fetching result for \"\(track.title)\": \(error.localizedDescription) — will retry", category: "network")
+            throw StreamingError.incompleteDownload
+        }
+        if let httpResponse = response as? HTTPURLResponse {
+            switch httpResponse.statusCode {
+            case 200..<300:
+                break
+            default:
+                appError("downloadToLibrary: HTTP \(httpResponse.statusCode) fetching result for \"\(track.title)\"", category: "network")
+                throw StreamingError.incompleteDownload
+            }
+        }
+
+        // Verify the downloaded file is complete before adopting it into the library.
+        // A truncated download (dropped connection, app suspended mid-transfer, etc.)
+        // would otherwise sit in the library as a track that shows "0:00" forever.
+        let downloadedSize = (try? FileManager.default.attributesOfItem(atPath: downloadedURL.path))?[.size] as? Int64 ?? 0
+        let expectedSize = (response as? HTTPURLResponse)?.expectedContentLength ?? -1
+        if downloadedSize <= 0 || (expectedSize > 0 && downloadedSize != expectedSize) {
+            try? FileManager.default.removeItem(at: downloadedURL)
+            appWarn("downloadToLibrary: incomplete download for \"\(track.title)\" (\(downloadedSize)/\(expectedSize) bytes)", category: "network")
+            throw StreamingError.incompleteDownload
+        }
+
+        // The bridge can fall back to a different container than requested (e.g. yt-dlp
+        // has no native m4a stream for this video and serves webm/opus instead while
+        // `format=m4a` was requested) — `_download_format_args` on the bridge already
+        // reflects this in the `Content-Type` header. Saving such a file with a `.m4a`
+        // extension makes AVAudioFile misparse it (it picks a decoder based on the file
+        // extension): playback's timer keeps advancing from the engine's render clock
+        // while no audio is actually decoded, which is the "silently lands ~1 minute in"
+        // bug. Trust the response's actual content type over the requested format.
+        let actualExt = extensionForContentType(
+            (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")
+        ) ?? requestedExt
+        let destURL = importDir.appendingPathComponent("\(safeName).\(actualExt)")
+
+        if FileManager.default.fileExists(atPath: destURL.path) {
+            try? FileManager.default.removeItem(at: downloadedURL)
+            appLog("downloadToLibrary: already exists, skipping \(destURL.lastPathComponent)", category: "network")
+            return destURL
+        }
+
+        try? FileManager.default.removeItem(at: destURL)
+        do {
+            try FileManager.default.moveItem(at: downloadedURL, to: destURL)
+        } catch {
+            appError("downloadToLibrary: move failed for \"\(track.title)\": \(error)", category: "network")
+            throw error
+        }
+        if actualExt != requestedExt {
+            appLog("downloadToLibrary: bridge returned .\(actualExt) instead of requested .\(requestedExt) for \"\(track.title)\" — saved with correct extension", category: "network")
+        }
+
+        // Final integrity check: the byte count matched what the server promised, but
+        // yt-dlp can still emit a file AVAudioFile can't decode (corrupt remux, dropped
+        // moov atom, etc.) — exactly what CorruptFileFinderService flags later. Catch it
+        // immediately so the retry loop can re-fetch instead of leaving a dead file behind.
+        guard CorruptFileFinderService.isValidAudioFile(at: destURL) else {
+            try? FileManager.default.removeItem(at: destURL)
+            appWarn("downloadToLibrary: corrupt/unreadable file for \"\(track.title)\" — discarding", category: "network")
+            throw StreamingError.corruptDownload
+        }
+
+        appLog("Download complete: \(destURL.lastPathComponent)", category: "network")
+
+        // Pre-seed the artwork cache with the track's thumbnail so it's immediately
+        // available when scanLocalDocuments() creates the Song for this file.
+        if !track.thumbnailURL.isEmpty, let thumbURL = URL(string: track.thumbnailURL) {
+            await ArtworkService.shared.prefetchRemoteImage(url: thumbURL, forKey: destURL.lastPathComponent)
+        }
+
+        return destURL
+    }
+
+    /// Builds the `/api/download/status` or `/api/download/result` URL for a given
+    /// job, reusing the scheme/host/port/auth of the original `/api/download`
+    /// request but replacing the path and query with `job_id=`.
+    func jobPollURL(from request: URLRequest, path: String, jobID: String) -> URL? {
+        guard let url = request.url,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = path
+        components.queryItems = [URLQueryItem(name: "job_id", value: jobID)]
+        return components.url
+    }
+
+    /// Maps a format value to the appropriate file extension.
+    func fileExtension(for format: String) -> String {
+        switch format {
+        case "mp3":  return "mp3"
+        case "flac": return "flac"
+        case "opus": return "opus"
+        case "wav":  return "wav"
+        default:     return "m4a"   // m4a and best both produce m4a
+        }
+    }
+
+    /// Maps the `/api/download` response's `Content-Type` (set by the bridge's
+    /// `content_type_map` from yt-dlp's *actual* output container, which can differ
+    /// from the requested `format` when that container isn't available for a given
+    /// video) back to a file extension. Returns `nil` for missing/unrecognized
+    /// content types so the caller can fall back to the requested format's extension.
+    func extensionForContentType(_ contentType: String?) -> String? {
+        guard let contentType else { return nil }
+        // Strip any "; charset=..." parameters before matching.
+        let base = contentType.split(separator: ";").first.map(String.init)?
+            .trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        switch base {
+        case "audio/mpeg":      return "mp3"
+        case "audio/mp4":       return "m4a"
+        case "audio/flac":      return "flac"
+        case "audio/ogg":       return "opus"
+        case "audio/wav", "audio/x-wav", "audio/wave": return "wav"
+        case "audio/webm":      return "webm"
+        default:                return nil
+        }
+    }
+}
