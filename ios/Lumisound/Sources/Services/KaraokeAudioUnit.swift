@@ -79,20 +79,34 @@ final class KaraokeAudioUnit: AUAudioUnit {
         guard !kernel.bypassed else { return noErr }
 
         let bufferList = UnsafeMutableAudioBufferListPointer(outputData)
-        guard bufferList.count >= 2,
-              let leftRaw = bufferList[0].mData,
-              let rightRaw = bufferList[1].mData
-        else { return noErr }
-
-        let left = leftRaw.assumingMemoryBound(to: Float.self)
-        let right = rightRaw.assumingMemoryBound(to: Float.self)
         let scale = 0.5 * kernel.level
         let n = Int(frameCount)
-        for i in 0 ..< n {
-            let l = left[i]
-            let r = right[i]
-            left[i]  = (l - r) * scale
-            right[i] = (r - l) * scale
+
+        if bufferList.count >= 2,
+           let leftRaw = bufferList[0].mData,
+           let rightRaw = bufferList[1].mData {
+            // Standard case: AVAudioEngine's canonical format is deinterleaved
+            // Float32, i.e. one buffer per channel.
+            let left = leftRaw.assumingMemoryBound(to: Float.self)
+            let right = rightRaw.assumingMemoryBound(to: Float.self)
+            for i in 0 ..< n {
+                let l = left[i]
+                let r = right[i]
+                left[i]  = (l - r) * scale
+                right[i] = (r - l) * scale
+            }
+        } else if bufferList.count == 1,
+                  bufferList[0].mNumberChannels == 2,
+                  let raw = bufferList[0].mData {
+            // Defensive fallback in case the negotiated connection format
+            // ends up interleaved instead of the expected planar layout.
+            let samples = raw.assumingMemoryBound(to: Float.self)
+            for i in 0 ..< n {
+                let l = samples[i * 2]
+                let r = samples[i * 2 + 1]
+                samples[i * 2]     = (l - r) * scale
+                samples[i * 2 + 1] = (r - l) * scale
+            }
         }
         return noErr
     }

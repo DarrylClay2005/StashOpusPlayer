@@ -215,13 +215,20 @@ extension AudioPlayerManager {
     /// point every playback path (normal, spatial-audio-routed, mono-downmixed)
     /// converges on before reaching the hardware, matching what the old
     /// (broken) tap on `outputNode` was trying to reach. No-ops until
-    /// `configureEngine()` has run at least once. Pauses the engine around
-    /// the graph mutation defensively — this can be invoked from the async
-    /// instantiation callback, which may fire while playback is running.
+    /// `configureEngine()` has run at least once.
+    ///
+    /// Fully *stops* the engine around the graph mutation, not just
+    /// `pause()` — attach/connect/disconnect are topology changes, and
+    /// `pause()` leaves the render graph "live"/locked in a rendering-ready
+    /// state rather than releasing it, unlike `stop()`. This can be invoked
+    /// from the async instantiation callback, which may fire while playback
+    /// is already running (e.g. autoplay-on-launch racing the async
+    /// instantiate), so this has to handle that case correctly rather than
+    /// assuming the engine is always stopped when it runs.
     func wireKaraokeUnitIntoGraph(_ unit: AVAudioUnit) {
         guard isEngineConfigured else { return }
         let wasRunning = engine.isRunning
-        if wasRunning { engine.pause() }
+        if wasRunning { engine.stop() }
         engine.attach(unit)
         engine.disconnectNodeOutput(engine.mainMixerNode)
         engine.connect(engine.mainMixerNode, to: unit, format: nil)
