@@ -14,7 +14,6 @@ extension AudioPlayerManager {
         stop8DRotation()
         stopTremolo()
         stopVibrato()
-        disableKaraoke()
 
         // Apply static EQ / speed / pitch settings.
         var s = AudioEffectsService.apply(effect: effect, to: audioSettings)
@@ -29,14 +28,12 @@ extension AudioPlayerManager {
             startTremolo(frequency: effect.specialMode.freq, depth: effect.specialMode.depth)
         case .vibrato:
             startVibrato(frequency: effect.specialMode.freq, depth: effect.specialMode.pitchDepth)
-        case .karaoke:
-            enableKaraoke(level: effect.specialMode.level)
         case .none:
             break
         }
     }
 
-    /// Re-starts any dynamic effect (8D, tremolo, vibrato, karaoke) that was active before
+    /// Re-starts any dynamic effect (8D, tremolo, vibrato) that was active before
     /// playback began. Called after the engine starts so CADisplayLink effects actually run.
     func reapplyActiveEffect() {
         let effectID = audioSettings.activeEffectID
@@ -50,8 +47,6 @@ extension AudioPlayerManager {
             if !isTremoloActive { startTremolo(frequency: effect.specialMode.freq, depth: effect.specialMode.depth) }
         case .vibrato:
             if !isVibratoActive { startVibrato(frequency: effect.specialMode.freq, depth: effect.specialMode.pitchDepth) }
-        case .karaoke:
-            if !isKaraokeActive { enableKaraoke(level: effect.specialMode.level) }
         case .none:
             break
         }

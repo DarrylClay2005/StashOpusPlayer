@@ -4154,12 +4154,18 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
     favorites = snapshot.get("favorites") or []
     playlists = snapshot.get("playlists") or []
 
+    # ON DUPLICATE KEY UPDATE on both inserts below — same fix as
+    # sync_push's identical favorites/playlists upsert (a repeated song_id/
+    # playlist id within one snapshot must not abort the restore after the
+    # DELETE above has already committed, per autocommit).
     await cur.execute("DELETE FROM ios_user_favorites WHERE user_id = %s", (user_id,))
     if favorites:
         await cur.executemany(
             """
             INSERT INTO ios_user_favorites (user_id, song_id, title, artist, album)
             VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                title = VALUES(title), artist = VALUES(artist), album = VALUES(album)
             """,
             [
                 (user_id, fav.get("song_id"), fav.get("title"), fav.get("artist"), fav.get("album"))
@@ -4173,6 +4179,8 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
             """
             INSERT INTO ios_user_playlists (id, user_id, name, description)
             VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                name = VALUES(name), description = VALUES(description)
             """,
             [
                 (pl.get("id") or str(uuid.uuid4()), user_id, pl.get("name"), pl.get("description"))
@@ -4335,7 +4343,13 @@ async def sync_push(
                 f"{len(body.favorites)} favorites, {len(body.playlists)} playlists",
             )
 
-            # Replace favorites — batch upsert
+            # Replace favorites — batch upsert. ON DUPLICATE KEY UPDATE guards
+            # against `body.favorites` containing the same song_id twice (seen
+            # in production: pymysql.err.IntegrityError 1062 on the PRIMARY
+            # key (user_id, song_id)) — since autocommit is on, the DELETE
+            # above had already committed, so a plain INSERT that then threw
+            # on a duplicate left the user's favorites wiped until their next
+            # successful sync instead of just deduping harmlessly.
             await cur.execute(
                 "DELETE FROM ios_user_favorites WHERE user_id = %s", (user_id,)
             )
@@ -4344,6 +4358,8 @@ async def sync_push(
                     """
                     INSERT INTO ios_user_favorites (user_id, song_id, title, artist, album)
                     VALUES (%s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        title = VALUES(title), artist = VALUES(artist), album = VALUES(album)
                     """,
                     [
                         (user_id, fav.song_id, fav.title, fav.artist, fav.album)
@@ -4351,7 +4367,10 @@ async def sync_push(
                     ],
                 )
 
-            # Replace playlists — batch insert playlists then all tracks in one shot
+            # Replace playlists — batch insert playlists then all tracks in one
+            # shot. ON DUPLICATE KEY UPDATE for the same reason as favorites
+            # above — a repeated playlist id within one push must not abort
+            # the whole sync after the DELETE has already committed.
             await cur.execute(
                 "DELETE FROM ios_user_playlists WHERE user_id = %s", (user_id,)
             )
@@ -4360,6 +4379,9 @@ async def sync_push(
                     """
                     INSERT INTO ios_user_playlists (id, user_id, name, description, folder, tags_json)
                     VALUES (%s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        name = VALUES(name), description = VALUES(description),
+                        folder = VALUES(folder), tags_json = VALUES(tags_json)
                     """,
                     [
                         (pl.id or str(uuid.uuid4()), user_id, pl.name, pl.description,

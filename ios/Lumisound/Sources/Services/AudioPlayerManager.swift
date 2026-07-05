@@ -249,18 +249,6 @@ final class AudioPlayerManager: ObservableObject {
     var isVibratoActive = false
     var vibratoBasePitch: Float = 0  // captures audioSettings.pitchSemitones at start
 
-    // Karaoke — real center-channel-cancellation insert node, wired between
-    // `mainMixerNode` and `outputNode` (see `configureKaraokeUnit`/
-    // `wireKaraokeUnitIntoGraph` in AudioPlayerManager+EngineConfig.swift).
-    // `AVAudioUnit.instantiate` is asynchronous, so this starts nil at launch
-    // and is populated shortly after `init()` — `enableKaraoke`/`disableKaraoke`
-    // record the desired state in `isKaraokeActive`/`pendingKaraokeLevel`
-    // regardless, so whichever finishes first (instantiation vs. the user
-    // toggling Karaoke) still ends up correct.
-    var karaokeUnit: AVAudioUnit?
-    var isKaraokeActive = false
-    var pendingKaraokeLevel: Float = 1.0
-
     // Tracks which player node currently owns the active song.
     // Flips after each crossfade so the two nodes alternate roles.
     var usingPrimaryNode = true
@@ -399,7 +387,6 @@ final class AudioPlayerManager: ObservableObject {
         Self.shared = self
         configureAudioSession()
         configureEngine()
-        configureKaraokeUnit()
         configureEqualizer()
         configureRemoteCommands()
         restorePlaybackState()

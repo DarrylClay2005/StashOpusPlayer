@@ -103,7 +103,6 @@ extension AudioPlayerManager {
         stop8DRotation()
         stopTremolo()
         stopVibrato()
-        disableKaraoke()
         // Fully release the audio system when stopped — without this the engine
         // kept running and the audio session stayed active with nothing playing
         // (the "ghost audio engine" / app stays an active audio app). The next

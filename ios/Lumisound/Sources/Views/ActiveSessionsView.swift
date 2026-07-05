@@ -60,6 +60,9 @@ struct ActiveSessionsView: View {
                 .listRowBackground(AppTheme.surface)
             }
         }
+        // Without an explicit style this defaults to a grouped-card look —
+        // see FavoritesView's identical fix.
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle("Active Sessions")

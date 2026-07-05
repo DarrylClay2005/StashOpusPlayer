@@ -7,7 +7,7 @@ import Foundation
 struct AudioEffectSpecialMode: Codable, Equatable {
 
     enum ModeType: String, Codable {
-        case none, rotation, tremolo, vibrato, karaoke
+        case none, rotation, tremolo, vibrato
     }
 
     var type: ModeType = .none
@@ -17,7 +17,6 @@ struct AudioEffectSpecialMode: Codable, Equatable {
     var freq: Double    = 0          // tremolo / vibrato: LFO frequency
     var depth: Float    = 0          // tremolo: depth [0–1]
     var pitchDepth: Double = 0       // vibrato: semitone deviation
-    var level: Float    = 1.0        // karaoke: cancellation level
 
     // MARK: Factory helpers (mirror the original enum cases)
 
@@ -33,10 +32,6 @@ struct AudioEffectSpecialMode: Codable, Equatable {
 
     static func vibrato(freq: Double, depth: Double) -> AudioEffectSpecialMode {
         AudioEffectSpecialMode(type: .vibrato, freq: freq, pitchDepth: depth)
-    }
-
-    static func karaoke(level: Float) -> AudioEffectSpecialMode {
-        AudioEffectSpecialMode(type: .karaoke, level: level)
     }
 }
 
@@ -59,8 +54,10 @@ enum AudioEffectsService {
 
     // MARK: All Presets
 
-    /// All 28 effects — the original 24 (retuned, see each preset's comment)
-    /// plus 4 new genre presets (Jazz, Hip-Hop, Acoustic, Vocal Boost).
+    /// All 27 effects — the original 24 (retuned, see each preset's comment)
+    /// plus 4 new genre presets (Jazz, Hip-Hop, Acoustic, Vocal Boost), minus
+    /// Karaoke (removed — center-channel cancellation never reliably worked
+    /// across mixes and was pulled rather than kept half-working).
     static let allEffects: [AudioEffect] = [
         none,
         bassboost,
@@ -89,7 +86,6 @@ enum AudioEffectsService {
         eightD,
         tremolo,
         vibrato,
-        karaoke,
     ]
 
     // MARK: Preset Definitions
@@ -423,18 +419,6 @@ enum AudioEffectsService {
         speed: 1.0,
         pitchSemitones: 0.0,
         specialMode: .vibrato(freq: 4.5, depth: 0.35)
-    )
-
-    /// Karaoke — center-channel cancellation to reduce lead vocals.
-    static let karaoke = AudioEffect(
-        id: "karaoke",
-        name: "Karaoke",
-        icon: "mic.slash.fill",
-        eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        eqEnabled: false,
-        speed: 1.0,
-        pitchSemitones: 0.0,
-        specialMode: .karaoke(level: 1.0)
     )
 
     // MARK: Lookup

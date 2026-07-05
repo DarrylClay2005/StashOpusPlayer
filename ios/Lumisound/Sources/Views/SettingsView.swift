@@ -125,6 +125,14 @@ struct SettingsView: View {
                         aboutSection
                     }
                 }
+                // Without an explicit style this defaults to a grouped-card
+                // look — every Section (account/appearance/sleep timer/etc.)
+                // floats as its own separate box with the gallery background
+                // showing fully through the gaps. `.plain` still renders
+                // Section headers as inline labels, just without each one
+                // becoming a disconnected card — matches every other screen's
+                // continuous-surface look.
+                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
             .background(GalleryBackgroundView().ignoresSafeArea())

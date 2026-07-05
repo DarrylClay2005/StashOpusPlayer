@@ -24,6 +24,15 @@ extension AudioPlayerManager {
         isSpatialAudioRouted = enabled
         isMonoAudioRouted = effectiveMono
 
+        // This disconnects/reconnects nodes with a *different channel-count
+        // format* (mono vs. stereo) than whatever was previously connected —
+        // doing that while the engine is actively rendering is what crashed
+        // the app when Mono Audio was toggled during playback. Stop first
+        // and restart afterward so the topology change happens on a fully
+        // stopped graph.
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+
         engine.disconnectNodeOutput(limiter)
         engine.disconnectNodeOutput(spatialSourceMixer)
         engine.disconnectNodeOutput(environmentNode)
@@ -73,6 +82,8 @@ extension AudioPlayerManager {
                 : nil
             engine.connect(limiter, to: engine.mainMixerNode, format: outputFormat)
         }
+
+        if wasRunning { try? engine.start() }
     }
 
     /// Configures `limiter` as a fast brick-wall peak limiter: threshold just

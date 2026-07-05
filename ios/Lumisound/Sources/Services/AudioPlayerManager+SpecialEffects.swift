@@ -133,27 +133,4 @@ extension AudioPlayerManager {
         let totalSemitones = Double(vibratoBasePitch) + deviation
         timePitch.pitch = Float(totalSemitones * 100)  // AVAudioUnitTimePitch.pitch is in cents
     }
-
-    // MARK: - Karaoke (center-channel cancellation)
-    //
-    // Toggled via `shouldBypassEffect` on the real insert node (`karaokeUnit`,
-    // see AudioPlayerManager+EngineConfig.swift / KaraokeAudioUnit.swift)
-    // rather than installing/removing a tap — a tap's buffer is a read-only
-    // copy, and mutating it has zero effect on actual playback, which is
-    // exactly why Karaoke used to silently do nothing.
-
-    func enableKaraoke(level: Float = 1.0) {
-        guard !isKaraokeActive else { return }
-        isKaraokeActive = true
-        pendingKaraokeLevel = level
-        guard let karaokeUnit else { return }  // applied once instantiation completes
-        (karaokeUnit.auAudioUnit as? KaraokeAudioUnit)?.level = level
-        karaokeUnit.auAudioUnit.shouldBypassEffect = false
-    }
-
-    func disableKaraoke() {
-        guard isKaraokeActive else { return }
-        isKaraokeActive = false
-        karaokeUnit?.auAudioUnit.shouldBypassEffect = true
-    }
 }

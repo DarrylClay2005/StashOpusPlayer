@@ -44,6 +44,9 @@ struct SettingsHelpView: View {
             }
             .listRowBackground(AppTheme.surface)
         }
+        // Without an explicit style this defaults to a grouped-card look —
+        // see FavoritesView's identical fix.
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle("Help & Feature Guide")
@@ -128,11 +131,6 @@ struct SettingsHelpView: View {
                 icon: "tuningfork",
                 title: "Vibrato",
                 body: "Vibrato modulates the pitch of the audio at a regular rate, producing the characteristic wobble heard in classical violin technique and vintage synthesizers. Rate controls the speed of the pitch oscillation and depth controls how wide the pitch swings. Like tremolo it is an artistic effect that can range from barely perceptible to exaggerated."
-            ),
-            HelpTopic(
-                icon: "mic.slash",
-                title: "Karaoke Mode",
-                body: "Karaoke Mode attempts to remove or reduce vocals from a stereo recording by phase-cancelling the centre channel where lead vocals are typically panned. The effect is not perfect and its quality depends heavily on the mix of the original recording. Songs where the vocal is hard-panned or heavily processed will not respond as well as straightforward pop mixes."
             ),
             HelpTopic(
                 icon: "hare",
@@ -378,6 +376,9 @@ private struct SettingsHelpDetailView: View {
             }
             .listRowBackground(AppTheme.surface)
         }
+        // Without an explicit style this defaults to a grouped-card look —
+        // see FavoritesView's identical fix.
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle(category.title)

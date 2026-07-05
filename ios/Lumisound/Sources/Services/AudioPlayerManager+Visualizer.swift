@@ -8,10 +8,8 @@ extension AudioPlayerManager {
 
     // MARK: - Visualizer Tap
     //
-    // Installed on `mainMixerNode` for analysis only — Karaoke is a real
-    // insert node (`karaokeUnit`, wired between `mainMixerNode` and
-    // `outputNode`), not a tap, so there's no shared-bus conflict to avoid
-    // here anymore; this tap runs independently either way.
+    // Installed on `mainMixerNode` for analysis only — a read-only monitoring
+    // tap, not an insert node, so it never affects what's actually played.
 
     func startVisualizerTap(handler: @escaping (AVAudioPCMBuffer) -> Void) {
         guard !visualizerTapInstalled else { return }

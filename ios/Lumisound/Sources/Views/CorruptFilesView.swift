@@ -125,6 +125,9 @@ struct CorruptFilesView: View {
                 }
             }
         }
+        // Without an explicit style this defaults to a grouped-card look —
+        // see FavoritesView's identical fix.
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle("Corrupt File Finder")
