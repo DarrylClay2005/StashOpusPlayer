@@ -1,0 +1,318 @@
+import SwiftUI
+
+extension SettingsView {
+
+    // MARK: — Playback & Audio Section
+
+    var playbackAudioSection: some View {
+        Section {
+            // Crossfade (manual, fixed-duration). Mutually exclusive with Smart
+            // Auto Crossfade — enabling one turns the other off; either one
+            // drives an actual crossfade transition.
+            Toggle(isOn: $player.audioSettings.crossfadeEnabled) {
+                Label("Crossfade", systemImage: "waveform.path.ecg")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+            .onChange(of: player.audioSettings.crossfadeEnabled) { on in
+                if on { player.audioSettings.smartCrossfadeEnabled = false }
+            }
+
+            if player.audioSettings.crossfadeEnabled {
+                Text("Songs will fade into each other over \(Int(player.audioSettings.crossfadeDuration))s. A smooth, uninterrupted listening experience.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Smart Auto Crossfade — independent top-level option (previously
+            // nested under Crossfade, so it only worked when manual crossfade was
+            // also on). Mutually exclusive with manual Crossfade.
+            Toggle(isOn: $player.audioSettings.smartCrossfadeEnabled) {
+                Label("Smart Auto Crossfade", systemImage: "metronome")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+            .onChange(of: player.audioSettings.smartCrossfadeEnabled) { on in
+                if on { player.audioSettings.crossfadeEnabled = false }
+            }
+
+            if player.audioSettings.smartCrossfadeEnabled {
+                Text("Analyzes each track's BPM and beatmatches the outgoing and incoming songs, aligning the fade to the beat for a seamless DJ-style transition. Falls back to a normal crossfade when tempos are too far apart or unknown.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Crossfade duration — shown when EITHER mode is on (it's the base /
+            // fallback duration that Smart Auto Crossfade adjusts around).
+            if player.audioSettings.crossfadeActive {
+                HStack {
+                    Label("Duration", systemImage: "timer")
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(AppTheme.bodyFont(size: 14))
+                    Spacer()
+                    Stepper(
+                        value: $player.audioSettings.crossfadeDuration,
+                        in: 1...10,
+                        step: 1
+                    ) {
+                        Text("\(Int(player.audioSettings.crossfadeDuration))s")
+                            .font(AppTheme.monoFont(size: 14))
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                }
+                .padding(.leading, 16)
+            }
+
+            // Gapless playback
+            Toggle(isOn: $player.audioSettings.gaplessEnabled) {
+                Label("Gapless Playback", systemImage: "infinity")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if player.audioSettings.gaplessEnabled {
+                Text("Tracks play back-to-back with no silence between them. Ideal for live albums and DJ mixes.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // ReplayGain
+            Toggle(isOn: $player.audioSettings.replayGainEnabled) {
+                Label("ReplayGain", systemImage: "speaker.wave.3")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if player.audioSettings.replayGainEnabled {
+                Text("Normalises loudness across tracks so volume stays consistent. Reads REPLAYGAIN_TRACK_GAIN metadata when available.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Default speed
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label("Speed", systemImage: "hare")
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    Text(String(format: "%.2f×", player.audioSettings.speed))
+                        .font(AppTheme.monoFont(size: 14))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                Slider(value: $player.audioSettings.speed, in: 0.5...2.0, step: 0.05)
+                    .tint(AppTheme.dynamicAccent)
+                HStack {
+                    Text("0.5×").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
+                    Spacer()
+                    Text("2.0×").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+
+            // Default pitch
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label("Pitch", systemImage: "music.quarternote.3")
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    Text(pitchLabel(player.audioSettings.pitchSemitones))
+                        .font(AppTheme.monoFont(size: 14))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                Slider(value: $player.audioSettings.pitchSemitones, in: -12...12, step: 0.5)
+                    .tint(AppTheme.dynamicAccent)
+                HStack {
+                    Text("−12 st").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
+                    Spacer()
+                    Text("+12 st").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+
+            // Equalizer toggle
+            Toggle(isOn: $player.audioSettings.equalizerEnabled) {
+                Label("Equalizer", systemImage: "slider.vertical.3")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            // EQ Preset picker
+            if player.audioSettings.equalizerEnabled {
+                // Auto EQ toggle — when on, the preset switches automatically per-track
+                // based on tempo (see EQPreset.auto(forBPM:)), so the manual picker
+                // below is hidden to avoid implying a fixed preset is in effect.
+                Toggle(isOn: $player.audioSettings.autoEQEnabled) {
+                    Label("Auto EQ (by genre & tempo)", systemImage: "wand.and.stars")
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .tint(AppTheme.dynamicAccent)
+
+                if player.audioSettings.autoEQEnabled {
+                    Text("Automatically picks the best EQ preset for each track from its genre tag, falling back to its analyzed BPM when no genre is tagged.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .padding(.leading, 16)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                if !player.audioSettings.autoEQEnabled {
+                    HStack {
+                        Label("EQ Preset", systemImage: "waveform")
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer()
+                        Picker("", selection: $player.audioSettings.eqPreset) {
+                            ForEach(EQPreset.allCases) { preset in
+                                Text(preset.displayName)
+                                    .tag(preset)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(AppTheme.dynamicAccent)
+                        .onChange(of: player.audioSettings.eqPreset) { newPreset in
+                            player.applyEQPreset(newPreset)
+                        }
+                    }
+                }
+            }
+
+            // Bass Boost toggle
+            Toggle(isOn: $player.audioSettings.bassBoostEnabled) {
+                Label("Bass Boost", systemImage: "waveform.path")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if player.audioSettings.bassBoostEnabled {
+                Text("Boosts the 32 Hz and 64 Hz bands for deeper, punchier bass. Adjust the gain below to taste.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Bass Boost gain slider — only shown when enabled
+            if player.audioSettings.bassBoostEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Label("Boost Gain", systemImage: "speaker.plus")
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .font(AppTheme.bodyFont(size: 14))
+                        Spacer()
+                        Text(String(format: "%.1f dB", player.audioSettings.bassBoostGain))
+                            .font(AppTheme.monoFont(size: 14))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    Slider(value: $player.audioSettings.bassBoostGain, in: 0...15, step: 0.5)
+                        .tint(AppTheme.dynamicAccent)
+                    HStack {
+                        Text("0 dB").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
+                        Spacer()
+                        Text("15 dB").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+                .padding(.leading, 16)
+            }
+
+            // Reverb toggle — on by default, applies live to whatever is playing.
+            Toggle(isOn: $player.audioSettings.reverbEnabled) {
+                Label("Reverb", systemImage: "circle.hexagonpath")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if player.audioSettings.reverbEnabled {
+                Text("Adds a real sense of space to playback. Changes apply instantly to the current track.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+
+                HStack {
+                    Label("Room", systemImage: "square.stack.3d.up")
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(AppTheme.bodyFont(size: 14))
+                    Spacer()
+                    Picker("", selection: $player.audioSettings.reverbPreset) {
+                        ForEach(ReverbRoomPreset.allCases) { preset in
+                            Text(preset.displayName)
+                                .tag(preset)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(AppTheme.dynamicAccent)
+                }
+                .padding(.leading, 16)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Label("Mix", systemImage: "dial.medium")
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .font(AppTheme.bodyFont(size: 14))
+                        Spacer()
+                        Text("\(Int(player.audioSettings.reverbWetDryMix))%")
+                            .font(AppTheme.monoFont(size: 14))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    Slider(value: $player.audioSettings.reverbWetDryMix, in: 0...100, step: 1)
+                        .tint(AppTheme.dynamicAccent)
+                    HStack {
+                        Text("Dry").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
+                        Spacer()
+                        Text("Wet").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+                .padding(.leading, 16)
+            }
+
+            // Spatial Audio toggle — HRTF-binaural rendering of the final mix,
+            // head-tracked on compatible headphones. Off by default.
+            // `spatialAudioEnabled` is `Bool?` (see PlaybackModels.swift for
+            // why), so Toggle needs a computed Binding<Bool> wrapper.
+            Toggle(isOn: Binding(
+                get: { player.audioSettings.spatialAudioEnabled ?? false },
+                set: { player.audioSettings.spatialAudioEnabled = $0 }
+            )) {
+                Label("Spatial Audio", systemImage: "airpods.pro")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if player.audioSettings.spatialAudioEnabled ?? false {
+                Text(
+                    SpatialAudioService.shared.isHeadTrackingAvailable
+                        ? "Externalizes the mix and anchors it in space as you turn your head. Works best with AirPods Pro/Max."
+                        : "Externalizes the mix in space. Head tracking needs compatible AirPods — without them the sound stays anchored but doesn't follow head movement."
+                )
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.leading, 16)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Player error message (if any)
+            if let error = player.errorMessage {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(AppTheme.bodyFont(size: 13))
+                    .foregroundStyle(AppTheme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+        } header: {
+            sectionHeader("Playback & Audio")
+        }
+        .listRowBackground(AppTheme.surface)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.crossfadeEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.gaplessEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.replayGainEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.bassBoostEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.reverbEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.spatialAudioEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.smartCrossfadeEnabled)
+    }
+}

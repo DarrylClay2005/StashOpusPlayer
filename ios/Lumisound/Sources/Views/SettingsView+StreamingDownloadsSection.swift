@@ -1,0 +1,109 @@
+import SwiftUI
+
+extension SettingsView {
+
+    // MARK: — Streaming & Downloads Section
+
+    var streamingDownloadsSection: some View {
+        Section {
+            #if DEBUG
+            // Status row — only meaningful in DEBUG since `isConfigured` is
+            // hardcoded `true` for release builds (a default bridge URL is
+            // always baked in), so it'd always read "Configured" otherwise.
+            HStack {
+                Label("Bridge Server", systemImage: "server.rack")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                Text(streaming.isConfigured ? "Configured" : "Not configured")
+                    .font(AppTheme.bodyFont(size: 13))
+                    .foregroundStyle(streaming.isConfigured ? AppTheme.success : AppTheme.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        (streaming.isConfigured ? AppTheme.success : AppTheme.textSecondary).opacity(0.15),
+                        in: Capsule()
+                    )
+            }
+
+            // Server URL and API key point at the developer's personal backend
+            // (a default URL is baked in via `StreamingService.defaultBridgeURL`,
+            // so the app works without any user input). These overrides are only
+            // useful for local development/testing against a different bridge,
+            // so they're hidden from end users entirely.
+            // Server URL field
+            HStack {
+                Label("Server URL", systemImage: "link")
+                    .foregroundStyle(AppTheme.textPrimary)
+                TextField("http://192.168.1.x:7333", text: Binding(
+                    get: { streaming.bridgeURL },
+                    set: { streaming.bridgeURL = $0 }
+                ))
+                .keyboardType(.URL)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            // API Key (optional)
+            HStack {
+                Label("API Key (optional)", systemImage: "key")
+                    .foregroundStyle(AppTheme.textPrimary)
+                SecureField("Leave blank if not set", text: Binding(
+                    get: { streaming.apiKey },
+                    set: { streaming.apiKey = $0 }
+                ))
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(AppTheme.textSecondary)
+            }
+            #endif
+
+            // Audio Format picker
+            HStack {
+                Label("Audio Format", systemImage: "waveform")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                Picker("Audio Format", selection: Binding(
+                    get: { streaming.preferredFormat },
+                    set: { streaming.preferredFormat = $0 }
+                )) {
+                    ForEach(StreamingService.availableFormats, id: \.value) { fmt in
+                        Text(fmt.label).tag(fmt.value)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(AppTheme.dynamicAccent)
+            }
+
+            // Test connection
+            Button {
+                Task {
+                    let ok = await streaming.checkHealth()
+                    healthOK = ok
+                    showHealthResult = true
+                }
+            } label: {
+                HStack {
+                    Label("Test Connection", systemImage: "antenna.radiowaves.left.and.right")
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                    Spacer()
+                    if showHealthResult {
+                        Image(systemName: healthOK ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundStyle(healthOK ? AppTheme.success : AppTheme.error)
+                    }
+                }
+            }
+
+            // YouTube Data API key — only relevant when signed in, since the
+            // key is stored server-side on the user's account.
+            if account.isLoggedIn {
+                youtubeAPIKeySection
+                acoustIDAPIKeySection
+            }
+
+        } header: {
+            sectionHeader("Streaming & Downloads")
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+}
