@@ -172,7 +172,7 @@ struct SongsTab: View {
                             // enough to the MiniPlayerBar + tab bar that the
                             // last row could still peek through their
                             // translucent material while scrolling.
-                            .padding(.bottom, 120)
+                            .padding(.bottom, 190)
                         }
                     }
                     .background(Color.clear.ignoresSafeArea())

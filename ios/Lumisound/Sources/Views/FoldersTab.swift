@@ -78,7 +78,7 @@ struct FoldersTab: View {
                 .padding(.top, 12)
                 // Extra clearance below the last row — see SongsTab's
                 // identical fix.
-                .padding(.bottom, 120)
+                .padding(.bottom, 190)
             }
         }
         .background(Color.clear.ignoresSafeArea())

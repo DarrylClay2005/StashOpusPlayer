@@ -152,7 +152,7 @@ struct AlbumDetailView: View {
                     }
                     // Extra clearance below the last row — see SongsTab's
                     // identical fix (MiniPlayerBar + tab bar clearance).
-                    .padding(.bottom, 120)
+                    .padding(.bottom, 190)
                 }
             }
         }

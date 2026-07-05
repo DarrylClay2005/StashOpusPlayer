@@ -89,7 +89,7 @@ struct MoodPlaylistsView: View {
                     .animation(.easeInOut(duration: 0.3), value: visibleMoods.map { $0.songs.count })
                 }
 
-                Spacer(minLength: 120) // space for mini player bar + tab bar
+                Spacer(minLength: 190) // space for mini player bar (80pt) + tab bar (~83pt) + margin
             }
         }
         .background(Color.clear.ignoresSafeArea())

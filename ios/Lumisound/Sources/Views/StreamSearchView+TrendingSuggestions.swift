@@ -68,7 +68,10 @@ extension StreamSearchView {
                         }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 24)
+                    // Extra clearance below the last row — MiniPlayerBar
+                    // (80pt) + tab bar (~83pt) + margin, see SongsTab's
+                    // identical fix.
+                    .padding(.bottom, 190)
                 }
                 .scrollContentBackground(.hidden)
             }
