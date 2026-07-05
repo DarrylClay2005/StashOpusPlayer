@@ -69,7 +69,7 @@ struct SettingsView: View {
 
     /// Top-level Settings categories — replaces the old single cluttered
     /// scroll with focused tabs, each showing only its related sections.
-    private enum SettingsTab: String, CaseIterable, Identifiable {
+    enum SettingsTab: String, CaseIterable, Identifiable {
         case general = "General"
         case audio = "Audio"
         case library = "Library"

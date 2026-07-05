@@ -1,3 +1,4 @@
+import MediaPlayer
 import SwiftUI
 
 extension SettingsView {
