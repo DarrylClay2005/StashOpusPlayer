@@ -16,9 +16,13 @@ extension AudioPlayerManager {
     /// HRTF-positionable source) and `environmentNode` (the binaural
     /// renderer + listener), anchored as a single source in front of the
     /// listener and head-tracked when compatible headphones are connected.
-    func setSpatialAudioRouting(_ enabled: Bool) {
-        guard isEngineConfigured, enabled != isSpatialAudioRouted else { return }
+    func setSpatialAudioRouting(_ enabled: Bool, monoEnabled: Bool = false) {
+        // Mono downmix only makes sense when spatial audio (which already
+        // renders a single HRTF-positioned source) is off.
+        let effectiveMono = monoEnabled && !enabled
+        guard isEngineConfigured, enabled != isSpatialAudioRouted || effectiveMono != isMonoAudioRouted else { return }
         isSpatialAudioRouted = enabled
+        isMonoAudioRouted = effectiveMono
 
         engine.disconnectNodeOutput(limiter)
         engine.disconnectNodeOutput(spatialSourceMixer)
@@ -56,7 +60,18 @@ extension AudioPlayerManager {
         } else {
             SpatialAudioService.shared.stopTracking()
             SpatialAudioService.shared.onOrientationUpdate = nil
-            engine.connect(limiter, to: engine.mainMixerNode, format: nil)
+            // Mono Audio: connect through a single-channel format so
+            // AVAudioEngine downmixes L+R at the boundary — both output
+            // channels then carry the identical summed signal. `format: nil`
+            // (the non-mono branch) is the original stereo passthrough,
+            // unchanged from before this feature existed.
+            let outputFormat: AVAudioFormat? = effectiveMono
+                ? AVAudioFormat(
+                    standardFormatWithSampleRate: engine.mainMixerNode.outputFormat(forBus: 0).sampleRate,
+                    channels: 1
+                )
+                : nil
+            engine.connect(limiter, to: engine.mainMixerNode, format: outputFormat)
         }
     }
 
@@ -73,6 +88,25 @@ extension AudioPlayerManager {
         AudioUnitSetParameter(unit, kDynamicsProcessorParam_ReleaseTime, kAudioUnitScope_Global, 0, 0.05, 0)  // seconds — short so it doesn't pump audibly
         AudioUnitSetParameter(unit, kDynamicsProcessorParam_OverallGain, kAudioUnitScope_Global, 0, 0, 0)
         limiter.bypass = false
+    }
+
+    /// Configures `nightModeCompressor` as a gentle "evener" — engages much
+    /// earlier and releases much slower than `limiter` (a peak-catching
+    /// brick-wall limiter further down the chain), so quiet passages get
+    /// pulled up and loud ones pulled down well before either would clip.
+    /// A few dB of makeup gain compensates for the level compression removes,
+    /// so Night Mode evens dynamics out rather than just making everything
+    /// quieter. Always attached/connected (see `configureEngine`) — toggled
+    /// purely via `.bypass` in `applyAudioSettings`, matching how EQ bands
+    /// are bypassed rather than disconnected.
+    func configureNightModeCompressor() {
+        let unit = nightModeCompressor.audioUnit
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_Threshold, kAudioUnitScope_Global, 0, -24.0, 0)  // dB — engage well below peak level
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_HeadRoom, kAudioUnitScope_Global, 0, 10.0, 0)    // dB — soft knee, gradual compression above threshold
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_AttackTime, kAudioUnitScope_Global, 0, 0.01, 0)  // seconds
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_ReleaseTime, kAudioUnitScope_Global, 0, 0.2, 0)  // seconds — slower than the limiter, for smoother leveling
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_OverallGain, kAudioUnitScope_Global, 0, 6.0, 0)  // dB makeup gain
+        nightModeCompressor.bypass = true  // off by default — see applyAudioSettings
     }
 
     func configureEqualizer() {
@@ -118,10 +152,12 @@ extension AudioPlayerManager {
             engine.reset()
             isEngineConfigured = false
             // engine.reset() wipes all connections, including any spatial-audio
-            // routing — clear the tracking flag too so configureEngine()'s
-            // default (unrouted) connection isn't skipped by a stale "already
-            // routed" guard once applyAudioSettings() re-runs below.
+            // or mono-downmix routing — clear both tracking flags too so
+            // configureEngine()'s default (unrouted) connection isn't skipped
+            // by a stale "already routed" guard once applyAudioSettings()
+            // re-runs below.
             isSpatialAudioRouted = false
+            isMonoAudioRouted = false
             configureEngine()
             configureEqualizer()
             try? AVAudioSession.sharedInstance().setActive(true)

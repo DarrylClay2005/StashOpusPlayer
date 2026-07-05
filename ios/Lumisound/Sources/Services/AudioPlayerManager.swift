@@ -189,6 +189,24 @@ final class AudioPlayerManager: ObservableObject {
         return AVAudioUnitEffect(audioComponentDescription: description)
     }()
 
+    // Night Mode: gentle, always-in-chain dynamic range compressor — unlike
+    // `limiter` (a fast brick-wall peak limiter placed after this, right
+    // before the output), this engages much earlier (see
+    // `configureNightModeCompressor`) to even out quiet vs. loud passages for
+    // late-night listening. Always attached and connected (see
+    // `configureEngine`); toggled purely via `.bypass` in `applyAudioSettings`,
+    // so enabling/disabling it never touches the engine graph's connections.
+    let nightModeCompressor: AVAudioUnitEffect = {
+        var description = AudioComponentDescription(
+            componentType: kAudioUnitType_Effect,
+            componentSubType: kAudioUnitSubType_DynamicsProcessor,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        return AVAudioUnitEffect(audioComponentDescription: description)
+    }()
+
     // Spatial Audio (opt-in): HRTF-binaural rendering of the final mix as a
     // single anchored source, head-tracked on compatible headphones. Both
     // nodes are always attached (harmless if unused) but only wired into the
@@ -201,6 +219,11 @@ final class AudioPlayerManager: ObservableObject {
     // so this mixer sits between them purely to be that positionable source.
     let spatialSourceMixer = AVAudioMixerNode()
     var isSpatialAudioRouted = false
+    // Mono downmix routing state — see `setSpatialAudioRouting`'s mono
+    // handling. Mutually exclusive with spatial routing (mono is ignored
+    // while spatial audio is on); tracked separately so toggling mono on/off
+    // doesn't trigger a reconnect when spatial routing already covers it.
+    var isMonoAudioRouted = false
 
     // MARK: Private — Spatial / Special-Effect Nodes
 

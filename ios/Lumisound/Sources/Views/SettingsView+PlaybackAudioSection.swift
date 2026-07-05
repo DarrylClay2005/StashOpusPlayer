@@ -66,6 +66,24 @@ extension SettingsView {
                     }
                 }
                 .padding(.leading, 16)
+
+                HStack {
+                    Label("Fade Curve", systemImage: "waveform.path")
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(AppTheme.bodyFont(size: 14))
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { player.audioSettings.crossfadeCurve ?? .equalPower },
+                        set: { player.audioSettings.crossfadeCurve = $0 }
+                    )) {
+                        ForEach(CrossfadeCurve.allCases) { curve in
+                            Text(curve.displayName).tag(curve)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(AppTheme.dynamicAccent)
+                }
+                .padding(.leading, 16)
             }
 
             // Gapless playback
@@ -271,13 +289,57 @@ extension SettingsView {
                 .padding(.leading, 16)
             }
 
+            // Night Mode — gentle dynamic range compression, distinct from the
+            // always-on peak limiter. Off by default; opt-in for late-night
+            // low-volume listening.
+            Toggle(isOn: Binding(
+                get: { player.audioSettings.nightModeEnabled ?? false },
+                set: { player.audioSettings.nightModeEnabled = $0 }
+            )) {
+                Label("Night Mode", systemImage: "moon.stars")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if player.audioSettings.nightModeEnabled ?? false {
+                Text("Evens out quiet and loud passages so quiet parts stay audible and loud parts don't jump out — useful for listening at low volume.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Silence Trimming — skips near-silent lead-in audio at the start
+            // of a track. Off by default.
+            Toggle(isOn: Binding(
+                get: { player.audioSettings.silenceTrimmingEnabled ?? false },
+                set: { player.audioSettings.silenceTrimmingEnabled = $0 }
+            )) {
+                Label("Skip Silent Intros", systemImage: "forward.end")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if player.audioSettings.silenceTrimmingEnabled ?? false {
+                Text("Automatically skips past near-silent lead-in audio when a track starts playing.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Spatial Audio toggle — HRTF-binaural rendering of the final mix,
             // head-tracked on compatible headphones. Off by default.
             // `spatialAudioEnabled` is `Bool?` (see PlaybackModels.swift for
             // why), so Toggle needs a computed Binding<Bool> wrapper.
+            // Mutually exclusive with Mono Audio — enabling one turns the
+            // other off, mirroring the Crossfade/Smart Crossfade pattern.
             Toggle(isOn: Binding(
                 get: { player.audioSettings.spatialAudioEnabled ?? false },
-                set: { player.audioSettings.spatialAudioEnabled = $0 }
+                set: {
+                    player.audioSettings.spatialAudioEnabled = $0
+                    if $0 { player.audioSettings.monoAudioEnabled = false }
+                }
             )) {
                 Label("Spatial Audio", systemImage: "airpods.pro")
                     .foregroundStyle(AppTheme.textPrimary)
@@ -294,6 +356,28 @@ extension SettingsView {
                 .foregroundStyle(AppTheme.textSecondary)
                 .padding(.leading, 16)
                 .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Mono Audio — downmixes to mono, for single-earbud listening or
+            // one-sided hearing loss. Mutually exclusive with Spatial Audio.
+            Toggle(isOn: Binding(
+                get: { player.audioSettings.monoAudioEnabled ?? false },
+                set: {
+                    player.audioSettings.monoAudioEnabled = $0
+                    if $0 { player.audioSettings.spatialAudioEnabled = false }
+                }
+            )) {
+                Label("Mono Audio", systemImage: "ear")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if player.audioSettings.monoAudioEnabled ?? false {
+                Text("Combines left and right channels into one — the same audio plays from both sides. Useful for single-earbud listening.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             // Player error message (if any)
@@ -315,5 +399,8 @@ extension SettingsView {
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.reverbEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.spatialAudioEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.smartCrossfadeEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.nightModeEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.silenceTrimmingEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.monoAudioEnabled)
     }
 }

@@ -141,8 +141,9 @@ extension AudioPlayerManager {
                 step += 1
                 let progress = Float(step) / Float(steps)
                 let clipped = min(max(progress, 0), 1)
-                outgoing.volume = (1 - clipped) * self.audioSettings.volume
-                incoming.volume = clipped * self.audioSettings.volume
+                let (outgoingGain, incomingGain) = self.crossfadeGains(atProgress: clipped)
+                outgoing.volume = outgoingGain * self.audioSettings.volume
+                incoming.volume = incomingGain * self.audioSettings.volume
                 // Ease the incoming track from its beatmatched rate back to its
                 // native tempo (1.0) over the course of the fade, so by the time
                 // the outgoing track is fully silent, the new track is playing
@@ -187,6 +188,22 @@ extension AudioPlayerManager {
             (activeNode === primaryNode ? primaryBeatMatch : secondaryBeatMatch).rate = 1.0
             activeNode.volume = audioSettings.volume
             isCrossfading = false
+        }
+    }
+
+    /// Splits a 0...1 crossfade progress value into (outgoing, incoming) linear
+    /// gain multipliers, per `audioSettings.crossfadeCurve`. Equal-power uses a
+    /// quarter-cosine/sine pair so the combined perceived loudness stays
+    /// constant through the overlap (`cos²+sin²=1`) — a plain linear fade
+    /// noticeably dips in the middle, since `(1-x)+x=1` is constant in
+    /// *amplitude*, not perceived (roughly power/energy) loudness.
+    func crossfadeGains(atProgress progress: Float) -> (outgoing: Float, incoming: Float) {
+        switch audioSettings.crossfadeCurve ?? .equalPower {
+        case .linear:
+            return (1 - progress, progress)
+        case .equalPower:
+            let theta = Double(progress) * Double.pi / 2
+            return (Float(cos(theta)), Float(sin(theta)))
         }
     }
 

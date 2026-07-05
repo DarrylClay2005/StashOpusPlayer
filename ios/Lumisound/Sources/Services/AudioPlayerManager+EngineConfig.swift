@@ -139,10 +139,12 @@ extension AudioPlayerManager {
         engine.attach(reverb)
         engine.attach(reverbMixer)
         engine.attach(reverbWetMixer)
+        engine.attach(nightModeCompressor)
         engine.attach(limiter)
         engine.attach(environmentNode)
         engine.attach(spatialSourceMixer)
         configureLimiter()
+        configureNightModeCompressor()
         configureReverb()
 
         // Both player nodes connect to separate mixer inputs (via their own
@@ -155,8 +157,9 @@ extension AudioPlayerManager {
         engine.connect(secondaryBeatMatch, to: crossfadeMixer, fromBus: 0, toBus: 1, format: nil)
         engine.connect(crossfadeMixer, to: timePitch, format: nil)
         engine.connect(timePitch, to: equalizer, format: nil)
-        // Parallel reverb: EQ output fans out to the dry sum bus AND the reverb send.
-        engine.connect(equalizer, to: [
+        engine.connect(equalizer, to: nightModeCompressor, format: nil)
+        // Parallel reverb: compressor output fans out to the dry sum bus AND the reverb send.
+        engine.connect(nightModeCompressor, to: [
             AVAudioConnectionPoint(node: reverbMixer, bus: 0),   // dry, full level
             AVAudioConnectionPoint(node: reverb, bus: 0)         // wet send
         ], fromBus: 0, format: nil)

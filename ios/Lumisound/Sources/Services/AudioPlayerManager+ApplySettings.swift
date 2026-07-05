@@ -85,7 +85,12 @@ extension AudioPlayerManager {
         let reverbWet = min(max(audioSettings.reverbWetDryMix, 0), 100) / 100.0
         reverbWetMixer.outputVolume = audioSettings.reverbEnabled ? reverbWet : 0
 
-        setSpatialAudioRouting(audioSettings.spatialAudioEnabled ?? false)
+        setSpatialAudioRouting(audioSettings.spatialAudioEnabled ?? false, monoEnabled: audioSettings.monoAudioEnabled ?? false)
+
+        // Night Mode compressor is always attached/connected (see
+        // configureEngine) — enabling/disabling it is just a bypass flip, so
+        // it's safe to set on every settings pass with no reconnect cost.
+        nightModeCompressor.bypass = !(audioSettings.nightModeEnabled ?? false)
 
         // ReplayGain + master volume/boost: re-combine the current track's analysed
         // gain (replayGainLinearGain, computed asynchronously in scheduleCurrent/

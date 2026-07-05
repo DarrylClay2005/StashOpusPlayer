@@ -125,6 +125,54 @@ struct AudioSettings: Codable, Equatable {
     /// ones with a plain default value (see `PlaybackSnapshot`'s custom
     /// decoder for the same issue with `version`). Read via `?? false`.
     var spatialAudioEnabled: Bool? = false
+
+    /// Downmixes the final stereo mix to mono — for single-earbud listening
+    /// or one-sided hearing loss. Mutually exclusive with Spatial Audio in
+    /// the UI (HRTF binaural rendering assumes real stereo output); when both
+    /// are somehow set, `AudioPlayerManager` gives Spatial Audio priority.
+    /// Optional for the same missing-key-safety reason as `spatialAudioEnabled`.
+    var monoAudioEnabled: Bool? = false
+
+    /// Gentle, always-tuned dynamic range compression (distinct from the
+    /// brick-wall peak `limiter` already in the chain) — evens out quiet vs.
+    /// loud passages for late-night listening at low volume. Optional for the
+    /// same missing-key-safety reason as `spatialAudioEnabled`.
+    var nightModeEnabled: Bool? = false
+
+    /// Detects and skips near-silent lead-in audio at the start of a track
+    /// (not mid-track or trailing silence — see `AudioPlayerManager`'s
+    /// `detectLeadingSilenceFrames`). Optional for the same missing-key-safety
+    /// reason as `spatialAudioEnabled`.
+    var silenceTrimmingEnabled: Bool? = false
+
+    /// Volume curve used during a crossfade's overlap. Optional so old saved
+    /// blobs decode with `.equalPower` (the recommended default — avoids the
+    /// perceived-loudness dip a linear fade has at the midpoint — rather than
+    /// silently failing to decode). Read via `?? .equalPower`.
+    var crossfadeCurve: CrossfadeCurve? = .equalPower
+}
+
+/// Volume curve applied across a crossfade's overlap window. See
+/// `AudioPlayerManager.beginCrossfade`'s per-tick volume ramp.
+enum CrossfadeCurve: String, CaseIterable, Codable, Identifiable, Equatable {
+    case linear
+    case equalPower
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .linear:     return "Linear"
+        case .equalPower: return "Equal-Power"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .linear:     return "Straight fade — perceived volume dips slightly midway."
+        case .equalPower: return "Constant perceived loudness through the whole transition."
+        }
+    }
 }
 
 /// Room/space presets for the live reverb effect. Mirrors a subset of
