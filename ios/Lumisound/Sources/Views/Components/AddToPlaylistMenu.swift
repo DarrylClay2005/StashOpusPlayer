@@ -52,6 +52,17 @@ struct SongContextMenuContent: View {
             }
         }
 
+        // MARK: Convert for Compatibility — only for imported files stuck on a
+        // format (opus/webm/ogg) that only plays through the reduced AVPlayer
+        // fallback (no EQ/pitch/crossfade/effects). Re-encodes to AAC in place.
+        if song.usesCompatibilityFallbackFormat, song.url?.isFileURL == true {
+            Button {
+                Task { await library.convertImportedSongFormat(songID: song.id) }
+            } label: {
+                Label("Convert for Compatibility", systemImage: "arrow.triangle.2.circlepath")
+            }
+        }
+
         // MARK: Make a Clip — same "local file, not DRM Apple Music" gate as Identify Track
         if song.url?.isFileURL == true {
             Button {

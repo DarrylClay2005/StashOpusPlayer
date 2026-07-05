@@ -99,6 +99,44 @@ extension LibraryManager {
         ToastCenter.shared.show("Updated \"\(song.displayName)\"", category: .success, icon: "checkmark.circle")
     }
 
+    /// Re-encodes an imported song stuck on a compatibility-fallback format
+    /// (opus/webm/ogg — see `Song.usesCompatibilityFallbackFormat`) to AAC
+    /// `.m4a` in place, so it plays through the full AVAudioEngine graph
+    /// (EQ/pitch/crossfade/gapless/effects) instead of the reduced AVPlayer
+    /// fallback. The old file is only deleted after the new one is written
+    /// and confirmed playable.
+    func convertImportedSongFormat(songID: String) async {
+        guard let index = importedSongs.firstIndex(where: { $0.id == songID }),
+              let oldURL = importedSongs[index].url,
+              oldURL.isFileURL
+        else { return }
+        let songName = importedSongs[index].displayName
+
+        let newURL = oldURL.deletingPathExtension().appendingPathExtension("m4a")
+        guard await AudioEncoderService.shared.convertPermanently(oldURL, to: newURL) else {
+            ToastCenter.shared.show("Couldn't convert \"\(songName)\"", category: .error, icon: "exclamationmark.triangle")
+            return
+        }
+
+        // Re-resolve the index — this is async, and the library could have
+        // mutated (e.g. the song was removed) while the conversion ran.
+        guard let freshIndex = importedSongs.firstIndex(where: { $0.id == songID }) else {
+            try? FileManager.default.removeItem(at: newURL)
+            return
+        }
+        var song = importedSongs[freshIndex]
+        song.url = newURL
+        importedSongs[freshIndex] = song
+        try? FileManager.default.removeItem(at: oldURL)
+
+        if let stamp = ScanCacheService.fileStamp(for: newURL) {
+            ScanCacheService.shared.store(song: song, for: newURL, stamp: stamp)
+            ScanCacheService.shared.persist()
+        }
+        rebuildAllSongs()
+        ToastCenter.shared.show("Converted \"\(songName)\" for compatibility", category: .success, icon: "checkmark.circle")
+    }
+
     /// Debounced rebuild — cancels any pending task and schedules a new one after 0.1 s.
     /// This prevents runaway work when rapid successive mutations occur (e.g. bulk imports).
     ///

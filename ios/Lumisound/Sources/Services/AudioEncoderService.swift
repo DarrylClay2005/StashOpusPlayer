@@ -54,6 +54,24 @@ final class AudioEncoderService {
         return await aacExport(url, to: outURL)
     }
 
+    // MARK: - Permanent Format Conversion (user-triggered, not playback caching)
+
+    /// Permanently re-encodes `url` (typically an opus/webm/ogg file that
+    /// only plays via the AVPlayer compatibility fallback) to AAC `.m4a` at
+    /// `destinationURL`. Unlike `transcodeForPlayback`, this writes to a
+    /// caller-provided permanent location rather than the pruned temp cache,
+    /// and always re-encodes rather than checking for a native-open
+    /// pass-through — the caller already knows this file needs converting.
+    /// Uses the same AAC-export path as `transcodeForPlayback`'s tier 3: the
+    /// source is already lossy, so there's no benefit to the heavier
+    /// lossless (ALAC) tier for a one-time compatibility fix. Returns `true`
+    /// once `destinationURL` exists and is confirmed playable.
+    func convertPermanently(_ url: URL, to destinationURL: URL) async -> Bool {
+        try? FileManager.default.removeItem(at: destinationURL)
+        guard let result = await aacExport(url, to: destinationURL) else { return false }
+        return (try? AVAudioFile(forReading: result)) != nil
+    }
+
     // MARK: - Lossless decode via AVAssetReader + AVAssetWriter
 
     private func losslessTranscode(_ url: URL, to outURL: URL) async -> Bool {
