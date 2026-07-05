@@ -60,7 +60,10 @@ struct TrackedPlaylistDetailView: View {
                 .listRowBackground(AppTheme.surface.opacity(0.5))
             }
         }
-        .listStyle(.insetGrouped)
+        // `.plain`, not `.insetGrouped` — see FavoritesView's identical fix;
+        // `.insetGrouped` splits each Section into a separate floating card
+        // with the gallery background showing fully through the gaps.
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle(playlist.name)

@@ -119,7 +119,10 @@ struct PlaylistDetailView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        // `.plain`, not `.insetGrouped` — see FavoritesView's identical fix;
+        // `.insetGrouped` splits each Section into a separate floating card
+        // with the gallery background showing fully through the gaps.
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         // Own gallery/theme background (pushed detail views don't inherit the
         // root's), so it matches the rest of the app instead of system black.

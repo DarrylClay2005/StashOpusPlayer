@@ -101,7 +101,14 @@ struct FavoritesView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        // `.plain`, not `.insetGrouped` — matches every other song-list screen
+        // (SongsTab, ArtistsTab, GenresTab, PlaylistsView, Artist/AlbumDetailView).
+        // `.insetGrouped` renders each Section as its own floating rounded card
+        // with real gaps between them, and with `.scrollContentBackground(.hidden)`
+        // those gaps show the full gallery background straight through —
+        // exactly the "UI is split into disconnected pieces" look reported
+        // against this screen specifically (every other tab already used `.plain`).
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         // Own gallery/theme background (pushed detail views don't inherit the
         // root's), so it matches the rest of the app instead of system black.
