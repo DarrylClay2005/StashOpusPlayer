@@ -66,7 +66,11 @@ final class KaraokeAudioUnit: AUAudioUnit {
         set { kernel.bypassed = newValue }
     }
 
-    private lazy var renderBlock: AUInternalRenderBlock = { [kernel] _, timestamp, frameCount, _, outputData, _, pullInputBlock in
+    // Named distinctly from `renderBlock` — AUAudioUnit already declares a
+    // public `renderBlock` property (a higher-level `AURenderBlock` wrapper
+    // derived from `internalRenderBlock`); reusing that name here would
+    // accidentally override it with the wrong type/access level.
+    private lazy var cachedInternalRenderBlock: AUInternalRenderBlock = { [kernel] _, timestamp, frameCount, _, outputData, _, pullInputBlock in
         guard let pullInputBlock else { return kAudioUnitErr_NoConnection }
 
         var pullFlags: AudioUnitRenderActionFlags = []
@@ -93,7 +97,7 @@ final class KaraokeAudioUnit: AUAudioUnit {
         return noErr
     }
 
-    override var internalRenderBlock: AUInternalRenderBlock { renderBlock }
+    override var internalRenderBlock: AUInternalRenderBlock { cachedInternalRenderBlock }
 }
 
 extension AudioComponentDescription {
