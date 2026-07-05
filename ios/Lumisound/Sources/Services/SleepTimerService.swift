@@ -83,9 +83,26 @@ final class SleepTimerService: ObservableObject {
 
     // MARK: - Volume Fade
 
-    private static let fadeDurationSeconds: Double = 60.0
+    static let fadeDurationPresets: [(label: String, seconds: TimeInterval)] = [
+        ("10s",   10),
+        ("30s",   30),
+        ("1 min", 60),
+        ("2 min", 120),
+        ("5 min", 300),
+    ]
+
+    /// How long the volume/tempo fade-out takes once the timer hits zero.
+    /// Persisted (unlike `selectedDuration`, which is session-only) since
+    /// it's more a "set once" preference than something you'd change per nap.
+    @Published var fadeDurationSeconds: TimeInterval = {
+        let saved = UserDefaults.standard.double(forKey: "sleepTimer_fadeDuration")
+        return saved > 0 ? saved : 60.0
+    }() {
+        didSet { UserDefaults.standard.set(fadeDurationSeconds, forKey: "sleepTimer_fadeDuration") }
+    }
+
     private static let fadeStepInterval: Double = 0.5
-    private static let fadeStepCount: Int = Int(fadeDurationSeconds / fadeStepInterval) // 120 steps
+    private var fadeStepCount: Int { max(1, Int(fadeDurationSeconds / Self.fadeStepInterval)) }
 
     /// Volume level captured just before the fade starts so it can be restored on cancel.
     private var volumeBeforeFade: Float = 1.0
@@ -120,7 +137,7 @@ final class SleepTimerService: ObservableObject {
 
     private func applyFadeStep(timer t: Timer) {
         fadeStep += 1
-        let progress = Float(fadeStep) / Float(Self.fadeStepCount)
+        let progress = Float(fadeStep) / Float(fadeStepCount)
         let clipped = min(max(progress, 0), 1)
         let newVolume = volumeBeforeFade * (1.0 - clipped)
         setVolume?(newVolume)
@@ -131,7 +148,7 @@ final class SleepTimerService: ObservableObject {
         let newRate = rateBeforeFade + (fadeTargetRate - rateBeforeFade) * clipped
         setRate?(newRate)
 
-        if fadeStep >= Self.fadeStepCount {
+        if fadeStep >= fadeStepCount {
             t.invalidate()
             fadeTimer = nil
             isFading = false

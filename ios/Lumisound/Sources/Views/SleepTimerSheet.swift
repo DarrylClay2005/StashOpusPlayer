@@ -109,6 +109,9 @@ struct SleepTimerSheet: View {
             // Custom stepper
             customDurationRow
 
+            // Fade-out duration
+            fadeDurationRow
+
             // Start button
             Button {
                 sleepTimer.start()
@@ -167,6 +170,24 @@ struct SleepTimerSheet: View {
                     .foregroundStyle(AppTheme.dynamicAccent)
                     .monospacedDigit()
             }
+            .tint(AppTheme.dynamicAccent)
+        }
+        .padding(14)
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var fadeDurationRow: some View {
+        HStack {
+            Label("Fade Out Over", systemImage: "waveform.path.ecg.rectangle")
+                .font(.subheadline)
+                .foregroundStyle(AppTheme.textPrimary)
+            Spacer()
+            Picker("", selection: $sleepTimer.fadeDurationSeconds) {
+                ForEach(SleepTimerService.fadeDurationPresets, id: \.seconds) { preset in
+                    Text(preset.label).tag(preset.seconds)
+                }
+            }
+            .pickerStyle(.menu)
             .tint(AppTheme.dynamicAccent)
         }
         .padding(14)
