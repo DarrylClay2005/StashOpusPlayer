@@ -336,6 +336,11 @@ struct BackgroundSettingsView: View {
                             .tint(AppTheme.dynamicAccent)
                             .onChange(of: bg.blurRadius) { _ in bg.saveSettings() }
                     }
+
+                    Toggle(isOn: $bg.kenBurnsEnabled) {
+                        Label("Ken Burns Motion", systemImage: "arrow.up.left.and.arrow.down.right")
+                    }
+                    .tint(AppTheme.dynamicAccent)
                 }
             }
         }

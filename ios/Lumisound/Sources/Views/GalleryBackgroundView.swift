@@ -5,6 +5,7 @@ import UIKit
 
 struct GalleryBackgroundView: View {
     @EnvironmentObject var bg: BackgroundService
+    @AppStorage("app_reduce_motion") private var reduceMotion = false
 
     var body: some View {
         // GeometryReader gives an exact screen-sized canvas so scaledToFill can't
@@ -34,9 +35,13 @@ struct GalleryBackgroundView: View {
                                 .scaledToFill()
                                 .frame(width: geo.size.width, height: geo.size.height)
                                 .clipped()
+                                .modifier(KenBurnsModifier(isActive: bg.kenBurnsEnabled && !reduceMotion))
                                 .blur(radius: bg.blurRadius, opaque: true)
                                 .opacity(bg.opacity)
-                                .transition(transitionForAnimation(bg.animation))
+                                // Reduce Motion drops every transition to a plain
+                                // cross-fade — the simplest, least motion-heavy
+                                // option — regardless of the chosen animation.
+                                .transition(reduceMotion ? .opacity : transitionForAnimation(bg.animation))
                         }
                     }
                 }
@@ -82,6 +87,32 @@ struct GalleryBackgroundView: View {
             identity: BlurTransitionModifier(radius: 0)
         ).combined(with: .opacity)
         case .none:  return .identity
+        }
+    }
+}
+
+// MARK: - Ken Burns Modifier
+
+/// Slow, continuous zoom/drift applied to the currently-displayed background
+/// image — independent of the crossfade/slide transition between images.
+/// Scales up slightly beyond the transition's own scale so the pan never
+/// exposes an edge (the image is already `.scaledToFill()` + `.clipped()`).
+private struct KenBurnsModifier: ViewModifier {
+    let isActive: Bool
+
+    func body(content: Content) -> some View {
+        if isActive {
+            TimelineView(.animation) { timeline in
+                let phase = CGFloat(ArtworkClock.pingPong(timeline.date, legDuration: 30))
+                let scale: CGFloat = 1.08 + 0.05 * phase
+                let dx: CGFloat = 14 * (phase - 0.5)
+                let dy: CGFloat = 10 * (0.5 - phase)
+                content
+                    .scaleEffect(scale)
+                    .offset(x: dx, y: dy)
+            }
+        } else {
+            content
         }
     }
 }

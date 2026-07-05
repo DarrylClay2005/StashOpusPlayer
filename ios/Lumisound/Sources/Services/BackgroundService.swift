@@ -80,6 +80,14 @@ final class BackgroundService: ObservableObject {
         didSet { saveSettings() }
     }
 
+    /// When on, the current background image slowly zooms/pans while it's
+    /// displayed (not just at the transition between images) — a subtle
+    /// "Ken Burns" ambient motion. Ignored when Reduce Motion is on (see
+    /// `GalleryBackgroundView`).
+    @Published var kenBurnsEnabled: Bool = false {
+        didSet { saveSettings() }
+    }
+
     /// True when the shuffle timer is running. Stored property so iOS backgrounding
     /// doesn't silently invalidate it without us knowing.
     @Published private(set) var isActive: Bool = false
@@ -149,6 +157,7 @@ final class BackgroundService: ObservableObject {
         static let animation             = "bgService.animation"
         static let opacity               = "bgService.opacity"
         static let blurRadius            = "bgService.blurRadius"
+        static let kenBurnsEnabled       = "bgService.kenBurnsEnabled"
         /// Legacy on/off blur switch — read once during migration in `loadSettings()`.
         static let isBlurredLegacy       = "bgService.isBlurred"
         static let imageFilenames        = "bg_image_filenames_v1"  // [String] of filenames
@@ -460,6 +469,7 @@ final class BackgroundService: ObservableObject {
         defaults.set(animation.rawValue, forKey: Keys.animation)
         defaults.set(opacity, forKey: Keys.opacity)
         defaults.set(blurRadius, forKey: Keys.blurRadius)
+        defaults.set(kenBurnsEnabled, forKey: Keys.kenBurnsEnabled)
     }
 
     func loadSettings() {
@@ -486,6 +496,8 @@ final class BackgroundService: ObservableObject {
         if let savedOpacity = defaults.object(forKey: Keys.opacity) as? Double {
             opacity = savedOpacity
         }
+
+        kenBurnsEnabled = defaults.bool(forKey: Keys.kenBurnsEnabled)
 
         if let savedRadius = defaults.object(forKey: Keys.blurRadius) as? Double {
             blurRadius = savedRadius
