@@ -32,6 +32,29 @@ extension NowPlayingView {
                             .background(AppTheme.elevatedSurface, in: Capsule())
                             .fixedSize()
                     }
+
+                    if let song = player.currentSong, let formatTag = song.formatTag {
+                        Button {
+                            selectHaptic.selectionChanged()
+                            showFormatInfoSheet = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                if player.isUsingOpusPlayer {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(AppTheme.warning)
+                                }
+                                Text(formatTag)
+                                    .font(AppTheme.monoFont(size: 11))
+                            }
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(AppTheme.elevatedSurface, in: Capsule())
+                            .fixedSize()
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
             .animation(.easeInOut(duration: 0.25), value: player.currentSong?.id)

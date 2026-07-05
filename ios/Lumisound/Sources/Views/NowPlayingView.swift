@@ -138,6 +138,9 @@ struct NowPlayingView: View {
     // Sleep Timer sheet
     @State var showSleepTimerSheet = false
 
+    // Format info sheet
+    @State var showFormatInfoSheet = false
+
     // Custom speed / pitch inline editing
     @State var editingSpeed = false
     @State var speedInput = ""
@@ -167,6 +170,10 @@ struct NowPlayingView: View {
         .sheet(isPresented: $showSleepTimerSheet) {
             SleepTimerSheet()
                 .environmentObject(sleepTimer)
+        }
+        .sheet(isPresented: $showFormatInfoSheet) {
+            FormatInfoSheet(song: player.currentSong, isUsingFallback: player.isUsingOpusPlayer)
+                .environmentObject(library)
         }
         .onChange(of: player.currentSong?.id) { newID in
             guard newID != nil else { return }

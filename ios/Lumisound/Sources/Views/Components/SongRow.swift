@@ -157,7 +157,10 @@ struct SongRow: View {
             }
 
             Spacer(minLength: 0)
-            durationLabel(.footnote)
+            VStack(alignment: .trailing, spacing: 2) {
+                formatBadge
+                durationLabel(.footnote)
+            }
         }
         .padding(.vertical, 9)
     }
@@ -182,7 +185,10 @@ struct SongRow: View {
             }
 
             Spacer(minLength: 0)
-            durationLabel(.footnote)
+            VStack(alignment: .trailing, spacing: 2) {
+                formatBadge
+                durationLabel(.footnote)
+            }
         }
         .padding(12)
         .modifier(SongCardGlassBackground(isCurrent: isCurrent, cornerRadius: 16))
@@ -243,6 +249,24 @@ struct SongRow: View {
             .font(font)
             .foregroundStyle(AppTheme.textSecondary)
             .monospacedDigit()
+    }
+
+    /// Small outlined tag calling out lossless/Hi-Res files — deliberately
+    /// silent for the common case (compressed, standard-rate audio) rather
+    /// than labeling every row, so it only draws attention to the notable ones.
+    @ViewBuilder
+    private var formatBadge: some View {
+        if song.isKnownLosslessContainer || song.isHiResSampleRate {
+            Text(song.isKnownLosslessContainer ? (song.formatTag ?? "LOSSLESS") : "HI-RES")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(AppTheme.dynamicAccent)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .strokeBorder(AppTheme.dynamicAccent.opacity(0.5), lineWidth: 1)
+                )
+        }
     }
 }
 
