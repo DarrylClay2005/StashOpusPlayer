@@ -69,53 +69,58 @@ enum EQPreset: String, CaseIterable, Codable, Identifiable {
 
     // Returns 10 band gain values (dB) for frequencies:
     // 32Hz, 64Hz, 125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz, 16kHz
+    //
+    // Every genre-named curve here matches the equivalent preset in
+    // `AudioEffectsService` exactly, so picking "Jazz" (say) from either the
+    // Equalizer's preset picker or the Effects grid sounds the same —
+    // previously several of these (Pop/Rock/Classical) were mechanically
+    // converted from an unrelated 15-band system and didn't match at all.
     var bands: [Float] {
         switch self {
         case .flat:
             return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
         case .bassBoost:
-            // Emphasise sub-bass and bass, slightly cut high presence
-            return [6, 5, 3, 1, 0, 0, 0, -1, -1, -2]
+            // Punchy sub/bass lift with a small compensating dip through the
+            // low-mids — matches AudioEffectsService.bassboost.
+            return [8.0, 6.5, 4.0, 1.0, -1.0, -1.5, -1.0, 0, 0, 0]
 
         case .trebleBoost:
             // Slightly cut lows, open up the high end
             return [-2, -1, 0, 0, 0, 1, 2, 4, 5, 6]
 
         case .vocal:
-            // Scoop lows, presence peak in the 500 Hz–2 kHz vocal range
-            return [-2, -1, 0, 2, 4, 4, 3, 2, 1, -1]
+            // Presence-focused — matches AudioEffectsService.vocalBoost.
+            return [-2.0, -1.5, -1.0, 0.5, 2.0, 3.0, 2.5, 1.0, 0, -1.0]
 
         case .pop:
-            // Derived from bot 15-band definition (gws.py):
-            // Flat sub, boosted low-mid punch, slight upper-mid dip, airy highs
-            return [0.0, 2.4, 2.7, 1.2, -0.3, -1.2, -0.6, 0.0, 1.8, 1.2]
+            // Bright, vocal-forward pop curve — matches AudioEffectsService.pop.
+            return [0, 1.0, 1.5, 0.5, -1.0, -1.5, -0.5, 1.0, 2.5, 2.0]
 
         case .electronic:
-            // Strong sub-bass, slight mid scoop, boosted highs for air
-            return [5, 4, 1, 0, -2, 0, 2, 3, 4, 5]
+            // Classic EDM "smiley" curve — matches AudioEffectsService.electronic.
+            return [3.0, 2.0, 0, -1.0, -1.5, -1.0, 1.0, 2.5, 3.5, 3.0]
 
         case .rock:
-            // Derived from bot 15-band definition (gws.py):
-            // Big sub/low boost, mid scoop, presence peak at 1–4 kHz
-            return [3.3, 1.2, -1.5, -1.2, 0.6, 3.9, 3.6, 2.4, 0.9, 0.0]
+            // The classic rock "V" curve — matches AudioEffectsService.rock.
+            return [4.0, 2.5, -1.0, -2.0, -1.0, 1.0, 2.5, 3.0, 2.0, 1.5]
 
         case .classical:
-            // Derived from bot 15-band definition (gws.py):
-            // Gentle sub shelf, flat-to-slight dip in mids, rising high-end air
-            return [1.2, 0.6, -0.3, -0.6, -0.6, -0.6, 0.0, 0.6, 1.5, 2.4]
+            // Natural and accurate — matches AudioEffectsService.classical.
+            return [1.0, 0.5, 0, 0, 0, 0, 0.5, 1.0, 1.5, 2.0]
 
         case .jazz:
-            // Warm low end, slight upper-mid dip, open highs
-            return [3, 2, 1, 2, -1, -1, 0, 1, 2, 3]
+            // Warm and smooth — matches AudioEffectsService.jazz.
+            return [1.5, 1.0, 0.5, 0.5, 0, 0, 0.5, 1.0, 1.5, 1.0]
 
         case .hiphop:
-            // Heavy sub and bass, slight upper presence boost
-            return [5, 4, 1, 3, -1, -1, 0, -1, 1, 2]
+            // Heavy 808 sub-bass with crisp highs — matches AudioEffectsService.hiphop.
+            return [6.0, 4.5, 1.0, -1.5, -1.0, 0, 1.0, 2.0, 2.5, 1.5]
 
         case .acoustic:
-            // Natural warmth with detail across the spectrum
-            return [3, 2, 1, 2, 1, 0, 0, 1, 2, 2]
+            // Natural warmth with detail across the spectrum — matches
+            // AudioEffectsService.acoustic.
+            return [1.0, 1.0, 1.5, 1.0, 0.5, 0.5, 1.0, 1.0, 0.5, 1.0]
 
         case .custom:
             // User-defined values; this default is never applied over user edits

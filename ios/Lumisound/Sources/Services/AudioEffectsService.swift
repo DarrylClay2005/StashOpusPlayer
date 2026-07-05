@@ -59,7 +59,8 @@ enum AudioEffectsService {
 
     // MARK: All Presets
 
-    /// All 23 effects — the original 19 plus 8D, tremolo, vibrato, and karaoke.
+    /// All 28 effects — the original 24 (retuned, see each preset's comment)
+    /// plus 4 new genre presets (Jazz, Hip-Hop, Acoustic, Vocal Boost).
     static let allEffects: [AudioEffect] = [
         none,
         bassboost,
@@ -77,6 +78,10 @@ enum AudioEffectsService {
         classical,
         deep,
         anime,
+        jazz,
+        hiphop,
+        acoustic,
+        vocalBoost,
         doubletime,
         slowmo,
         pitchUp,
@@ -88,6 +93,13 @@ enum AudioEffectsService {
     ]
 
     // MARK: Preset Definitions
+    //
+    // Every EQ curve below is authored directly for this app's actual 10-band
+    // AVAudioUnitEQ layout (32/64/125/250/500/1k/2k/4k/8k/16k Hz, shelf
+    // filters at the two extremes — see AudioPlayerManager+SpatialAudio.swift
+    // `configureEqualizer`), replacing the previous values, which were
+    // mechanically converted from an unrelated 15-band system and only
+    // approximated what they were named after.
 
     /// Flat — all defaults, no processing.
     static let none = AudioEffect(
@@ -100,196 +112,236 @@ enum AudioEffectsService {
         pitchSemitones: 0.0
     )
 
-    /// bassboost: equalizer(bands=[(0,0.32),(1,0.24),(2,0.12)])
-    /// iOS[0] = avg(0.32,0.24)*12 = 3.4  iOS[1] = 0.12*12 = 1.4
+    /// Punchy sub/bass lift with a small compensating dip through the low-mids
+    /// so it reads as "more bass", not "muddier".
     static let bassboost = AudioEffect(
         id: "bassboost",
         name: "Bass Boost",
         icon: "speaker.wave.3.fill",
-        eqBands: [3.8, 2.9, 1.4, 0, 0, 0, 0, 0, 0, 0],
+        eqBands: [8.0, 6.5, 4.0, 1.0, -1.0, -1.5, -1.0, 0, 0, 0],
         eqEnabled: true,
         speed: 1.0,
         pitchSemitones: 0.0
     )
 
-    /// nightcore: timescale(speed=1.25, pitch=1.3)
-    /// pitch: 12*log2(1.3) = +4.5 semitones
+    /// Sped up + pitched up (unchanged), now paired with a bright, scooped
+    /// EQ — the shimmery, energetic top end that's the actual Nightcore
+    /// signature, not just a faster/higher-pitched flat mix.
     static let nightcore = AudioEffect(
         id: "nightcore",
         name: "Nightcore",
         icon: "moon.stars.fill",
-        eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        eqEnabled: false,
+        eqBands: [-1.0, -1.0, -0.5, 0, 0.5, 2.0, 3.5, 4.0, 3.0, 2.0],
+        eqEnabled: true,
         speed: 1.25,
         pitchSemitones: 4.5
     )
 
-    /// vaporwave: timescale(speed=0.8, pitch=0.8)
-    /// pitch: 12*log2(0.8) = -3.9 semitones
+    /// Slowed + pitched down (unchanged), now paired with a warm, rolled-off
+    /// EQ — the washed-out "underwater cassette" tone the genre is named for.
     static let vaporwave = AudioEffect(
         id: "vaporwave",
         name: "Vaporwave",
         icon: "sunset.fill",
-        eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        eqEnabled: false,
+        eqBands: [3.0, 2.5, 1.5, 0.5, 0, -1.0, -2.0, -3.0, -4.5, -6.0],
+        eqEnabled: true,
         speed: 0.8,
         pitchSemitones: -3.9
     )
 
-    /// lofi: lowpass(smoothing=35.0) + timescale(speed=0.94, pitch=0.96)
-    /// pitch: 12*log2(0.96) = -0.7 semitones
-    /// Lowpass simulated as high-frequency rolloff: band[8]=-3.0, band[9]=-8.0
+    /// Dusty and mid-forward: a gentle low-mid lift for warmth, steep high
+    /// rolloff for tape/vinyl character, plus the original mild speed/pitch dip.
     static let lofi = AudioEffect(
         id: "lofi",
         name: "Lo-Fi",
         icon: "radio.fill",
-        eqBands: [0, 0, 0, 0, 0, 0, 0, 0, -3.0, -8.0],
+        eqBands: [1.0, 1.5, 1.5, 0.5, 0, -0.5, -1.5, -3.0, -6.0, -10.0],
         eqEnabled: true,
         speed: 0.94,
         pitchSemitones: -0.7
     )
 
-    /// lowpass: lowpass(smoothing=20.0)
-    /// band[8]=-4.0, band[9]=-8.0
+    /// A pure filter effect (no genre coloring) — steep high-frequency rolloff only.
     static let lowpass = AudioEffect(
         id: "lowpass",
         name: "Low Pass",
         icon: "arrow.down.to.line",
-        eqBands: [0, 0, 0, 0, 0, 0, 0, 0, -4.0, -8.0],
+        eqBands: [0, 0, 0, 0, 0, 0, 0, -2.0, -6.0, -11.5],
         eqEnabled: true,
         speed: 1.0,
         pitchSemitones: 0.0
     )
 
-    /// soft: lowpass(smoothing=25.0)
-    /// band[7]=-1.5, band[8]=-3.5, band[9]=-7.0
+    /// Gentle high-end rolloff — smoother, less fatiguing top end than Low Pass.
     static let soft = AudioEffect(
         id: "soft",
         name: "Soft",
         icon: "cloud.fill",
-        eqBands: [0, 0, 0, 0, 0, 0, 0, -1.5, -3.5, -7.0],
+        eqBands: [0, 0, 0, 0, 0, 0, -0.5, -1.5, -3.5, -6.5],
         eqEnabled: true,
         speed: 1.0,
         pitchSemitones: 0.0
     )
 
-    /// electronic: equalizer(bands=[(0,0.12),(1,0.10),(4,-0.05),(8,0.08),(10,0.14)])
-    /// iOS[0]=avg(0.12,0.10)*12=1.3  iOS[2]=avg(0,-0.05)*12=-0.3
-    /// iOS[5]=avg(0.08,0)*12=0.5     iOS[6]=0.14*12=1.7
+    /// Classic EDM "smiley" curve — boosted sub-bass and highs, scooped mids,
+    /// for punch and sparkle without a muddy midrange.
     static let electronic = AudioEffect(
         id: "electronic",
         name: "Electronic",
         icon: "bolt.fill",
-        eqBands: [1.3, 0, -0.3, 0, 0, 0.5, 1.7, 0, 0, 0],
+        eqBands: [3.0, 2.0, 0, -1.0, -1.5, -1.0, 1.0, 2.5, 3.5, 3.0],
         eqEnabled: true,
         speed: 1.0,
         pitchSemitones: 0.0
     )
 
-    /// party: equalizer(bands=[(0,0.25),(1,0.18),(2,0.08),(9,0.10)])
-    /// iOS[0]=avg(0.25,0.18)*12=2.6  iOS[1]=0.08*12=1.0
-    /// iOS[5]=avg(0,0.10)*12=0.6
+    /// A more moderate smiley curve than Electronic — loud and fun without
+    /// scooping the mids as hard, so vocals still cut through.
     static let party = AudioEffect(
         id: "party",
         name: "Party",
         icon: "party.popper.fill",
-        eqBands: [2.6, 1.0, 0, 0, 0, 0.6, 0, 0, 0, 0],
+        eqBands: [4.0, 3.0, 1.0, 0, -1.0, -0.5, 0.5, 1.5, 2.5, 2.0],
         eqEnabled: true,
         speed: 1.0,
         pitchSemitones: 0.0
     )
 
-    /// radio: equalizer(bands=[(0,-0.18),(1,-0.10),(4,0.12),(5,0.12),(10,-0.12)]) + lowpass(18.0)
-    /// iOS[0]=avg(-0.18,-0.10)*12=-1.7  iOS[2]=avg(0,0.12)*12=0.7
-    /// iOS[3]=0.12*12=1.4               iOS[6]=-0.12*12=-1.4
-    /// lowpass(18.0) → heavy: band[8]=-5.0, band[9]=-8.0
+    /// Classic AM/FM band-limited sound — cut lows and highs, presence boost
+    /// through the mids where speech/broadcast content actually lives.
     static let radio = AudioEffect(
         id: "radio",
         name: "Radio",
         icon: "antenna.radiowaves.left.and.right",
-        eqBands: [-1.7, 0, 0.7, 1.4, 0, 0, -1.4, 0, -5.0, -8.0],
+        eqBands: [-6.0, -4.0, -1.0, 1.0, 2.5, 3.0, 2.0, 0, -4.0, -8.0],
         eqEnabled: true,
         speed: 1.0,
         pitchSemitones: 0.0
     )
 
-    /// cinema: equalizer(bands=[(0,0.18),(1,0.12),(8,0.08),(9,0.10)])
-    /// iOS[0]=avg(0.18,0.12)*12=1.8  iOS[5]=avg(0.08,0.10)*12=1.1
+    /// Cinematic and spacious — low-end rumble plus a touch of air up top,
+    /// pairs well with the reverb already in the signal chain.
     static let cinema = AudioEffect(
         id: "cinema",
         name: "Cinema",
         icon: "film.fill",
-        eqBands: [1.8, 0, 0, 0, 0, 1.1, 0, 0, 0, 0],
+        eqBands: [3.0, 2.0, 1.0, 0, 0, 0, 0.5, 1.0, 1.5, 1.0],
         eqEnabled: true,
         speed: 1.0,
         pitchSemitones: 0.0
     )
 
-    /// pop: converted from 15-band bot definition
-    /// iOS[0]=0.0  iOS[1]=2.4  iOS[2]=2.7  iOS[3]=1.2  iOS[4]=-0.3
-    /// iOS[5]=-1.2  iOS[6]=-0.6  iOS[7]=0.0  iOS[8]=1.8  iOS[9]=1.2
+    /// Bright and vocal-forward — modern pop mix character: a small presence
+    /// boost, a light mid dip to avoid boxiness, and airy top end.
     static let pop = AudioEffect(
         id: "pop",
         name: "Pop",
         icon: "music.mic",
-        eqBands: [0.0, 2.4, 2.7, 1.2, -0.3, -1.2, -0.6, 0.0, 1.8, 1.2],
+        eqBands: [0, 1.0, 1.5, 0.5, -1.0, -1.5, -0.5, 1.0, 2.5, 2.0],
         eqEnabled: true,
         speed: 1.0,
         pitchSemitones: 0.0
     )
 
-    /// rock: converted from 15-band bot definition
-    /// iOS[0]=3.3  iOS[1]=1.2  iOS[2]=-1.5  iOS[3]=-1.2  iOS[4]=0.6
-    /// iOS[5]=3.9  iOS[6]=3.6  iOS[7]=2.4   iOS[8]=0.9   iOS[9]=0.0
+    /// The classic rock "V" curve — boosted bass and highs with scooped
+    /// low-mids, for driving guitars and crisp cymbals.
     static let rock = AudioEffect(
         id: "rock",
         name: "Rock",
         icon: "guitars.fill",
-        eqBands: [3.3, 1.2, -1.5, -1.2, 0.6, 3.9, 3.6, 2.4, 0.9, 0.0],
+        eqBands: [4.0, 2.5, -1.0, -2.0, -1.0, 1.0, 2.5, 3.0, 2.0, 1.5],
         eqEnabled: true,
         speed: 1.0,
         pitchSemitones: 0.0
     )
 
-    /// classical: converted from 15-band bot definition
-    /// iOS[0]=1.2  iOS[1]=0.6  iOS[2]=-0.3  iOS[3]=-0.6  iOS[4]=-0.6
-    /// iOS[5]=-0.6  iOS[6]=0.0  iOS[7]=0.6  iOS[8]=1.5   iOS[9]=2.4
+    /// Natural and accurate — classical listeners want fidelity, not
+    /// coloring, so this is just a gentle warmth-and-air smile, nothing extreme.
     static let classical = AudioEffect(
         id: "classical",
         name: "Classical",
         icon: "pianokeys",
-        eqBands: [1.2, 0.6, -0.3, -0.6, -0.6, -0.6, 0.0, 0.6, 1.5, 2.4],
+        eqBands: [1.0, 0.5, 0, 0, 0, 0, 0.5, 1.0, 1.5, 2.0],
         eqEnabled: true,
         speed: 1.0,
         pitchSemitones: 0.0
     )
 
-    /// deep: equalizer(bands=[(0,0.5),(1,0.4),(2,0.3)]) + timescale(pitch=0.8)
-    /// iOS[0]=avg(0.5,0.4)*12=5.4  iOS[1]=0.3*12=3.6
-    /// pitch: 12*log2(0.8) = -3.9 semitones
+    /// Heavy sub-bass emphasis paired with a pitched-down mix — a deep-house
+    /// low end without touching the mids/highs.
     static let deep = AudioEffect(
         id: "deep",
         name: "Deep",
         icon: "waveform.path",
-        eqBands: [5.4, 3.6, 0, 0, 0, 0, 0, 0, 0, 0],
+        eqBands: [7.0, 5.5, 3.0, 0.5, -1.0, -1.5, -1.0, -0.5, 0, 0],
         eqEnabled: true,
         speed: 1.0,
         pitchSemitones: -3.9
     )
 
-    /// anime: timescale(speed=1.4, pitch=1.5)
-    /// pitch: 12*log2(1.5) = +7.0 semitones
+    /// Sped up + pitched up (unchanged), now paired with a bright,
+    /// vocal-forward EQ — energetic opening-theme character.
     static let anime = AudioEffect(
         id: "anime",
         name: "Anime",
         icon: "star.fill",
-        eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        eqEnabled: false,
+        eqBands: [0, -0.5, -0.5, 0, 0.5, 1.5, 2.5, 3.5, 3.0, 2.5],
+        eqEnabled: true,
         speed: 1.4,
         pitchSemitones: 7.0
     )
 
-    /// doubletime: timescale(speed=2.0, pitch=1.0) — speed only, no EQ, no pitch shift
+    /// Warm and smooth — present mids for brushed drums/upright bass/sax,
+    /// gentle top-end air for cymbals, nothing scooped or aggressive.
+    static let jazz = AudioEffect(
+        id: "jazz",
+        name: "Jazz",
+        icon: "music.note",
+        eqBands: [1.5, 1.0, 0.5, 0.5, 0, 0, 0.5, 1.0, 1.5, 1.0],
+        eqEnabled: true,
+        speed: 1.0,
+        pitchSemitones: 0.0
+    )
+
+    /// Heavy 808 sub-bass, a scooped low-mid to keep it from getting boxy,
+    /// and crisp highs for hi-hats and vocal presence.
+    static let hiphop = AudioEffect(
+        id: "hiphop",
+        name: "Hip-Hop",
+        icon: "music.quarternote.3",
+        eqBands: [6.0, 4.5, 1.0, -1.5, -1.0, 0, 1.0, 2.0, 2.5, 1.5],
+        eqEnabled: true,
+        speed: 1.0,
+        pitchSemitones: 0.0
+    )
+
+    /// Natural and warm — present low-mids for guitar body/vocal warmth,
+    /// gentle top-end air for string detail, no scooping.
+    static let acoustic = AudioEffect(
+        id: "acoustic",
+        name: "Acoustic",
+        icon: "guitars",
+        eqBands: [1.0, 1.0, 1.5, 1.0, 0.5, 0.5, 1.0, 1.0, 0.5, 1.0],
+        eqEnabled: true,
+        speed: 1.0,
+        pitchSemitones: 0.0
+    )
+
+    /// Presence-focused — cuts low-end mud, boosts the 500Hz–4kHz range where
+    /// speech intelligibility and lead vocals actually live. Works for
+    /// podcasts/audiobooks as well as vocal-forward music.
+    static let vocalBoost = AudioEffect(
+        id: "vocal_boost",
+        name: "Vocal Boost",
+        icon: "person.wave.2.fill",
+        eqBands: [-2.0, -1.5, -1.0, 0.5, 2.0, 3.0, 2.5, 1.0, 0, -1.0],
+        eqEnabled: true,
+        speed: 1.0,
+        pitchSemitones: 0.0
+    )
+
+    /// doubletime: speed only — a pure utility transform, deliberately kept
+    /// EQ-neutral (unlike the genre presets above) so it doesn't color the mix.
     static let doubletime = AudioEffect(
         id: "doubletime",
         name: "Double Time",
@@ -300,7 +352,8 @@ enum AudioEffectsService {
         pitchSemitones: 0.0
     )
 
-    /// slowmo: timescale(speed=0.5, pitch=1.0) — speed only, no EQ, no pitch shift
+    /// slowmo: speed only — a pure utility transform, deliberately kept
+    /// EQ-neutral so it doesn't color the mix.
     static let slowmo = AudioEffect(
         id: "slowmo",
         name: "Slow Mo",
@@ -311,8 +364,8 @@ enum AudioEffectsService {
         pitchSemitones: 0.0
     )
 
-    /// pitch_up: timescale(speed=1.0, pitch=1.3)
-    /// pitch: 12*log2(1.3) = +4.5 semitones
+    /// pitch_up: pitch only — a pure utility transform, deliberately kept
+    /// EQ-neutral so it doesn't color the mix.
     static let pitchUp = AudioEffect(
         id: "pitch_up",
         name: "Pitch Up",
@@ -323,8 +376,8 @@ enum AudioEffectsService {
         pitchSemitones: 4.5
     )
 
-    /// pitch_down: timescale(speed=1.0, pitch=0.7)
-    /// pitch: 12*log2(0.7) = -6.1 semitones
+    /// pitch_down: pitch only — a pure utility transform, deliberately kept
+    /// EQ-neutral so it doesn't color the mix.
     static let pitchDown = AudioEffect(
         id: "pitch_down",
         name: "Pitch Down",
