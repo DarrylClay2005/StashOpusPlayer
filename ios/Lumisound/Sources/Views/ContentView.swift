@@ -2,6 +2,24 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
+// MARK: - TabTransitionStyle
+
+enum TabTransitionStyle: String, CaseIterable, Identifiable, Codable {
+    case scalePop
+    case slide
+    case fadeOnly
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .scalePop: return "Scale Pop"
+        case .slide:    return "Slide"
+        case .fadeOnly: return "Fade Only"
+        }
+    }
+}
+
 struct ContentView: View {
 
     @EnvironmentObject private var player: AudioPlayerManager
@@ -17,6 +35,11 @@ struct ContentView: View {
     /// Drives a quick scale "pop" on the freshly-selected tab's content —
     /// dips slightly below 1.0 then springs back to 1.0 each time the tab changes.
     @State private var tabPopScale: CGFloat = 1.0
+    /// Vertical dip used by the "Slide" transition style.
+    @State private var tabSlideOffset: CGFloat = 0
+    /// Opacity dip used by the "Slide" and "Fade Only" transition styles.
+    @State private var tabContentOpacity: Double = 1.0
+    @AppStorage("tab_transition_style") private var tabTransitionStyleRaw: String = TabTransitionStyle.scalePop.rawValue
 
     /// Set in Settings → Playback. When off, the floating Car Mode button is
     /// hidden and connecting to a car stereo no longer auto-presents it.
@@ -125,8 +148,12 @@ struct ContentView: View {
             // native tab-bar icons themselves (`.symbolEffect(.bounce)` needs iOS 17),
             // so this gives the newly-selected tab's content a quick settle-in instead.
             .scaleEffect(tabPopScale)
+            .offset(y: tabSlideOffset)
+            .opacity(tabContentOpacity)
             .animation(.easeInOut(duration: 0.18), value: selectedTab)
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: tabPopScale)
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: tabSlideOffset)
+            .animation(.easeInOut(duration: 0.15), value: tabContentOpacity)
             // Crash-context breadcrumb — "what was the user doing right before
             // the crash" is the single most useful fact for diagnosing reports
             // like "it just freezes/crashes sometimes". See AppLogger.breadcrumb.
@@ -134,11 +161,29 @@ struct ContentView: View {
                 let names = ["Library", "Playing", "Queue", "Cloud Services", "Settings"]
                 appBreadcrumb("Switched to \(names.indices.contains(newValue) ? names[newValue] : "tab \(newValue)") tab")
 
-                // Quick scale "pop" — dip down then spring back to 1.0 — gives the
-                // newly-selected tab a tactile settle-in feel.
-                tabPopScale = 0.98
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-                    tabPopScale = 1.0
+                // Settle-in transition on the newly-selected tab's content —
+                // style picked in Settings → Appearance. iOS 16 doesn't expose
+                // a way to animate transitions *between* TabView pages or the
+                // native tab-bar icons themselves, so all three styles work by
+                // dipping then springing/fading back on the content itself.
+                switch TabTransitionStyle(rawValue: tabTransitionStyleRaw) ?? .scalePop {
+                case .scalePop:
+                    tabPopScale = 0.98
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                        tabPopScale = 1.0
+                    }
+                case .slide:
+                    tabSlideOffset = 14
+                    tabContentOpacity = 0.5
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                        tabSlideOffset = 0
+                        tabContentOpacity = 1.0
+                    }
+                case .fadeOnly:
+                    tabContentOpacity = 0.3
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                        tabContentOpacity = 1.0
+                    }
                 }
             }
             // No explicit .frame() on TabView — it must size itself from its content.
