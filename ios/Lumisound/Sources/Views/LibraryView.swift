@@ -79,11 +79,26 @@ private enum LibrarySortOption: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Cached by song ID — `filteredSongs` recomputes on every `LibraryView`
+    /// re-render (including ones triggered by unrelated `AudioPlayerManager`
+    /// publishes like a track change or play/pause toggle), and without this
+    /// cache each of those re-renders re-ran `FileManager.attributesOfItem`
+    /// synchronously on the main thread for every song in the library when
+    /// sorted by date added — a real stat-the-whole-library cost on every
+    /// trigger, not just when the query/sort/library actually changed.
+    private static var fileDateCache: [String: Date] = [:]
+
     private static func fileDate(_ song: Song) -> Date {
-        guard let url = song.url, url.isFileURL,
-              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let date = (attrs[.creationDate] as? Date) ?? (attrs[.modificationDate] as? Date)
-        else { return .distantPast }
+        if let cached = fileDateCache[song.id] { return cached }
+        let date: Date
+        if let url = song.url, url.isFileURL,
+           let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let resolved = (attrs[.creationDate] as? Date) ?? (attrs[.modificationDate] as? Date) {
+            date = resolved
+        } else {
+            date = .distantPast
+        }
+        fileDateCache[song.id] = date
         return date
     }
 }

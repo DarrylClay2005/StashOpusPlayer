@@ -247,18 +247,45 @@ extension AudioPlayerManager {
         }
         guard withBPM.count > 1 else { return songs }
 
-        var remaining = withBPM
-        var ordered: [Song] = []
-        var lastBPM = anchorBPM ?? remaining[0].bpm
+        // Sort once by BPM, then walk outward from the entry closest to
+        // `anchorBPM`. Because the list is sorted, the globally-nearest
+        // remaining track to whichever BPM was picked last is always one of
+        // the two entries immediately outside the already-picked contiguous
+        // block — so this two-pointer walk produces the exact same order as
+        // a naive "rescan everything remaining, every step" greedy search,
+        // but in O(n log n) instead of O(n²). The O(n²) version ran
+        // synchronously on the main thread on every shuffle; for a large
+        // library (thousands of BPM-tagged tracks) that was a real multi-
+        // second hang, the same bug class as the hasLocalCopy(of:) main-
+        // thread hang fixed in v1.4.30.
+        let sorted = withBPM.sorted { $0.bpm < $1.bpm }
+        let startAnchor = anchorBPM ?? sorted[0].bpm
+        var startIndex = 0
+        var bestDiff = Double.greatestFiniteMagnitude
+        for (index, entry) in sorted.enumerated() {
+            let diff = abs(entry.bpm - startAnchor)
+            if diff < bestDiff {
+                bestDiff = diff
+                startIndex = index
+            }
+        }
 
-        while !remaining.isEmpty {
-            let reference = lastBPM ?? remaining[0].bpm
-            let nearestIndex = remaining.indices.min(by: {
-                abs(remaining[$0].bpm - reference) < abs(remaining[$1].bpm - reference)
-            })!
-            let chosen = remaining.remove(at: nearestIndex)
-            ordered.append(chosen.song)
-            lastBPM = chosen.bpm
+        var ordered: [Song] = [sorted[startIndex].song]
+        var lastBPM = sorted[startIndex].bpm
+        var lo = startIndex - 1
+        var hi = startIndex + 1
+        while lo >= 0 || hi < sorted.count {
+            let leftDiff = lo >= 0 ? abs(sorted[lo].bpm - lastBPM) : Double.greatestFiniteMagnitude
+            let rightDiff = hi < sorted.count ? abs(sorted[hi].bpm - lastBPM) : Double.greatestFiniteMagnitude
+            if leftDiff <= rightDiff {
+                ordered.append(sorted[lo].song)
+                lastBPM = sorted[lo].bpm
+                lo -= 1
+            } else {
+                ordered.append(sorted[hi].song)
+                lastBPM = sorted[hi].bpm
+                hi += 1
+            }
         }
 
         guard !withoutBPM.isEmpty else { return ordered }

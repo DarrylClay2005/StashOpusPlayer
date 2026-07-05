@@ -43,7 +43,14 @@ struct VerticalSlider: View {
 
 struct NowPlayingView: View {
     @EnvironmentObject var player: AudioPlayerManager
-    @EnvironmentObject var progress: PlaybackProgress
+    // Deliberately NOT `@EnvironmentObject var progress: PlaybackProgress` —
+    // that subscribes this view to every ~0.25-0.5s position tick regardless
+    // of whether `body` reads it (see NowPlayingView+Timeline.swift's
+    // isolation comment). The few pieces that need live position
+    // (`NowPlayingScrubber`, `NowPlayingPlaytimeCounter`, `NowPlayingLyricsBody`)
+    // declare their own `progress` subscription instead; one-shot reads
+    // (adding a bookmark) use `player.position` — a plain, non-published
+    // passthrough — instead.
     @EnvironmentObject var library: LibraryManager
     @EnvironmentObject var sleepTimer: SleepTimerService
 

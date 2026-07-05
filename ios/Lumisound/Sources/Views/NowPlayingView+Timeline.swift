@@ -5,90 +5,17 @@ extension NowPlayingView {
 
     // MARK: - Timeline
 
-    @ViewBuilder
     var timelineSection: some View {
         VStack(spacing: 10) {
-            switch seekerStyle {
-            case .waveform:
-                if let url = player.currentSong?.url, url.isFileURL, progress.duration > 0 {
-                    WaveformScrubberView(
-                        url: url,
-                        position: progress.position,
-                        duration: progress.duration,
-                        isPlaying: player.isPlaying,
-                        onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
-                    )
-                } else {
-                    ClassicScrubberView(
-                        position: progress.position,
-                        duration: progress.duration,
-                        isPlaying: player.isPlaying,
-                        onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
-                    )
-                }
-            case .classic:
-                ClassicScrubberView(
-                    position: progress.position,
-                    duration: progress.duration,
-                    isPlaying: player.isPlaying,
-                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
-                )
-            case .ring:
-                RingScrubberView(
-                    position: progress.position,
-                    duration: progress.duration,
-                    isPlaying: player.isPlaying,
-                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
-                )
-            case .bars:
-                BarsScrubberView(
-                    position: progress.position,
-                    duration: progress.duration,
-                    isPlaying: player.isPlaying,
-                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
-                )
-            case .digital:
-                DigitalScrubberView(
-                    position: progress.position,
-                    duration: progress.duration,
-                    isPlaying: player.isPlaying,
-                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
-                )
-            case .pill:
-                PillScrubberView(
-                    position: progress.position,
-                    duration: progress.duration,
-                    isPlaying: player.isPlaying,
-                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
-                )
-            case .neonLine:
-                NeonLineScrubberView(
-                    position: progress.position,
-                    duration: progress.duration,
-                    isPlaying: player.isPlaying,
-                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
-                )
-            case .dotTrack:
-                DotTrackScrubberView(
-                    position: progress.position,
-                    duration: progress.duration,
-                    isPlaying: player.isPlaying,
-                    onSeek: { seekHaptic.impactOccurred(); player.seek(to: $0) }
-                )
-            }
-
-            playtimeCounterRow
+            NowPlayingScrubber(seekerStyle: seekerStyle, seekHaptic: seekHaptic)
+            NowPlayingPlaytimeCounter(style: playtimeCounterStyle)
             seekerStylePicker
             playtimeCounterStylePicker
         }
     }
 
     var playtimeCounterRow: some View {
-        Text(playtimeCounterStyle.text(position: progress.position, duration: progress.duration))
-            .font(AppTheme.monoFont(size: 13))
-            .foregroundStyle(AppTheme.textSecondary)
-            .contentTransition(.numericText())
-            .animation(.snappy, value: progress.position)
+        NowPlayingPlaytimeCounter(style: playtimeCounterStyle)
     }
 
     var playtimeCounterStylePicker: some View {
@@ -151,5 +78,110 @@ extension NowPlayingView {
             }
             .padding(.horizontal, 2)
         }
+    }
+}
+
+// MARK: - Progress-isolated subviews
+//
+// These declare their own `@EnvironmentObject var progress: PlaybackProgress`
+// instead of `NowPlayingView` doing so. `@EnvironmentObject`/`@ObservedObject`
+// subscribes to `objectWillChange` for as long as it's *declared* on a type —
+// regardless of whether that render's `body` actually reads it (see
+// `PlaybackProgress`'s doc comment in AudioPlayerManager.swift) — so having
+// it on `NowPlayingView` itself, one of the biggest view trees in the app
+// (artwork, queue preview, lyrics, EQ, effects), forced all of that to
+// re-evaluate on every ~0.25-0.5s position tick. Isolating the two pieces
+// that actually need live position into their own small views keeps only
+// these re-rendering that often.
+
+private struct NowPlayingScrubber: View {
+    @EnvironmentObject private var progress: PlaybackProgress
+    @EnvironmentObject private var player: AudioPlayerManager
+    let seekerStyle: SeekerStyle
+    let seekHaptic: UIImpactFeedbackGenerator
+
+    var body: some View {
+        let onSeek: (TimeInterval) -> Void = { seekHaptic.impactOccurred(); player.seek(to: $0) }
+        switch seekerStyle {
+        case .waveform:
+            if let url = player.currentSong?.url, url.isFileURL, progress.duration > 0 {
+                WaveformScrubberView(
+                    url: url,
+                    position: progress.position,
+                    duration: progress.duration,
+                    isPlaying: player.isPlaying,
+                    onSeek: onSeek
+                )
+            } else {
+                ClassicScrubberView(
+                    position: progress.position,
+                    duration: progress.duration,
+                    isPlaying: player.isPlaying,
+                    onSeek: onSeek
+                )
+            }
+        case .classic:
+            ClassicScrubberView(
+                position: progress.position,
+                duration: progress.duration,
+                isPlaying: player.isPlaying,
+                onSeek: onSeek
+            )
+        case .ring:
+            RingScrubberView(
+                position: progress.position,
+                duration: progress.duration,
+                isPlaying: player.isPlaying,
+                onSeek: onSeek
+            )
+        case .bars:
+            BarsScrubberView(
+                position: progress.position,
+                duration: progress.duration,
+                isPlaying: player.isPlaying,
+                onSeek: onSeek
+            )
+        case .digital:
+            DigitalScrubberView(
+                position: progress.position,
+                duration: progress.duration,
+                isPlaying: player.isPlaying,
+                onSeek: onSeek
+            )
+        case .pill:
+            PillScrubberView(
+                position: progress.position,
+                duration: progress.duration,
+                isPlaying: player.isPlaying,
+                onSeek: onSeek
+            )
+        case .neonLine:
+            NeonLineScrubberView(
+                position: progress.position,
+                duration: progress.duration,
+                isPlaying: player.isPlaying,
+                onSeek: onSeek
+            )
+        case .dotTrack:
+            DotTrackScrubberView(
+                position: progress.position,
+                duration: progress.duration,
+                isPlaying: player.isPlaying,
+                onSeek: onSeek
+            )
+        }
+    }
+}
+
+private struct NowPlayingPlaytimeCounter: View {
+    @EnvironmentObject private var progress: PlaybackProgress
+    let style: PlaytimeCounterStyle
+
+    var body: some View {
+        Text(style.text(position: progress.position, duration: progress.duration))
+            .font(AppTheme.monoFont(size: 13))
+            .foregroundStyle(AppTheme.textSecondary)
+            .contentTransition(.numericText())
+            .animation(.snappy, value: progress.position)
     }
 }

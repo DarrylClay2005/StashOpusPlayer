@@ -10,7 +10,13 @@ extension NowPlayingView {
             Button {
                 addBookmarkAtCurrentPosition()
             } label: {
-                Label("Add Bookmark at \(formattedBookmarkTime(progress.position))", systemImage: "bookmark.fill")
+                // `player.position` (a plain computed passthrough to
+                // `player.progress.position`, not `@Published` itself) rather
+                // than the `progress` environment object directly — this is
+                // just a one-shot read for display text, and NowPlayingView
+                // no longer declares `progress` as an `@EnvironmentObject`
+                // (see NowPlayingView+Timeline.swift's isolation comment).
+                Label("Add Bookmark at \(formattedBookmarkTime(player.position))", systemImage: "bookmark.fill")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AppTheme.dynamicAccent)
             }
@@ -69,8 +75,8 @@ extension NowPlayingView {
         guard let songID = player.currentSong?.id else { return }
         BookmarkStore.shared.addBookmark(
             songID: songID,
-            timestamp: progress.position,
-            label: "Bookmark at \(formattedBookmarkTime(progress.position))"
+            timestamp: player.position,
+            label: "Bookmark at \(formattedBookmarkTime(player.position))"
         )
         bookmarksRefreshToken = UUID()
     }

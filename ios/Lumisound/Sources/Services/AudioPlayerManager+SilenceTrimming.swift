@@ -18,10 +18,19 @@ extension AudioPlayerManager {
     /// detecting trailing silence would need scanning from the end of the
     /// file (or monitoring live playback), which is meaningfully more
     /// complex and isn't implemented here.
+    // maxScanSeconds trimmed from an earlier 4.0 — this scan (decode + linear
+    // sample sweep) runs synchronously on the main thread in `scheduleCurrent`
+    // for every fresh track start when silence trimming is on, and real
+    // leading silence is virtually always under 2s; halving the window
+    // roughly halves that per-track-start cost without missing realistic
+    // cases. A full async rewrite of `scheduleCurrent` would remove the
+    // main-thread cost entirely but touches the core scheduling path shared
+    // by every playback/skip/gapless transition — too risky to change here
+    // without the ability to compile/test it.
     func detectLeadingSilenceFrames(
         in file: AVAudioFile,
         thresholdLinear: Float = 0.02,
-        maxScanSeconds: Double = 4.0
+        maxScanSeconds: Double = 2.0
     ) -> AVAudioFramePosition {
         let format = file.processingFormat
         let sampleRate = format.sampleRate

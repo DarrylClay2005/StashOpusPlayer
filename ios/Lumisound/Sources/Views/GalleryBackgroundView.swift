@@ -102,7 +102,16 @@ private struct KenBurnsModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         if isActive {
-            TimelineView(.animation) { timeline in
+            // `.periodic` at ~12fps instead of `.animation` (which drives at
+            // the display's full 60/120Hz) — `GalleryBackgroundView` is
+            // instantiated once per tab and `TabView` keeps every tab's
+            // hierarchy mounted simultaneously, so with Ken Burns on this
+            // driver runs continuously in up to 6 places at once, most of
+            // them off-screen. The pan/zoom itself is a slow 30-second leg
+            // (see `legDuration` below), so a much lower update rate is
+            // visually indistinguishable while cutting the redundant-instance
+            // cost by roughly an order of magnitude.
+            TimelineView(.periodic(from: .now, by: 1.0 / 12.0)) { timeline in
                 let phase = CGFloat(ArtworkClock.pingPong(timeline.date, legDuration: 30))
                 let scale: CGFloat = 1.08 + 0.05 * phase
                 let dx: CGFloat = 14 * (phase - 0.5)
