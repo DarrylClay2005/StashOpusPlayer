@@ -1,0 +1,533 @@
+@preconcurrency import AVFoundation
+import AudioToolbox
+import Foundation
+import MediaPlayer
+import UIKit
+
+extension AudioPlayerManager {
+
+    // MARK: - Private Helpers
+
+    func prepareCurrent() {
+        scheduleCurrent(from: position)
+        updateNowPlaying()
+    }
+
+    func playCurrent(from startTime: TimeInterval) {
+        // Invalidate any pending completion callbacks BEFORE cancelCrossfade() or node.stop()
+        // so that the stopped node's completion block never fires handleTrackEnded().
+        scheduleGeneration &+= 1
+        crossfadeStartTimer?.invalidate()
+        crossfadeStartTimer = nil
+        cancelCrossfade()
+        // Clear before scheduling so failure can be detected below.
+        errorMessage = nil
+
+        // Best-effort: get the upcoming streamed track's audio onto disk while
+        // this one plays, so its turn doesn't open with a multi-second download
+        // stall (the audible "gap" streamed sources have that local files don't).
+        prefetchUpcomingStreamIfNeeded()
+
+        // For HTTP/HTTPS URLs the download is async — scheduleCurrent handles the full play
+        // flow internally (including calling node.play() after the download completes).
+        if let url = currentSong?.url,
+           ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            isPlaying = true  // optimistically set — confirmed once download finishes
+            startTimer()
+            updateNowPlaying()
+            scheduleCurrent(from: startTime)  // kicks off async download path
+            return
+        }
+
+        // Local file — synchronous path.
+        scheduleCurrent(from: startTime)
+        // scheduleCurrent sets errorMessage on failure; bail out here to avoid a zombie
+        // state where isPlaying=true but no audio segment is scheduled on the node.
+        guard errorMessage == nil else { return }
+        startEngineIfNeeded()
+        activeNode.play()
+        isPlaying = true
+        startTimer()
+        updateNowPlaying()
+        reapplyActiveEffect()
+    }
+
+    /// Resets ReplayGain to neutral at the start of a new track — before that track's own
+    /// analysis (the `replayGainEnabled` block further down each scheduling path) computes
+    /// its per-track gain — so the previous track's gain can't briefly bleed into this one.
+    /// Called only once a file/stream has loaded successfully, so this also doubles as the
+    /// reset point for the AVPlayer load-failure circuit breaker (see `handleLoadFailure`).
+    func resetReplayGainForNewTrack() {
+        recentLoadFailureTimestamps.removeAll()
+        replayGainLinearGain = 1.0
+        // Every fresh (stop()+play()) schedule restarts the node's sample clock
+        // at 0, so the gapless position baseline must reset too. The gapless
+        // hand-off path also calls this, then immediately re-captures the
+        // node's cumulative sample time (see `handleTrackEnded`).
+        gaplessBaseFrame = 0
+        // Re-apply the master volume/boost (and reset ReplayGain's contribution
+        // to neutral) so a track change can't leave the previous track's
+        // analysed ReplayGain — or a stale boost level — applied to the new one.
+        applyOutputGain()
+    }
+
+    /// Core scheduler — loads the audio file, seeks to `startTime`, and arms the completion handler
+    /// that drives crossfade / gapless / normal track-end logic.
+    ///
+    /// `fileStartFrame` is always set to the absolute frame corresponding to `startTime`.
+    /// When `startTime == 0` this is explicitly 0, which keeps `updatePositionFromPlayer()`
+    /// accurate from the very first rendered frame of a new track.
+    ///
+    /// For HTTP/HTTPS URLs this method returns early after launching an async Task;
+    /// `downloadAndSchedule` completes the setup and starts the node once the file is cached.
+    func scheduleCurrent(from startTime: TimeInterval) {
+        guard let song = currentSong else { return }
+        guard let url = song.url else {
+            // URL was cleared (e.g. stale ipod-library:// after app restore) — skip silently.
+            // Do not set errorMessage; the user sees the track title with no playback.
+            return
+        }
+
+        // HTTP URLs must be downloaded to a temp file before AVAudioFile can read them.
+        // AVAudioFile only reads local filesystem paths, not HTTP streams.
+        let scheme = url.scheme?.lowercased() ?? ""
+        if scheme == "http" || scheme == "https" {
+            Task {
+                await downloadAndSchedule(url: url, startTime: startTime)
+            }
+            return
+        }
+
+        // Opus/WebM/OGG containers may not be natively supported by AVAudioFile.
+        // Route through AudioEncoderService which tries native open first, then exports to M4A.
+        let fileExt = url.pathExtension.lowercased()
+        if ["opus", "webm", "ogg"].contains(fileExt) {
+            Task { await transcodeAndSchedule(url: url, startTime: startTime) }
+            return
+        }
+
+        // Local file — schedule directly (native format, no transcoding needed).
+        tearDownOpusPlayer()
+        do {
+            let node = activeNode
+            // Increment generation before stopping so the old completion is invalidated.
+            let gen = scheduleGeneration &+ 1
+            scheduleGeneration = gen
+            node.stop()
+            let file = try AVAudioFile(forReading: url)
+            audioFile = file
+            duration = file.duration
+            let sampleRate = file.processingFormat.sampleRate
+            let startFrame = max(0, AVAudioFramePosition(startTime * sampleRate))
+            let framesLeft = max(0, AVAudioFrameCount(file.length - startFrame))
+            // Explicitly reset to 0 for new-track starts so the position formula is exact.
+            fileStartFrame = startFrame
+            position = startTime
+            gaplessScheduled = false
+            pendingNextIndex = nil
+            resetReplayGainForNewTrack()
+
+            node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.scheduleGeneration == gen else { return }
+                    self.handleTrackEnded()
+                }
+            }
+
+            // Warm the BPM cache for this track and the one queued after it so
+            // `beginCrossfade` can read a tempo synchronously once it fires.
+            prewarmBPM(for: currentSong)
+            prewarmBPM(for: peekNextSong())
+
+            // Schedule crossfade to begin crossfadeDuration seconds before the track ends,
+            // so the incoming track fades in while the current track is still playing.
+            if audioSettings.crossfadeActive && audioSettings.crossfadeDuration > 0 {
+                let trackLength = Double(framesLeft) / file.processingFormat.sampleRate
+                let crossfadeOffset = max(0, trackLength - audioSettings.crossfadeDuration)
+                if crossfadeOffset > 0 {
+                    crossfadeStartTimer?.invalidate()
+                    crossfadeStartTimer = Timer.scheduledTimer(
+                        withTimeInterval: crossfadeOffset, repeats: false
+                    ) { [weak self] _ in
+                        Task { @MainActor in
+                            guard let self, self.isPlaying, !self.isCrossfading else { return }
+                            self.beginCrossfade()
+                        }
+                    }
+                }
+            }
+
+            // Pre-schedule the next track for gapless playback 0.1 s after this segment
+            // starts, giving the engine enough time to buffer it seamlessly.
+            //
+            // Gapless and crossfade are mutually-exclusive transition strategies:
+            // crossfade starts the incoming track on the OTHER node a few seconds
+            // early, while gapless queues it on THIS node to start the instant
+            // this one ends. With both enabled, the crossfade fires AND the
+            // gapless-queued segment also plays — two tracks at once (the
+            // "current + next play together" bug). So only arm gapless when
+            // crossfade is off.
+            if audioSettings.gaplessEnabled && !audioSettings.crossfadeActive {
+                Task { [weak self] in
+                    guard let self else { return }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    await MainActor.run {
+                        guard self.isPlaying,
+                              self.audioSettings.gaplessEnabled,
+                              !self.audioSettings.crossfadeActive,
+                              !self.gaplessScheduled else { return }
+                        self.scheduleGaplessNext()
+                    }
+                }
+            }
+
+            // ReplayGain: read embedded REPLAYGAIN_TRACK_GAIN tag; fall back to RMS analysis
+            // for files without a tag. Runs off the main thread to avoid blocking playback.
+            if audioSettings.replayGainEnabled {
+                let asset = AVURLAsset(url: url)
+                let capturedURL = url
+                Task.detached(priority: .utility) { [weak self] in
+                    let metadata = (try? await asset.load(.metadata)) ?? []
+                    var gainDB: Float? = nil
+                    for item in metadata {
+                        let id = item.identifier?.rawValue.lowercased() ?? ""
+                        if id.contains("replaygain_track_gain") || id.contains("replaygain") {
+                            if let str = item.stringValue {
+                                // Tag format: "+1.23 dB" or "-1.23 dB"
+                                let numeric = str.components(
+                                    separatedBy: CharacterSet(
+                                        charactersIn: "-+0123456789."
+                                    ).inverted
+                                ).joined()
+                                gainDB = Float(numeric)
+                            }
+                        }
+                    }
+                    // No embedded tag: compute RMS gain (returns 0 for unsupported formats).
+                    if gainDB == nil {
+                        let rms = await NormalizationService.shared.gain(for: capturedURL)
+                        if rms != 0 { gainDB = rms }
+                    }
+                    if let gain = gainDB {
+                        await MainActor.run { [weak self] in
+                            guard let self else { return }
+                            let linear = pow(10.0, gain / 20.0)
+                            self.replayGainLinearGain = linear
+                            // Re-derive the output gain split (mixer attenuation +
+                            // EQ globalGain boost) now that ReplayGain's contribution
+                            // is known.
+                            self.applyOutputGain()
+                        }
+                    }
+                }
+            }
+        } catch {
+            // AVAudioFile couldn't open this "native format" file — most often a
+            // corrupted/truncated download (e.g. a track saved despite a failed
+            // yt-dlp run) that AVAssetReader chokes on with a cryptic coreaudio
+            // error. AVPlayer's codec pipeline is more tolerant and can often play
+            // (or at least cleanly fail) these files, so fall back to it instead of
+            // leaving playback stalled on a silent "errorMessage only" dead end.
+            appWarn("AVAudioFile open failed for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription) — falling back to AVPlayer", category: "audio")
+            scheduleWithOpusPlayer(url: url, startTime: startTime)
+        }
+    }
+
+    /// Converts an Opus/WebM/OGG file to a playable format via AudioEncoderService,
+    /// then schedules the result for playback using the standard AVAudioFile pipeline.
+    /// Called from `scheduleCurrent` when it detects an unsupported container extension.
+    @MainActor
+    func transcodeAndSchedule(url: URL, startTime: TimeInterval) async {
+        isSchedulingAsync = true
+        defer { isSchedulingAsync = false }
+        errorMessage = nil
+
+        guard let transcodedURL = await AudioEncoderService.shared.transcodeForPlayback(url) else {
+            // AVAssetReader/AVAssetExportSession cannot decode this container (e.g. Ogg/Opus).
+            // Fall back to AVPlayer which has access to iOS's full codec pipeline.
+            appLog("Transcoding unavailable for .\(url.pathExtension), falling back to AVPlayer — \"\(currentSong?.displayName ?? "?")\"", category: "audio")
+            scheduleWithOpusPlayer(url: url, startTime: startTime)
+            return
+        }
+
+        do {
+            let node = activeNode
+            let gen  = scheduleGeneration &+ 1
+            scheduleGeneration = gen
+            node.stop()
+
+            let file        = try AVAudioFile(forReading: transcodedURL)
+            audioFile       = file
+            duration        = file.duration
+            let sampleRate  = file.processingFormat.sampleRate
+            let startFrame  = max(0, AVAudioFramePosition(startTime * sampleRate))
+            let framesLeft  = max(0, AVAudioFrameCount(file.length - startFrame))
+            fileStartFrame  = startFrame
+            position        = startTime
+            gaplessScheduled = false
+            pendingNextIndex = nil
+            resetReplayGainForNewTrack()
+
+            node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.scheduleGeneration == gen else { return }
+                    self.handleTrackEnded()
+                }
+            }
+
+            // Warm the BPM cache for this track and the one queued after it so
+            // `beginCrossfade` can read a tempo synchronously once it fires.
+            prewarmBPM(for: currentSong)
+            prewarmBPM(for: peekNextSong())
+
+            // Crossfade timer — same logic as scheduleCurrent.
+            if audioSettings.crossfadeActive && audioSettings.crossfadeDuration > 0 {
+                let trackLength     = Double(framesLeft) / sampleRate
+                let crossfadeOffset = max(0, trackLength - audioSettings.crossfadeDuration)
+                if crossfadeOffset > 0 {
+                    crossfadeStartTimer?.invalidate()
+                    crossfadeStartTimer = Timer.scheduledTimer(
+                        withTimeInterval: crossfadeOffset, repeats: false
+                    ) { [weak self] _ in
+                        Task { @MainActor in
+                            guard let self, self.isPlaying, !self.isCrossfading else { return }
+                            self.beginCrossfade()
+                        }
+                    }
+                }
+            }
+
+            if isPlaying {
+                startEngineIfNeeded()
+                node.play()
+                startTimer()
+                reapplyActiveEffect()
+            }
+            updateNowPlaying()
+
+            // ReplayGain from original file's metadata.
+            if audioSettings.replayGainEnabled {
+                let asset       = AVURLAsset(url: url)
+                let capturedURL = url
+                Task.detached(priority: .utility) { [weak self] in
+                    let metadata = (try? await asset.load(.metadata)) ?? []
+                    var gainDB: Float?
+                    for item in metadata {
+                        let id = item.identifier?.rawValue.lowercased() ?? ""
+                        if id.contains("replaygain_track_gain") || id.contains("replaygain") {
+                            if let str = item.stringValue {
+                                let numeric = str.components(
+                                    separatedBy: CharacterSet(charactersIn: "-+0123456789.").inverted
+                                ).joined()
+                                gainDB = Float(numeric)
+                            }
+                        }
+                    }
+                    if gainDB == nil {
+                        let rms = await NormalizationService.shared.gain(for: capturedURL)
+                        if rms != 0 { gainDB = rms }
+                    }
+                    if let gain = gainDB {
+                        await MainActor.run { [weak self] in
+                            guard let self else { return }
+                            let linear = pow(10.0, gain / 20.0)
+                            self.replayGainLinearGain = linear
+                            // Re-derive the output gain split (mixer attenuation +
+                            // EQ globalGain boost) now that ReplayGain's contribution
+                            // is known.
+                            self.applyOutputGain()
+                        }
+                    }
+                }
+            }
+
+        } catch {
+            errorMessage = "Playback error: \(error.localizedDescription)"
+            isPlaying = false
+            appError("Transcoded-file scheduling failed for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
+        }
+    }
+
+    /// Removes stream cache temp files older than 1 hour to prevent unbounded disk growth.
+    func cleanOldStreamCache() {
+        let tempDir = FileManager.default.temporaryDirectory
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: [.creationDateKey]) else { return }
+        let cutoff = Date().addingTimeInterval(-3600)  // 1 hour
+        for file in files where file.lastPathComponent.hasPrefix("stream_") {
+            if let created = try? file.resourceValues(forKeys: [.creationDateKey]).creationDate,
+               created < cutoff {
+                try? fm.removeItem(at: file)
+            }
+        }
+    }
+
+    @MainActor
+    func downloadAndSchedule(url: URL, startTime: TimeInterval) async {
+        tearDownOpusPlayer()
+        cleanOldStreamCache()
+        isSchedulingAsync = true
+        defer { isSchedulingAsync = false }
+
+        errorMessage = nil
+
+        do {
+            // Derive a stable cache filename from the URL string.
+            let cacheKey: String = url.absoluteString.data(using: .utf8).map { bytes in
+                var hash: UInt64 = 5381
+                for byte in bytes { hash = hash &* 31 &+ UInt64(byte) }
+                return String(hash, radix: 16)
+            } ?? UUID().uuidString
+
+            // Detect the actual audio container from the URL path before choosing an extension.
+            // YouTube CDN URLs often include the itag/mime in the path or may serve webm/opus
+            // even when we requested m4a. AVAudioFile reads magic bytes but uses the file
+            // extension for format hints — a mismatch causes silent failure.
+            let urlPath = url.path.lowercased()
+            let ext: String
+            if urlPath.contains("audio/webm") || urlPath.hasSuffix(".webm") || urlPath.contains("mime=audio%2fwebm") {
+                ext = "webm"
+            } else if urlPath.hasSuffix(".opus") || urlPath.contains("mime=audio%2fogg") {
+                ext = "opus"
+            } else if urlPath.hasSuffix(".mp3") {
+                ext = "mp3"
+            } else {
+                ext = "m4a"    // default; covers m4a, aac, mp4 audio
+            }
+
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("stream_\(cacheKey).\(ext)")
+
+            if !FileManager.default.fileExists(atPath: tempURL.path) {
+                // Build a request with a realistic browser UA so CDN servers don't reject it.
+                var req = URLRequest(url: url)
+                req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", forHTTPHeaderField: "User-Agent")
+                req.timeoutInterval = 60
+                // Apply any per-song headers (e.g. Authorization for user music / server tracks).
+                if let headers = currentSong?.httpHeaders {
+                    for (field, value) in headers { req.setValue(value, forHTTPHeaderField: field) }
+                }
+                let (downloaded, response) = try await URLSession.shared.download(for: req)
+                // Detect extension from Content-Type if URL path was inconclusive
+                if ext == "m4a", let ct = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") {
+                    let refinedExt: String
+                    if ct.contains("webm") { refinedExt = "webm" }
+                    else if ct.contains("ogg") || ct.contains("opus") { refinedExt = "opus" }
+                    else if ct.contains("mpeg") { refinedExt = "mp3" }
+                    else { refinedExt = "m4a" }
+                    let refinedURL = tempURL.deletingPathExtension().appendingPathExtension(refinedExt)
+                    try? FileManager.default.removeItem(at: refinedURL)
+                    try FileManager.default.moveItem(at: downloaded, to: refinedURL)
+                    // Re-enter with the corrected URL
+                    let file2 = try AVAudioFile(forReading: refinedURL)
+                    audioFile = file2
+                    duration = file2.duration
+                    let node = activeNode
+                    let gen = scheduleGeneration &+ 1
+                    scheduleGeneration = gen
+                    node.stop()
+                    let sr = file2.processingFormat.sampleRate
+                    let sf = max(0, AVAudioFramePosition(startTime * sr))
+                    let fl = max(0, AVAudioFrameCount(file2.length - sf))
+                    fileStartFrame = sf; position = startTime; gaplessScheduled = false; pendingNextIndex = nil
+                    resetReplayGainForNewTrack()
+                    node.scheduleSegment(file2, startingFrame: sf, frameCount: fl, at: nil) { [weak self] in
+                        Task { @MainActor in guard let self, self.scheduleGeneration == gen else { return }; self.handleTrackEnded() }
+                    }
+                    if isPlaying { startEngineIfNeeded(); node.play(); startTimer(); reapplyActiveEffect() }
+                    updateNowPlaying()
+                    return
+                }
+                try? FileManager.default.removeItem(at: tempURL)
+                try FileManager.default.moveItem(at: downloaded, to: tempURL)
+            }
+
+            // From here on this is identical to the local-file path in scheduleCurrent.
+            let node = activeNode
+            // Increment generation before stopping so the old completion is invalidated.
+            let gen = scheduleGeneration &+ 1
+            scheduleGeneration = gen
+            node.stop()
+            let file = try AVAudioFile(forReading: tempURL)
+            audioFile = file
+            duration = file.duration
+            let sampleRate = file.processingFormat.sampleRate
+            let startFrame = max(0, AVAudioFramePosition(startTime * sampleRate))
+            let framesLeft = max(0, AVAudioFrameCount(file.length - startFrame))
+            fileStartFrame = startFrame
+            position = startTime
+            gaplessScheduled = false
+            pendingNextIndex = nil
+            resetReplayGainForNewTrack()
+
+            node.scheduleSegment(file, startingFrame: startFrame, frameCount: framesLeft, at: nil) { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.scheduleGeneration == gen else { return }
+                    self.handleTrackEnded()
+                }
+            }
+
+            // Start playback — playCurrent already set isPlaying = true before the download.
+            if isPlaying {
+                startEngineIfNeeded()
+                node.play()
+                startTimer()
+                reapplyActiveEffect()
+            }
+            updateNowPlaying()
+
+        } catch {
+            errorMessage = "Could not load audio: \(error.localizedDescription)"
+            isPlaying = false
+            appError("Stream load failed for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
+        }
+    }
+
+    /// Called by the AVAudioPlayerNode completion block when the current segment finishes.
+    func handleTrackEnded() {
+        guard isPlaying else { return }
+
+        // If gapless already scheduled the next file on this node, advance the index and update UI.
+        if gaplessScheduled {
+            advanceIndex()
+            gaplessScheduled = false
+            pendingNextIndex = nil
+            // Adopt the file that just began playing gaplessly so position,
+            // duration, and the scrubber track the NEW track. Without this the
+            // Now Playing UI/MiniPlayer keep showing the previous track's
+            // duration and a frozen (clamped) progress bar — the "won't update
+            // when crossfade is off" bug, since gapless is the default
+            // crossfade-off transition path.
+            if let nextFile = pendingGaplessFile {
+                audioFile = nextFile
+                duration = nextFile.duration
+            }
+            fileStartFrame = 0
+            pendingGaplessFile = nil
+            // Fresh track — reset ReplayGain to neutral (its own analysis, if
+            // enabled, runs per-track in the scheduling paths). This also zeroes
+            // `gaplessBaseFrame`, so capture the node's CURRENT cumulative sample
+            // time as this segment's baseline immediately afterward.
+            resetReplayGainForNewTrack()
+            if let nodeTime = activeNode.lastRenderTime,
+               let playerTime = activeNode.playerTime(forNodeTime: nodeTime) {
+                gaplessBaseFrame = Double(playerTime.sampleTime)
+            }
+            position = 0
+            reapplyActiveEffect()
+            updateNowPlaying()
+            // Schedule completion for the newly playing segment.
+            scheduleGaplessNext()
+            return
+        }
+
+        if audioSettings.crossfadeActive {
+            // The crossfadeStartTimer may have already started the crossfade;
+            // don't trigger a second crossfade if we're already mid-fade.
+            guard !isCrossfading else { return }
+            beginCrossfade()
+        } else {
+            skipToNext()
+        }
+    }
+}

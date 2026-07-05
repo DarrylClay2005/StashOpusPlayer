@@ -1,0 +1,144 @@
+@preconcurrency import AVFoundation
+import AudioToolbox
+import Foundation
+import MediaPlayer
+import UIKit
+
+extension AudioPlayerManager {
+
+    // MARK: - Apply Audio Settings
+
+    func applyAudioSettings() {
+        // AVPlayer fallback path (opus/webm/ogg streams) — only Speed can be
+        // mapped onto AVPlayer's API (EQ/pitch/crossfade/gapless/ReplayGain need
+        // the AVAudioEngine graph below, which this path bypasses entirely).
+        // Re-apply `.rate` directly so dragging the Speed slider mid-playback
+        // takes effect immediately instead of silently doing nothing.
+        if isUsingOpusPlayer {
+            // AVPlayer.volume is hard-clamped to 0...1 by AVFoundation and this
+            // path bypasses the AVAudioEngine graph entirely (no `equalizer`/
+            // `limiter` available here to realise a boost above unity). Clamp
+            // explicitly so values above 1.0 don't silently no-op — boost beyond
+            // 100% simply isn't available for opus/webm/ogg streams played via
+            // this fallback.
+            opusPlayer?.volume = min(audioSettings.volume, 1.0)
+            if isPlaying { opusPlayer?.rate = Float(audioSettings.speed) }
+            return
+        }
+
+        // Volume — apply to both nodes (secondary will be 0 unless crossfading).
+        primaryNode.volume = isCrossfading ? primaryNode.volume : audioSettings.volume
+        if !isCrossfading { secondaryNode.volume = audioSettings.volume }
+
+        // Speed / pitch
+        timePitch.rate = audioSettings.speed
+        timePitch.pitch = audioSettings.pitchSemitones * 100
+
+        // EQ bands
+        let eqEnabled = audioSettings.equalizerEnabled
+        for (index, band) in equalizer.bands.enumerated() {
+            band.bypass = !eqEnabled
+            if audioSettings.eqBands.indices.contains(index) {
+                var gain = eqEnabled ? audioSettings.eqBands[index] : 0
+                // Apply bass boost on top of EQ gains for bands 0 (32Hz) and 1 (64Hz).
+                if audioSettings.bassBoostEnabled && eqEnabled {
+                    if index == 0 || index == 1 {
+                        let boost = min(max(audioSettings.bassBoostGain, 0), 15)
+                        gain += boost
+                    }
+                }
+                // AVAudioUnitEQ clamps band gain to -96...24 dB internally — combining a
+                // +12 dB EQ slider with a +15 dB bass boost (27 dB) silently hit that
+                // ceiling, so the boost had less audible effect than its displayed value
+                // implied. Clamp explicitly so the applied gain matches what's shown.
+                band.gain = min(max(gain, -96), 24)
+            }
+        }
+
+        // If bass boost is enabled but EQ is disabled, enable EQ bands 0 & 1 for bass
+        // boost only. This block is mutually exclusive with the EQ block above (which
+        // already adds boost to bands 0/1 when both EQ and bass boost are on), so there
+        // is no double-application.
+        if audioSettings.bassBoostEnabled && !audioSettings.equalizerEnabled {
+            for (index, band) in equalizer.bands.enumerated() {
+                band.bypass = false
+                if index == 0 || index == 1 {
+                    band.gain = min(max(audioSettings.bassBoostGain, 0), 15)
+                } else {
+                    band.gain = 0
+                }
+            }
+        }
+
+        // Reverb — live amount and room preset. Only reload the factory preset
+        // when it actually changed (loadFactoryPreset is the heavy call, and it
+        // resets wetDryMix, so re-pin it to 100 after). The reverb amount is the
+        // wet-path gain, applied on every pass so toggling reverb or dragging
+        // the mix slider takes effect instantly on whatever is playing — and
+        // because the dry path is separate, turning reverb down/off never
+        // attenuates the original signal.
+        if loadedReverbPreset != audioSettings.reverbPreset {
+            reverb.loadFactoryPreset(avReverbPreset(for: audioSettings.reverbPreset))
+            reverb.wetDryMix = 100
+            loadedReverbPreset = audioSettings.reverbPreset
+        }
+        let reverbWet = min(max(audioSettings.reverbWetDryMix, 0), 100) / 100.0
+        reverbWetMixer.outputVolume = audioSettings.reverbEnabled ? reverbWet : 0
+
+        setSpatialAudioRouting(audioSettings.spatialAudioEnabled ?? false)
+
+        // ReplayGain + master volume/boost: re-combine the current track's analysed
+        // gain (replayGainLinearGain, computed asynchronously in scheduleCurrent/
+        // transcodeAndSchedule from embedded REPLAYGAIN_TRACK_GAIN metadata or RMS
+        // analysis) with the live volume. Using the SAME formula here as the analysis
+        // callback — rather than a separate flat-cap value — means a mid-track
+        // volume/EQ/speed tweak (which re-invokes this via the `audioSettings` didSet)
+        // refreshes the output level without clobbering the per-track gain the
+        // analysis already computed.
+        applyOutputGain()
+
+        // Do NOT call updateNowPlaying() here — this runs on every EQ slider drag.
+    }
+
+    /// Applies the ReplayGain correction (if enabled) and any volume boost above
+    /// 100% to the output stage. The 0...100% portion of `audioSettings.volume`
+    /// is applied separately, directly to the player node(s) — see
+    /// `applyAudioSettings()` and the crossfade/tremolo helpers — since
+    /// `AVAudioPlayerNode.volume` already handles that range correctly.
+    ///
+    /// `AVAudioMixerNode.outputVolume` is hard-clamped by AVFoundation to `0...1`,
+    /// so it (and the player nodes) can only ever *attenuate* — neither can express
+    /// the boost above unity that `audioSettings.volume` allows (up to
+    /// `AudioSettings.maxVolume`, i.e. up to +12 dB), nor a ReplayGain correction
+    /// greater than 1.0x for a quiet track. To realise gain beyond what those
+    /// attenuation-only stages contribute, the *remaining* portion of the desired
+    /// total gain is applied as positive dB on `equalizer.globalGain`, which is NOT
+    /// clamped to unity. The brick-wall `limiter` further down the chain (see
+    /// `configureLimiter`) catches any peaks this boost would otherwise clip.
+    func applyOutputGain() {
+        let rgGain: Float = audioSettings.replayGainEnabled ? replayGainLinearGain : 1.0
+        let userVol = audioSettings.volume
+
+        // Desired total linear gain across the whole chain.
+        let totalLinear = max(0, rgGain * userVol)
+
+        // What the player-node volume (set in applyAudioSettings/crossfade/tremolo
+        // to `min(userVol, 1.0)`) and the mixer's outputVolume can each contribute
+        // on their own, attenuation-only (0...1).
+        let nodeContribution = min(max(userVol, 0), 1.0)
+        let mixerContribution = min(max(rgGain, 0), 1.0)
+        crossfadeMixer.outputVolume = mixerContribution
+
+        // Whatever's left over — i.e. gain the node+mixer pair can't express
+        // because both are capped at 1.0x — is made up as positive dB via the
+        // EQ's global gain.
+        let attenuationApplied = nodeContribution * mixerContribution
+        if totalLinear > attenuationApplied, attenuationApplied > 0 {
+            let boostLinear = totalLinear / attenuationApplied
+            let boostDB = 20 * log10(boostLinear)
+            equalizer.globalGain = min(max(boostDB, 0), AudioSettings.maxBoostDB)
+        } else {
+            equalizer.globalGain = 0
+        }
+    }
+}

@@ -1,0 +1,239 @@
+@preconcurrency import AVFoundation
+import AudioToolbox
+import Foundation
+import MediaPlayer
+import UIKit
+
+extension AudioPlayerManager {
+
+    // MARK: - Crossfade
+
+    func beginCrossfade() {
+        guard let nextSong = peekNextSong(), let nextURL = nextSong.url else {
+            skipToNext(); return
+        }
+        guard let nextFile = try? AVAudioFile(forReading: nextURL) else {
+            skipToNext(); return
+        }
+
+        isCrossfading = true
+        // Smart Auto Crossfade (when enabled): snap the fade to the outgoing
+        // track's beat grid (if its tempo is known) so it starts and ends on a
+        // downbeat instead of an arbitrary fraction of a second. With Smart
+        // Crossfade off, use the fixed user-set duration verbatim.
+        let smartCrossfade = audioSettings.smartCrossfadeEnabled
+        let fadeDuration = smartCrossfade
+            ? smartFadeDuration(base: audioSettings.crossfadeDuration, bpm: currentSong.flatMap { bpmCache[$0.id] })
+            : audioSettings.crossfadeDuration
+
+        // The outgoing node is the one currently playing; incoming is the opposite.
+        // Captured as `let` — the upcoming `usingPrimaryNode` flip changes what
+        // `activeNode` resolves to, but these bindings keep pointing at the
+        // correct physical nodes for the rest of this function and the timer below.
+        let outgoing = usingPrimaryNode ? primaryNode : secondaryNode
+        let incoming = usingPrimaryNode ? secondaryNode : primaryNode
+        let outgoingBeatMatch = usingPrimaryNode ? primaryBeatMatch : secondaryBeatMatch
+        let incomingBeatMatch = usingPrimaryNode ? secondaryBeatMatch : primaryBeatMatch
+
+        // True beatmatching (Smart Auto Crossfade only): nudge both tracks'
+        // tempos toward their midpoint for the duration of the overlap, then
+        // ease the incoming track back to its native tempo as the fade
+        // completes. Only attempted when Smart Crossfade is on, both BPMs are
+        // known, and the required adjustment is modest (±8%) — outside that
+        // range (or with Smart Crossfade off) both rates stay at 1.0 for a
+        // plain volume crossfade.
+        let outgoingBPM = currentSong.flatMap { bpmCache[$0.id] }
+        let incomingBPM = bpmCache[nextSong.id]
+        var incomingRate: Float = 1.0
+        if smartCrossfade, let oBPM = outgoingBPM, let iBPM = incomingBPM, oBPM > 0, iBPM > 0 {
+            let target = (oBPM + iBPM) / 2
+            let oRatio = target / oBPM
+            let iRatio = target / iBPM
+            if (0.92...1.08).contains(oRatio), (0.92...1.08).contains(iRatio) {
+                outgoingBeatMatch.rate = Float(oRatio)
+                incomingRate = Float(iRatio)
+            } else {
+                outgoingBeatMatch.rate = 1.0
+            }
+        } else {
+            outgoingBeatMatch.rate = 1.0
+        }
+        incomingBeatMatch.rate = incomingRate
+
+        incoming.volume = 0
+        let gen = scheduleGeneration &+ 1
+        scheduleGeneration = gen
+        incoming.scheduleFile(nextFile, at: nil) { [weak self] in
+            Task { @MainActor in
+                // Incoming finished its full file — drive normal track-end logic.
+                guard let self, self.scheduleGeneration == gen else { return }
+                self.handleTrackEnded()
+            }
+        }
+        startEngineIfNeeded()
+        incoming.play()
+
+        // Switch every "what's playing" property to the incoming track THE INSTANT
+        // it starts audibly — not after the multi-second fade finishes. `activeNode`
+        // is a plain `usingPrimaryNode` lookup that we flip right here, so position
+        // tracking immediately reads frames from `incoming`. Previously these stayed
+        // pointed at the outgoing track for the whole fade: `updatePositionFromPlayer`
+        // combined the OLD track's fileStartFrame/duration with the NEW node's
+        // elapsed time (the position briefly snapping toward zero against the old
+        // track's duration), while Now Playing, the miniplayer, and "Up Next" kept
+        // showing the outgoing track's title/artwork/queue position until the fade
+        // ended — exactly the "miniplayer freaks out, Now Playing/Up Next don't
+        // live-update" glitch reported during crossfades. Flipping here keeps every
+        // published property in lockstep with the audio from the first frame.
+        usingPrimaryNode.toggle()
+        advanceIndex()
+        currentSong = nextSong
+        audioFile = nextFile
+        fileStartFrame = 0
+        position = 0
+        duration = nextFile.duration
+        gaplessScheduled = false
+        pendingNextIndex = nil
+        // Crossfade schedules `nextFile` directly rather than through scheduleCurrent,
+        // so no fresh ReplayGain analysis runs for it — fall back to neutral rather than
+        // carrying over the outgoing track's (likely mismatched) computed gain.
+        resetReplayGainForNewTrack()
+        updateNowPlaying()
+        applyAutoEQIfNeeded(bpm: incomingBPM ?? nextSong.bpm)
+
+        // The track that just became current was prewarmed before this fade
+        // started; warm the one after it now so its tempo is ready for the
+        // next crossfade.
+        prewarmBPM(for: peekNextSong())
+
+        // Arm the crossfade-start timer for the track that just became current —
+        // mirroring the setup `scheduleCurrent` does for the very first track.
+        // Without this, `handleTrackEnded` only ever calls `beginCrossfade` again
+        // at the natural end of `nextFile`'s full playback (zero seconds of
+        // overlap), so every transition after the first one in a session degrades
+        // from an actual crossfade into the new track simply fading in from
+        // silence once the old one has already finished. Re-arming here keeps
+        // the whole queue crossfading with consistent overlap.
+        let nextTrackLength = nextFile.duration
+        let nextCrossfadeOffset = max(0, nextTrackLength - fadeDuration)
+        crossfadeStartTimer?.invalidate()
+        crossfadeStartTimer = nil
+        if fadeDuration > 0 && nextCrossfadeOffset > 0 {
+            crossfadeStartTimer = Timer.scheduledTimer(
+                withTimeInterval: nextCrossfadeOffset, repeats: false
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.isPlaying, !self.isCrossfading else { return }
+                    self.beginCrossfade()
+                }
+            }
+        }
+
+        // When crossfadeDuration == 0, steps clamps to 1 (instantaneous swap). Intentional.
+        let steps = max(1, Int(fadeDuration * 30))
+        let interval = fadeDuration / Double(steps)
+        var step = 0
+
+        crossfadeTimer?.invalidate()
+        crossfadeTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] t in
+            Task { @MainActor [weak self] in
+                guard let self else { t.invalidate(); return }
+                step += 1
+                let progress = Float(step) / Float(steps)
+                let clipped = min(max(progress, 0), 1)
+                outgoing.volume = (1 - clipped) * self.audioSettings.volume
+                incoming.volume = clipped * self.audioSettings.volume
+                // Ease the incoming track from its beatmatched rate back to its
+                // native tempo (1.0) over the course of the fade, so by the time
+                // the outgoing track is fully silent, the new track is playing
+                // at its own correct speed.
+                incomingBeatMatch.rate = incomingRate + (1.0 - incomingRate) * clipped
+                if step >= steps {
+                    t.invalidate()
+                    self.crossfadeTimer = nil
+                    self.finishCrossfade(outgoing: outgoing)
+                }
+            }
+        }
+    }
+
+    /// Called when the volume-ramp timer completes. All "now playing" state already
+    /// switched to the incoming track at the moment the fade began (see
+    /// beginCrossfade) — this just silences and stops the now-abandoned outgoing node.
+    func finishCrossfade(outgoing: AVAudioPlayerNode) {
+        outgoing.stop()
+        outgoing.volume = audioSettings.volume
+        // Reset the abandoned node's beatmatch rate to neutral so it's ready
+        // for reuse on the next crossfade.
+        (outgoing === primaryNode ? primaryBeatMatch : secondaryBeatMatch).rate = 1.0
+        isCrossfading = false
+    }
+
+    func cancelCrossfade() {
+        crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
+        crossfadeStartTimer?.invalidate()
+        crossfadeStartTimer = nil
+        if isCrossfading {
+            // `usingPrimaryNode`/`activeNode` already point at the track that's
+            // becoming current (flipped at the start of the fade — see
+            // beginCrossfade) — that node keeps playing and gets reused/
+            // rescheduled by the caller. The other node is the abandoned
+            // fade-out track: silence and stop it so it doesn't keep sounding.
+            let abandoned = usingPrimaryNode ? secondaryNode : primaryNode
+            abandoned.stop()
+            abandoned.volume = audioSettings.volume
+            (abandoned === primaryNode ? primaryBeatMatch : secondaryBeatMatch).rate = 1.0
+            (activeNode === primaryNode ? primaryBeatMatch : secondaryBeatMatch).rate = 1.0
+            activeNode.volume = audioSettings.volume
+            isCrossfading = false
+        }
+    }
+
+    /// Adjusts `base` (the user's configured crossfade duration) to the nearest
+    /// whole number of beats at `bpm`, so the fade starts and ends on a
+    /// downbeat instead of an arbitrary fraction of a second. Falls back to
+    /// `base` unchanged if `bpm` isn't known yet, and clamps the result to
+    /// within ±50% of `base` so a very slow track doesn't balloon a short
+    /// crossfade into a multi-second one (or vice versa for a fast track).
+    func smartFadeDuration(base: TimeInterval, bpm: Double?) -> TimeInterval {
+        guard base > 0, let bpm, bpm > 0 else { return base }
+        let beatLength = 60.0 / bpm
+        let beats = max(1, (base / beatLength).rounded())
+        let snapped = beats * beatLength
+        return min(max(snapped, base * 0.5), base * 1.5)
+    }
+
+    /// Kicks off (cached) BPM analysis for `song` so its tempo is available by
+    /// the time `beginCrossfade` needs it. Fire-and-forget — `bpmCache` is
+    /// populated asynchronously and read synchronously from `beginCrossfade`.
+    func prewarmBPM(for song: Song?) {
+        guard let song, bpmCache[song.id] == nil, song.url != nil else { return }
+        Task { [weak self] in
+            guard let self, let library = self.libraryManager,
+                  let bpm = await library.bpm(for: song)
+            else { return }
+            await MainActor.run {
+                self.bpmCache[song.id] = bpm
+                // Surface the result on `currentSong` too, so the Now Playing
+                // UI can display tempo once it's known.
+                if self.currentSong?.id == song.id {
+                    self.currentSong?.bpm = bpm
+                    self.applyAutoEQIfNeeded(bpm: bpm)
+                }
+            }
+        }
+    }
+
+    /// If "Auto EQ" is enabled, switches the EQ preset to match the current
+    /// track's genre (preferred) or tempo (fallback) — see
+    /// `EQPreset.auto(forBPM:genre:)`. No-op if Auto EQ is off, neither signal
+    /// is usable, or the suggested preset is already active.
+    func applyAutoEQIfNeeded(bpm: Double?) {
+        guard audioSettings.autoEQEnabled else { return }
+        let genre = currentSong?.genre
+        guard let preset = EQPreset.auto(forBPM: bpm, genre: genre),
+              audioSettings.eqPreset != preset else { return }
+        applyEQPreset(preset)
+    }
+}

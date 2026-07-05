@@ -1,0 +1,141 @@
+@preconcurrency import AVFoundation
+import AudioToolbox
+import Foundation
+import MediaPlayer
+import UIKit
+
+extension AudioPlayerManager {
+
+    // MARK: - Position Tracking
+
+    func startTimer() {
+        stopTimer()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.timerTick()
+            }
+        }
+    }
+
+    func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    /// Counts 0.5s timer ticks so `pushPlaybackStateToBridge()` runs roughly
+    /// every 5s during playback, instead of on every tick.
+    var bridgePushTickCounter = 0
+
+    func timerTick() {
+        updatePositionFromPlayer()
+
+        bridgePushTickCounter += 1
+        if bridgePushTickCounter >= 10 {
+            bridgePushTickCounter = 0
+            pushPlaybackStateToBridge()
+        }
+
+        // Belt-and-braces recovery: if we think we're playing but the engine has
+        // silently stopped (and no interruption/route/config-change notification
+        // fired to tell us), restart it here. Without this, `isPlaying` stays true
+        // forever with no audio and no track advance — the "music randomly stops"
+        // bug — until the user manually pauses/resumes.
+        if isPlaying, !isUsingOpusPlayer, !engine.isRunning {
+            handleEngineConfigurationChange()
+        }
+
+        // AB Repeat enforcement
+        if abRepeatEnabled,
+           let start = abRepeatStart,
+           let end = abRepeatEnd,
+           position >= end {
+            seek(to: start)
+        }
+
+        // Keep the lock screen / Apple Watch / CarPlay "Now Playing" elapsed time and
+        // playback-rate in sync with actual position — without this, those surfaces
+        // only refresh on play/pause/track-change events and can visibly drift from
+        // (or briefly disagree with) the in-app scrubber.
+        updateNowPlaying()
+    }
+
+    /// Mirrors the current track/position to the bridge (`/user/playback-state`)
+    /// so other surfaces — e.g. the local Discord Rich Presence daemon — can
+    /// show what this account is currently playing. Fires on play/pause/track
+    /// changes and roughly every 5s during playback; no-ops if not logged in.
+    func pushPlaybackStateToBridge() {
+        AccountService.shared?.pushPlaybackState(
+            song: currentSong,
+            position: position,
+            duration: duration,
+            isPlaying: isPlaying,
+            bpm: currentSong.flatMap { $0.bpm ?? bpmCache[$0.id] }
+        )
+    }
+
+    /// Cancelled/rescheduled on every track change; the in-flight task for the
+    /// previous track.
+    var historyLogTask: Task<Void, Never>?
+
+    /// Logs the current track to `/user/history` (`AccountService.logPlay`)
+    /// ~5s after it starts playing — long enough to filter out rapid skips,
+    /// but soon enough that a linked Discord "Now Playing" webhook and any
+    /// Last.fm/ListenBrainz scrobble reflect the track the user is actually
+    /// listening to. Without this, play history was never recorded and those
+    /// integrations silently never fired.
+    func scheduleHistoryLog() {
+        historyLogTask?.cancel()
+        guard let song = currentSong else { return }
+        historyLogTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            guard self.currentSong?.id == song.id else { return }
+            // Local play-history for the on-device Smart Playlists/Stats
+            // features — same "still on this track 5s later" threshold as
+            // the server-bound log below, so an instant skip doesn't count.
+            PlayHistoryStore.shared.recordPlay(songID: song.id)
+            await AccountService.shared?.logPlay(
+                song: song,
+                listenSeconds: Int(self.position),
+                bpm: song.bpm ?? self.bpmCache[song.id]
+            )
+        }
+    }
+
+    var queuePushTask: Task<Void, Never>?
+
+    /// Mirrors the "up next" queue to the bridge (`/user/queue`), debounced so
+    /// rapid changes (drag-reorder, batch removals) don't fire a request per
+    /// edit. No-ops if not logged in.
+    func pushQueueToBridge() {
+        queuePushTask?.cancel()
+        let snapshot = queue
+        queuePushTask = Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            await AccountService.shared?.pushQueue(snapshot)
+        }
+    }
+
+    func updatePositionFromPlayer() {
+        guard !isUsingOpusPlayer else { return }
+        // Do not overwrite `position` while an async download is in progress.
+        // The position was already set to the seek target in seek()/downloadAndSchedule();
+        // letting the timer fire here would clobber it with a stale node time.
+        guard !isSchedulingAsync else { return }
+
+        let node = activeNode
+        guard let nodeTime = node.lastRenderTime,
+              let playerTime = node.playerTime(forNodeTime: nodeTime),
+              let file = audioFile
+        else { return }
+
+        // Subtract `gaplessBaseFrame` so elapsed time is measured from the start
+        // of the CURRENT segment, not the cumulative frame count of every
+        // gapless segment played on this node since the last fresh schedule.
+        let elapsedFrames = Double(playerTime.sampleTime) - gaplessBaseFrame
+        let computed = Double(fileStartFrame) / file.processingFormat.sampleRate
+            + elapsedFrames / playerTime.sampleRate
+        position = min(duration, max(0, computed))
+    }
+}
