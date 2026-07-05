@@ -1,0 +1,99 @@
+import Foundation
+import MediaPlayer
+import UIKit
+
+extension LibraryManager {
+
+    // MARK: - Scan Cache Helper
+
+    /// Resolves a list of file URLs to Songs, using `ScanCacheService` for unchanged files
+    /// and `DocumentImportService.makeSong` only for new or modified ones.
+    func resolveSongs(for urls: [URL]) async -> [Song] {
+        // Stat every candidate file off the main actor first. `stat()` is a blocking
+        // syscall — running it serially on the main thread for thousands of files
+        // (as a naive cache check would) is the dominant cause of UI hitches/hangs
+        // when scanning or importing a large library.
+        let stamps: [(url: URL, stamp: ScanCacheService.FileStamp)] = await Task.detached(priority: .userInitiated) {
+            urls.compactMap { url in
+                ScanCacheService.fileStamp(for: url).map { (url, $0) }
+            }
+        }.value
+
+        var cachedSongs: [Song] = []
+        var uncached: [(url: URL, stamp: ScanCacheService.FileStamp)] = []
+
+        // Pure in-memory dictionary lookups — cheap enough to stay on the main actor.
+        for entry in stamps {
+            if let cached = ScanCacheService.shared.cachedSong(for: entry.url, stamp: entry.stamp) {
+                cachedSongs.append(cached)
+            } else {
+                uncached.append(entry)
+            }
+        }
+
+        guard !uncached.isEmpty else { return cachedSongs }
+
+        let stampByURL = Dictionary(
+            uncached.map { ($0.url.standardizedFileURL, $0.stamp) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        // Process uncached files in checkpointed batches, storing+persisting the
+        // scan cache after each one completes. Previously the cache was only
+        // written once at the very end — so a scan interrupted by a crash, force
+        // quit, or the OS killing a backgrounded app lost ALL of its metadata
+        // extraction work and started completely from zero next launch (the
+        // dominant cause of "it rescans my whole library again" reports for big
+        // libraries). Now an interrupted scan resumes from the last completed
+        // batch — at most ~100 files of repeated work instead of thousands.
+        // Concurrency within each batch is unchanged (maxConcurrent = 8).
+        let checkpointSize = 100
+        var newSongs: [Song] = []
+        newSongs.reserveCapacity(uncached.count)
+        var batchStart = 0
+        while batchStart < uncached.count {
+            let batchEnd = min(batchStart + checkpointSize, uncached.count)
+            let batchURLs = uncached[batchStart..<batchEnd].map(\.url)
+
+            let batchSongs: [Song] = await Task.detached(priority: .userInitiated) {
+                await withTaskGroup(of: Song?.self) { group in
+                    var results: [Song] = []
+                    var pending = 0
+                    let maxConcurrent = 8
+                    var iterator = batchURLs.makeIterator()
+
+                    while pending < maxConcurrent, let url = iterator.next() {
+                        let s = DocumentImportService()
+                        group.addTask { await s.makeSong(for: url) }
+                        pending += 1
+                    }
+
+                    for await song in group {
+                        if let song { results.append(song) }
+                        pending -= 1
+                        if let url = iterator.next() {
+                            let s = DocumentImportService()
+                            group.addTask { await s.makeSong(for: url) }
+                            pending += 1
+                        }
+                    }
+                    return results
+                }
+            }.value
+
+            for song in batchSongs {
+                if let url = song.url, let stamp = stampByURL[url.standardizedFileURL] {
+                    ScanCacheService.shared.store(song: song, for: url, stamp: stamp)
+                }
+            }
+            ScanCacheService.shared.persist()
+
+            newSongs.append(contentsOf: batchSongs)
+            batchStart = batchEnd
+        }
+
+        await EnrichmentCacheStore.shared.persist()
+
+        return cachedSongs + newSongs
+    }
+}

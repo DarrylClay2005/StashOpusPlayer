@@ -1,0 +1,295 @@
+import Foundation
+import MediaPlayer
+import UIKit
+
+extension LibraryManager {
+
+    /// Scans all user-selected folders tracked by `MusicFolderService` and adds
+    /// any new audio files not already in the library.
+    func scanWatchedFolders(using folderService: MusicFolderService) {
+        Task { await scanWatchedFoldersAsync(using: folderService) }
+    }
+
+    /// Awaitable variant of `scanWatchedFolders(using:)` — used by callers
+    /// (e.g. the duplicate finder) that need `allSongs` to reflect every
+    /// watched-folder file before deciding what to do next.
+    func scanWatchedFoldersAsync(using folderService: MusicFolderService) async {
+        appLog("scanWatchedFolders: starting", category: "library")
+        beginScan()
+        defer { endScan() }
+        let urls = folderService.resolveAll()
+        guard !urls.isEmpty else {
+            appLog("scanWatchedFolders: no accessible watched folders", category: "library")
+            return
+        }
+        // Keep security-scoped access open until after makeSong reads the files.
+        defer { for url in urls { url.stopAccessingSecurityScopedResource() } }
+
+        var candidates: [URL] = []
+        let fm = FileManager.default
+
+        for baseURL in urls {
+            let enumerator = fm.enumerator(
+                at: baseURL,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            )
+            while let url = enumerator?.nextObject() as? URL {
+                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+                if DocumentImportService.supportedExtensions.contains(url.pathExtension.lowercased()) {
+                    candidates.append(url)
+                }
+            }
+        }
+
+        guard !candidates.isEmpty else { return }
+
+        let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
+        let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
+        guard !newURLs.isEmpty else { return }
+
+        let newSongs = await resolveSongs(for: newURLs)
+
+        appLog("scanWatchedFolders: \(newSongs.count) song(s) from \(urls.count) folder(s)", category: "library")
+        importedSongs.append(contentsOf: newSongs)
+        importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
+        rebuildAllSongs()
+
+        // Push the updated folder structure (new tracks in watched folders)
+        // to the server so it survives a reinstall — debounced, all
+        // logged-in users, no opt-in toggle.
+        if !newSongs.isEmpty {
+            AccountService.shared?.scheduleFolderBackupPush(folderService: folderService, library: self)
+        }
+    }
+
+    /// Scans a specific directory URL for audio files and adds any not already in the library.
+    /// Designed for use with preset locations (Documents) that don't require a
+    /// security-scoped bookmark — just a direct filesystem path the app can enumerate.
+    func scanSpecificDirectory(_ url: URL) {
+        appLog("scanSpecificDirectory: \(url.lastPathComponent)", category: "library")
+        beginScan()
+        lastScanResult = nil
+        Task {
+            defer { endScan() }
+
+            let fm = FileManager.default
+            var candidates: [URL] = []
+            let enumerator = fm.enumerator(
+                at: url,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            )
+            while let fileURL = enumerator?.nextObject() as? URL {
+                guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+                else { continue }
+                if DocumentImportService.supportedExtensions.contains(fileURL.pathExtension.lowercased()) {
+                    candidates.append(fileURL)
+                }
+            }
+
+            // No audio files at all — return silently (not an error).
+            guard !candidates.isEmpty else { return }
+
+            let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
+            let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
+
+            // All files already in library — return silently.
+            guard !newURLs.isEmpty else { return }
+
+            let newSongs = await resolveSongs(for: newURLs)
+
+            appLog("scanSpecificDirectory: \(newSongs.count) song(s) from \(url.lastPathComponent)", category: "library")
+            importedSongs.append(contentsOf: newSongs)
+            importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
+            rebuildAllSongs()
+            lastScanResult = "Found \(newSongs.count) song\(newSongs.count == 1 ? "" : "s") in \(url.lastPathComponent)"
+        }
+    }
+
+    /// Convenience: re-scans every local source — the Documents folder, all
+    /// user-selected watched folders, and (if previously granted) the Apple
+    /// Music library — so the "Refresh" button picks up files added or
+    /// changed outside the app since the last scan, not just on next launch.
+    func scanAll(folderService: MusicFolderService) {
+        scanLocalDocuments()
+        scanWatchedFolders(using: folderService)
+        // Only re-scan Apple Music if access was already granted — calling
+        // `scanMediaLibrary()` without that check would trigger a permission
+        // prompt for users who've never used the Apple Music Transfer feature.
+        if MPMediaLibrary.authorizationStatus() == .authorized {
+            scanMediaLibrary()
+        }
+    }
+
+    func requestAccessAndScan() {
+        appLog("requestAccessAndScan: requesting media library authorization", category: "library")
+        Task {
+            let existing = MPMediaLibrary.authorizationStatus()
+            // Already denied/restricted — system won't re-prompt; send user to Settings.
+            if existing == .denied || existing == .restricted {
+                appWarn("requestAccessAndScan: access denied/restricted — opening Settings", category: "library")
+                await UIApplication.shared.open(
+                    URL(string: UIApplication.openSettingsURLString)!,
+                    options: [:],
+                    completionHandler: nil
+                )
+                errorMessage = "Open Settings → Privacy → Media & Apple Music to allow access."
+                return
+            }
+            let status = await MPMediaLibrary.requestAuthorization()
+            if status == .authorized {
+                appLog("requestAccessAndScan: authorized, scanning", category: "library")
+                errorMessage = nil
+                scanMediaLibrary()
+            } else if status == .denied || status == .restricted {
+                appWarn("requestAccessAndScan: denied — opening Settings", category: "library")
+                await UIApplication.shared.open(
+                    URL(string: UIApplication.openSettingsURLString)!,
+                    options: [:],
+                    completionHandler: nil
+                )
+                errorMessage = "Open Settings → Privacy → Media & Apple Music to allow access."
+            } else {
+                appWarn("requestAccessAndScan: declined (status=\(status.rawValue))", category: "library")
+                errorMessage = "Media library access was declined. Imported files still work."
+            }
+        }
+    }
+
+    /// Persists how many `scanMediaLibrary` runs in a row never reached completion.
+    /// Survives process termination (unlike an in-memory flag), which is exactly
+    /// what's needed to detect a crash loop: the counter is bumped *before* the
+    /// scan starts and only cleared on success, so an app that crashes mid-scan
+    /// comes back up, sees a non-zero count, and knows the previous attempt died.
+    private static let scanAttemptCounterKey = "media_scan_incomplete_attempts"
+
+    func scanMediaLibrary() {
+        guard MPMediaLibrary.authorizationStatus() == .authorized else {
+            requestAccessAndScan()
+            return
+        }
+
+        // Crash-loop guard — `MPMediaQuery.songs().items` has been observed to
+        // crash mid-read on some very large Apple Music libraries. Without this,
+        // a crash here restarts the app straight back into the same scan: an
+        // unrecoverable boot loop the user can only escape by deleting the app.
+        // After 2 incomplete attempts in a row we stop trying automatically and
+        // let the user fall back to imported/local files (still fully usable),
+        // or switch scan sources from Settings.
+        let defaults = UserDefaults.standard
+        let priorAttempts = defaults.integer(forKey: Self.scanAttemptCounterKey)
+        if priorAttempts >= 2 {
+            appWarn("scanMediaLibrary: \(priorAttempts) consecutive incomplete attempts — refusing to retry automatically", category: "library")
+            scanCrashGuardActive = true
+            errorMessage = "The media library scan has been crashing repeatedly. Imported/local files still work — switch \"Default Scan Source\" to App Storage in Settings, or tap Retry to try again."
+            return
+        }
+        defaults.set(priorAttempts + 1, forKey: Self.scanAttemptCounterKey)
+
+        appLog("scanMediaLibrary: starting (attempt \(priorAttempts + 1))", category: "library")
+        appBreadcrumb("Started media library scan (attempt \(priorAttempts + 1))")
+        beginScan()
+        errorMessage = nil
+        scanCrashGuardActive = false
+        scanProgress = nil
+
+        Task {
+            defer { endScan() }
+            // The query itself is the slow, blocking part — keep it off the main actor.
+            let items: [MPMediaItem] = await Task.detached(priority: .userInitiated) {
+                MPMediaQuery.songs().items ?? []
+            }.value
+            appLog("scanMediaLibrary: found \(items.count) item(s), converting", category: "library")
+
+            // Convert in small chunks with a yield in between. `Song.init(mediaItem:)`
+            // is cheap per item (just reads cached MPMediaItem properties), but doing
+            // all 1,000+ at once back-to-back is enough synchronous main-actor work to
+            // visibly stall scrolling/animation — the "freakout" users see on big
+            // libraries. Yielding between chunks lets the UI (and artwork prefetch)
+            // get scheduling slices throughout, and doubles as the source for the
+            // live "Scanning N of M" progress shown on the launch screen.
+            var scanned: [Song] = []
+            scanned.reserveCapacity(items.count)
+            let chunkSize = 200
+            var index = 0
+            while index < items.count {
+                guard !Task.isCancelled else { return }
+                let end = min(index + chunkSize, items.count)
+                scanned.append(contentsOf: items[index..<end].compactMap(Song.init(mediaItem:)))
+                index = end
+                scanProgress = LibraryScanProgress(current: index, total: items.count)
+                await Task.yield()
+            }
+
+            appLog("scanMediaLibrary: found \(scanned.count) song(s)", category: "library")
+            self.mediaSongs = scanned
+            self.rebuildAllSongs()
+            self.scanProgress = nil
+            // Completed cleanly — reset the crash-loop counter so future launches
+            // get the normal 2-attempt grace again rather than accumulating forever.
+            defaults.set(0, forKey: Self.scanAttemptCounterKey)
+            appBreadcrumb("Media library scan completed: \(scanned.count) song(s)")
+
+            // `Song.init(mediaItem:)` returns nil for items with no `assetURL` —
+            // i.e. Apple Music catalog tracks that are in the library but not
+            // downloaded to this device (cloud-only). Without this message the
+            // "Apple Music Transfer" felt completely broken for anyone whose
+            // library is mostly cloud-streamed: the scan would "complete" having
+            // imported nothing, with no indication why.
+            let skipped = items.count - scanned.count
+            if skipped > 0 {
+                let songWord = skipped == 1 ? "song" : "songs"
+                if scanned.isEmpty {
+                    self.errorMessage = "Found \(skipped) \(songWord) in your Apple Music library, but none are downloaded to this device. Open the Music app, download the songs you want (tap ⋯ → Download), then scan again."
+                } else {
+                    self.errorMessage = "Imported \(scanned.count) song(s). \(skipped) \(songWord) in your Apple Music library aren't downloaded to this device and were skipped — download them in the Music app, then scan again to add them."
+                }
+            }
+        }
+    }
+
+    /// User-initiated escape hatch from the crash-loop guard above. The guard's
+    /// banner tells the user to "tap Retry" — this is that action. Deliberately
+    /// NOT wired into any automatic path (onAppear, app launch, etc.): resetting
+    /// the counter there would silently recreate the exact boot loop the guard
+    /// exists to break. Only reachable by an explicit tap, so a genuinely broken
+    /// library can't trap the user in endless automatic retries, while a
+    /// transient run of bad luck is just one button away from a fresh attempt.
+    func retryMediaLibraryScanAfterCrashGuard() {
+        guard scanCrashGuardActive else { return }
+        appLog("retryMediaLibraryScanAfterCrashGuard: user-initiated retry — resetting attempt counter", category: "library")
+        appBreadcrumb("User retried media library scan after crash-loop guard")
+        UserDefaults.standard.set(0, forKey: Self.scanAttemptCounterKey)
+        scanCrashGuardActive = false
+        errorMessage = nil
+        scanMediaLibrary()
+    }
+
+    func importFiles(urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        appLog("Importing \(urls.count) file(s)", category: "library")
+        beginScan()
+        errorMessage = nil
+
+        Task {
+            defer { endScan() }
+            do {
+                let imported = try await importer.importFiles(from: urls)
+                appLog("Import complete: \(imported.count) file(s) added", category: "library")
+                importedSongs.append(contentsOf: imported)
+                importedSongs = Array(
+                    Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id })
+                        .compactMap { $0.value.first }
+                )
+                let songWord = imported.count == 1 ? "song" : "songs"
+                ToastCenter.shared.show("Imported \(imported.count) \(songWord)", category: .success, icon: "tray.and.arrow.down.fill")
+            } catch {
+                appError("Import failed: \(error.localizedDescription)", category: "library")
+                errorMessage = error.localizedDescription
+                ToastCenter.shared.show("Import failed: \(error.localizedDescription)", category: .error)
+            }
+            rebuildAllSongs()
+        }
+    }
+}
