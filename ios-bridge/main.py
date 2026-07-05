@@ -214,12 +214,26 @@ _TRANSCODE_SEMAPHORE = asyncio.Semaphore(2)
 # =none avoids a slow pre-allocate on the temp file. This is the single
 # biggest download-speed win available here (the built-in downloader is
 # single-connection). aria2c is installed in the Docker image.
+#
+# -k (min-split-size) is 256K rather than aria2's 1M/20M defaults: a typical
+# music track is only 3-8MB, so a 1M floor let aria2 open just 3-8 of the 16
+# requested connections — most tracks never got anywhere near the parallelism
+# -x16/-s16 ask for. 256K lets a track this size actually reach ~12-16 way
+# split. retry-wait/max-tries give aria2 its own quick retry instead of
+# failing the whole yt-dlp attempt on one flaky connection.
 _ARIA2_DOWNLOADER_ARGS = [
     "--downloader", "aria2c",
     "--downloader-args",
-    "aria2c:-x16 -s16 -j16 -k1M --min-split-size=1M --max-connection-per-server=16 "
-    "--file-allocation=none --console-log-level=warn --summary-interval=0",
+    "aria2c:-x16 -s16 -j16 -k256K --file-allocation=none --console-log-level=warn "
+    "--summary-interval=0 --retry-wait=1 --max-tries=3",
 ]
+
+# Applied to every yt-dlp invocation (search/resolve, streaming-URL extraction,
+# and downloads): -4 avoids the multi-second stall some hosts hit when an IPv6
+# route is advertised but dead/blackholed before falling back to IPv4;
+# --socket-timeout bounds a single stalled connection attempt instead of
+# silently eating the whole per-call timeout further up the stack.
+_YTDLP_NETWORK_ARGS = ["-4", "--socket-timeout", "10"]
 
 # ---------------------------------------------------------------------------
 # /api/download job tracking
@@ -661,7 +675,7 @@ async def _run_ytdlp(*args: str, timeout: float = 30.0) -> list[dict]:
     Raises asyncio.TimeoutError if the process exceeds *timeout* seconds.
     Max 4 concurrent yt-dlp processes are allowed (semaphore).
     """
-    cmd = ["yt-dlp", *args]
+    cmd = ["yt-dlp", *_YTDLP_NETWORK_ARGS, *args]
     logger.info("Running: %s", " ".join(cmd))
     async with _YTDLP_SEMAPHORE:
         proc = await asyncio.create_subprocess_exec(
@@ -1511,6 +1525,16 @@ async def search(
     return tracks
 
 
+# Short-TTL cache of extracted raw stream URLs, shared by /api/stream and
+# /api/stream/proxy, so repeated plays/seeks of the same track (direct-play
+# retries, replays, seeking) don't each re-run a fresh yt-dlp extraction —
+# previously only stream_proxy cached this, so direct-play callers paid the
+# full ~2-5s extraction cost on every single call even for a track played
+# seconds earlier.
+_STREAM_URL_CACHE: dict[str, tuple[str, float]] = {}
+_STREAM_URL_TTL = 5 * 3600  # under the ~6h googlevideo URL validity
+
+
 @app.get("/api/stream")
 async def stream(
     request: Request,
@@ -1534,19 +1558,21 @@ async def stream(
     else:
         target_url = f"https://youtube.com/watch?v={id}"
 
-    format_flag = _format_flag(format)
     user_id = _account_token_user_id(request)
-    stream_url, failure_reason = await _get_raw_url(target_url, format_flag=format_flag, user_id=user_id)
+    cache_key = f"{source}:{id}:{format}"
+    cached = _STREAM_URL_CACHE.get(cache_key)
+    if cached and cached[1] > time.monotonic():
+        stream_url: Optional[str] = cached[0]
+        failure_reason = None
+    else:
+        format_flag = _format_flag(format)
+        stream_url, failure_reason = await _get_raw_url(target_url, format_flag=format_flag, user_id=user_id)
+        if stream_url:
+            _STREAM_URL_CACHE[cache_key] = (stream_url, time.monotonic() + _STREAM_URL_TTL)
     if not stream_url:
         raise HTTPException(status_code=404, detail=failure_reason or "No stream URL found")
 
     return {"url": stream_url, "expires_in": 21600}
-
-
-# Short-TTL cache of extracted raw stream URLs, so seeking (Range requests) and
-# repeated plays of the same track don't each pay yt-dlp's extraction cost.
-_PROXY_URL_CACHE: dict[str, tuple[str, float]] = {}
-_PROXY_URL_TTL = 5 * 3600  # under the ~6h googlevideo URL validity
 
 
 @app.get("/api/stream/proxy")
@@ -1577,7 +1603,7 @@ async def stream_proxy(
 
     user_id = _account_token_user_id(request)
     cache_key = f"{source}:{id}:{format}"
-    cached = _PROXY_URL_CACHE.get(cache_key)
+    cached = _STREAM_URL_CACHE.get(cache_key)
     if cached and cached[1] > time.monotonic():
         raw_url = cached[0]
     else:
@@ -1586,7 +1612,7 @@ async def stream_proxy(
         )
         if not raw_url:
             raise HTTPException(status_code=404, detail=failure_reason or "No stream URL found")
-        _PROXY_URL_CACHE[cache_key] = (raw_url, time.monotonic() + _PROXY_URL_TTL)
+        _STREAM_URL_CACHE[cache_key] = (raw_url, time.monotonic() + _STREAM_URL_TTL)
 
     req_headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
@@ -1605,7 +1631,7 @@ async def stream_proxy(
         upstream = await asyncio.to_thread(_open_upstream)
     except Exception as exc:
         # A cached URL may have expired early — drop it so the next try re-extracts.
-        _PROXY_URL_CACHE.pop(cache_key, None)
+        _STREAM_URL_CACHE.pop(cache_key, None)
         logger.warning("stream_proxy upstream open failed for %s: %s", cache_key, exc)
         raise HTTPException(status_code=502, detail="Upstream stream fetch failed")
 
@@ -1688,6 +1714,7 @@ async def _get_raw_url(
     for attempt_flag in attempts:
         cmd = [
             "yt-dlp",
+            *_YTDLP_NETWORK_ARGS,
             "-f", attempt_flag,
             "--get-url",
             "--no-playlist",
@@ -1764,9 +1791,11 @@ async def download_track(
                      "keeps the 5-15s anti-bot pacing. Client-controlled.",
     ),
     concurrent_fragments: int = Query(
-        1, ge=1, le=16,
+        4, ge=1, le=16,
         description="Parallel DASH fragment downloads (yt-dlp -N). >1 speeds up "
-                     "large downloads. Client-controlled via Settings -> yt-dlp.",
+                     "large downloads. Default 4 (was 1) — negligible memory cost "
+                     "per fragment buffer, meaningful speedup for fragmented/DASH "
+                     "audio. Client-controlled via Settings -> yt-dlp.",
     ),
 ):
     """
@@ -1937,9 +1966,21 @@ async def _do_download_job(
         if throttle_seconds > 0:
             sleep_args = ["--sleep-interval", str(throttle_seconds),
                           "--max-sleep-interval", str(throttle_seconds * 3)]
-        concurrency_args = ["-N", str(concurrent_fragments)] if concurrent_fragments > 1 else []
+        concurrency_args: list[str] = []
+        if concurrent_fragments > 1:
+            concurrency_args = ["-N", str(concurrent_fragments)]
+            if not aria2_this_attempt:
+                # Native downloader only: --http-chunk-size turns even a single
+                # progressive/adaptive URL into byte-range chunks so -N can
+                # fetch them in parallel too, not just genuine multi-fragment
+                # DASH — the same per-connection-throttle bypass aria2 gives,
+                # without spawning a subprocess. Redundant (and skipped) when
+                # aria2 is handling this attempt, since aria2 does its own
+                # splitting via -s/-k.
+                concurrency_args += ["--http-chunk-size", "10M"]
         cmd = [
             "yt-dlp",
+            *_YTDLP_NETWORK_ARGS,
             "--no-playlist",
             "--embed-metadata",
             "--embed-thumbnail",
@@ -2610,12 +2651,19 @@ async def _run_batch_download(job_id: str, links_path: pathlib.Path, music_dir: 
     # what's genuinely missing instead of re-downloading everything.
     cmd = [
         "yt-dlp",
+        *_YTDLP_NETWORK_ARGS,
         "--batch-file", str(links_path),
         "--no-playlist",
         "--embed-metadata", "--embed-thumbnail",
         "--ignore-errors",
         "--sleep-interval", "5", "--max-sleep-interval", "15",
-        "-N", "3",
+        # -N + --http-chunk-size (not aria2): this job has no retry loop or
+        # aria2-drop-on-final-attempt safety net like the per-track download
+        # path, so a whole playlist shouldn't hinge on an aria2 subprocess
+        # succeeding. This still gets multi-connection speed on both genuine
+        # DASH fragments and single-URL progressive streams.
+        "-N", "4",
+        "--http-chunk-size", "10M",
         "-P", str(music_dir),
         "-o", "%(title)s.%(ext)s",
         *(["--download-archive", str(archive_path)] if archive_path else []),
