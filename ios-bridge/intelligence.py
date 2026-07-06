@@ -4,11 +4,19 @@ Aria is a persona wrapped around a Claude structured-output call
 (call_intelligence). She upgrades a handful of the bridge's existing
 rule-based decisions (metadata disambiguation today; EQ suggestion,
 duplicate resolution, and Discover Mix curation are planned follow-ups using
-the same helper), and — unlike a stateless API call — she remembers: every
-correction a user makes after one of her suggestions is logged to
-ios_aria_memory (see db/schema.sql) and fed back into her next prompt for
-that task as few-shot context, so her judgment concretely improves from real
-usage instead of resetting every request.
+the same helper), and — unlike a stateless API call — she remembers, in two
+ways:
+
+1. Corrections (ios_aria_memory): every correction a user makes after one of
+   her suggestions is logged and fed back into her next prompt for that task
+   as few-shot context, so her judgment concretely improves from real usage
+   instead of resetting every request. See get_recent_corrections /
+   record_suggestion / record_correction.
+2. Usage (get_user_taste_profile): what a user actually plays and favorites
+   (ios_play_history, ios_user_favorites — data the app already collects for
+   other reasons) is summarized into a per-user "taste" context, so her
+   judgment reflects what a specific user actually listens to, not just a
+   one-size-fits-all rule.
 
 Every caller MUST treat a ``None`` return as "fall back to the existing
 heuristic" — this module never raises past its own boundary, so a missing API
@@ -193,3 +201,57 @@ async def record_correction(memory_id: int, correction: dict) -> None:
                 )
     except Exception:
         logger.exception("failed to record correction for ios_aria_memory id %s", memory_id)
+
+
+# ---------------------------------------------------------------------------
+# Learning from usage: what a user actually plays and favorites
+# ---------------------------------------------------------------------------
+#
+# Distinct from ios_aria_memory above (which is Aria's own suggestion/
+# correction history) — this reads signal the app already collects for other
+# reasons (ios_play_history, ios_user_favorites) and turns it into a compact
+# per-user "taste" context. It's a soft disambiguation signal, never a
+# strong one: an artist name matching something this user already plays a
+# lot is real evidence, but it must never override a genuinely better
+# string/exact match on the candidates themselves.
+
+_TASTE_PROFILE_TTL = 3600  # seconds; usage taste changes slowly, no need to
+                           # re-query on every single call
+_taste_profile_cache: dict[str, tuple[float, dict]] = {}
+
+
+async def get_user_taste_profile(user_id: str) -> dict:
+    """Summarizes what *user_id* actually listens to and favorites, so Aria
+    can use real usage as context instead of judging each request in
+    isolation. Cached in-memory per user for _TASTE_PROFILE_TTL seconds.
+    Returns an empty profile (never raises) on any DB failure or for a user
+    with no history yet — an empty profile is simply not used as a signal.
+    """
+    cached = _taste_profile_cache.get(user_id)
+    if cached is not None and time.monotonic() < cached[0]:
+        return cached[1]
+
+    profile: dict = {"top_played_artists": [], "favorited_artists": []}
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT artist, COUNT(*) AS plays FROM ios_play_history "
+                    "WHERE user_id = %s AND artist IS NOT NULL AND artist != '' "
+                    "GROUP BY artist ORDER BY plays DESC LIMIT 15",
+                    (user_id,),
+                )
+                profile["top_played_artists"] = [row[0] for row in await cur.fetchall()]
+
+                await cur.execute(
+                    "SELECT DISTINCT artist FROM ios_user_favorites "
+                    "WHERE user_id = %s AND artist IS NOT NULL AND artist != '' LIMIT 30",
+                    (user_id,),
+                )
+                profile["favorited_artists"] = [row[0] for row in await cur.fetchall()]
+    except Exception:
+        logger.exception("failed to build taste profile for user %s", user_id)
+
+    _taste_profile_cache[user_id] = (time.monotonic() + _TASTE_PROFILE_TTL, profile)
+    return profile

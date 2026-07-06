@@ -46,6 +46,7 @@ from db import get_pool, init_db
 from intelligence import (
     call_intelligence,
     get_recent_corrections,
+    get_user_taste_profile,
     record_correction,
     record_suggestion,
 )
@@ -3110,8 +3111,13 @@ _METADATA_RESOLVE_SYSTEM_PROMPT = (
     "artist-name recognition. If no candidate is a plausible match, return "
     "null. Never guess — a wrong pick is worse than no pick. You may also be "
     "given 'recent_corrections': real past cases where a user overrode your "
-    "prior pick. Treat them as evidence of the kinds of mistakes to avoid, "
-    "not as literal templates to copy."
+    "prior pick — treat them as evidence of the kinds of mistakes to avoid, "
+    "not as literal templates to copy. You may also be given 'user_taste': "
+    "artists this specific user plays or favorites most. A candidate whose "
+    "artist appears there is meaningfully more likely correct than a bare "
+    "string match alone would suggest — but this is a soft tiebreaker, never "
+    "grounds to override a candidate that's a much stronger clean match on "
+    "its own."
 )
 
 _METADATA_RESOLVE_SCHEMA = {
@@ -3170,12 +3176,19 @@ async def intelligence_metadata_resolve(
     if not row or not row[0]:
         return {"best_index": None, "confidence": "low", "memory_id": None}
 
-    # Cache key intentionally excludes recent_corrections (below) — the cache
-    # is for "same filename+candidates should give the same stable answer",
-    # while corrections are prompt context that evolves independently.
+    # Cache key intentionally excludes recent_corrections (below) — those are
+    # task-level prompt context that evolves independently of any one input.
+    # It DOES include user_taste, though: unlike corrections, taste changes
+    # what the actually-correct candidate is for *this specific user*, so a
+    # cache shared across users regardless of taste would silently reuse one
+    # user's disambiguation for another. The cost is fewer cross-user cache
+    # hits; acceptable since this endpoint only fires on already-rare
+    # ambiguous cases.
+    taste_profile = await get_user_taste_profile(user_id)
     cache_input = {
         "filename": body.filename,
         "candidates": [c.model_dump() for c in body.candidates],
+        "user_taste": taste_profile,
     }
     cache_key = hashlib.sha256(
         json.dumps(cache_input, sort_keys=True).encode("utf-8")
