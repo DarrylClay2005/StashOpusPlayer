@@ -222,16 +222,24 @@ _TRANSCODE_SEMAPHORE = asyncio.Semaphore(2)
 # biggest download-speed win available here (the built-in downloader is
 # single-connection). aria2c is installed in the Docker image.
 #
-# -k (min-split-size) is 256K rather than aria2's 1M/20M defaults: a typical
-# music track is only 3-8MB, so a 1M floor let aria2 open just 3-8 of the 16
-# requested connections — most tracks never got anywhere near the parallelism
-# -x16/-s16 ask for. 256K lets a track this size actually reach ~12-16 way
-# split. retry-wait/max-tries give aria2 its own quick retry instead of
-# failing the whole yt-dlp attempt on one flaky connection.
+# -k (min-split-size) is 1M rather than aria2's 20M default: a typical music
+# track is only 3-8MB, so the 20M default would never split at all. 1M is
+# aria2's OWN HARD MINIMUM for this option (aria2 rejects anything below
+# 1048576 with "min-split-size must be between 1048576 and 1073741824" and
+# exits immediately) — this used to be set to 256K, which is below that
+# floor, so EVERY aria2 attempt failed outright with an option-validation
+# error before opening a single connection. That failure was silently eaten
+# by the 3-attempt retry loop's fallback to the native downloader, so
+# aria2=true has never actually run a single real aria2 download in this
+# deployment; every download that opted in just burned 2 full failed
+# attempts before falling through. 1M gives a 3-8MB track real (if modest,
+# ~3-8 way) parallelism instead of zero. retry-wait/max-tries give aria2 its
+# own quick retry instead of failing the whole yt-dlp attempt on one flaky
+# connection.
 _ARIA2_DOWNLOADER_ARGS = [
     "--downloader", "aria2c",
     "--downloader-args",
-    "aria2c:-x16 -s16 -j16 -k256K --file-allocation=none --console-log-level=warn "
+    "aria2c:-x16 -s16 -j16 -k1M --file-allocation=none --console-log-level=warn "
     "--summary-interval=0 --retry-wait=1 --max-tries=3",
 ]
 
@@ -1696,6 +1704,13 @@ async def download_relay(
     url: Optional[str] = Query(None, description="Full URL (required for soundcloud/bandcamp)"),
     format: str = Query("m4a", description="Audio format — only m4a/best supported here"),
     title: Optional[str] = Query(None, description="Filename hint (no extension)"),
+    existing_ids: Optional[str] = Query(
+        None,
+        description="Comma-separated 'source:id' manifest of tracks the client already "
+                     "has — if this download's 'source:id' is in the manifest OR the "
+                     "user's server-stored library inventory, the bridge skips resolving "
+                     "the CDN URL entirely and returns 204.",
+    ),
 ):
     """Real-time download relay: resolves the raw CDN URL (same extraction as
     /api/stream/proxy) and streams the bytes through as they arrive, instead
@@ -1709,8 +1724,10 @@ async def download_relay(
     await check_auth(request)
     source = source.lower()
     format = format.lower()
+    relay_start = time.monotonic()
 
     if format in _RELAY_INCOMPATIBLE_FORMATS:
+        logger.info("download_relay: rejecting format=%s for %s:%s (needs server-side transcoding)", format, source, id)
         raise HTTPException(
             status_code=400,
             detail=f"format={format} requires server-side transcoding; use /api/download instead",
@@ -1725,15 +1742,31 @@ async def download_relay(
         target_url = f"https://youtube.com/watch?v={id}"
 
     user_id = _account_token_user_id(request)
+
+    # Pre-fetch dedupe, mirroring download_track's — this endpoint has no
+    # yt-dlp job to naturally slot an ownership check into, so without this
+    # it would re-fetch from the CDN even for a track the server already
+    # knows is owned (server-stored inventory, independent of the client's
+    # local library state).
+    owned: set[str] = await _user_inventory_source_ids(user_id)
+    if existing_ids:
+        owned |= {s.strip() for s in existing_ids.split(",") if s.strip()}
+    if f"{source}:{id}" in owned:
+        logger.info("download_relay: skipping %s:%s — already owned (manifest/inventory)", source, id)
+        return Response(status_code=204)
+
+    logger.info("download_relay: start source=%s id=%s format=%s", source, id, format)
     cache_key = f"{source}:{id}:{format}"
     cached = _STREAM_URL_CACHE.get(cache_key)
     if cached and cached[1] > time.monotonic():
         raw_url = cached[0]
+        logger.info("download_relay: raw URL cache hit for %s", cache_key)
     else:
         raw_url, failure_reason = await _get_raw_url(
             target_url, format_flag=_format_flag(format), user_id=user_id
         )
         if not raw_url:
+            logger.warning("download_relay: no raw URL for %s (%s) after %.2fs", cache_key, failure_reason, time.monotonic() - relay_start)
             raise HTTPException(status_code=404, detail=failure_reason or "No stream URL found")
         _STREAM_URL_CACHE[cache_key] = (raw_url, time.monotonic() + _STREAM_URL_TTL)
 
@@ -1751,7 +1784,10 @@ async def download_relay(
         upstream = await asyncio.to_thread(_open_upstream)
     except Exception as exc:
         _STREAM_URL_CACHE.pop(cache_key, None)
-        logger.warning("download_relay upstream open failed for %s: %s", cache_key, exc)
+        logger.warning(
+            "download_relay: upstream open failed for %s after %.2fs: %s",
+            cache_key, time.monotonic() - relay_start, exc,
+        )
         raise HTTPException(status_code=502, detail="Upstream fetch failed")
 
     status_code = upstream.getcode() or 200
@@ -1760,19 +1796,35 @@ async def download_relay(
     content_length = upstream.headers.get("Content-Length")
     if content_length:
         passthrough["Content-Length"] = content_length
+    logger.info(
+        "download_relay: upstream opened for %s in %.2fs (status=%d, content-type=%s, content-length=%s)",
+        cache_key, time.monotonic() - relay_start, status_code, media_type, content_length or "unknown",
+    )
 
     safe_title = (title or id).replace("/", "-").replace(":", "-")[:100]
-    # Both supported formats (m4a, best) resolve to an m4a-compatible container —
-    # "best" is just a looser -f selector, not a different output container.
+    # "m4a" is the only format that reaches this endpoint (see
+    # _RELAY_INCOMPATIBLE_FORMATS) — always an m4a-compatible container.
     passthrough["Content-Disposition"] = f'attachment; filename="{safe_title}.m4a"'
 
     def _body():
+        bytes_sent = 0
         try:
             while True:
                 chunk = upstream.read(65536)
                 if not chunk:
                     break
+                bytes_sent += len(chunk)
                 yield chunk
+            logger.info(
+                "download_relay: complete for %s — %d bytes in %.2fs",
+                cache_key, bytes_sent, time.monotonic() - relay_start,
+            )
+        except Exception as exc:
+            logger.warning(
+                "download_relay: stream interrupted for %s after %d bytes/%.2fs: %s",
+                cache_key, bytes_sent, time.monotonic() - relay_start, exc,
+            )
+            raise
         finally:
             upstream.close()
 
@@ -1833,6 +1885,7 @@ async def _get_raw_url(
 
     cookie_args = await _ytdlp_cookie_args(user_id)
     last_stderr = b""
+    resolve_start = time.monotonic()
     for attempt_flag in attempts:
         cmd = [
             "yt-dlp",
@@ -1844,6 +1897,7 @@ async def _get_raw_url(
             target_url,
         ]
         logger.info("Running (raw): %s", " ".join(cmd))
+        attempt_start = time.monotonic()
         async with _YTDLP_SEMAPHORE:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -1855,27 +1909,34 @@ async def _get_raw_url(
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.communicate()  # reap the zombie (Fix 7)
+                logger.warning(
+                    "_get_raw_url: yt-dlp --get-url timed out after %.1fs (flag=%r) for %s",
+                    time.monotonic() - attempt_start, attempt_flag, target_url,
+                )
                 raise HTTPException(status_code=408, detail="Stream URL fetch timed out")
 
+        attempt_elapsed = time.monotonic() - attempt_start
         last_stderr = stderr_bytes
         for raw_line in stdout_bytes.splitlines():
             line = raw_line.strip().decode(errors="replace")
             if line.startswith("http"):
-                if attempt_flag != format_flag:
-                    logger.info(
-                        "Stream URL resolved via fallback format %r (preferred %r unavailable) for %s",
-                        attempt_flag, format_flag, target_url,
-                    )
+                total_elapsed = time.monotonic() - resolve_start
+                logger.info(
+                    "_get_raw_url: resolved in %.2fs (attempt %.2fs, flag=%r%s) for %s",
+                    total_elapsed, attempt_elapsed, attempt_flag,
+                    "" if attempt_flag == format_flag else f", preferred {format_flag!r} unavailable",
+                    target_url,
+                )
                 return line, None
 
         logger.warning(
-            "yt-dlp returned no stream URL for %s with format %r — trying next fallback",
-            target_url, attempt_flag,
+            "_get_raw_url: yt-dlp returned no stream URL for %s with format %r in %.2fs — trying next fallback",
+            target_url, attempt_flag, attempt_elapsed,
         )
 
     logger.error(
-        "yt-dlp exhausted all format fallbacks for %s — stderr: %s",
-        target_url, last_stderr.decode(errors="replace")[-500:],
+        "_get_raw_url: exhausted all format fallbacks for %s in %.2fs — stderr: %s",
+        target_url, time.monotonic() - resolve_start, last_stderr.decode(errors="replace")[-500:],
     )
     return None, _ytdlp_auth_failure_reason(last_stderr)
 
@@ -2052,6 +2113,7 @@ async def _do_download_job(
     output_file: Optional[pathlib.Path] = None
     actual_ext = expected_ext
     tmp_dir: Optional[pathlib.Path] = None
+    job_start = time.monotonic()
 
     # Resolve the calling user once — used both for per-user cookies below and
     # for the download-history write at the end of this function.
@@ -2114,13 +2176,15 @@ async def _do_download_job(
             *extra_args,
             target_url,
         ]
-        logger.info("Download cmd (attempt %d/%d, aria2=%s): %s", attempt, max_attempts, aria2_this_attempt, " ".join(cmd))
+        downloader_name = "aria2c" if aria2_this_attempt else "native"
+        logger.info("Download cmd (attempt %d/%d, downloader=%s): %s", attempt, max_attempts, downloader_name, " ".join(cmd))
 
         # `-x`/`--extract-audio` means yt-dlp transcodes after downloading
         # (mp3/flac/wav/opus) — much more CPU-bound and slower than the m4a/best
         # stream copy, so it gets its own concurrency cap and a longer timeout.
         is_transcode = "-x" in extra_args or "--extract-audio" in extra_args
         ytdlp_timeout = 240.0 if is_transcode else 140.0
+        proc_start = time.monotonic()
 
         async with AsyncExitStack() as stack:
             await stack.enter_async_context(_YTDLP_SEMAPHORE)
@@ -2144,20 +2208,28 @@ async def _do_download_job(
                 await proc.communicate()  # reap the zombie (Fix 7)
                 shutil.rmtree(tmp_dir, ignore_errors=True)
                 logger.warning(
-                    "yt-dlp timed out after %.0fs (attempt %d/%d, transcode=%s): %s",
-                    ytdlp_timeout, attempt, max_attempts, is_transcode, safe_title,
+                    "yt-dlp timed out after %.0fs (attempt %d/%d, downloader=%s, transcode=%s): %s",
+                    ytdlp_timeout, attempt, max_attempts, downloader_name, is_transcode, safe_title,
                 )
                 raise HTTPException(status_code=408, detail="Download timed out")
 
+        proc_elapsed = time.monotonic() - proc_start
         if proc.returncode != 0:
             last_stderr = stderr_bytes
             err_text = stderr_bytes.decode(errors="replace")[-500:]
-            logger.error("yt-dlp download failed (attempt %d/%d): %s", attempt, max_attempts, err_text)
+            logger.error(
+                "yt-dlp download failed (attempt %d/%d, downloader=%s, elapsed=%.1fs, exit=%d): %s",
+                attempt, max_attempts, downloader_name, proc_elapsed, proc.returncode, err_text,
+            )
             shutil.rmtree(tmp_dir, ignore_errors=True)
             if attempt == max_attempts:
                 detail = _ytdlp_auth_failure_reason(last_stderr) or "Could not download track"
                 raise HTTPException(status_code=404, detail=detail)
             continue
+        logger.info(
+            "yt-dlp download succeeded (attempt %d/%d, downloader=%s, elapsed=%.1fs): %s",
+            attempt, max_attempts, downloader_name, proc_elapsed, safe_title,
+        )
 
         # yt-dlp may choose a slightly different extension than requested — scan the dir.
         candidate: Optional[pathlib.Path] = None
@@ -2305,6 +2377,12 @@ async def _do_download_job(
     job["file"] = output_file
     job["media_type"] = media_type
     job["filename"] = f"{safe_title}.{actual_ext}"
+
+    file_size = output_file.stat().st_size if output_file.exists() else 0
+    logger.info(
+        "download_track complete: job=%s source=%s:%s ext=%s size=%d bytes elapsed=%.1fs aria2_requested=%s",
+        job_id, source, id, actual_ext, file_size, time.monotonic() - job_start, use_aria2,
+    )
 
 
 @app.get("/api/download/status")

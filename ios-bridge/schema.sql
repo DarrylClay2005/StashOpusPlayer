@@ -521,6 +521,13 @@ ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS car_mode_enabled BOOLEAN 
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS library_artists_columns INT DEFAULT 2;
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS now_playing_artwork_style VARCHAR(32) NULL;
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS now_playing_seeker_style VARCHAR(32) NULL;
+-- now_playing_artwork_style holds EITHER a built-in style's short rawValue OR
+-- a user-created CustomNowPlayingStyle's UUID id (NowPlayingView.swift's
+-- selectStyle) — a UUID string is 36 chars, which doesn't fit VARCHAR(32) and
+-- 500s the whole settings sync for anyone using a custom style. Widen to
+-- match channel_id's VARCHAR(64) below. Plain MODIFY is idempotent (a no-op
+-- once already widened), unlike ADD COLUMN IF NOT EXISTS.
+ALTER TABLE ios_user_settings MODIFY COLUMN now_playing_artwork_style VARCHAR(64) NULL;
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS earned_badges_json MEDIUMTEXT NULL;
 -- Generic JSON bag of additional UserDefaults-backed preferences included in
 -- the per-user auto backup (notifications toggle, card style, auto-radio,

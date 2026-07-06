@@ -27,12 +27,17 @@ enum AudioTagWriter {
         album: String?,
         sourceTrackID: String
     ) async -> URL? {
+        let startTime = Date()
         let outURL = url.deletingLastPathComponent()
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("m4a")
 
         let asset = AVURLAsset(url: url)
-        guard let session = makeSession(asset: asset) else { return nil }
+        guard let session = makeSession(asset: asset) else {
+            appWarn("AudioTagWriter: could not create export session (passthrough and AAC presets both failed) for sourceTrackID: \(sourceTrackID)", category: "network")
+            return nil
+        }
+        let presetUsed = session.presetName == AVAssetExportPresetPassthrough ? "passthrough" : "AAC-fallback"
         session.outputFileType = .m4a
         session.outputURL = outURL
         session.metadata = buildMetadataItems(
@@ -43,10 +48,13 @@ enum AudioTagWriter {
             session.exportAsynchronously { cont.resume() }
         }
 
+        let elapsed = Date().timeIntervalSince(startTime)
         guard session.status == .completed else {
+            appWarn("AudioTagWriter: export failed (preset: \(presetUsed), elapsed: \(String(format: "%.2f", elapsed))s, sourceTrackID: \(sourceTrackID)): \(session.error?.localizedDescription ?? "unknown error")", category: "network")
             try? FileManager.default.removeItem(at: outURL)
             return nil
         }
+        appLog("AudioTagWriter: tagged (preset: \(presetUsed), elapsed: \(String(format: "%.2f", elapsed))s, sourceTrackID: \(sourceTrackID))", category: "network")
         return outURL
     }
 

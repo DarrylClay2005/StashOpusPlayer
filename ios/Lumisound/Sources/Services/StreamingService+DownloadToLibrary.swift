@@ -85,18 +85,44 @@ extension StreamingService {
         // silently downgrading those users to a single connection here would
         // undo the exact thing they opted in for. Job-based /api/download is the
         // only path that honors use_aria2, so that preference routes there.
+        // Computed here (rather than just before the job-based request below) so
+        // the fast paths can also hand it to /api/download/relay — that endpoint
+        // has no yt-dlp job to naturally slot an ownership check into, so without
+        // this it would have no server-side dedupe backstop at all, unlike the
+        // job-based path. Exclude this track's own ID — if we got this far the
+        // pre-download check above either found no local copy or a corrupt one
+        // that needs replacing, so the server must not skip *this* download.
+        let manifest = existingTrackManifest(songs: existingSongs.filter { $0.sourceTrackID != sourceTrackID })
+
         let aria2Enabled = UserDefaults.standard.bool(forKey: "ytdlp_use_aria2")
+        if fmt == "m4a" && aria2Enabled {
+            appLog("downloadToLibrary: skipping faster transport for \"\(track.title)\" — aria2 enabled, routing to job-based /api/download", category: "network")
+        }
         if fmt == "m4a" && !aria2Enabled {
-            if track.source == "soundcloud" || track.source == "bandcamp",
-               let destURL = try? await attemptDirectFetch(track: track, safeName: safeName, importDir: importDir) {
-                appLog("downloadToLibrary: succeeded via direct CDN fetch for \"\(track.title)\"", category: "network")
-                DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
-                return destURL
+            appLog("downloadToLibrary: attempting faster transport for \"\(track.title)\" [source: \(track.source), fmt: \(fmt)]", category: "network")
+            if track.source == "soundcloud" || track.source == "bandcamp" {
+                let attemptStart = Date()
+                do {
+                    let destURL = try await attemptDirectFetch(track: track, safeName: safeName, importDir: importDir)
+                    let elapsed = Date().timeIntervalSince(attemptStart)
+                    appLog("downloadToLibrary: succeeded via direct CDN fetch for \"\(track.title)\" in \(String(format: "%.2f", elapsed))s", category: "network")
+                    DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
+                    return destURL
+                } catch {
+                    let elapsed = Date().timeIntervalSince(attemptStart)
+                    appWarn("downloadToLibrary: direct CDN fetch failed for \"\(track.title)\" after \(String(format: "%.2f", elapsed))s: \(error) — falling back to relay", category: "network")
+                }
             }
-            if let destURL = try? await attemptRelayDownload(track: track, safeName: safeName, importDir: importDir) {
-                appLog("downloadToLibrary: succeeded via server relay for \"\(track.title)\"", category: "network")
+            let relayStart = Date()
+            do {
+                let destURL = try await attemptRelayDownload(track: track, safeName: safeName, importDir: importDir, existingIDs: manifest)
+                let elapsed = Date().timeIntervalSince(relayStart)
+                appLog("downloadToLibrary: succeeded via server relay for \"\(track.title)\" in \(String(format: "%.2f", elapsed))s", category: "network")
                 DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
                 return destURL
+            } catch {
+                let elapsed = Date().timeIntervalSince(relayStart)
+                appWarn("downloadToLibrary: server relay failed for \"\(track.title)\" after \(String(format: "%.2f", elapsed))s: \(error) — falling back to job-based download", category: "network")
             }
         }
 
@@ -127,15 +153,13 @@ extension StreamingService {
             queryItems.append(URLQueryItem(name: "throttle_seconds", value: String(max(0, min(60, throttle)))))
         }
         let concurrentFrags = UserDefaults.standard.object(forKey: "ytdlp_concurrent_fragments") as? Int ?? 1
+        appLog("downloadToLibrary: job-based /api/download for \"\(track.title)\" [fmt: \(fmt), aria2: \(aria2Enabled), throttle: \(throttle)s, concurrentFrags: \(concurrentFrags)]", category: "network")
         if concurrentFrags > 1 {
             queryItems.append(URLQueryItem(name: "concurrent_fragments", value: String(min(16, concurrentFrags))))
         }
         // Defense-in-depth: also tell the bridge what the client already has, so
         // a stale/incomplete `existingSongs` snapshot still gets server-side dedupe.
-        // Exclude this track's own ID — if we got this far the pre-download check
-        // above either found no local copy or found a corrupt one that needs
-        // replacing, so the server must not skip *this* download.
-        let manifest = existingTrackManifest(songs: existingSongs.filter { $0.sourceTrackID != sourceTrackID })
+        // (manifest computed earlier, alongside the fast-path block above.)
         if !manifest.isEmpty {
             queryItems.append(URLQueryItem(name: "existing_ids", value: manifest))
         }
@@ -469,7 +493,7 @@ extension StreamingService {
     /// the whole file, THEN the client downloads that" sequential double-transfer.
     /// No metadata is embedded by this endpoint (see its doc comment on the
     /// bridge) — `finalizeRelayedFile` handles tagging on-device.
-    private func attemptRelayDownload(track: StreamTrack, safeName: String, importDir: URL) async throws -> URL {
+    private func attemptRelayDownload(track: StreamTrack, safeName: String, importDir: URL, existingIDs: String) async throws -> URL {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "id", value: track.id),
             URLQueryItem(name: "source", value: track.source),
@@ -478,6 +502,14 @@ extension StreamingService {
         ]
         if track.source == "soundcloud" || track.source == "bandcamp" {
             queryItems.append(URLQueryItem(name: "url", value: track.youtubeURL))
+        }
+        // Defense-in-depth dedupe, mirroring the job-based path below — this
+        // endpoint has no yt-dlp job to naturally slot an ownership check into,
+        // so without this the relay path would re-fetch from the CDN even for a
+        // track the server-side inventory already knows is owned (e.g. synced
+        // from another device, not yet reflected in this device's local library).
+        if !existingIDs.isEmpty {
+            queryItems.append(URLQueryItem(name: "existing_ids", value: existingIDs))
         }
 
         var components = URLComponents()
