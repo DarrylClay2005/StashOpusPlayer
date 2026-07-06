@@ -31,6 +31,43 @@ struct AppUser: Codable, Equatable {
         case shareListeningActivity = "share_listening_activity"
         case aiAssistedSuggestions  = "ai_assisted_suggestions"
     }
+
+    // Hand-written so a boolean flag added in a later app version (like
+    // aiAssistedSuggestions) never breaks decoding of an AppUser cached in
+    // UserDefaults by an OLDER app version that predates the field — the
+    // synthesized Decodable init does NOT fall back to a property's default
+    // value when a key is missing, it throws. That bug shipped in 1.4.62/63
+    // and logged everyone out on update (old cached user JSON had no
+    // "ai_assisted_suggestions" key -> decode failed -> currentUser reset to
+    // nil). decodeIfPresent + ?? false makes every Bool flag here tolerant
+    // of being absent, from either a stale local cache or an older/newer
+    // server response, going forward.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        username = try container.decode(String.self, forKey: .username)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+        email = try container.decodeIfPresent(String.self, forKey: .email)
+        avatarURL = try container.decodeIfPresent(String.self, forKey: .avatarURL)
+        dateOfBirth = try container.decodeIfPresent(String.self, forKey: .dateOfBirth)
+        shareListeningActivity = try container.decodeIfPresent(Bool.self, forKey: .shareListeningActivity) ?? false
+        aiAssistedSuggestions = try container.decodeIfPresent(Bool.self, forKey: .aiAssistedSuggestions) ?? false
+    }
+
+    init(
+        id: String, username: String, displayName: String?, email: String?,
+        avatarURL: String?, dateOfBirth: String?,
+        shareListeningActivity: Bool = false, aiAssistedSuggestions: Bool = false
+    ) {
+        self.id = id
+        self.username = username
+        self.displayName = displayName
+        self.email = email
+        self.avatarURL = avatarURL
+        self.dateOfBirth = dateOfBirth
+        self.shareListeningActivity = shareListeningActivity
+        self.aiAssistedSuggestions = aiAssistedSuggestions
+    }
 }
 
 struct SyncData: Codable {
