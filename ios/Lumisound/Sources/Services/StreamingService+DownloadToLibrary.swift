@@ -77,7 +77,16 @@ extension StreamingService {
         // silently fail after downloading the whole file, wasting bandwidth for
         // anyone on "Best Quality" before falling back anyway. See the matching
         // comment on _RELAY_INCOMPATIBLE_FORMATS in main.py.
-        if fmt == "m4a" {
+        //
+        // Also skipped when the user has opted into aria2 (Settings → yt-dlp):
+        // both faster paths fetch over a single connection (attemptDirectFetch via
+        // URLSession, attemptRelayDownload via the bridge's single urllib.urlopen).
+        // aria2 is specifically for networks that throttle single connections —
+        // silently downgrading those users to a single connection here would
+        // undo the exact thing they opted in for. Job-based /api/download is the
+        // only path that honors use_aria2, so that preference routes there.
+        let aria2Enabled = UserDefaults.standard.bool(forKey: "ytdlp_use_aria2")
+        if fmt == "m4a" && !aria2Enabled {
             if track.source == "soundcloud" || track.source == "bandcamp",
                let destURL = try? await attemptDirectFetch(track: track, safeName: safeName, importDir: importDir) {
                 appLog("downloadToLibrary: succeeded via direct CDN fetch for \"\(track.title)\"", category: "network")
