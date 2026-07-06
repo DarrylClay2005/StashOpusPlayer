@@ -122,9 +122,14 @@ struct BackgroundSettingsView: View {
                     }
 
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
+                        // LazyHStack + small thumbnails (not the full ~1280px
+                        // slideshow images) — with a large gallery (100+
+                        // photos), eagerly laying out every full-size bitmap
+                        // in a plain HStack is what made this screen grind to
+                        // a halt well before any hard limit was ever reached.
+                        LazyHStack(spacing: 8) {
                             ForEach(bg.images.indices, id: \.self) { i in
-                                Image(uiImage: bg.images[i])
+                                Image(uiImage: bg.thumbnails.indices.contains(i) ? bg.thumbnails[i] : bg.images[i])
                                     .resizable()
                                     .scaledToFill()
                                     .frame(width: 60, height: 60)

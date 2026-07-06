@@ -22,6 +22,14 @@ final class ScanCacheService {
 
     private var entries: [String: CacheEntry] = [:]
     private let cacheURL: URL
+    /// Set by `store()`/`evictMissing()`, cleared by `persist()`. Without this,
+    /// `persist()` re-encodes and rewrites the ENTIRE cache (hundreds/800+
+    /// entries, each a full `Song`) every time it's called — and it's called
+    /// on a timer every 3 and 10 minutes (`LibraryManager+PeriodicMetadataRefresh`,
+    /// `+MetadataReEnrichment`) regardless of whether anything actually
+    /// changed. At a large library size that's a real, recurring cost for
+    /// zero benefit on the (common) ticks where nothing was touched.
+    private var dirty = false
 
     private init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
@@ -88,12 +96,16 @@ final class ScanCacheService {
     /// Pure in-memory dictionary write — no I/O, safe to call on the main actor.
     func store(song: Song, for url: URL, stamp: FileStamp) {
         entries[stableKey(for: url)] = CacheEntry(mtime: stamp.mtime, fileSize: stamp.size, song: song)
+        dirty = true
     }
 
     /// Writes the in-memory cache to disk atomically. Call once after a bulk scan completes.
     /// Encoding/writing thousands of entries is offloaded to a background task so it
-    /// never blocks the main thread.
+    /// never blocks the main thread. No-op if nothing has changed since the last
+    /// persist (see `dirty`) — safe to call this liberally/on a timer.
     func persist() {
+        guard dirty else { return }
+        dirty = false
         let snapshot = entries
         let destination = cacheURL
         Task.detached(priority: .utility) {
@@ -109,10 +121,12 @@ final class ScanCacheService {
     /// process's working directory and incorrectly evict everything.
     func evictMissing() {
         guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let before = entries.count
         entries = entries.filter { key, _ in
             let candidate = key.hasPrefix("/") ? key : docs.appendingPathComponent(key).path
             return FileManager.default.fileExists(atPath: candidate)
         }
+        if entries.count != before { dirty = true }
     }
 
     private func stableKey(for url: URL) -> String {

@@ -57,6 +57,15 @@ final class BackgroundService: ObservableObject {
         didSet { saveSettings() }
     }
     @Published var images: [UIImage] = []
+    /// Small (≤200px) previews for the management grid in
+    /// `BackgroundSettingsView`, kept in lockstep with `images` via
+    /// `rebuildThumbnails()`. Rendering that grid directly off `images`
+    /// (full ~1280px downsamples, one per photo) is what made the gallery
+    /// grind to a halt once a library grew past ~100 photos — every row
+    /// forced SwiftUI to lay out and composite a full-size bitmap instead of
+    /// a genuinely thumbnail-sized one. `images` itself is unchanged and
+    /// still what the actual full-screen slideshow displays.
+    @Published private(set) var thumbnails: [UIImage] = []
     @Published var currentIndex: Int = 0
     @Published var shuffleIntervalSeconds: Double = 30.0 {
         didSet {
@@ -186,8 +195,18 @@ final class BackgroundService: ObservableObject {
         ImageDownsampler.downsampled(from: data, maxPixelSize: maxDimension)
     }
 
+    /// Regenerates `thumbnails` from `images` — a cheap in-memory resize
+    /// (`ImageDownsampler.downscaled`, no re-decode) of already-loaded
+    /// bitmaps, not a file read. Called after every mutation of `images`;
+    /// safe to call on a large gallery since a resize is ~milliseconds per
+    /// photo and this only runs on add/remove/load, never per-render.
+    private func rebuildThumbnails() {
+        thumbnails = images.map { ImageDownsampler.downscaled($0, maxPixelSize: 200) }
+    }
+
     func addImages(_ newImages: [UIImage]) {
         images.append(contentsOf: newImages)
+        rebuildThumbnails()
         saveImagesToDisk()
         if !isEnabled {
             isEnabled = true
@@ -204,6 +223,9 @@ final class BackgroundService: ObservableObject {
     func removeImage(at index: Int) {
         guard images.indices.contains(index) else { return }
         images.remove(at: index)
+        if thumbnails.indices.contains(index) {
+            thumbnails.remove(at: index)
+        }
         if images.isEmpty {
             currentIndex = 0
             stopShuffling()
@@ -216,6 +238,7 @@ final class BackgroundService: ObservableObject {
 
     func clearAll() {
         images.removeAll()
+        thumbnails.removeAll()
         currentIndex = 0
         saveImagesToDisk()
         scheduleCloudGallerySync()
@@ -308,6 +331,7 @@ final class BackgroundService: ObservableObject {
                 // Append directly to `images`/disk rather than via `addImages` —
                 // avoids re-triggering an upload of the images we just downloaded.
                 self.images = restored
+                self.rebuildThumbnails()
                 self.saveImagesToDisk()
                 if !self.isEnabled {
                     self.isEnabled = true
@@ -343,6 +367,7 @@ final class BackgroundService: ObservableObject {
             }
         }
         images = loaded
+        rebuildThumbnails()
         appLog("loadImagesFromDisk: loaded \(loaded.count)/\(filenames.count) images", category: "background")
         if isEnabled && !images.isEmpty {
             startShuffling()
@@ -369,6 +394,7 @@ final class BackgroundService: ObservableObject {
         }
         guard !loaded.isEmpty else { return }
         images = loaded
+        rebuildThumbnails()
         UserDefaults.standard.set(imageFiles, forKey: Keys.imageFilenames)
         appLog("rebuildManifestFromDisk: restored \(loaded.count) image(s) from disk", category: "background")
         if isEnabled { startShuffling() }

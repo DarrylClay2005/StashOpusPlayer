@@ -32,6 +32,8 @@ cookies.txt
 ios-bridge/cookies.txt
 .env
 ios-bridge/.env
+# yt-dlp runtime cache, incl. per-user session cookies — never source, never committed
+ios-bridge/cache/
 
 # Logs
 *.log

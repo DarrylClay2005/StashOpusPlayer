@@ -45,13 +45,26 @@ extension LibraryManager {
     /// mid-scan state as if it were the real library. Encoding/writing
     /// thousands of `Song` structs is real work — offloaded to a background
     /// task exactly like `ScanCacheService.persist()`.
+    ///
+    /// Debounced ~2s (separate from `rebuildAllSongs()`'s own 100ms debounce):
+    /// `rebuildAllSongs()` runs once per single-song mutation too (e.g. one
+    /// BPM analysis completing at a time, or a metadata correction), and each
+    /// call used to trigger its own full snapshot re-encode+write. A run of
+    /// several such mutations a few seconds apart — common while background
+    /// BPM analysis works through a large library — now collapses into one
+    /// disk write instead of one per mutation.
     func persistSnapshotIfSettled() {
         guard !isScanning else { return }
-        let snapshot = LibrarySnapshot(songs: allSongs, artists: artists, albums: albums, genres: genres)
-        let destination = Self.snapshotURL
-        Task.detached(priority: .utility) {
-            guard let data = try? JSONEncoder().encode(snapshot) else { return }
-            try? data.write(to: destination, options: .atomic)
+        pendingSnapshotPersistTask?.cancel()
+        pendingSnapshotPersistTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+            guard let self, !Task.isCancelled, !self.isScanning else { return }
+            let snapshot = LibrarySnapshot(songs: self.allSongs, artists: self.artists, albums: self.albums, genres: self.genres)
+            let destination = Self.snapshotURL
+            await Task.detached(priority: .utility) {
+                guard let data = try? JSONEncoder().encode(snapshot) else { return }
+                try? data.write(to: destination, options: .atomic)
+            }.value
         }
     }
 }

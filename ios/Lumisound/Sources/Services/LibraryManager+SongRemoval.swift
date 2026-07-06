@@ -169,14 +169,22 @@ extension LibraryManager {
             let media = self.mediaSongs
             let imported = self.importedSongs
 
-            let (combined, artists, albums, genres) = await Task.detached(priority: .userInitiated) {
+            let (combined, artists, albums, genres, byID, byArtist, byAlbum, byGenre) = await Task.detached(priority: .userInitiated) {
                 let combined = (media + imported).sorted {
                     $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
                 }
                 let artists = Array(Set(combined.map(\.artistName))).sorted()
                 let albums  = Array(Set(combined.map(\.albumName))).sorted()
                 let genres  = Array(Set(combined.compactMap { $0.genre.isEmpty ? nil : $0.genre })).sorted()
-                return (combined, artists, albums, genres)
+                // Built alongside the sort/group work above so `songs(byArtist:)` /
+                // `songs(inAlbum:)` / `songs(inGenre:)` / `songs(for playlist:)`
+                // never need to re-scan the full library per call — see the
+                // `songsBy*` property doc comments in LibraryManager.swift.
+                let byID = Dictionary(uniqueKeysWithValues: combined.map { ($0.id, $0) })
+                let byArtist = Dictionary(grouping: combined, by: \.artistName)
+                let byAlbum  = Dictionary(grouping: combined, by: \.albumName)
+                let byGenre  = Dictionary(grouping: combined.filter { !$0.genre.isEmpty }, by: \.genre)
+                return (combined, artists, albums, genres, byID, byArtist, byAlbum, byGenre)
             }.value
 
             guard !Task.isCancelled else { return }
@@ -184,6 +192,10 @@ extension LibraryManager {
             self.artists = artists
             self.albums  = albums
             self.genres  = genres
+            self.songsByID     = byID
+            self.songsByArtist = byArtist
+            self.songsByAlbum  = byAlbum
+            self.songsByGenre  = byGenre
             self.persistSnapshotIfSettled()
         }
     }

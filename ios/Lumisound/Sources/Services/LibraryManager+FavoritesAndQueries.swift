@@ -20,19 +20,18 @@ extension LibraryManager {
     }
 
     func songs(for playlist: Playlist) -> [Song] {
-        let lookup = Dictionary(uniqueKeysWithValues: allSongs.map { ($0.id, $0) })
-        return playlist.songIDs.compactMap { lookup[$0] }
+        playlist.songIDs.compactMap { songsByID[$0] }
     }
 
     func songs(byArtist artist: String) -> [Song] {
-        allSongs.filter { $0.artistName == artist }
+        songsByArtist[artist] ?? []
     }
 
     func songs(inAlbum album: String) -> [Song] {
-        allSongs.filter { $0.albumName == album }
+        songsByAlbum[album] ?? []
     }
 
     func songs(inGenre genre: String) -> [Song] {
-        allSongs.filter { $0.genre == genre }
+        songsByGenre[genre] ?? []
     }
 }

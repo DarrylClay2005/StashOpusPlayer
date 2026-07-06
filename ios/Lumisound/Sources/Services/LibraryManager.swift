@@ -59,8 +59,34 @@ final class LibraryManager: ObservableObject {
     var mediaSongs: [Song] = []
     var importedSongs: [Song] = []
 
+    // MARK: Indexed lookups (rebuilt alongside `allSongs` in `rebuildAllSongs()`)
+    //
+    // `songs(byArtist:)`/`songs(inAlbum:)`/`songs(inGenre:)`/`songs(for:)` used
+    // to be a fresh `allSongs.filter { ... }` (or a fresh `Dictionary(uniqueKeysWithValues:)`
+    // build for playlists) on every single call — and every visible row in the
+    // Artists/Albums/Genres tabs and every row in the Playlists tab calls one of
+    // these on every render. At a few hundred+ songs, with a few dozen visible
+    // rows, that's thousands of full-array scans per render pass. These caches
+    // turn each lookup into an O(1) dictionary read; they're plain (non-`@Published`)
+    // stored properties since nothing observes them directly — only
+    // `rebuildAllSongs()`'s existing `allSongs`/`artists`/`albums`/`genres`
+    // publishes need to trigger a re-render, these just need to be *current* by
+    // the time a row reads them.
+    var songsByID: [String: Song] = [:]
+    var songsByArtist: [String: [Song]] = [:]
+    var songsByAlbum: [String: [Song]] = [:]
+    var songsByGenre: [String: [Song]] = [:]
+
     /// Pending debounced rebuild task. Cancelled and replaced on each rapid mutation.
     var pendingRebuildTask: Task<Void, Never>?
+    /// Pending debounced snapshot-persist task (see `persistSnapshotIfSettled`).
+    /// Separate from `pendingRebuildTask`'s 100ms debounce: `rebuildAllSongs()`
+    /// itself runs once per single-song mutation (e.g. each BPM analysis
+    /// completing, one at a time, well outside that 100ms window), and every
+    /// one of those was unconditionally re-encoding and writing the *entire*
+    /// library snapshot to disk. This gives the disk write its own, longer
+    /// debounce so a string of individual mutations collapses into one write.
+    var pendingSnapshotPersistTask: Task<Void, Never>?
 
     var foregroundObserver: NSObjectProtocol?
     var metadataReenrichTimer: Timer?
