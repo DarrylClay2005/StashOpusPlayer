@@ -223,6 +223,14 @@ CREATE TABLE IF NOT EXISTS ios_bug_reports (
 -- contents or URLs) are visible to other signed-in users via GET /social/*.
 ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS share_listening_activity BOOLEAN DEFAULT FALSE;
 
+-- Opt-in flag for AI-assisted suggestions (see ios-bridge/intelligence.py).
+-- When TRUE, this user's track titles/artists/genres may be sent to
+-- Anthropic's API to improve metadata/EQ/duplicate/mix decisions that
+-- otherwise fall back to the existing rule-based heuristics. Off by default —
+-- this is the first feature in the app that sends track data to a
+-- third-party API.
+ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS ai_assisted_suggestions BOOLEAN DEFAULT FALSE;
+
 -- Per-user snapshots of sync data (favorites, playlists, settings), taken
 -- automatically before any operation that overwrites that data server-side
 -- (notably POST /user/sync, which replaces all favorites/playlists in one
@@ -601,6 +609,37 @@ CREATE TABLE IF NOT EXISTS ios_lyrics_cache (
     submitted_by_user_id VARCHAR(36) NULL,
     cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_title_artist (title, artist)
+);
+
+-- Cache of Claude "intelligence" task results (see ios-bridge/intelligence.py),
+-- keyed by task + a hash of the normalized input. Results here are stable
+-- decisions (e.g. "which metadata candidate is correct for this filename"),
+-- so they're cached indefinitely rather than on a TTL.
+CREATE TABLE IF NOT EXISTS ios_intelligence_cache (
+    task VARCHAR(32) NOT NULL,
+    cache_key VARCHAR(64) NOT NULL,
+    result_json MEDIUMTEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (task, cache_key)
+);
+
+-- Aria Lumi's memory (see ios-bridge/intelligence.py): one row per suggestion
+-- she makes, updated with correction_json whenever the user's actual choice
+-- differs from her pick. Recent corrections (correction_json IS NOT NULL) are
+-- fed back into her next prompt for that task as few-shot examples, so her
+-- judgment concretely improves from real usage instead of resetting on every
+-- request. Kept separate from ios_intelligence_cache (which caches a stable
+-- decision for reuse) since this table's purpose is a learning signal, not
+-- a cache — it's read in small recent-N slices, never looked up by key.
+CREATE TABLE IF NOT EXISTS ios_aria_memory (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    task VARCHAR(32) NOT NULL,
+    input_json MEDIUMTEXT NOT NULL,
+    ai_result_json MEDIUMTEXT NOT NULL,
+    correction_json MEDIUMTEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_task_created (task, created_at)
 );
 
 -- Feature: server-side waveform peak-data precomputation, alongside the

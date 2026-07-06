@@ -28,7 +28,11 @@ actor MetadataFetchService {
     private init() {}
 
     /// Looks up metadata using a chain of free APIs. Returns the first successful result.
-    func fetchMetadata(title: String, artist: String) async -> OnlineMetadata? {
+    /// *filename*, when provided, lets an ambiguous iTunes result set be
+    /// disambiguated by Aria Lumi (AI-assisted suggestions, opt-in) instead
+    /// of the plain "exact match or first result" heuristic — see
+    /// `fetchFromItunes`.
+    func fetchMetadata(title: String, artist: String, filename: String? = nil) async -> OnlineMetadata? {
         let rawTitle  = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let rawArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !rawTitle.isEmpty else { return nil }
@@ -39,7 +43,7 @@ actor MetadataFetchService {
         }
 
         // 1. iTunes
-        if let meta = await fetchFromItunes(title: rawTitle, artist: rawArtist) {
+        if let meta = await fetchFromItunes(title: rawTitle, artist: rawArtist, filename: filename) {
             cache[cacheKey] = meta
             AppLogger.shared.log("MetadataFetch[iTunes]: \"\(rawTitle)\"", category: "network")
             return meta
@@ -66,7 +70,7 @@ actor MetadataFetchService {
 
     // MARK: - iTunes
 
-    private func fetchFromItunes(title: String, artist: String) async -> OnlineMetadata? {
+    private func fetchFromItunes(title: String, artist: String, filename: String? = nil) async -> OnlineMetadata? {
         let query = [title, artist].filter { !$0.isEmpty }.joined(separator: " ")
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "https://itunes.apple.com/search?term=\(encoded)&entity=song&limit=3&country=US"),
@@ -77,9 +81,37 @@ actor MetadataFetchService {
               !results.isEmpty
         else { return nil }
 
-        let best = results.first(where: {
+        var best = results.first(where: {
             ($0["trackName"] as? String ?? "").lowercased() == title.lowercased()
         }) ?? results[0]
+
+        // Ambiguous case: no exact title match among multiple candidates.
+        // Ask Aria Lumi (opt-in AI-assisted suggestions) to disambiguate
+        // instead of blindly taking the first result; falls straight through
+        // to the existing `best` above on any failure, disabled toggle, or
+        // low-confidence pick.
+        if results.count > 1, let filename,
+           !results.contains(where: { ($0["trackName"] as? String ?? "").lowercased() == title.lowercased() }) {
+            let candidates = results.map { result in
+                MetadataCandidate(
+                    title: result["trackName"] as? String ?? "",
+                    artist: result["artistName"] as? String ?? "",
+                    album: result["collectionName"] as? String,
+                    year: (result["releaseDate"] as? String).map { String($0.prefix(4)) },
+                    source: "itunes"
+                )
+            }
+            if let resolution = await AccountService.shared?.resolveMetadata(filename: filename, candidates: candidates) {
+                best = results[resolution.bestIndex]
+                await IntelligenceSuggestionCache.shared.store(
+                    filename,
+                    title: candidates[resolution.bestIndex].title,
+                    artist: candidates[resolution.bestIndex].artist,
+                    memoryID: resolution.memoryID
+                )
+            }
+        }
+
         let art100 = best["artworkUrl100"] as? String ?? ""
         let art600 = best["artworkUrl600"] as? String
             ?? art100.replacingOccurrences(of: "100x100bb", with: "600x600bb")
@@ -166,7 +198,7 @@ actor MetadataFetchService {
     /// iTunes lookup. Returns the updated Song (or the original if nothing was found).
     func enrich(song: Song) async -> Song {
         var s = song
-        let meta = await fetchMetadata(title: song.title, artist: song.artist)
+        let meta = await fetchMetadata(title: song.title, artist: song.artist, filename: song.url?.lastPathComponent)
         guard let meta else { return s }
 
         if s.artist.isEmpty, let a = meta.artistName { s.artist = a }

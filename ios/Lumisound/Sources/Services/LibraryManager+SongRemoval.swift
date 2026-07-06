@@ -97,6 +97,22 @@ extension LibraryManager {
         }
         rebuildAllSongs()
         ToastCenter.shared.show("Updated \"\(song.displayName)\"", category: .success, icon: "checkmark.circle")
+
+        // If Aria Lumi previously resolved this file's metadata and the user
+        // just corrected it to something different, report the correction so
+        // she learns from it (see AccountService+Intelligence.swift). Silent,
+        // best-effort — never blocks or surfaces an error to the user.
+        if let filename = song.url?.lastPathComponent {
+            Task {
+                guard let resolution = await IntelligenceSuggestionCache.shared.lookup(filename),
+                      let memoryID = resolution.memoryID,
+                      resolution.title != song.title || resolution.artist != song.artist
+                else { return }
+                await AccountService.shared?.reportMetadataCorrection(
+                    memoryID: memoryID, title: song.title, artist: song.artist
+                )
+            }
+        }
     }
 
     /// Re-encodes an imported song stuck on a compatibility-fallback format

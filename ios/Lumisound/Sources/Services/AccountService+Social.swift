@@ -27,6 +27,29 @@ extension AccountService {
         }
     }
 
+    /// Toggles whether track titles/artists/genres may be sent to Anthropic's
+    /// API to power AI-assisted metadata/EQ/duplicate/mix suggestions. Off by
+    /// default — this is the first feature in the app that shares track data
+    /// with a third party, so it must be an explicit opt-in.
+    func setAIAssistedSuggestions(_ enabled: Bool) async {
+        guard isLoggedIn else { return }
+        struct Body: Encodable { let ai_assisted_suggestions: Bool }
+        do {
+            _ = try await makeRequest("/user/privacy", method: "PUT", body: Body(ai_assisted_suggestions: enabled))
+            if var user = currentUser {
+                user.aiAssistedSuggestions = enabled
+                currentUser = user
+                if let data = try? JSONEncoder().encode(user) {
+                    UserDefaults.standard.set(data, forKey: Self.userKey)
+                }
+            }
+        } catch let err as AccountError {
+            errorMessage = err.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// Fetches the recent "what others are listening to" feed.
     func fetchSocialActivity() async {
         guard isLoggedIn else { return }

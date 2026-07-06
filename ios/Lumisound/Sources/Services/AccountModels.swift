@@ -16,6 +16,10 @@ struct AppUser: Codable, Equatable {
     let avatarURL: String?
     let dateOfBirth: String?   // ISO YYYY-MM-DD, nil if not set
     var shareListeningActivity: Bool = false
+    /// Opt-in for AI-assisted suggestions (metadata/EQ/duplicate/mix). Off by
+    /// default — when enabled, track titles/artists/genres may be sent to
+    /// Anthropic's API. See PUT /user/privacy and AccountService+Intelligence.
+    var aiAssistedSuggestions: Bool = false
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -25,6 +29,7 @@ struct AppUser: Codable, Equatable {
         case avatarURL    = "avatar_url"
         case dateOfBirth  = "date_of_birth"
         case shareListeningActivity = "share_listening_activity"
+        case aiAssistedSuggestions  = "ai_assisted_suggestions"
     }
 }
 
@@ -570,6 +575,17 @@ struct AchievementsData: Codable {
         case longestStreakDays  = "longest_streak_days"
         case badges
     }
+}
+
+/// One candidate metadata result (from iTunes/MusicBrainz/Deezer) sent to
+/// POST /user/intelligence/metadata-resolve for AI-assisted disambiguation.
+/// Mirrors the backend's `MetadataCandidate` Pydantic model field-for-field.
+struct MetadataCandidate: Codable {
+    let title: String
+    let artist: String
+    let album: String?
+    let year: String?
+    let source: String
 }
 
 struct SyncTrack: Codable {

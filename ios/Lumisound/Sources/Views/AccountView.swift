@@ -454,6 +454,25 @@ struct AccountView: View {
                 }
                 .listRowBackground(AppTheme.surface)
 
+                // MARK: AI-Assisted Suggestions Section
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { account.currentUser?.aiAssistedSuggestions ?? false },
+                        set: { newValue in Task { await account.setAIAssistedSuggestions(newValue) } }
+                    )) {
+                        Label("AI-Assisted Suggestions", systemImage: "wand.and.stars")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                    .tint(AppTheme.dynamicAccent)
+                } header: {
+                    sectionHeader("AI Features")
+                } footer: {
+                    Text("When on, track titles/artists/genres for ambiguous local files may be sent to Anthropic's API to improve metadata matching (and, in future updates, EQ, duplicate detection, and Discover Mix). Off by default. No audio or file contents are ever sent.")
+                        .font(AppTheme.bodyFont(size: 12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .listRowBackground(AppTheme.surface)
+
                 // MARK: Security Section
                 Section {
                     NavigationLink(destination: ActiveSessionsView()) {

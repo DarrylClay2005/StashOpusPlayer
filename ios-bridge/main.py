@@ -43,6 +43,12 @@ from auth import (
     verify_password_async,
 )
 from db import get_pool, init_db
+from intelligence import (
+    call_intelligence,
+    get_recent_corrections,
+    record_correction,
+    record_suggestion,
+)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -1365,7 +1371,7 @@ class DiscordRpcConfigRequest(BaseModel):
 
 def _user_dict(row: tuple) -> dict:
     """Map a (id, username, email, display_name, avatar_url, created_at, last_login,
-    date_of_birth, share_listening_activity) row."""
+    date_of_birth, share_listening_activity, ai_assisted_suggestions) row."""
     return {
         "id": row[0],
         "username": row[1],
@@ -1376,6 +1382,7 @@ def _user_dict(row: tuple) -> dict:
         "last_login": row[6].isoformat() if row[6] else None,
         "date_of_birth": row[7].isoformat() if len(row) > 7 and row[7] else None,
         "share_listening_activity": bool(row[8]) if len(row) > 8 else False,
+        "ai_assisted_suggestions": bool(row[9]) if len(row) > 9 else False,
     }
 
 
@@ -2779,7 +2786,7 @@ async def register(body: RegisterRequest, request: Request):
 
             await cur.execute(
                 "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth, "
-                "share_listening_activity "
+                "share_listening_activity, ai_assisted_suggestions "
                 "FROM ios_users WHERE id = %s",
                 (user_id,),
             )
@@ -2844,7 +2851,7 @@ async def login(body: LoginRequest, request: Request):
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth, "
-                "share_listening_activity "
+                "share_listening_activity, ai_assisted_suggestions "
                 "FROM ios_users WHERE id = %s",
                 (user_id,),
             )
@@ -2993,7 +3000,7 @@ async def me(payload: dict = Depends(get_current_user)):
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth, "
-                "share_listening_activity "
+                "share_listening_activity, ai_assisted_suggestions "
                 "FROM ios_users WHERE id = %s AND is_active = TRUE",
                 (user_id,),
             )
@@ -3043,7 +3050,7 @@ async def update_me(body: UpdateMeRequest, payload: dict = Depends(get_current_u
 
             await cur.execute(
                 "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth, "
-                "share_listening_activity "
+                "share_listening_activity, ai_assisted_suggestions "
                 "FROM ios_users WHERE id = %s AND is_active = TRUE",
                 (user_id,),
             )
@@ -3055,24 +3062,180 @@ async def update_me(body: UpdateMeRequest, payload: dict = Depends(get_current_u
 
 
 class PrivacyRequest(BaseModel):
-    share_listening_activity: bool
+    share_listening_activity: Optional[bool] = None
+    ai_assisted_suggestions: Optional[bool] = None
 
 
 @app.put("/user/privacy")
 async def update_privacy(body: PrivacyRequest, payload: dict = Depends(get_current_user)):
-    """Toggles whether this user's recent plays (title/artist only) are
-    visible to other signed-in users via GET /social/activity and
-    /social/discover."""
+    """Toggles privacy-sensitive opt-ins: whether this user's recent plays
+    (title/artist only) are visible to other signed-in users via
+    GET /social/activity and /social/discover (share_listening_activity), and
+    whether track titles/artists/genres may be sent to Anthropic's API to
+    power AI-assisted metadata/EQ/duplicate/mix suggestions
+    (ai_assisted_suggestions). Both default off; either field may be omitted
+    to leave that setting unchanged."""
+    user_id = payload["sub"]
+    updates: dict = {}
+    if body.share_listening_activity is not None:
+        updates["share_listening_activity"] = body.share_listening_activity
+    if body.ai_assisted_suggestions is not None:
+        updates["ai_assisted_suggestions"] = body.ai_assisted_suggestions
+
+    if updates:
+        set_clause = ", ".join(f"{col} = %s" for col in updates)
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"UPDATE ios_users SET {set_clause} WHERE id = %s AND is_active = TRUE",
+                    (*updates.values(), user_id),
+                )
+
+    return updates
+
+
+# ---------------------------------------------------------------------------
+# AI-Assisted Suggestions (see intelligence.py)
+# ---------------------------------------------------------------------------
+
+_METADATA_RESOLVE_SYSTEM_PROMPT = (
+    "You are helping a music library app pick the correct metadata match for "
+    "a locally-imported audio file. You are given the file's original "
+    "filename (often a messy YouTube-style title) and a list of candidate "
+    "metadata results already fetched from iTunes, MusicBrainz, or Deezer. "
+    "Pick the single candidate (by its index) that most likely describes the "
+    "actual song, using clean title/artist matching, noise-tag stripping "
+    "(e.g. '(Official Video)', '[feat. X]', 'HQ', 'Lyrics'), and canonical "
+    "artist-name recognition. If no candidate is a plausible match, return "
+    "null. Never guess — a wrong pick is worse than no pick. You may also be "
+    "given 'recent_corrections': real past cases where a user overrode your "
+    "prior pick. Treat them as evidence of the kinds of mistakes to avoid, "
+    "not as literal templates to copy."
+)
+
+_METADATA_RESOLVE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "best_index": {
+            "type": ["integer", "null"],
+            "description": "0-based index into the candidates array, or null if none match",
+        },
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+    },
+    "required": ["best_index", "confidence"],
+    "additionalProperties": False,
+}
+
+
+class MetadataCandidate(BaseModel):
+    title: str
+    artist: str
+    album: Optional[str] = None
+    year: Optional[str] = None
+    source: str
+
+
+class MetadataResolveRequest(BaseModel):
+    filename: str
+    candidates: list[MetadataCandidate]
+
+
+@app.post("/user/intelligence/metadata-resolve")
+async def intelligence_metadata_resolve(
+    body: MetadataResolveRequest, payload: dict = Depends(get_current_user)
+):
+    """AI-assisted replacement for the client's "exact match or first result"
+    metadata picking logic. Requires the user has opted into
+    ai_assisted_suggestions (see PUT /user/privacy); returns a null pick
+    (never an error) when the feature is off, cooling down, or unavailable,
+    so the client's existing heuristic is always a safe fallback.
+
+    On a fresh (non-cached) resolution, logs the suggestion to
+    ios_aria_memory and returns its id as `memory_id` so the client can later
+    report a correction via POST /user/intelligence/feedback if the user
+    overrides the pick — this is how Aria Lumi learns over time."""
+    if not body.candidates:
+        return {"best_index": None, "confidence": "low", "memory_id": None}
+
     user_id = payload["sub"]
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "UPDATE ios_users SET share_listening_activity = %s WHERE id = %s AND is_active = TRUE",
-                (body.share_listening_activity, user_id),
+                "SELECT ai_assisted_suggestions FROM ios_users WHERE id = %s AND is_active = TRUE",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+    if not row or not row[0]:
+        return {"best_index": None, "confidence": "low", "memory_id": None}
+
+    # Cache key intentionally excludes recent_corrections (below) — the cache
+    # is for "same filename+candidates should give the same stable answer",
+    # while corrections are prompt context that evolves independently.
+    cache_input = {
+        "filename": body.filename,
+        "candidates": [c.model_dump() for c in body.candidates],
+    }
+    cache_key = hashlib.sha256(
+        json.dumps(cache_input, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT result_json FROM ios_intelligence_cache WHERE task = %s AND cache_key = %s",
+                ("metadata_resolve", cache_key),
+            )
+            cached = await cur.fetchone()
+            if cached:
+                result = json.loads(cached[0])
+                result["memory_id"] = None  # no fresh suggestion logged on a cache hit
+                return result
+
+    recent_corrections = await get_recent_corrections("metadata_resolve")
+    model_input = {**cache_input, "recent_corrections": recent_corrections}
+
+    result = await call_intelligence(
+        "metadata_resolve",
+        _METADATA_RESOLVE_SYSTEM_PROMPT,
+        model_input,
+        _METADATA_RESOLVE_SCHEMA,
+    )
+    if result is None:
+        return {"best_index": None, "confidence": "low", "memory_id": None}
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_intelligence_cache (task, cache_key, result_json) VALUES (%s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE result_json = VALUES(result_json)",
+                ("metadata_resolve", cache_key, json.dumps(result)),
             )
 
-    return {"share_listening_activity": body.share_listening_activity}
+    memory_id = await record_suggestion("metadata_resolve", user_id, cache_input, result)
+    return {**result, "memory_id": memory_id}
+
+
+class IntelligenceFeedbackRequest(BaseModel):
+    memory_id: int
+    correction: dict
+
+
+@app.post("/user/intelligence/feedback")
+async def intelligence_feedback(
+    body: IntelligenceFeedbackRequest, payload: dict = Depends(get_current_user)
+):
+    """Reports that a user overrode one of Aria Lumi's suggestions —
+    *correction* is task-specific (e.g. {"best_index": 2} for a
+    metadata-resolve correction). Attached to the original suggestion row
+    (memory_id, from the resolving endpoint's response) so it can be
+    surfaced as a few-shot example on future calls for that task. Best-effort
+    — always returns {"ok": true} even if the write silently failed, since
+    feedback is a learning signal, not something the client should retry or
+    surface an error for."""
+    await record_correction(body.memory_id, body.correction)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

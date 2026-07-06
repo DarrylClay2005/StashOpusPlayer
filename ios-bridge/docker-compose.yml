@@ -16,6 +16,11 @@ services:
       # cap (unlike yt-dlp's flat-playlist scrape). Falls back to yt-dlp if unset.
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
       - IOS_BRIDGE_API_KEY=${IOS_BRIDGE_API_KEY:-}
+      # Optional: Anthropic API key (console.anthropic.com). When set, powers
+      # the opt-in "AI-assisted suggestions" feature (see intelligence.py) —
+      # metadata disambiguation today, EQ/duplicate/mix suggestions planned.
+      # Off (no calls made) when unset.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - PORT=8002
       # Dedicated MariaDB credentials for the Lumisound iOS app
       - DB_HOST=127.0.0.1

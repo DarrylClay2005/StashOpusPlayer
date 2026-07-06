@@ -46,6 +46,7 @@ bridge, and build-from-source instructions.
 | **Apple Music library** | Scan and play your existing iTunes/Apple Music library on-device |
 | **Folder/album organisation** | Albums derived from directory names; list, 2-col, and 3-col grid layouts |
 | **Playlist folders & tags** | File playlists into folders and attach free-form tags to keep things organised |
+| **Aria Lumi metadata matching** | Optional (Settings → Account → AI Features, off by default) — when a local file's metadata is ambiguous, Aria Lumi picks the correct match instead of a plain "first result" guess, and learns from any corrections you make |
 
 ### Streaming (via the bridge server)
 
@@ -85,6 +86,10 @@ bridge, and build-from-source instructions.
 - Account data (playlists, settings, history) lives only on the bridge server you connect to.
 - Apple Music access is optional and read-only.
 - "Share Listening Activity" (for Trending/Discover) is off by default and shares only titles/artists.
+- **AI-Assisted Suggestions** (Settings → Account → AI Features) — off by default. When enabled, track
+  titles/artists/genres for ambiguous local files may be sent to Anthropic's API (powering "Aria Lumi",
+  the bridge's music intelligence) to improve metadata matching, with more suggestions planned. No audio
+  or file contents are ever sent, and the feature never overrides a confident local match.
 
 ---
 
