@@ -1665,6 +1665,120 @@ async def stream_proxy(
     return StreamingResponse(_body(), status_code=status_code, headers=passthrough, media_type=media_type)
 
 
+# Formats that require yt-dlp's -x (actual ffmpeg transcode) server-side —
+# there is no live-subprocess-piping infrastructure in this bridge (every
+# subprocess call elsewhere in this file buffers fully via .communicate()),
+# so these can't be relayed in real time. They keep using the existing
+# job-based /api/download flow.
+#
+# "best" belongs in this set too, despite looking like a plain remux: per
+# _download_format_args, "best" also uses `-x` (just without --audio-format),
+# because raw `bestaudio` is frequently a .webm/opus stream — exactly what
+# "best" is supposed to prefer. yt-dlp's `-x` there extracts to whatever
+# native codec results (m4a/opus/ogg), not a guaranteed m4a container. The
+# relay path can't replicate that: it streams whatever _get_raw_url resolves
+# for "bestaudio/best" verbatim and mislabels it "{title}.m4a" regardless of
+# the real container. On-device, AVFoundation can't demux webm/opus at all,
+# so AudioTagWriter/isValidAudioFile correctly reject the result and the
+# client falls back to the job-based flow anyway — but only after wasting a
+# full download of the (often several-MB) opus file first. Every user with
+# "Best Quality" selected would eat that tax on every single download, so
+# "best" is excluded here entirely. Only m4a (near-universally available as
+# YouTube's native itag 140, no transcode) is safe to relay raw.
+_RELAY_INCOMPATIBLE_FORMATS = frozenset({"mp3", "flac", "opus", "wav", "best"})
+
+
+@app.get("/api/download/relay")
+async def download_relay(
+    request: Request,
+    id: str = Query(..., description="Video/track ID"),
+    source: str = Query("youtube", description="youtube, soundcloud, or bandcamp"),
+    url: Optional[str] = Query(None, description="Full URL (required for soundcloud/bandcamp)"),
+    format: str = Query("m4a", description="Audio format — only m4a/best supported here"),
+    title: Optional[str] = Query(None, description="Filename hint (no extension)"),
+):
+    """Real-time download relay: resolves the raw CDN URL (same extraction as
+    /api/stream/proxy) and streams the bytes through as they arrive, instead
+    of the /api/download job flow's "server downloads the whole file, THEN
+    the client downloads that" sequential double-transfer. This only works
+    for formats that don't need server-side transcoding (see
+    _RELAY_INCOMPATIBLE_FORMATS) — no tagging happens here at all, that's
+    done on-device by the client after the file lands (see
+    AudioTagWriter.swift). Callers MUST fall back to /api/download on any
+    non-2xx response from this endpoint."""
+    await check_auth(request)
+    source = source.lower()
+    format = format.lower()
+
+    if format in _RELAY_INCOMPATIBLE_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"format={format} requires server-side transcoding; use /api/download instead",
+        )
+
+    if source in ("soundcloud", "bandcamp"):
+        if not url:
+            raise HTTPException(status_code=400, detail=f"url parameter required for {source} source")
+        await _reject_ssrf_targets(url)
+        target_url = url
+    else:
+        target_url = f"https://youtube.com/watch?v={id}"
+
+    user_id = _account_token_user_id(request)
+    cache_key = f"{source}:{id}:{format}"
+    cached = _STREAM_URL_CACHE.get(cache_key)
+    if cached and cached[1] > time.monotonic():
+        raw_url = cached[0]
+    else:
+        raw_url, failure_reason = await _get_raw_url(
+            target_url, format_flag=_format_flag(format), user_id=user_id
+        )
+        if not raw_url:
+            raise HTTPException(status_code=404, detail=failure_reason or "No stream URL found")
+        _STREAM_URL_CACHE[cache_key] = (raw_url, time.monotonic() + _STREAM_URL_TTL)
+
+    req_headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                      "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+    }
+
+    def _open_upstream():
+        return urllib.request.urlopen(
+            urllib.request.Request(raw_url, headers=req_headers), timeout=30
+        )
+
+    try:
+        upstream = await asyncio.to_thread(_open_upstream)
+    except Exception as exc:
+        _STREAM_URL_CACHE.pop(cache_key, None)
+        logger.warning("download_relay upstream open failed for %s: %s", cache_key, exc)
+        raise HTTPException(status_code=502, detail="Upstream fetch failed")
+
+    status_code = upstream.getcode() or 200
+    media_type = upstream.headers.get("Content-Type") or "audio/mp4"
+    passthrough: dict[str, str] = {}
+    content_length = upstream.headers.get("Content-Length")
+    if content_length:
+        passthrough["Content-Length"] = content_length
+
+    safe_title = (title or id).replace("/", "-").replace(":", "-")[:100]
+    # Both supported formats (m4a, best) resolve to an m4a-compatible container —
+    # "best" is just a looser -f selector, not a different output container.
+    passthrough["Content-Disposition"] = f'attachment; filename="{safe_title}.m4a"'
+
+    def _body():
+        try:
+            while True:
+                chunk = upstream.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            upstream.close()
+
+    return StreamingResponse(_body(), status_code=status_code, headers=passthrough, media_type=media_type)
+
+
 def _ytdlp_auth_failure_reason(stderr: bytes) -> Optional[str]:
     """Maps common yt-dlp stderr failure signatures to a user-facing reason —
     lets /api/stream and /api/download surface "upload your cookies" instead

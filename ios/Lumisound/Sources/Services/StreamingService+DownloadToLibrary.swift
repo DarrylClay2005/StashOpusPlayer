@@ -65,6 +65,32 @@ extension StreamingService {
             return provisionalDestURL
         }
 
+        // Faster transports, tried before the job-based /api/download flow below —
+        // each is best-effort and falls straight through to the proven job-based
+        // path on ANY failure, so worst case behavior is unchanged from before
+        // these existed. Only apply to m4a: mp3/flac/opus/wav need server-side
+        // transcoding, which neither of these paths does (see the /api/download/relay
+        // doc comment on the bridge for why — no live-subprocess-piping infra exists
+        // there yet). "best" is deliberately excluded too, even though it sounds like
+        // a plain remux: YouTube's actual "best" audio is frequently a webm/opus
+        // stream, which AVFoundation can't demux at all — every attempt would
+        // silently fail after downloading the whole file, wasting bandwidth for
+        // anyone on "Best Quality" before falling back anyway. See the matching
+        // comment on _RELAY_INCOMPATIBLE_FORMATS in main.py.
+        if fmt == "m4a" {
+            if track.source == "soundcloud" || track.source == "bandcamp",
+               let destURL = try? await attemptDirectFetch(track: track, safeName: safeName, importDir: importDir) {
+                appLog("downloadToLibrary: succeeded via direct CDN fetch for \"\(track.title)\"", category: "network")
+                DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
+                return destURL
+            }
+            if let destURL = try? await attemptRelayDownload(track: track, safeName: safeName, importDir: importDir) {
+                appLog("downloadToLibrary: succeeded via server relay for \"\(track.title)\"", category: "network")
+                DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
+                return destURL
+            }
+        }
+
         // Hit the /api/download endpoint which runs yt-dlp with metadata embedding.
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "id",       value: track.id),
@@ -368,6 +394,162 @@ extension StreamingService {
             await ArtworkService.shared.prefetchRemoteImage(url: thumbURL, forKey: destURL.lastPathComponent)
         }
 
+        return destURL
+    }
+
+    // MARK: - Faster transports (tried before the job-based flow above)
+
+    /// SoundCloud/Bandcamp only: resolves the raw CDN URL via `/api/stream`
+    /// (already used elsewhere for playback resolution) and fetches it
+    /// DIRECTLY from the phone — no bridge hop for the actual bytes at all.
+    /// Unlike YouTube's `googlevideo` URLs, SoundCloud/Bandcamp CDN URLs are
+    /// not confirmed to be IP-locked to the resolving server (nothing in the
+    /// bridge asserts either way) — this is a genuine "try it" attempt. Any
+    /// failure (including a 403 if it turns out these ARE IP-locked too)
+    /// throws, and the caller falls through to `attemptRelayDownload`.
+    private func attemptDirectFetch(track: StreamTrack, safeName: String, importDir: URL) async throws -> URL {
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "id", value: track.id),
+            URLQueryItem(name: "source", value: track.source),
+            URLQueryItem(name: "format", value: preferredFormat),
+        ]
+        queryItems.append(URLQueryItem(name: "url", value: track.youtubeURL))
+
+        var components = URLComponents()
+        components.path = "/api/stream"
+        components.queryItems = queryItems
+
+        guard var resolveRequest = makeRequest(components.string ?? "/api/stream") else {
+            throw StreamingError.invalidURL
+        }
+        if let accountToken = AccountService.shared?.token {
+            resolveRequest.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
+        }
+        resolveRequest.timeoutInterval = 15
+
+        let (resolveData, resolveResponse) = try await URLSession.shared.data(for: resolveRequest)
+        guard let resolveHTTP = resolveResponse as? HTTPURLResponse, resolveHTTP.statusCode == 200 else {
+            throw StreamingError.invalidURL
+        }
+        struct ResolvedURL: Decodable { let url: String }
+        guard let resolved = try? JSONDecoder().decode(ResolvedURL.self, from: resolveData),
+              let rawURL = URL(string: resolved.url) else {
+            throw StreamingError.invalidURL
+        }
+
+        var fetchRequest = URLRequest(url: rawURL)
+        fetchRequest.timeoutInterval = 120
+        let (rawFileURL, fetchResponse) = try await BackgroundDownloadManager.run(
+            named: "lumisound.download.direct.\(safeName)"
+        ) {
+            try await URLSession.shared.download(for: fetchRequest)
+        }
+        guard let fetchHTTP = fetchResponse as? HTTPURLResponse, (200..<300).contains(fetchHTTP.statusCode) else {
+            try? FileManager.default.removeItem(at: rawFileURL)
+            throw StreamingError.incompleteDownload
+        }
+
+        return try await finalizeRelayedFile(
+            rawFileURL: rawFileURL, track: track, safeName: safeName, importDir: importDir
+        )
+    }
+
+    /// Any source, m4a format only (see the exclusion of "best" above): fetches
+    /// `/api/download/relay` — the bridge resolves the CDN URL and streams bytes
+    /// through as they arrive, instead of the job-based flow's "server downloads
+    /// the whole file, THEN the client downloads that" sequential double-transfer.
+    /// No metadata is embedded by this endpoint (see its doc comment on the
+    /// bridge) — `finalizeRelayedFile` handles tagging on-device.
+    private func attemptRelayDownload(track: StreamTrack, safeName: String, importDir: URL) async throws -> URL {
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "id", value: track.id),
+            URLQueryItem(name: "source", value: track.source),
+            URLQueryItem(name: "format", value: preferredFormat),
+            URLQueryItem(name: "title", value: safeName),
+        ]
+        if track.source == "soundcloud" || track.source == "bandcamp" {
+            queryItems.append(URLQueryItem(name: "url", value: track.youtubeURL))
+        }
+
+        var components = URLComponents()
+        components.path = "/api/download/relay"
+        components.queryItems = queryItems
+
+        guard var request = makeRequest(components.string ?? "/api/download/relay") else {
+            throw StreamingError.invalidURL
+        }
+        if let accountToken = AccountService.shared?.token {
+            request.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
+        }
+        request.timeoutInterval = 180
+
+        let (rawFileURL, response) = try await BackgroundDownloadManager.run(
+            named: "lumisound.download.relay.\(safeName)"
+        ) {
+            try await URLSession.shared.download(for: request)
+        }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            try? FileManager.default.removeItem(at: rawFileURL)
+            throw StreamingError.incompleteDownload
+        }
+        let downloadedSize = (try? FileManager.default.attributesOfItem(atPath: rawFileURL.path))?[.size] as? Int64 ?? 0
+        let expectedSize = http.expectedContentLength
+        if downloadedSize <= 0 || (expectedSize > 0 && downloadedSize != expectedSize) {
+            try? FileManager.default.removeItem(at: rawFileURL)
+            throw StreamingError.incompleteDownload
+        }
+
+        return try await finalizeRelayedFile(
+            rawFileURL: rawFileURL, track: track, safeName: safeName, importDir: importDir
+        )
+    }
+
+    /// Shared tail for both faster-transport paths above: tags the raw
+    /// downloaded file on-device (see `AudioTagWriter`), moves it into place,
+    /// validates it, and pre-seeds the artwork cache — mirroring the
+    /// equivalent steps in `attemptDownload` for the job-based path. Both
+    /// faster paths only ever produce m4a-compatible containers.
+    private func finalizeRelayedFile(
+        rawFileURL: URL, track: StreamTrack, safeName: String, importDir: URL
+    ) async throws -> URL {
+        let sourceTrackID = "\(track.source):\(track.id)"
+        let taggedURL = await AudioTagWriter.tag(
+            fileAt: rawFileURL,
+            title: track.title,
+            artist: track.artist,
+            album: nil,
+            sourceTrackID: sourceTrackID
+        )
+        let finalRawURL = taggedURL ?? rawFileURL
+        if taggedURL != nil {
+            try? FileManager.default.removeItem(at: rawFileURL)
+        } else {
+            appWarn("finalizeRelayedFile: on-device tagging failed for \"\(track.title)\" — importing untagged", category: "network")
+        }
+
+        let destURL = importDir.appendingPathComponent("\(safeName).m4a")
+        if FileManager.default.fileExists(atPath: destURL.path) {
+            try? FileManager.default.removeItem(at: finalRawURL)
+            return destURL
+        }
+        try? FileManager.default.removeItem(at: destURL)
+        do {
+            try FileManager.default.moveItem(at: finalRawURL, to: destURL)
+        } catch {
+            appError("finalizeRelayedFile: move failed for \"\(track.title)\": \(error)", category: "network")
+            throw error
+        }
+
+        guard CorruptFileFinderService.isValidAudioFile(at: destURL) else {
+            try? FileManager.default.removeItem(at: destURL)
+            appWarn("finalizeRelayedFile: corrupt/unreadable file for \"\(track.title)\" — discarding", category: "network")
+            throw StreamingError.corruptDownload
+        }
+
+        appLog("Download complete: \(destURL.lastPathComponent)", category: "network")
+        if !track.thumbnailURL.isEmpty, let thumbURL = URL(string: track.thumbnailURL) {
+            await ArtworkService.shared.prefetchRemoteImage(url: thumbURL, forKey: destURL.lastPathComponent)
+        }
         return destURL
     }
 
