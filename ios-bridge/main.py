@@ -266,6 +266,18 @@ _DOWNLOAD_JOBS: dict = {}
 _DOWNLOAD_JOB_MAX_AGE = 900  # seconds — sweep abandoned jobs/temp dirs after this
 
 
+def _truncate_filename_bytes(name: str, max_bytes: int = 100) -> str:
+    """Truncates `name` to at most `max_bytes` UTF-8 bytes, without splitting a
+    multi-byte character in half. A plain `name[:100]` truncates by character
+    count, which is fine for ASCII titles but silently produces filenames far
+    over the filesystem's byte limit for titles that use 3-4-byte-per-char
+    Unicode (e.g. stylized "mathematical alphanumeric" fullwidth text some
+    tracks use) — ext4/most Linux filesystems reject any path component over
+    255 bytes with ENAMETOOLONG, which crashes the whole yt-dlp invocation."""
+    encoded = name.encode("utf-8")[:max_bytes]
+    return encoded.decode("utf-8", errors="ignore")
+
+
 def _sweep_stale_download_jobs() -> None:
     now = time.monotonic()
     stale = [jid for jid, job in _DOWNLOAD_JOBS.items() if now - job["created"] > _DOWNLOAD_JOB_MAX_AGE]
@@ -1801,7 +1813,7 @@ async def download_relay(
         cache_key, time.monotonic() - relay_start, status_code, media_type, content_length or "unknown",
     )
 
-    safe_title = (title or id).replace("/", "-").replace(":", "-")[:100]
+    safe_title = _truncate_filename_bytes((title or id).replace("/", "-").replace(":", "-"))
     # "m4a" is the only format that reaches this endpoint (see
     # _RELAY_INCOMPATIBLE_FORMATS) — always an m4a-compatible container.
     passthrough["Content-Disposition"] = f'attachment; filename="{safe_title}.m4a"'
@@ -2018,7 +2030,7 @@ async def download_track(
 
     extra_args, expected_ext = _download_format_args(format)
 
-    safe_title = (title or id).replace("/", "-").replace(":", "-")[:100]
+    safe_title = _truncate_filename_bytes((title or id).replace("/", "-").replace(":", "-"))
     account_token = request.headers.get("X-Account-Token", "")
 
     job_id = uuid.uuid4().hex
