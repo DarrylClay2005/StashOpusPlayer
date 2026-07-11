@@ -22,6 +22,12 @@ struct TrackedPlaylist: Identifiable, Codable, Equatable {
     var autoDownload: Bool?
     /// Last time the auto-downloader checked this playlist (throttles checks).
     var lastAutoCheck: Date?
+    /// Optional per-playlist destination subfolder under "Imported Music" (see
+    /// `DownloadFolderPicker`) — lets this playlist's downloads land somewhere
+    /// dedicated instead of the global Settings → yt-dlp → Download Folder.
+    /// nil/empty falls back to that global setting. Optional so older persisted
+    /// entries decode (missing = use the global default).
+    var destinationFolder: String?
 
     var isAutoDownload: Bool { autoDownload ?? false }
 
@@ -32,7 +38,8 @@ struct TrackedPlaylist: Identifiable, Codable, Equatable {
          dateAdded: Date = Date(),
          lastTrackCount: Int = 0,
          autoDownload: Bool? = nil,
-         lastAutoCheck: Date? = nil) {
+         lastAutoCheck: Date? = nil,
+         destinationFolder: String? = nil) {
         self.id = id
         self.url = url
         self.name = name
@@ -41,6 +48,7 @@ struct TrackedPlaylist: Identifiable, Codable, Equatable {
         self.lastTrackCount = lastTrackCount
         self.autoDownload = autoDownload
         self.lastAutoCheck = lastAutoCheck
+        self.destinationFolder = destinationFolder
     }
 }
 
@@ -102,6 +110,14 @@ final class TrackedPlaylistStore: ObservableObject {
         save()
     }
 
+    /// Sets this playlist's destination subfolder (see `DownloadFolderPicker`).
+    /// Pass "" to clear it and fall back to the global Download Folder setting.
+    func setDestinationFolder(id: String, _ folder: String) {
+        guard let idx = playlists.firstIndex(where: { $0.id == id }) else { return }
+        playlists[idx].destinationFolder = folder.isEmpty ? nil : folder
+        save()
+    }
+
     private func markAutoChecked(id: String) {
         guard let idx = playlists.firstIndex(where: { $0.id == id }) else { return }
         playlists[idx].lastAutoCheck = Date()
@@ -136,11 +152,12 @@ final class TrackedPlaylistStore: ObservableObject {
             let localSourceIDs = library.localSourceIDs()
             let identityIndex = library.importedIdentityIndex()
             let toGet = tracks.filter { !library.hasLocalCopy(of: $0, localSourceIDs: localSourceIDs, identityIndex: identityIndex) }
+            let destinationDir = StreamingService.downloadDirectory(forFolderName: pl.destinationFolder)
             var got = 0
             var blocked = 0
             for track in toGet {
                 do {
-                    _ = try await streaming.downloadToLibrary(track: track, existingSongs: library.allSongs)
+                    _ = try await streaming.downloadToLibrary(track: track, destinationDir: destinationDir, existingSongs: library.allSongs)
                     got += 1
                 } catch StreamingError.serverDetail {
                     // e.g. an auto-generated Topic-channel track blocked from

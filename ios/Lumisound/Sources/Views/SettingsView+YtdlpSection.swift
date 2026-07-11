@@ -91,22 +91,12 @@ extension SettingsView {
                     Label("Download Folder", systemImage: "folder")
                         .foregroundStyle(AppTheme.textPrimary)
                     Spacer()
-                    TextField("Imported Music", text: $ytdlpDownloadFolder)
-                        .multilineTextAlignment(.trailing)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .foregroundStyle(AppTheme.dynamicAccent)
-                        .frame(maxWidth: 180)
-                }
-                if !ytdlpDownloadFolder.trimmingCharacters(in: .whitespaces).isEmpty {
-                    Text("Saving to: Imported Music/\(StreamingService.sanitizedFolderName(ytdlpDownloadFolder))")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.textSecondary)
+                    DownloadFolderPicker(folderName: $ytdlpDownloadFolder)
                 }
             } header: {
                 sectionHeader("Download Folder")
             } footer: {
-                Text("Name a folder to send every download into (created automatically), so a big playlist lands together instead of in the Imported Music root. Leave blank to use Imported Music. Downloads in any subfolder are still found and de-duplicated.")
+                Text("Every download goes into this folder (created automatically), so a big playlist lands together instead of in the Imported Music root. Choose an existing folder or create a new one. Downloads in any subfolder are still found and de-duplicated. Each tracked playlist can also override this with its own folder.")
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }

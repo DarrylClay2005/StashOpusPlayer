@@ -28,6 +28,61 @@ final class StreamingService: ObservableObject {
             .prefix(80))
     }
 
+    /// Lists existing subfolder names directly under "Imported Music" (one
+    /// level deep) — the set of destinations `DownloadFolderPicker` offers
+    /// besides the root and "create new". Unlike deriving the list from
+    /// `LibraryManager.allSongs`, this includes empty folders (just created,
+    /// nothing downloaded into them yet).
+    static func existingDownloadFolderNames() -> [String] {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return []
+        }
+        let importDir = docs.appendingPathComponent("Imported Music")
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: importDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+        return entries
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
+            .map { $0.lastPathComponent }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    /// Creates (if needed) a subfolder under "Imported Music" — used when the
+    /// user picks "New Folder…" in `DownloadFolderPicker` so it shows up
+    /// immediately (in the picker and the Folders tab) even before anything
+    /// has been downloaded into it.
+    @discardableResult
+    static func createDownloadFolder(named name: String) -> Bool {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return false
+        }
+        let dir = docs.appendingPathComponent("Imported Music").appendingPathComponent(name, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Resolves a (possibly empty) folder name — as stored on a
+    /// `TrackedPlaylist.destinationFolder` or the global `downloadSubfolderKey`
+    /// setting — to the actual destination directory URL to pass as
+    /// `downloadToLibrary`'s `destinationDir`. Empty/nil means "Imported Music"
+    /// root itself.
+    static func downloadDirectory(forFolderName name: String?) -> URL? {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let base = docs.appendingPathComponent("Imported Music")
+        guard let name, !name.isEmpty else { return base }
+        let sanitized = sanitizedFolderName(name)
+        guard !sanitized.isEmpty else { return base }
+        return base.appendingPathComponent(sanitized, isDirectory: true)
+    }
+
     /// Public URL baked into the app — routed via a Cloudflare Tunnel so
     /// it works anywhere without home WiFi. Users can override in Settings.
     static let defaultBridgeURL = "https://lumisound-bridge.xenusanimations.studio"

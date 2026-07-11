@@ -57,11 +57,19 @@ extension StreamingService {
 
         // Check for an existing download under the requested extension before hitting
         // the network — the actual extension is only known after the response arrives
-        // (see below), so this is just the common-case fast path.
+        // (see below), so this is just the common-case fast path. Titles routinely
+        // collide across different tracks (covers, remasters, two different artists'
+        // same-titled songs), so a bare filename match here is NOT proof this is the
+        // same source track — only trust it if the ledger confirms *this exact*
+        // sourceTrackID produced *this exact* filename (see resolveDownloadDestination).
+        // Otherwise fall through to a real download; the move-into-place step below
+        // will pick a disambiguated name instead of silently adopting or clobbering
+        // whatever's already there.
         let provisionalDestURL = importDir.appendingPathComponent("\(safeName).\(requestedExt)")
-        if FileManager.default.fileExists(atPath: provisionalDestURL.path) {
+        if DownloadLedgerStore.shared.filename(for: sourceTrackID) == provisionalDestURL.lastPathComponent,
+           FileManager.default.fileExists(atPath: provisionalDestURL.path),
+           CorruptFileFinderService.isValidAudioFile(at: provisionalDestURL) {
             appLog("downloadToLibrary: already exists, skipping \(provisionalDestURL.lastPathComponent)", category: "network")
-            DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: provisionalDestURL.lastPathComponent)
             return provisionalDestURL
         }
 
@@ -398,15 +406,18 @@ extension StreamingService {
         let actualExt = extensionForContentType(
             (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")
         ) ?? requestedExt
-        let destURL = importDir.appendingPathComponent("\(safeName).\(actualExt)")
+        let sourceTrackID = "\(track.source):\(track.id)"
+        let (destURL, alreadyComplete) = resolveDownloadDestination(
+            preferred: importDir.appendingPathComponent("\(safeName).\(actualExt)"),
+            sourceTrackID: sourceTrackID
+        )
 
-        if FileManager.default.fileExists(atPath: destURL.path) {
+        if alreadyComplete {
             try? FileManager.default.removeItem(at: downloadedURL)
             appLog("downloadToLibrary: already exists, skipping \(destURL.lastPathComponent)", category: "network")
             return destURL
         }
 
-        try? FileManager.default.removeItem(at: destURL)
         do {
             try FileManager.default.moveItem(at: downloadedURL, to: destURL)
         } catch {
@@ -576,12 +587,14 @@ extension StreamingService {
             appWarn("finalizeRelayedFile: on-device tagging failed for \"\(track.title)\" — importing untagged", category: "network")
         }
 
-        let destURL = importDir.appendingPathComponent("\(safeName).m4a")
-        if FileManager.default.fileExists(atPath: destURL.path) {
+        let (destURL, alreadyComplete) = resolveDownloadDestination(
+            preferred: importDir.appendingPathComponent("\(safeName).m4a"),
+            sourceTrackID: sourceTrackID
+        )
+        if alreadyComplete {
             try? FileManager.default.removeItem(at: finalRawURL)
             return destURL
         }
-        try? FileManager.default.removeItem(at: destURL)
         do {
             try FileManager.default.moveItem(at: finalRawURL, to: destURL)
         } catch {
@@ -600,6 +613,44 @@ extension StreamingService {
             await ArtworkService.shared.prefetchRemoteImage(url: thumbURL, forKey: destURL.lastPathComponent)
         }
         return destURL
+    }
+
+    /// Resolves a safe, non-colliding destination path for a track about to be
+    /// moved into place. A filename collision at `preferred` does NOT necessarily
+    /// mean "we already have this track" — titles routinely collide (different
+    /// artists' same-titled songs, covers, remasters), and a stale/partial file
+    /// from an interrupted previous download can share the same name too.
+    /// Trusting a bare filename match here was the cause of two user-visible
+    /// bugs: a different track silently never downloading because it happened to
+    /// share a sanitized filename with something already on disk, and the app
+    /// reporting a track as "downloaded" when the file at that path was actually
+    /// corrupt or belonged to a different track entirely.
+    ///
+    /// Only treats an existing file as "this exact track, already downloaded" if
+    /// the download ledger confirms *this* `sourceTrackID` is the one that
+    /// produced that exact filename, AND the file still passes an audio
+    /// integrity check. Otherwise returns a disambiguated sibling path
+    /// ("Title (2).ext", "Title (3).ext", ...) so the real download can proceed
+    /// without clobbering or being silently mistaken for something else.
+    func resolveDownloadDestination(preferred: URL, sourceTrackID: String) -> (url: URL, alreadyComplete: Bool) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: preferred.path) else {
+            return (preferred, false)
+        }
+        if DownloadLedgerStore.shared.filename(for: sourceTrackID) == preferred.lastPathComponent,
+           CorruptFileFinderService.isValidAudioFile(at: preferred) {
+            return (preferred, true)
+        }
+        let ext = preferred.pathExtension
+        let base = preferred.deletingPathExtension().lastPathComponent
+        let dir = preferred.deletingLastPathComponent()
+        var n = 2
+        var candidate = dir.appendingPathComponent("\(base) (\(n))").appendingPathExtension(ext)
+        while fm.fileExists(atPath: candidate.path) {
+            n += 1
+            candidate = dir.appendingPathComponent("\(base) (\(n))").appendingPathExtension(ext)
+        }
+        return (candidate, false)
     }
 
     /// Builds the `/api/download/status` or `/api/download/result` URL for a given

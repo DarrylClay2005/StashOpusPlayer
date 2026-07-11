@@ -106,10 +106,27 @@ struct TrackedPlaylistDetailView: View {
                     .foregroundStyle(AppTheme.textPrimary)
             }
             .tint(AppTheme.dynamicAccent)
+
+            HStack {
+                Label("Save to", systemImage: "folder")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                DownloadFolderPicker(folderName: Binding(
+                    get: { trackedStore.playlists.first { $0.id == playlist.id }?.destinationFolder ?? "" },
+                    set: { trackedStore.setDestinationFolder(id: playlist.id, $0) }
+                ))
+            }
         } footer: {
-            Text("Tracks already in your library are skipped automatically — Lumisound rescans the local Imported Music folder (and its subfolders) before each download so nothing is fetched twice. With auto-download on, new tracks added to this playlist are fetched automatically when you open the app.")
+            Text("Tracks already in your library are skipped automatically — Lumisound rescans the local Imported Music folder (and its subfolders) before each download so nothing is fetched twice. With auto-download on, new tracks added to this playlist are fetched automatically when you open the app. \"Save to\" overrides the global Download Folder setting just for this playlist.")
         }
         .listRowBackground(AppTheme.surface)
+    }
+
+    /// This playlist's resolved destination directory (its own override, or
+    /// the global Settings → yt-dlp → Download Folder default).
+    private var destinationDir: URL? {
+        let folder = trackedStore.playlists.first { $0.id == playlist.id }?.destinationFolder
+        return StreamingService.downloadDirectory(forFolderName: folder)
     }
 
     // MARK: Track Row
@@ -248,7 +265,7 @@ struct TrackedPlaylistDetailView: View {
         }
 
         do {
-            let localURL = try await streaming.downloadToLibrary(track: track, existingSongs: library.allSongs)
+            let localURL = try await streaming.downloadToLibrary(track: track, destinationDir: destinationDir, existingSongs: library.allSongs)
             library.scanLocalDocuments()
             localCopyIDs.insert(track.id)
             await maybeCloudBackup(track: track, localURL: localURL)
@@ -280,6 +297,7 @@ struct TrackedPlaylistDetailView: View {
         // Snapshot the library once on the main actor so the @Sendable task-group
         // children don't reach back into the @MainActor LibraryManager.
         let existing = library.allSongs
+        let dir = destinationDir
 
         // Bounded concurrency matching the bridge's yt-dlp semaphore (4).
         let maxConcurrent = 4
@@ -295,7 +313,7 @@ struct TrackedPlaylistDetailView: View {
                 downloadingIDs.insert(track.id)
                 group.addTask {
                     do {
-                        let url = try await streaming.downloadToLibrary(track: track, existingSongs: existing)
+                        let url = try await streaming.downloadToLibrary(track: track, destinationDir: dir, existingSongs: existing)
                         return (track, url, false)
                     } catch StreamingError.serverDetail {
                         // e.g. an auto-generated Topic-channel track blocked from
