@@ -342,7 +342,12 @@ struct UploadMusicView: View {
                     message: "Tap Upload to Cloud to back up your audio files."
                 )
             } else {
-                VStack(spacing: 0) {
+                // LazyVStack, not VStack: this screen renders every uploaded
+                // track (thousands for a heavy user), and a plain VStack inside
+                // a ScrollView builds/lays out ALL of them synchronously on
+                // appear instead of only what's on-screen — a main-thread hang
+                // long enough to trip the iOS watchdog and get the app killed.
+                LazyVStack(spacing: 0) {
                     ForEach(streaming.userMusicMetadata) { track in
                         uploadedTrackRow(track)
                         if track.id != streaming.userMusicMetadata.last?.id {
@@ -453,7 +458,10 @@ struct UploadMusicView: View {
                     message: "Upload tracks first and they will appear here for re-download."
                 )
             } else {
-                VStack(spacing: 0) {
+                // Same LazyVStack fix as uploadedTracksSection above — this is
+                // a second full render of the same (potentially thousands-long)
+                // track list, so it needs the fix independently.
+                LazyVStack(spacing: 0) {
                     ForEach(streaming.userMusicMetadata) { track in
                         restoreTrackRow(track)
                         if track.id != streaming.userMusicMetadata.last?.id {
