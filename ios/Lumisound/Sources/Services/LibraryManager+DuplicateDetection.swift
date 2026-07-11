@@ -12,11 +12,17 @@ extension LibraryManager {
     /// filename or source — including manually-imported files or ones that
     /// predate the `LUMISOUND_ID`/`sourceTrackID` tagging — so re-downloads
     /// aren't queued just because the track lacks a matching source ID.
+    ///
+    /// Uses `normalizeArtist` (not plain `normalize`) so this matches exactly
+    /// what `DuplicateFinderService`'s own scan considers a duplicate — these
+    /// used to disagree (this check used plain `normalize`), which meant a
+    /// track could round-trip through a re-download here undetected and only
+    /// get caught later by a manual Duplicate Scanner run.
     func isAlreadyImported(title: String, artist: String, duration: TimeInterval? = nil) -> Bool {
-        let key = DuplicateFinderService.normalize(title) + "|" + DuplicateFinderService.normalize(artist)
+        let key = DuplicateFinderService.normalize(title) + "|" + DuplicateFinderService.normalizeArtist(artist)
         guard key != "|" else { return false }
         return allSongs.contains { song in
-            let songKey = DuplicateFinderService.normalize(song.title) + "|" + DuplicateFinderService.normalize(song.artist)
+            let songKey = DuplicateFinderService.normalize(song.title) + "|" + DuplicateFinderService.normalizeArtist(song.artist)
             guard songKey == key else { return false }
             guard let duration, duration > 0 else { return true }
             return abs(song.duration - duration) <= DuplicateFinderService.durationTolerance
@@ -32,7 +38,7 @@ extension LibraryManager {
     struct ImportedIdentityIndex {
         let byKey: [String: [TimeInterval]]
         func contains(title: String, artist: String, duration: TimeInterval?) -> Bool {
-            let key = DuplicateFinderService.normalize(title) + "|" + DuplicateFinderService.normalize(artist)
+            let key = DuplicateFinderService.normalize(title) + "|" + DuplicateFinderService.normalizeArtist(artist)
             guard key != "|", let durations = byKey[key] else { return false }
             guard let duration, duration > 0 else { return true }
             return durations.contains { abs($0 - duration) <= DuplicateFinderService.durationTolerance }
@@ -42,7 +48,7 @@ extension LibraryManager {
     func importedIdentityIndex() -> ImportedIdentityIndex {
         var byKey: [String: [TimeInterval]] = [:]
         for song in allSongs {
-            let key = DuplicateFinderService.normalize(song.title) + "|" + DuplicateFinderService.normalize(song.artist)
+            let key = DuplicateFinderService.normalize(song.title) + "|" + DuplicateFinderService.normalizeArtist(song.artist)
             guard key != "|" else { continue }
             byKey[key, default: []].append(song.duration)
         }

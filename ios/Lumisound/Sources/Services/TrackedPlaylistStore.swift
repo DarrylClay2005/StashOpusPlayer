@@ -137,15 +137,32 @@ final class TrackedPlaylistStore: ObservableObject {
             let identityIndex = library.importedIdentityIndex()
             let toGet = tracks.filter { !library.hasLocalCopy(of: $0, localSourceIDs: localSourceIDs, identityIndex: identityIndex) }
             var got = 0
+            var blocked = 0
             for track in toGet {
-                if (try? await streaming.downloadToLibrary(track: track, existingSongs: library.allSongs)) != nil {
+                do {
+                    _ = try await streaming.downloadToLibrary(track: track, existingSongs: library.allSongs)
                     got += 1
+                } catch StreamingError.serverDetail {
+                    // e.g. an auto-generated Topic-channel track blocked from
+                    // extraction — tallied so the summary toast can explain why
+                    // some tracks were skipped instead of silently dropping them.
+                    blocked += 1
+                } catch {
+                    // Other failures (network, timeout, etc.) stay silent here —
+                    // this is a background check, and the next scheduled run
+                    // will simply retry them.
                 }
             }
             if got > 0 {
                 library.scanLocalDocuments()
                 ToastCenter.shared.show("Auto-downloaded \(got) new track\(got == 1 ? "" : "s") from \"\(pl.name)\"",
                                         category: .download)
+            }
+            if blocked > 0 {
+                ToastCenter.shared.show(
+                    "\(blocked) track\(blocked == 1 ? "" : "s") from \"\(pl.name)\" blocked by YouTube (auto-generated \"Topic\" channel)",
+                    category: .warning
+                )
             }
             markAutoChecked(id: pl.id)
             if !tracks.isEmpty { updateMetadata(id: pl.id, trackCount: tracks.count) }

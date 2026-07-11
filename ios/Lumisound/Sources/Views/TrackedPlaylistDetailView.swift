@@ -253,6 +253,11 @@ struct TrackedPlaylistDetailView: View {
             localCopyIDs.insert(track.id)
             await maybeCloudBackup(track: track, localURL: localURL)
             ToastCenter.shared.show("Downloaded \"\(track.title)\"", category: .download)
+        } catch StreamingError.serverDetail(let detail) {
+            // A specific, actionable reason from the bridge (e.g. an
+            // auto-generated Topic-channel track blocked from extraction) —
+            // show it directly instead of a generic "failed to download".
+            ToastCenter.shared.show(detail, category: .error)
         } catch {
             ToastCenter.shared.show("Failed to download \"\(track.title)\"", category: .error)
         }
@@ -280,16 +285,26 @@ struct TrackedPlaylistDetailView: View {
         let maxConcurrent = 4
         var nextIndex = 0
         var failed = 0
+        var blockedCount = 0
 
-        await withTaskGroup(of: (track: StreamTrack, localURL: URL?).self) { group in
+        await withTaskGroup(of: (track: StreamTrack, localURL: URL?, blocked: Bool).self) { group in
             func launchNext() {
                 guard nextIndex < toDownload.count else { return }
                 let track = toDownload[nextIndex]
                 nextIndex += 1
                 downloadingIDs.insert(track.id)
                 group.addTask {
-                    let url = try? await streaming.downloadToLibrary(track: track, existingSongs: existing)
-                    return (track, url)
+                    do {
+                        let url = try await streaming.downloadToLibrary(track: track, existingSongs: existing)
+                        return (track, url, false)
+                    } catch StreamingError.serverDetail {
+                        // e.g. an auto-generated Topic-channel track blocked from
+                        // extraction — tallied separately so the summary toast can
+                        // explain why, rather than reading like a generic failure.
+                        return (track, nil, true)
+                    } catch {
+                        return (track, nil, false)
+                    }
                 }
             }
 
@@ -300,6 +315,9 @@ struct TrackedPlaylistDetailView: View {
                 if let localURL = result.localURL {
                     localCopyIDs.insert(result.track.id)
                     await maybeCloudBackup(track: result.track, localURL: localURL)
+                } else if result.blocked {
+                    blockedCount += 1
+                    failed += 1
                 } else {
                     failed += 1
                 }
@@ -313,6 +331,16 @@ struct TrackedPlaylistDetailView: View {
 
         if failed == 0 {
             ToastCenter.shared.show("Downloaded \(toDownload.count) track\(toDownload.count == 1 ? "" : "s")", category: .download)
+        } else if blockedCount == failed {
+            ToastCenter.shared.show(
+                "Downloaded \(toDownload.count - failed), \(failed) blocked by YouTube (auto-generated \"Topic\" channel tracks)",
+                category: .error
+            )
+        } else if blockedCount > 0 {
+            ToastCenter.shared.show(
+                "Downloaded \(toDownload.count - failed), \(failed) failed (\(blockedCount) blocked by YouTube)",
+                category: .error
+            )
         } else {
             ToastCenter.shared.show("Downloaded \(toDownload.count - failed), \(failed) failed", category: .error)
         }

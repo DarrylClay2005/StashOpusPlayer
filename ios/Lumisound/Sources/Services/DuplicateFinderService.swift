@@ -287,12 +287,29 @@ final class DuplicateFinderService: ObservableObject {
         return result
     }
 
-    /// Like `normalize`, but additionally splits on common multi-artist
-    /// separators (",", "&", "/", " x ", " vs ", "with") and sorts the parts —
-    /// so "Artist A & Artist B" and "Artist B, Artist A" (or the same pairing
-    /// tagged with a different separator across sources) compare equal.
+    /// Matches a trailing "- Topic" (any dash style) — YouTube's
+    /// auto-generated "Topic" channel naming convention for official
+    /// Content-ID audio (e.g. "WoodenToaster - Topic"). Stripped so the same
+    /// track imported once via a Topic-channel download and once from a
+    /// plain-artist source (Apple Music, a manual import, a different
+    /// extractor version) still compares equal instead of silently evading
+    /// both the pre-download dedupe check and the Duplicate Scanner.
+    private static let topicChannelSuffixRegex = try? NSRegularExpression(
+        pattern: #"(?i)\s*[-–—]\s*Topic\s*$"#
+    )
+
+    /// Like `normalize`, but additionally strips a trailing "- Topic" channel
+    /// suffix, splits on common multi-artist separators (",", "&", "/", " x ",
+    /// " vs ", "with") and sorts the parts — so "Artist A & Artist B" and
+    /// "Artist B, Artist A" (or the same pairing tagged with a different
+    /// separator across sources) compare equal.
     nonisolated static func normalizeArtist(_ text: String) -> String {
         var working = text
+        if let topicChannelSuffixRegex {
+            working = topicChannelSuffixRegex.stringByReplacingMatches(
+                in: working, range: NSRange(working.startIndex..., in: working), withTemplate: ""
+            )
+        }
         if let featureClauseRegex {
             working = featureClauseRegex.stringByReplacingMatches(
                 in: working, range: NSRange(working.startIndex..., in: working), withTemplate: ""

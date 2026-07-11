@@ -1861,6 +1861,40 @@ def _ytdlp_auth_failure_reason(stderr: bytes) -> Optional[str]:
     return None
 
 
+_TOPIC_CHANNEL_SUFFIX = " - Topic"
+
+_TOPIC_CHANNEL_UNAVAILABLE_DETAIL = (
+    'Blocked by YouTube: this is an auto-generated "Topic" channel track and '
+    "can't be extracted right now — not an app bug, may resolve itself later."
+)
+
+
+async def _is_topic_channel_video(source: str, id: str) -> bool:
+    """Auto-generated YouTube "Topic" channel uploads (official
+    Content-ID-registered audio) have started returning an UNPLAYABLE
+    playability status from every yt-dlp player client (confirmed across
+    web/android_vr/web_safari/tv/ios/android/mweb/web_embedded, with and
+    without auth) while remaining perfectly resolvable via YouTube's
+    lightweight oembed endpoint, which never touches the player API at all.
+    Used to turn a generic "download failed" into a specific, actionable
+    explanation instead of something that looks transient/retryable."""
+    if source != "youtube":
+        return False
+    url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={id}&format=json"
+    try:
+        loop = asyncio.get_running_loop()
+
+        def _fetch():
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                return json.loads(resp.read())
+
+        data = await loop.run_in_executor(None, _fetch)
+        return str(data.get("author_name", "")).endswith(_TOPIC_CHANNEL_SUFFIX)
+    except Exception:
+        return False
+
+
 def _format_flag(format: str) -> str:
     """Map a format name to a yt-dlp -f flag value for direct URL extraction."""
     mapping = {
@@ -2234,6 +2268,13 @@ async def _do_download_job(
                 attempt, max_attempts, downloader_name, proc_elapsed, proc.returncode, err_text,
             )
             shutil.rmtree(tmp_dir, ignore_errors=True)
+            if "not available" in err_text.lower() or "unavailable" in err_text.lower():
+                if await _is_topic_channel_video(source, id):
+                    logger.info(
+                        "download_track: %s:%s identified as an auto-generated Topic-channel "
+                        "track — not retrying further attempts", source, id,
+                    )
+                    raise HTTPException(status_code=422, detail=_TOPIC_CHANNEL_UNAVAILABLE_DETAIL)
             if attempt == max_attempts:
                 detail = _ytdlp_auth_failure_reason(last_stderr) or "Could not download track"
                 raise HTTPException(status_code=404, detail=detail)

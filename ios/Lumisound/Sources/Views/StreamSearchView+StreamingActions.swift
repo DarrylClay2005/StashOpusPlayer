@@ -121,6 +121,20 @@ extension StreamSearchView {
                         )
                     }
                 }
+            } catch let error as StreamingError {
+                failedTrackIDs.insert(track.id)
+                appWarn("Download failed: \"\(track.title)\": \(error.localizedDescription)", category: "download",
+                        extra: ["title": track.title, "artist": track.artist, "source": track.source, "trackId": track.id, "error": error.localizedDescription])
+                if case .serverDetail(let detail) = error {
+                    // A specific, actionable reason from the bridge (e.g. an
+                    // auto-generated Topic-channel track blocked from extraction) —
+                    // show it directly instead of a generic "failed to download".
+                    streaming.errorMessage = detail
+                    ToastCenter.shared.show(detail, category: .error)
+                } else {
+                    streaming.errorMessage = "Download failed: \(error.localizedDescription)"
+                    ToastCenter.shared.show("Failed to download \"\(track.title)\"", category: .error)
+                }
             } catch {
                 streaming.errorMessage = "Download failed: \(error.localizedDescription)"
                 failedTrackIDs.insert(track.id)
