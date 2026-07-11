@@ -12,7 +12,12 @@ RUN apt-get update && apt-get install -y ffmpeg curl unzip atomicparsley aria2 l
 # yt-dlp now needs a JS runtime to solve YouTube's player/signature challenge
 # (EJS) — without one, extraction fails for most videos with "This video is
 # not available". Deno is the runtime yt-dlp enables by default.
-RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+# `curl | sh` alone silently ships a broken image on any network hiccup: a
+# failed curl still leaves `sh` reading an empty pipe, which exits 0, so the
+# RUN step "succeeds" having installed nothing. The trailing `test -x` makes
+# a failed install fail the build instead of shipping a JS-runtime-less image.
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
+    && test -x /usr/local/bin/deno
 ENV PATH="/usr/local/bin:${PATH}"
 
 # Install yt-dlp pinned version via pip — kept current; YouTube changes its
