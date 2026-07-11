@@ -19,6 +19,20 @@ struct StreamTrack: Identifiable, Codable, Hashable {
     /// `Song.sourceTrackID` regardless of filename/title differences.
     var sourceTrackID: String { "\(source):\(id)" }
 
+    /// True for auto-generated YouTube "Topic" channel uploads (official
+    /// Content-ID audio) — these have started being rejected by every yt-dlp
+    /// player client (see main.py's `_is_topic_channel_video`/
+    /// `_TOPIC_CHANNEL_UNAVAILABLE_DETAIL`), so playlist/search results filter
+    /// them out entirely rather than showing something that will just fail to
+    /// download. "- Topic" (any dash style) is YouTube's own naming
+    /// convention for these channels, and it's already present in `artist`
+    /// (populated server-side from yt-dlp's uploader/channel field) — no
+    /// extra network call needed to detect it.
+    var isBlockedTopicChannelTrack: Bool {
+        guard source == "youtube" else { return false }
+        return artist.range(of: #"(?i)[-–—]\s*Topic\s*$"#, options: .regularExpression) != nil
+    }
+
     var durationText: String {
         let m = durationSeconds / 60
         let s = durationSeconds % 60

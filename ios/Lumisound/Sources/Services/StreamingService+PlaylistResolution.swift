@@ -82,7 +82,11 @@ extension StreamingService {
                     return
                 }
             }
-            let tracks = StreamingService.dedupedByID(try JSONDecoder().decode([StreamTrack].self, from: data))
+            let allTracks = StreamingService.dedupedByID(try JSONDecoder().decode([StreamTrack].self, from: data))
+            let tracks = allTracks.filter { !$0.isBlockedTopicChannelTrack }
+            if tracks.count != allTracks.count {
+                appLog("resolvePlaylist: hid \(allTracks.count - tracks.count) Topic-channel track(s) blocked from extraction", category: "network")
+            }
             if tracks.isEmpty {
                 // Primary resolve returned nothing — fall back to the
                 // playlist-to-individual-URLs expander (the export-style
@@ -153,7 +157,11 @@ extension StreamingService {
                 // Fall back to the individual-URL expander on any non-2xx.
                 return await expandPlaylistTracks(url: url, existingSongs: existingSongs)
             }
-            let tracks = StreamingService.dedupedByID(try JSONDecoder().decode([StreamTrack].self, from: data))
+            let allTracks = StreamingService.dedupedByID(try JSONDecoder().decode([StreamTrack].self, from: data))
+            let tracks = allTracks.filter { !$0.isBlockedTopicChannelTrack }
+            if tracks.count != allTracks.count {
+                appLog("fetchPlaylistTracks: hid \(allTracks.count - tracks.count) Topic-channel track(s) blocked from extraction", category: "network")
+            }
             if tracks.isEmpty {
                 return await expandPlaylistTracks(url: url, existingSongs: existingSongs)
             }
