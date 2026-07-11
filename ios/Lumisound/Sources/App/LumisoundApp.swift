@@ -101,6 +101,26 @@ struct LumisoundApp: App {
                     // Scan previously added watched folders.
                     libraryManager.scanWatchedFolders(using: folderService)
 
+                    // Auto-download new tracks from any tracked playlists that have it
+                    // enabled (throttled internally; each playlist does its own fresh
+                    // library scan before deciding what's new — see
+                    // TrackedPlaylistStore.runAutoDownloads — so it doesn't need to wait
+                    // for anything above to finish first). Fired as its own independent
+                    // Task rather than awaited in this sequential chain: it used to run
+                    // dead last, after account sync, notification-permission prompts,
+                    // bridge health checks, a 3s sleep, and a GitHub update check —  a
+                    // normal "open the app, glance at it, close it" session routinely got
+                    // this whole .task cancelled by view disappearance before ever
+                    // reaching that line, so auto-download silently never ran. A plain
+                    // Task{} is unstructured — it starts immediately and keeps running
+                    // independently of this .task's own cancellation, so it actually gets
+                    // a chance to finish even on a quick app open.
+                    Task {
+                        await TrackedPlaylistStore.shared.runAutoDownloads(
+                            streaming: streaming, library: libraryManager
+                        )
+                    }
+
                     // If logged in, pull latest state from DB as primary storage source.
                     if account.isLoggedIn {
                         await account.pullSync(library: libraryManager, player: player)
@@ -132,13 +152,6 @@ struct LumisoundApp: App {
                     // Check for updates after a brief delay.
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     await updater.checkForUpdates()
-
-                    // Auto-download new tracks from any tracked playlists that
-                    // have it enabled (throttled internally). Runs after the
-                    // initial library scan so dedup sees what's already present.
-                    await TrackedPlaylistStore.shared.runAutoDownloads(
-                        streaming: streaming, library: libraryManager
-                    )
 
                     // Queue the periodic background check (subscriptions +
                     // tracked playlists) — see BackgroundRefreshService.
