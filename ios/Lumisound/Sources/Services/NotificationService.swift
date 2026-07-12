@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import UserNotifications
 
 // MARK: - NotificationService
@@ -71,6 +72,13 @@ final class NotificationService: ObservableObject {
             isAuthorized = true
         default:
             isAuthorized = false
+        }
+        // Ask the OS for an APNs device token whenever we hold real alert
+        // authorization, so real (background) push delivery stays wired up
+        // to the current authorization state on every launch — registering
+        // again with an already-valid token is a harmless no-op.
+        if isAuthorized {
+            UIApplication.shared.registerForRemoteNotifications()
         }
     }
 

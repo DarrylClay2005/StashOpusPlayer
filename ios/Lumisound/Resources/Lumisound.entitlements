@@ -12,6 +12,17 @@
          below (commented out), this one needs no separate Apple approval. -->
     <key>com.apple.developer.group-session</key>
     <true/>
+    <!-- Real APNs push (see AppDelegate.swift / NotificationService.swift /
+         ios-bridge's _send_push_best_effort). Self-serviceable — unlike
+         CarPlay below, Push Notifications needs no separate Apple approval,
+         just an APNs auth key generated at developer.apple.com and the
+         server's APNS_KEY_* env vars set. "development" matches AltStore/
+         Sideloadly's ad-hoc/development-signed builds, which only Apple's
+         sandbox APNs environment will deliver to (server's
+         APNS_USE_SANDBOX defaults to "1" to match) — flip both together if
+         this ever ships as a true App Store build. -->
+    <key>aps-environment</key>
+    <string>development</string>
     <!-- CarPlay (see CarPlaySceneDelegate.swift) is intentionally NOT enabled
          here. com.apple.developer.carplay-audio is a restricted entitlement —
          Apple must grant it to this app's paid developer account per

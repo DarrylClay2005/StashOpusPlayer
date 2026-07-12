@@ -137,6 +137,11 @@
          calling its APIs without this key present crashes the app. -->
     <key>NSMotionUsageDescription</key>
     <string>Lumisound uses head tracking to anchor Spatial Audio in place as you turn your head.</string>
+    <!-- Required to call LAContext.evaluatePolicy with Face ID (Settings →
+         General → App Lock) — omitting this crashes the app on first use on
+         a Face ID device, even though Touch ID/passcode need no such key. -->
+    <key>NSFaceIDUsageDescription</key>
+    <string>Lumisound can use Face ID to lock the app, since it syncs your playlists and listening history to your account.</string>
 
     <!-- Status bar -->
     <key>UIStatusBarStyle</key>

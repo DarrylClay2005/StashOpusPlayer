@@ -3,6 +3,7 @@ import UIKit
 
 @main
 struct LumisoundApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var libraryManager = LibraryManager()
     @StateObject private var player = AudioPlayerManager()
     @StateObject private var sleepTimer = SleepTimerService()
@@ -15,8 +16,11 @@ struct LumisoundApp: App {
     @StateObject private var moodService = MoodPlaylistService()
     @StateObject private var cacheManager = CacheManagerService()
     @StateObject private var sharePlay = SharePlayCoordinator()
+    @StateObject private var appLock = AppLockService()
+    @StateObject private var recentlyDeleted = RecentlyDeletedService()
 
     @State private var showLaunch = true
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         // Must happen before the app finishes launching — too late if done
@@ -42,6 +46,8 @@ struct LumisoundApp: App {
                     .environmentObject(moodService)
                     .environmentObject(cacheManager)
                     .environmentObject(sharePlay)
+                    .environmentObject(appLock)
+                    .environmentObject(recentlyDeleted)
                     .opacity(showLaunch ? 0 : 1)
                     .animation(.easeInOut(duration: 0.4), value: showLaunch)
 
@@ -52,9 +58,25 @@ struct LumisoundApp: App {
                         .environmentObject(player)
                         .transition(.opacity)
                 }
+
+                // Outermost layer — covers the launch screen too, so locking
+                // takes effect the instant the app becomes active again, not
+                // only once the launch/loading sequence finishes.
+                if appLock.isEnabled && !appLock.isUnlocked {
+                    AppLockView()
+                        .environmentObject(appLock)
+                        .transition(.opacity)
+                        .zIndex(1)
+                }
             }
             .animation(.easeInOut(duration: 0.4), value: showLaunch)
+            .animation(.easeInOut(duration: 0.25), value: appLock.isUnlocked)
             .preferredColorScheme(.dark)
+            .onChange(of: scenePhase) { phase in
+                if phase == .background {
+                    appLock.lock()
+                }
+            }
             .task {
                     // Configure background logger (idempotent — safe if .task fires multiple times)
                     AppLogger.shared.configure(bridgeURL: streaming.bridgeURL)
@@ -97,6 +119,11 @@ struct LumisoundApp: App {
                     // Auto-scan for corrupt files immediately, then every 5 minutes
                     // for the rest of the session (non-blocking, all users).
                     CorruptFileFinderService.shared.startPeriodicScanning()
+
+                    // Sweep anything past its 30-day recovery window — cheap
+                    // no-op most launches, matters for anyone who deleted
+                    // tracks a month ago and never opened Recently Deleted.
+                    recentlyDeleted.purgeExpired()
 
                     // Periodically retry online metadata lookups for imported
                     // tracks still missing artist/album/genre/year (e.g. after

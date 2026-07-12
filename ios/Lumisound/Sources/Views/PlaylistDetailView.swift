@@ -131,37 +131,58 @@ struct PlaylistDetailView: View {
         .navigationTitle(playlist.name)
         .navigationBarTitleDisplayMode(.large)
         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
+        // While `editMode` is active, SwiftUI/UIKit's List editing chrome
+        // suppresses the system back button and the edge-swipe-to-pop
+        // gesture (a List-in-edit-mode convention: leaving mid-reorder is
+        // blocked so you can't "swipe away" a half-finished drag). Without
+        // an explicit way out in the same top-left spot users look for, that
+        // reads as "I can't go back" — a leading "Done" here guarantees an
+        // always-visible, always-tappable exit for as long as editing is on,
+        // matching Apple's own Photos/Notes edit-mode convention.
+        .navigationBarBackButtonHidden(isEditing)
         .toolbar {
+            if isEditing {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        withAnimation { isEditing = false }
+                    } label: {
+                        Text("Done").fontWeight(.semibold)
+                    }
+                    .tint(AppTheme.dynamicAccent)
+                }
+            }
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                Menu {
-                    Button {
-                        showOrganizeSheet = true
+                if !isEditing {
+                    Menu {
+                        Button {
+                            showOrganizeSheet = true
+                        } label: {
+                            Label("Organize", systemImage: "folder.badge.gearshape")
+                        }
+                        Button {
+                            exportM3U()
+                        } label: {
+                            Label("Export as M3U", systemImage: "doc.text")
+                        }
                     } label: {
-                        Label("Organize", systemImage: "folder.badge.gearshape")
+                        Image(systemName: "folder.badge.gearshape")
                     }
+                    .tint(AppTheme.dynamicAccent)
+
                     Button {
-                        exportM3U()
+                        showShareSheet = true
                     } label: {
-                        Label("Export as M3U", systemImage: "doc.text")
+                        Image(systemName: "square.and.arrow.up")
                     }
-                } label: {
-                    Image(systemName: "folder.badge.gearshape")
-                }
-                .tint(AppTheme.dynamicAccent)
+                    .tint(AppTheme.dynamicAccent)
 
-                Button {
-                    showShareSheet = true
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
+                    Button {
+                        showingAddSongs = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .tint(AppTheme.dynamicAccent)
                 }
-                .tint(AppTheme.dynamicAccent)
-
-                Button {
-                    showingAddSongs = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .tint(AppTheme.dynamicAccent)
 
                 Button {
                     withAnimation { isEditing.toggle() }

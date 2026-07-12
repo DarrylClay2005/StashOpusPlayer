@@ -5,6 +5,10 @@ struct ArtistDetailView: View {
 
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
+    @EnvironmentObject private var account: AccountService
+
+    @State private var bio: ArtistBio?
+    @State private var isBioExpanded = false
 
     // Songs sorted by album name then track number
     private var songs: [Song] {
@@ -40,6 +44,8 @@ struct ArtistDetailView: View {
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
             .listSectionSeparator(.hidden)
+
+            bioSection
 
             if songs.isEmpty {
                 EmptyStateView(
@@ -89,6 +95,21 @@ struct ArtistDetailView: View {
         .navigationTitle(artist)
         .navigationBarTitleDisplayMode(.large)
         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
+        .task(id: artist) {
+            bio = await account.fetchArtistBio(name: artist)
+        }
+    }
+
+    @ViewBuilder
+    private var bioSection: some View {
+        if let bio, bio.found, let text = bio.bio, !text.isEmpty {
+            Section {
+                ArtistBioCard(bio: bio, text: text, isExpanded: $isBioExpanded)
+            }
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets())
+            .listSectionSeparator(.hidden)
+        }
     }
 
     private var playbackButtons: some View {
@@ -143,6 +164,95 @@ private struct ArtistHeaderView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 20)
+    }
+}
+
+// MARK: - Artist Bio Card
+
+/// "About this artist" — MusicBrainz facts (type/country/active years/tags)
+/// plus a Wikipedia bio excerpt with a "more" toggle, since full Wikipedia
+/// extracts can run several paragraphs. See `AccountService.fetchArtistBio`.
+private struct ArtistBioCard: View {
+    let bio: ArtistBio
+    let text: String
+    @Binding var isExpanded: Bool
+
+    private var factsLine: String? {
+        var parts: [String] = []
+        if let type = bio.artistType, !type.isEmpty { parts.append(type) }
+        if let country = bio.country, !country.isEmpty { parts.append(country) }
+        if let begin = bio.beginDate, !begin.isEmpty {
+            let end = bio.endDate?.isEmpty == false ? bio.endDate! : "present"
+            parts.append("\(begin.prefix(4))\u{2013}\(end.prefix(4))")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                if let urlString = bio.imageURL, !urlString.isEmpty, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        if case .success(let image) = phase {
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } else {
+                            AppTheme.elevatedSurface
+                        }
+                    }
+                    .frame(width: 56, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("About")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    if let factsLine {
+                        Text(factsLine)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(AppTheme.textSecondary)
+                .lineLimit(isExpanded ? nil : 4)
+
+            HStack(spacing: 16) {
+                Button(isExpanded ? "Show Less" : "Read More") {
+                    withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.dynamicAccent)
+
+                if let urlString = bio.wikipediaURL, !urlString.isEmpty, let url = URL(string: urlString) {
+                    Link("Wikipedia", destination: url)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                }
+            }
+
+            if let tags = bio.tags, !tags.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(tags, id: \.self) { tag in
+                            Text(tag)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(AppTheme.elevatedSurface, in: Capsule())
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 4)
     }
 }
 

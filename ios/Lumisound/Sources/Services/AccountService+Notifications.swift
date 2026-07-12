@@ -42,8 +42,13 @@ extension AccountService {
         }
     }
 
-    /// Registers this device's APNs token for push notifications.
+    private static let deviceTokenKey = "apns_device_token_hex"
+
+    /// Registers this device's APNs token for push notifications. Also
+    /// remembered locally (not tied to a session) so `logout()` can
+    /// unregister it without needing a fresh callback from the OS.
     func registerPushToken(_ deviceToken: String) async {
+        UserDefaults.standard.set(deviceToken, forKey: Self.deviceTokenKey)
         guard isLoggedIn else { return }
         struct Body: Encodable { let device_token: String; let platform: String }
         do {
@@ -61,5 +66,12 @@ extension AccountService {
         } catch {
             // Best-effort.
         }
+    }
+
+    /// Unregisters whatever APNs token this device last registered, if any —
+    /// so a logged-out device stops receiving another account's pushes.
+    func unregisterCurrentDeviceToken() async {
+        guard let token = UserDefaults.standard.string(forKey: Self.deviceTokenKey) else { return }
+        await unregisterPushToken(token)
     }
 }

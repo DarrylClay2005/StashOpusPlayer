@@ -94,6 +94,23 @@ final class TrackedPlaylistStore: ObservableObject {
         save()
     }
 
+    /// Merges tracked playlists pulled from the account backup (see
+    /// `AccountService.pullSync`) — adds any not already tracked (reusing
+    /// `add`'s existing case-insensitive URL dedup) and carries over
+    /// autoDownload/destinationFolder for newly-added entries only, so a
+    /// playlist already tracked on this device keeps whatever settings it
+    /// already has rather than being overwritten by a stale server value.
+    func mergeFromSync(_ remote: [TrackedPlaylist]) {
+        for entry in remote {
+            let trimmedURL = entry.url.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard add(url: trimmedURL, name: entry.name, thumbnailURL: entry.thumbnailURL) else { continue }
+            guard let idx = playlists.firstIndex(where: { $0.url.lowercased() == trimmedURL.lowercased() }) else { continue }
+            if let autoDownload = entry.autoDownload { playlists[idx].autoDownload = autoDownload }
+            if let destinationFolder = entry.destinationFolder { playlists[idx].destinationFolder = destinationFolder }
+        }
+        save()
+    }
+
     /// Updates the cached track count (and optionally the thumbnail/name) after a
     /// successful resolve.
     func updateMetadata(id: String, trackCount: Int? = nil, thumbnailURL: String? = nil, name: String? = nil) {

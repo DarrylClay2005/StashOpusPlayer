@@ -6,14 +6,51 @@ import AVFoundation
 /// `AudioPlayerManager.startVisualizerTap`) rather than decoding/analyzing
 /// anything separately, so it reacts to exactly what's actually audible
 /// (effects, EQ, crossfade included) — entirely on-device, no server.
+///
+/// Also the app's one real "audio listener/analyzer" — Auto EQ
+/// (`AudioPlayerManager.applyAutoEQIfNeeded`) and Smart Auto Crossfade
+/// (`AudioPlayerManager.smartFadeDuration`), both in
+/// `AudioPlayerManager+Crossfade.swift`, read `bassLevel`/`midLevel`/
+/// `trebleLevel`/`overallLevel` off the SAME per-buffer FFT pass this
+/// already runs for the visualizer, rather than each standing up its own
+/// tap/analysis (only one tap can be installed on `mainMixerNode` bus 0 at a
+/// time, and a second FFT pass over the same audio would just be wasted CPU).
 @MainActor
 final class AudioVisualizerService: ObservableObject {
     static let shared = AudioVisualizerService()
+
+    /// Identifies why a caller wants analysis running — the underlying tap
+    /// stays installed as long as at least one reason is active. A `Set`
+    /// (rather than a plain ref count) is what makes `start(for:)`/
+    /// `stop(for:)` idempotent per-reason: the existing Live Spectrum view
+    /// already calls `start()`/`stop()` from both `.onAppear`/`.onDisappear`
+    /// AND `.onChange(of: isPlaying)` without them being strictly paired 1:1
+    /// (SwiftUI view identity churn, multiple views bound to the same
+    /// `isPlaying`, etc.) — a plain counter would drift out of sync and
+    /// leave the tap either stuck on or stuck off. Inserting/removing the
+    /// same reason twice is always safe.
+    enum AnalysisReason: Hashable {
+        case liveSpectrumUI
+        case autoEQ
+        case smartCrossfade
+    }
+    private var activeReasons: Set<AnalysisReason> = []
 
     static let barCount = 24
 
     /// Smoothed per-bar magnitude, 0...1.
     @Published private(set) var magnitudes: [Float] = Array(repeating: 0, count: barCount)
+
+    /// Coarse smoothed band energy, 0...1 (relative/self-referential, not
+    /// calibrated to an absolute loudness reference) — derived from the same
+    /// `fftMagnitudes` the 24-bar spectrum uses, just summed into 3 broad
+    /// ranges instead of 24 log-spaced ones. Bass ~20-250Hz, mid
+    /// ~250Hz-4kHz, treble ~4-16kHz.
+    @Published private(set) var bassLevel: Float = 0
+    @Published private(set) var midLevel: Float = 0
+    @Published private(set) var trebleLevel: Float = 0
+    /// Smoothed overall level across the full spectrum, 0...1.
+    @Published private(set) var overallLevel: Float = 0
 
     private let fftSize = 2048
     private let log2n: vDSP_Length = 11 // 2^11 == 2048
@@ -27,15 +64,32 @@ final class AudioVisualizerService: ObservableObject {
         if let fftSetup { vDSP_destroy_fftsetup(fftSetup) }
     }
 
-    func start() {
+    /// Requests analysis for `reason`. Safe to call repeatedly for the same
+    /// reason (idempotent), and safe to call from multiple independent
+    /// reasons at once — the tap stays installed as long as any reason is
+    /// active. Back-compat no-arg overload defaults to the original Live
+    /// Spectrum UI call sites' meaning.
+    func start(for reason: AnalysisReason = .liveSpectrumUI) {
+        let wasInactive = activeReasons.isEmpty
+        activeReasons.insert(reason)
+        guard wasInactive else { return }
         AudioPlayerManager.shared?.startVisualizerTap { [weak self] buffer in
             self?.process(buffer: buffer)
         }
     }
 
-    func stop() {
+    /// Releases `reason`'s interest in analysis. The underlying tap only
+    /// actually stops once no reason remains active. Safe to call for a
+    /// reason that was never started (a harmless no-op).
+    func stop(for reason: AnalysisReason = .liveSpectrumUI) {
+        activeReasons.remove(reason)
+        guard activeReasons.isEmpty else { return }
         AudioPlayerManager.shared?.stopVisualizerTap()
         magnitudes = Array(repeating: 0, count: Self.barCount)
+        bassLevel = 0
+        midLevel = 0
+        trebleLevel = 0
+        overallLevel = 0
     }
 
     /// Runs on the audio render thread (the tap's callback), not the main
@@ -55,6 +109,8 @@ final class AudioVisualizerService: ObservableObject {
 
         guard let fftSetup else { return }
         var bars = [Float](repeating: 0, count: Self.barCount)
+        var bandLevels: (bass: Float, mid: Float, treble: Float, overall: Float) = (0, 0, 0, 0)
+        let sampleRate = Float(buffer.format.sampleRate > 0 ? buffer.format.sampleRate : 44100)
 
         real.withUnsafeMutableBufferPointer { realPtr in
             imag.withUnsafeMutableBufferPointer { imagPtr in
@@ -82,18 +138,44 @@ final class AudioVisualizerService: ObservableObject {
                     let avg = slice.reduce(0, +) / Float(slice.count)
                     bars[bar] = min(1, max(0, log10(avg + 1) / 4))
                 }
+
+                // Coarse bass/mid/treble energy — same magnitude array, summed
+                // over actual frequency ranges (Hz -> bin index) rather than
+                // the log-spaced display bins above, since Auto EQ/Smart
+                // Crossfade care about real frequency bands, not display bars.
+                let binHz = sampleRate / Float(fftSize)
+                func bandAverage(_ lowHz: Float, _ highHz: Float) -> Float {
+                    let lowBin = max(1, Int(lowHz / binHz))
+                    let highBin = max(lowBin + 1, min(halfSize, Int(highHz / binHz)))
+                    guard lowBin < highBin else { return 0 }
+                    let slice = fftMagnitudes[lowBin..<highBin]
+                    return slice.reduce(0, +) / Float(slice.count)
+                }
+                func normalize(_ v: Float) -> Float { min(1, max(0, log10(v + 1) / 4)) }
+
+                let bass = normalize(bandAverage(20, 250))
+                let mid = normalize(bandAverage(250, 4000))
+                let treble = normalize(bandAverage(4000, min(16000, sampleRate / 2)))
+                let overallAvg = fftMagnitudes.reduce(0, +) / Float(max(1, fftMagnitudes.count))
+                bandLevels = (bass, mid, treble, normalize(overallAvg))
             }
         }
 
         Task { @MainActor [weak self] in
-            self?.applySmoothed(bars)
+            self?.applySmoothed(bars, bands: bandLevels)
         }
     }
 
-    private func applySmoothed(_ new: [Float]) {
-        guard new.count == magnitudes.count else { return }
-        for i in 0..<magnitudes.count {
-            magnitudes[i] = magnitudes[i] * 0.55 + new[i] * 0.45
+    private func applySmoothed(_ new: [Float], bands: (bass: Float, mid: Float, treble: Float, overall: Float)) {
+        if new.count == magnitudes.count {
+            for i in 0..<magnitudes.count {
+                magnitudes[i] = magnitudes[i] * 0.55 + new[i] * 0.45
+            }
         }
+        let smoothing: Float = 0.7
+        bassLevel = bassLevel * smoothing + bands.bass * (1 - smoothing)
+        midLevel = midLevel * smoothing + bands.mid * (1 - smoothing)
+        trebleLevel = trebleLevel * smoothing + bands.treble * (1 - smoothing)
+        overallLevel = overallLevel * smoothing + bands.overall * (1 - smoothing)
     }
 }

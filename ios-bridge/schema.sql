@@ -535,6 +535,28 @@ ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS earned_badges_json MEDIUM
 -- settings can be backed up without per-field schema migrations.
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS extra_settings_json MEDIUMTEXT NULL;
 
+-- The client (AccountService+Sync.swift) has built and sent bg_enabled/
+-- bg_blur_radius/bg_shuffle_interval in every sync push since the gallery
+-- background feature shipped, but no column ever existed for them here —
+-- Pydantic's SyncPushRequest silently dropped the extra JSON keys, so a
+-- fresh install never restored whether the gallery background was on, its
+-- blur radius, or its shuffle interval. Filling that gap now.
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS bg_enabled BOOLEAN DEFAULT TRUE;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS bg_blur_radius FLOAT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS bg_shuffle_interval FLOAT NULL;
+
+-- Previously device-local-only stores, now included in the per-user auto
+-- backup — see SyncData's Swift-side doc comments (AccountModels.swift) for
+-- why each of these was a real gap (Smart Playlists, tracked/auto-download
+-- playlists, play history/stats, track bookmarks, and per-track BPM keyed
+-- portably by sourceTrackID rather than the on-device-only path/mtime/size
+-- key BPMAnalyzerService's own cache uses).
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS play_history_json MEDIUMTEXT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS smart_playlists_json MEDIUMTEXT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS tracked_playlists_json MEDIUMTEXT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS bookmarks_json MEDIUMTEXT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS bpm_by_source_track_id_json MEDIUMTEXT NULL;
+
 -- Feature: Discover subscriptions — resolve a user-entered channel
 -- URL/handle/search term to a real YouTube channel_id + thumbnail at
 -- subscribe time, so the subscription list can show real channel art
@@ -616,6 +638,20 @@ CREATE TABLE IF NOT EXISTS ios_lyrics_cache (
     submitted_by_user_id VARCHAR(36) NULL,
     cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_title_artist (title, artist)
+);
+
+-- Cache of GET /api/artist/bio results (MusicBrainz facts + Wikipedia bio
+-- text/photo — see main.py). artist_name is the lowercased/trimmed lookup
+-- key. `found = FALSE` rows are real cache entries too (a typo'd/obscure
+-- name that matched nothing), so a bad lookup isn't re-queried against
+-- MusicBrainz/Wikipedia on every visit to that artist's page. Refreshed on
+-- a 30-day TTL (checked in the endpoint itself via `cached_at`), not
+-- indefinitely — unlike lyrics, a bio can meaningfully change over time.
+CREATE TABLE IF NOT EXISTS ios_artist_bio_cache (
+    artist_name VARCHAR(255) PRIMARY KEY,
+    bio_json MEDIUMTEXT NULL,
+    found BOOLEAN NOT NULL DEFAULT FALSE,
+    cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 -- Cache of Claude "intelligence" task results (see ios-bridge/intelligence.py),

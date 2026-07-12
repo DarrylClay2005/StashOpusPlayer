@@ -312,18 +312,22 @@ struct CacheManagerView: View {
     @ViewBuilder
     private var downloadedMusicSection: some View {
         Section {
-            HStack {
-                Label("Imported Music", systemImage: "music.note")
-                    .foregroundStyle(AppTheme.textPrimary)
-                Spacer()
-                Text(CacheManagerService.formattedSize(cacheManager.downloadedMusicSize))
-                    .font(AppTheme.monoFont(size: 14))
-                    .foregroundStyle(AppTheme.textSecondary)
+            NavigationLink {
+                DownloadsManagementView()
+            } label: {
+                HStack {
+                    Label("Imported Music", systemImage: "music.note")
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    Text(CacheManagerService.formattedSize(cacheManager.downloadedMusicSize))
+                        .font(AppTheme.monoFont(size: 14))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
             }
         } header: {
             sectionHeader("Downloaded Music")
         } footer: {
-            Text("Songs in your app's Documents folder. To remove individual tracks, use the Library view.")
+            Text("Tap to see every downloaded track's size, sort by size or date, and remove individual or multiple tracks at once.")
                 .font(.caption)
                 .foregroundStyle(AppTheme.textSecondary)
         }

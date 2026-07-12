@@ -105,6 +105,16 @@ struct SettingsHelpView: View {
                 title: "Per-Track Sound Settings",
                 body: "Adjust the EQ, effects, volume, or any other sound setting for the current track, then tap Save in the \"Custom Sound for This Track\" panel in Now Playing to pin those settings to that song specifically. They'll be recalled automatically every time the track plays, without affecting your default settings for everything else. Tap Remove to go back to your defaults for that track."
             ),
+            HelpTopic(
+                icon: "metronome",
+                title: "Smart Auto Crossfade",
+                body: "Smart Auto Crossfade (Settings → Audio) is an alternative to manual Crossfade that picks its own transition timing per-track instead of a fixed slider — it beatmatches the outgoing and incoming songs' tempos and snaps the fade to land on a downbeat, and reads how the outgoing track actually sounds right as it ends (a live audio analysis, not just a genre/tempo guess): a quiet fade-out gets a longer, gentler blend, while a track still at full energy gets a tighter one so two loud passages don't smear together. Turning it on automatically turns manual Crossfade off, since only one transition strategy can be active."
+            ),
+            HelpTopic(
+                icon: "bookmark",
+                title: "Track Bookmarks",
+                body: "Bookmark specific timestamps within a long track (a DJ mix, podcast, or audiobook-style file) to jump straight back to them later — useful for marking \"the drop\" or a chapter start. Bookmarks are entirely on-device and don't require an account."
+            ),
         ]),
         HelpCategory(icon: "slider.vertical.3", title: "Audio Effects", topics: [
             HelpTopic(
@@ -136,6 +146,16 @@ struct SettingsHelpView: View {
                 icon: "hare",
                 title: "Pitch & Speed",
                 body: "The Speed slider changes how fast the audio plays, from 0.5× (half-speed) to 2.0× (double-speed), without affecting pitch. The Pitch slider shifts the pitch up or down by up to 12 semitones independently of speed. Tap the pencil icon next to either value to type in an exact number. These controls are also accessible in the Now Playing screen under Playback Controls."
+            ),
+            HelpTopic(
+                icon: "water.waves",
+                title: "Reverb",
+                body: "Reverb (on by default) simulates the sound of a physical room, from a small booth up to a cathedral — pick a room size and adjust the wet/dry mix slider to control how present the effect is, from 0% (no reverb, dry signal only) to 100% (fully wet). The mix is a true crossfade between the dry and processed signal, so every point on the slider is audibly different — not just the top end of the range."
+            ),
+            HelpTopic(
+                icon: "wand.and.stars",
+                title: "Auto EQ",
+                body: "Auto EQ (Settings → Audio, requires the Equalizer to be on) automatically switches the active EQ preset to match each track — first by its genre tag, falling back to its analyzed tempo when untagged. A couple of seconds into each track it also fine-tunes the bass/treble balance based on a live analysis of how the track actually sounds, so a bass-light mix gets a touch more low end and an already bass-heavy one doesn't get over-boosted by a generic preset. The manual preset picker is hidden while Auto EQ is on, since the preset changes automatically per track."
             ),
         ]),
         HelpCategory(icon: "music.note.list", title: "Library", topics: [
@@ -173,6 +193,31 @@ struct SettingsHelpView: View {
                 icon: "wand.and.stars",
                 title: "Automatic Metadata Lookup",
                 body: "Whenever new tracks are scanned in, Lumisound reads the title, artist, album, genre, and year embedded in the file, and fills in anything still missing using online lookups (iTunes, MusicBrainz, and Deezer). Lumisound also periodically re-checks any imported track that's still missing artist, album, genre, or year — for example after deleting and reinstalling the app and copying your music back from a backup folder — so those tracks fill in automatically the next time the app is open, without needing a manual rescan."
+            ),
+            HelpTopic(
+                icon: "internaldrive",
+                title: "Downloads Manager",
+                body: "Settings → Storage & Cache → Downloaded Music opens a dedicated list of every downloaded/imported track with its on-disk size, sortable by size or date. Swipe a track to delete it, or tap Select to remove several at once — useful for finding and clearing out the largest files when you're low on storage."
+            ),
+            HelpTopic(
+                icon: "trash.slash",
+                title: "Recently Deleted",
+                body: "Deleting a downloaded track (from the Downloads Manager or the general Library view) doesn't remove it immediately — it moves to Recently Deleted (accessible from the Downloads Manager) for 30 days, where you can restore it or delete it permanently right away. This is a safety net for an accidental bulk delete; after 30 days it's purged automatically."
+            ),
+            HelpTopic(
+                icon: "square.and.arrow.down",
+                title: "M3U Playlist Import",
+                body: "Playlists → the + menu → Import M3U File lets you bring in a .m3u/.m3u8 playlist exported from another app or device. Tracks are matched to your library by filename first, then by title/artist from the playlist's metadata — after importing, you'll see how many of the file's tracks were actually found and added. Any playlist here can also be exported back out as M3U from its own detail screen."
+            ),
+            HelpTopic(
+                icon: "sparkles.tv",
+                title: "Smart Playlists",
+                body: "Playlists → Smart Playlists are rule-based playlists that update themselves automatically — e.g. \"Most Played\", \"Recently Added\", or a custom combination of rules (favorite status, play count, duration, genre, and more). Create your own with any combination of rules and a sort order; the results refresh every time you open it, no manual maintenance needed."
+            ),
+            HelpTopic(
+                icon: "arrow.triangle.2.circlepath.circle",
+                title: "Tracked Playlists (Auto-Download)",
+                body: "Paste a YouTube or SoundCloud playlist URL into Tracked Playlists and turn on Auto-Download to have Lumisound periodically check it for new tracks and download them straight into your library in the background, with no need to keep re-checking manually. Each tracked playlist can optionally have its own destination subfolder."
             ),
         ]),
         HelpCategory(icon: "photo.on.rectangle", title: "Background Gallery", topics: [
@@ -258,7 +303,7 @@ struct SettingsHelpView: View {
             HelpTopic(
                 icon: "bell",
                 title: "Notifications",
-                body: "Account → Notifications is your inbox for server-generated updates: new achievement badges, new uploads from artists you follow, and activity on playlists you collaborate on. A badge on the Account tab and the Notifications row shows your unread count. Tap a notification to mark it read; pull to refresh for the latest."
+                body: "Account → Notifications is your inbox for server-generated updates: new achievement badges, new uploads from artists you follow, activity on playlists you collaborate on, and storage-quota warnings. A badge on the Account tab and the Notifications row shows your unread count. Tap a notification to mark it read; pull to refresh for the latest. When the app has notification permission, these also arrive as real background push notifications — not just when you happen to have the app open."
             ),
             HelpTopic(
                 icon: "key.viewfinder",
@@ -313,6 +358,23 @@ struct SettingsHelpView: View {
                 icon: "music.note.list",
                 title: "Scrobbling (Last.fm / ListenBrainz)",
                 body: "Account → Scrobbling links your Last.fm and/or ListenBrainz account so finished tracks are submitted automatically. For Last.fm, tap \"Open Last.fm to Authorize\" to approve access in Safari, then return to the app to complete the link. For ListenBrainz, paste your user token from your ListenBrainz profile settings. Use the top toggle to pause scrobbling without unlinking either service."
+            ),
+            HelpTopic(
+                icon: "clock.arrow.circlepath",
+                title: "On This Day",
+                body: "Discover → On This Day surfaces tracks you played on today's date in a previous year, grouped by how long ago — a quick throwback to what you were listening to a year (or more) back. It's built from your own play history, so it fills in naturally the longer you use Lumisound."
+            ),
+            HelpTopic(
+                icon: "person.text.rectangle",
+                title: "Artist Bio",
+                body: "Open any artist from your library to see an \"About\" panel with a short biography, active years, and genre tags pulled from public sources (Wikipedia and MusicBrainz) — no setup needed. Tap \"Read More\" to expand a longer excerpt, or \"Wikipedia\" to open the full article."
+            ),
+        ]),
+        HelpCategory(icon: "lock.shield", title: "Privacy & Security", topics: [
+            HelpTopic(
+                icon: "faceid",
+                title: "App Lock",
+                body: "Settings → General → App Lock requires Face ID, Touch ID, or your device passcode to open Lumisound after it's been backgrounded — an extra layer beyond your device's own lock screen, since your account syncs playlists and listening history. Off by default; the option only appears on a device with biometrics or a passcode set up."
             ),
         ]),
         HelpCategory(icon: "play.circle.fill", title: "Now Playing", topics: [

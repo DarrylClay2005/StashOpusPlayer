@@ -32,7 +32,12 @@ final class ScanCacheService {
     private var dirty = false
 
     private init() {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        // .cachesDirectory essentially never fails to resolve on a real device,
+        // but this singleton is created during the library scan launch path —
+        // a force-unwrap crash here would take down the app on nearly every
+        // cold start. Fall back to temporaryDirectory (always available).
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         // v4: keys switched from absolute paths (which embed the sandbox container
         // UUID and change on every reinstall) to Documents-relative paths. Bumping
         // the filename starts from a clean slate instead of accumulating dead v3

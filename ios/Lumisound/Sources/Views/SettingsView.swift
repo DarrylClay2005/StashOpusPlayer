@@ -15,6 +15,7 @@ struct SettingsView: View {
     @EnvironmentObject var account: AccountService
     @EnvironmentObject var cacheManager: CacheManagerService
     @EnvironmentObject var folderService: MusicFolderService
+    @EnvironmentObject var appLock: AppLockService
 
     @State var showLogin = false
 
@@ -36,8 +37,12 @@ struct SettingsView: View {
     @AppStorage("ytdlp_download_folder") var ytdlpDownloadFolder: String = ""
     /// Inter-request throttle (yt-dlp --sleep-interval). 0 = fastest. Default 5.
     @AppStorage("ytdlp_throttle_seconds") var ytdlpThrottleSeconds: Int = 5
-    /// Parallel DASH fragments (yt-dlp -N). 1 = default. Higher = faster, riskier.
-    @AppStorage("ytdlp_concurrent_fragments") var ytdlpConcurrentFragments: Int = 1
+    /// Parallel DASH fragments (yt-dlp -N). Bridge default is 4 (was 1) — a
+    /// meaningful download speedup for fragmented/DASH audio at negligible
+    /// memory cost. Matches the bridge's own Query(4, ...) default in
+    /// /api/download so the displayed value here is honest about what
+    /// actually happens when this is left untouched.
+    @AppStorage("ytdlp_concurrent_fragments") var ytdlpConcurrentFragments: Int = 4
 
     // MARK: YouTube API Key Validation / Exposure Check State
 
@@ -111,6 +116,7 @@ struct SettingsView: View {
                         accountSection
                         appearanceSection
                         sleepTimerSection
+                        appLockSection
                     case .audio:
                         playbackAudioSection
                         carModeSection

@@ -97,6 +97,31 @@ struct SyncData: Codable {
     /// ride along in the per-user auto backup without a column each. See
     /// `AccountService.extraBackupKeys`.
     var extraSettingsJSON: String?
+    /// JSON-encoded `[String: PlayHistoryEntry]` (see `PlayHistoryStore`) —
+    /// per-song play counts/last-played dates, otherwise device-local only
+    /// and lost on reinstall (which also silently breaks "Most Played"/
+    /// "Recently Played" Smart Playlists, since they read straight from it).
+    var playHistoryJSON: String?
+    /// JSON-encoded `[SmartPlaylist]` (see `SmartPlaylistStore`) — user-authored
+    /// filter rules, previously device-local only.
+    var smartPlaylistsJSON: String?
+    /// JSON-encoded `[TrackedPlaylist]` (see `TrackedPlaylistStore`) — the
+    /// "auto-download new tracks from this playlist" list, previously
+    /// device-local only (losing it silently stops auto-downloads on a new
+    /// device with no user-visible warning).
+    var trackedPlaylistsJSON: String?
+    /// JSON-encoded `[String: [TrackBookmark]]` (see `BookmarkStore`) —
+    /// per-track timestamp markers, previously device-local only.
+    var bookmarksJSON: String?
+    /// JSON-encoded `[String: Double]` mapping a track's `sourceTrackID`
+    /// (e.g. "youtube:dQw4w9WgXcQ") to its analyzed BPM — NOT the same
+    /// keying as `BPMAnalyzerService`'s own on-disk cache (which is keyed by
+    /// absolute file path + mtime + size and is therefore useless across
+    /// devices/reinstalls). sourceTrackID is portable, so this lets a
+    /// re-downloaded/re-imported copy of the same track skip re-analysis —
+    /// applied straight to `Song.bpm` via `LibraryManager.storeBPM`, not into
+    /// the analyzer's own cache.
+    var bpmBySourceTrackIDJSON: String?
 
     enum CodingKeys: String, CodingKey {
         case favorites
@@ -121,6 +146,11 @@ struct SyncData: Codable {
         case nowPlayingSeekerStyle  = "now_playing_seeker_style"
         case earnedBadgesJSON       = "earned_badges_json"
         case extraSettingsJSON      = "extra_settings_json"
+        case playHistoryJSON        = "play_history_json"
+        case smartPlaylistsJSON     = "smart_playlists_json"
+        case trackedPlaylistsJSON   = "tracked_playlists_json"
+        case bookmarksJSON          = "bookmarks_json"
+        case bpmBySourceTrackIDJSON = "bpm_by_source_track_id_json"
     }
 }
 

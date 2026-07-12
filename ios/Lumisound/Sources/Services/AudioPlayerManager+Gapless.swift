@@ -8,6 +8,28 @@ extension AudioPlayerManager {
 
     // MARK: - Gapless Playback
 
+    /// Deterministic local cache path(s) for a streamed (http/https) track URL,
+    /// matching the naming `downloadAndSchedule`/`prefetchUpcomingStreamIfNeeded`
+    /// use — checked across every extension either of those could have landed
+    /// on, since the final extension is only "refined" from a default m4a
+    /// guess to the real container once a download's Content-Type response is
+    /// known. Returns `nil` if nothing's been downloaded/prefetched yet.
+    static func cachedStreamFileURL(for url: URL) -> URL? {
+        let cacheKey: String = url.absoluteString.data(using: .utf8).map { bytes in
+            var hash: UInt64 = 5381
+            for byte in bytes { hash = hash &* 31 &+ UInt64(byte) }
+            return String(hash, radix: 16)
+        } ?? UUID().uuidString
+        let tempDir = FileManager.default.temporaryDirectory
+        for ext in ["m4a", "webm", "opus", "mp3"] {
+            let candidate = tempDir.appendingPathComponent("stream_\(cacheKey).\(ext)")
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
     /// Pre-schedules the next track on primaryNode immediately after the current segment,
     /// so AVAudioEngine delivers audio without any gap.
     func scheduleGaplessNext() {
@@ -15,7 +37,31 @@ extension AudioPlayerManager {
         // strategies would both fire and play two tracks at once.
         guard audioSettings.gaplessEnabled, !audioSettings.crossfadeActive else { return }
         guard let nextSong = peekNextSong(), let nextURL = nextSong.url else { return }
-        guard let nextFile = try? AVAudioFile(forReading: nextURL) else { return }
+
+        // Streamed tracks (http/https) can't be read directly by AVAudioFile,
+        // which only opens local file paths — resolve to the local cache file
+        // `prefetchUpcomingStreamIfNeeded()` downloads ahead of time instead.
+        // Previously this called AVAudioFile(forReading:) on the raw remote
+        // URL, which silently failed for every http(s) track: gapless never
+        // actually armed for a streamed queue (the common case for anyone
+        // playing from search/streaming rather than only downloaded/imported
+        // files) and playback always fell back to the normal, audibly-gapped
+        // transition — reported as "gapless doesn't work".
+        let resolvedURL: URL
+        if ["http", "https"].contains(nextURL.scheme?.lowercased() ?? "") {
+            guard let cached = Self.cachedStreamFileURL(for: nextURL) else {
+                // Prefetch hasn't finished yet (or never started) — nothing to
+                // schedule gaplessly this pass. The normal (non-gapless) path
+                // still plays it correctly, just with the usual transition
+                // gap; this gets retried on the next segment-start call.
+                return
+            }
+            resolvedURL = cached
+        } else {
+            resolvedURL = nextURL
+        }
+
+        guard let nextFile = try? AVAudioFile(forReading: resolvedURL) else { return }
 
         gaplessScheduled = true
         // Stashed so `handleTrackEnded` can adopt it as the live `audioFile`

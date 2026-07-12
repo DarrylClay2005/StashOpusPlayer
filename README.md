@@ -46,6 +46,8 @@ bridge, and build-from-source instructions.
 | **Apple Music library** | Scan and play your existing iTunes/Apple Music library on-device |
 | **Folder/album organisation** | Albums derived from directory names; list, 2-col, and 3-col grid layouts |
 | **Playlist folders & tags** | File playlists into folders and attach free-form tags to keep things organised |
+| **M3U import/export** | Bring in a `.m3u`/`.m3u8` playlist from another app (matched by filename, falling back to title/artist), or export any playlist as one |
+| **Downloads manager** | See every downloaded track's on-disk size, sort by size or date, and delete individually or in bulk |
 | **Aria Lumi metadata matching** | Optional (Settings → Account → AI Features, off by default) — when a local file's metadata is ambiguous, Aria Lumi picks the correct match instead of a plain "first result" guess, and learns from any corrections you make |
 
 ### Streaming (via the bridge server)
@@ -69,7 +71,7 @@ bridge, and build-from-source instructions.
 | **Backup history** | Automatic pre-sync snapshots you can restore from |
 | **Queue sync** | Your Up Next queue is saved server-side and restored on other signed-in devices |
 | **Achievements** | Listening streaks, play-count and listening-time badges, time-of-day badges |
-| **Notifications** | In-app inbox for achievement unlocks, subscription uploads, and collaborator activity |
+| **Notifications** | In-app inbox for achievement unlocks, subscription uploads, and collaborator activity — delivered as real background push when the server operator configures an APNs key (`APNS_KEY_BASE64`/`APNS_KEY_ID`/`APNS_TEAM_ID`), otherwise surfaced on next foreground/poll |
 
 ### Sharing & Social
 

@@ -11,6 +11,19 @@ extension LibraryManager {
         ToastCenter.shared.show("Created playlist \"\(name)\"", category: .success, icon: "music.note.list")
     }
 
+    /// Creates a playlist pre-populated with `songIDs`, in order — used by
+    /// M3U import (see `M3UImportService`) so matched tracks land in the new
+    /// playlist in one step instead of `createPlaylist` + N `addSong` calls
+    /// (each of which would persist/rebuild on its own). Does not toast —
+    /// the caller reports match counts, which a bare "created" toast can't.
+    @discardableResult
+    func createPlaylist(name: String, songIDs: [String]) -> Playlist {
+        let playlist = Playlist(id: UUID(), name: name, songIDs: songIDs, createdAt: Date())
+        playlists.append(playlist)
+        persistence.savePlaylists(playlists)
+        return playlist
+    }
+
     /// Merges a `LibraryBackup` into the current library — always additive,
     /// never overwrites/removes anything already here. Playlists are added
     /// as new playlists (fresh IDs, so re-importing the same backup twice

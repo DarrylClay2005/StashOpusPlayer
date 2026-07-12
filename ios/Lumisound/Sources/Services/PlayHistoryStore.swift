@@ -45,6 +45,29 @@ final class PlayHistoryStore {
         entries[songID]?.lastPlayedAt
     }
 
+    /// Merges play-history entries pulled from the account backup (see
+    /// `AccountService.pullSync`) — for each song, keeps the higher play
+    /// count and the more recent last-played date, so restoring on a new
+    /// device (or after a reinstall) never regresses stats this device
+    /// already has.
+    func mergeFromSync(_ remote: [String: PlayHistoryEntry]) {
+        var changed = false
+        for (songID, remoteEntry) in remote {
+            var local = entries[songID] ?? PlayHistoryEntry()
+            if remoteEntry.playCount > local.playCount {
+                local.playCount = remoteEntry.playCount
+                changed = true
+            }
+            if let remoteDate = remoteEntry.lastPlayedAt,
+               remoteDate > (local.lastPlayedAt ?? .distantPast) {
+                local.lastPlayedAt = remoteDate
+                changed = true
+            }
+            entries[songID] = local
+        }
+        if changed { save() }
+    }
+
     /// Removes history for songs no longer in the library, so the store
     /// doesn't grow forever with entries for deleted/renamed files. Safe to
     /// call periodically (e.g. after a library scan) with the current set

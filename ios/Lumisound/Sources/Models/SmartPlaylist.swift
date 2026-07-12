@@ -313,6 +313,20 @@ final class SmartPlaylistStore: ObservableObject {
         save()
     }
 
+    /// Merges smart playlists pulled from the account backup (see
+    /// `AccountService.pullSync`) — adds any whose id isn't already present
+    /// locally. Never overwrites an existing one, so local edits made since
+    /// the last push are never clobbered by a stale server copy. Rules
+    /// reference `Song` fields (play count, favorite, duration, …), never
+    /// stored song ids, so they're fully portable across devices.
+    func mergeFromSync(_ remote: [SmartPlaylist]) {
+        let existingIDs = Set(playlists.map { $0.id })
+        let toAdd = remote.filter { !existingIDs.contains($0.id) }
+        guard !toAdd.isEmpty else { return }
+        playlists.append(contentsOf: toAdd)
+        save()
+    }
+
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: key) else { return }
         if let decoded = try? JSONDecoder().decode([SmartPlaylist].self, from: data) {

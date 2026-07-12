@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PlaylistsView: View {
     @EnvironmentObject private var library: LibraryManager
@@ -11,6 +12,10 @@ struct PlaylistsView: View {
     @State private var renameTarget: Playlist? = nil
     @State private var renameText: String = ""
     @State private var showingRenameAlert = false
+
+    // M3U import state
+    @State private var showingM3UImporter = false
+    @State private var isImportingM3U = false
 
     var body: some View {
         List {
@@ -88,13 +93,53 @@ struct PlaylistsView: View {
         .background(Color.clear.ignoresSafeArea())
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    newPlaylistName = ""
-                    showingCreateSheet = true
-                } label: {
-                    Image(systemName: "plus")
+                if isImportingM3U {
+                    ProgressView().tint(AppTheme.dynamicAccent)
+                } else {
+                    Menu {
+                        Button {
+                            newPlaylistName = ""
+                            showingCreateSheet = true
+                        } label: {
+                            Label("New Playlist", systemImage: "plus")
+                        }
+                        Button {
+                            showingM3UImporter = true
+                        } label: {
+                            Label("Import M3U File", systemImage: "square.and.arrow.down")
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .tint(AppTheme.dynamicAccent)
                 }
-                .tint(AppTheme.dynamicAccent)
+            }
+        }
+        .fileImporter(
+            isPresented: $showingM3UImporter,
+            allowedContentTypes: [
+                UTType(filenameExtension: "m3u") ?? .plainText,
+                UTType(filenameExtension: "m3u8") ?? .plainText,
+                .plainText,
+            ]
+        ) { result in
+            guard case .success(let fileURL) = result else { return }
+            isImportingM3U = true
+            Task {
+                let name = fileURL.deletingPathExtension().lastPathComponent
+                let importResult = M3UImportService.import(fileURL: fileURL, library: library)
+                isImportingM3U = false
+                guard importResult.totalEntries > 0 else {
+                    ToastCenter.shared.show("No tracks found in that file", category: .error, icon: "exclamationmark.triangle")
+                    return
+                }
+                library.createPlaylist(name: name, songIDs: importResult.matchedSongIDs)
+                let matched = importResult.matchedSongIDs.count
+                ToastCenter.shared.show(
+                    "Imported \"\(name)\" — \(matched) of \(importResult.totalEntries) track\(importResult.totalEntries == 1 ? "" : "s") matched",
+                    category: matched > 0 ? .success : .error,
+                    icon: "music.note.list"
+                )
             }
         }
         .sheet(isPresented: $showingCreateSheet) {

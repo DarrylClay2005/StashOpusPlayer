@@ -82,6 +82,7 @@ extension AccountService {
     func logout() async {
         appLog("Logout: \(currentUser?.username ?? "?")", category: "account")
         errorMessage = nil
+        await unregisterCurrentDeviceToken()
         if token != nil {
             _ = try? await makeRequest("/auth/logout", method: "POST", body: EmptyBody())
         }

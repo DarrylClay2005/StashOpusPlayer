@@ -35,6 +35,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
+import aioapns
 import pyotp
 import yt_dlp
 
@@ -113,6 +114,20 @@ YOUTUBE_API_KEY: str = os.getenv("YOUTUBE_API_KEY", "")
 # Unset (default) disables Spotify link import entirely.
 SPOTIFY_CLIENT_ID: str = os.getenv("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET: str = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+# Optional: APNs auth key (developer.apple.com/account/resources/authkeys —
+# a "APNs" key, downloaded once as a .p8 file). Lets ios_notifications rows
+# (see _create_notification) become real background push instead of only
+# showing up on next foreground/poll. Unset (default) disables push sending
+# entirely — device tokens still get registered/stored via /user/push-token,
+# they just never get anything sent to them, exactly like before this feature.
+APNS_KEY_BASE64: str = os.getenv("APNS_KEY_BASE64", "")  # base64 of the .p8 file's bytes
+APNS_KEY_ID: str = os.getenv("APNS_KEY_ID", "")
+APNS_TEAM_ID: str = os.getenv("APNS_TEAM_ID", "")
+APNS_TOPIC: str = os.getenv("APNS_TOPIC", "com.lumisound.ios")
+# Ad-hoc/sideloaded builds (AltStore, Sideloadly) carry a development
+# provisioning profile, which only accepts push from Apple's *sandbox* APNs
+# environment. Flip to "0" only once distributing a real App Store build.
+APNS_USE_SANDBOX: bool = os.getenv("APNS_USE_SANDBOX", "1") in ("1", "true", "True", "yes")
 # Discord webhook URL that new in-app bug reports are posted to, so they're
 # seen immediately instead of sitting unnoticed in ios_bug_reports. This is a
 # standalone admin/developer channel — entirely separate from any per-user
@@ -262,6 +277,27 @@ _ARIA2_DOWNLOADER_ARGS = [
 # --socket-timeout bounds a single stalled connection attempt instead of
 # silently eating the whole per-call timeout further up the stack.
 _YTDLP_NETWORK_ARGS = ["-4", "--socket-timeout", "10"]
+
+# Optional: base URL of a running bgutil-ytdlp-pot-provider POT server
+# (github.com/Brainicism/bgutil-ytdlp-pot-provider). YouTube's "proof of
+# origin token" challenge has made cookie-less extraction progressively
+# slower and more failure-prone over time (this deployment already runs a
+# bgutil POT-server container, but nothing here queries it yet) — a POT
+# provider resolves the challenge without needing real account cookies,
+# and is the most likely fix for yt-dlp extraction/download times of
+# 70-100+ seconds per track (see the /api/download job-tracking comment
+# below for why that duration was treated as an accepted baseline rather
+# than something parameter-tunable). To actually enable this: (1) install
+# the `bgutil-ytdlp-pot-provider` pip plugin in this image, (2) make sure
+# the POT server's port is reachable from this container at the URL below
+# (its own compose service must publish/expose that port — this repo
+# doesn't manage that service's compose file), (3) set this env var.
+# Unset (default) leaves extraction exactly as it was — purely additive.
+YTDLP_POT_PROVIDER_URL: str = os.getenv("YTDLP_POT_PROVIDER_URL", "")
+if YTDLP_POT_PROVIDER_URL:
+    _YTDLP_NETWORK_ARGS += [
+        "--extractor-args", f"youtubepot-bgutilhttp:base_url={YTDLP_POT_PROVIDER_URL}",
+    ]
 
 # ---------------------------------------------------------------------------
 # /api/download job tracking
@@ -1257,6 +1293,9 @@ class SyncPushRequest(BaseModel):
     albums_per_row: Optional[int] = None
     bg_animation: Optional[str] = None
     bg_opacity: Optional[float] = None
+    bg_enabled: Optional[bool] = None
+    bg_blur_radius: Optional[float] = None
+    bg_shuffle_interval: Optional[float] = None
     preferred_audio_format: Optional[str] = None
     download_path: Optional[str] = None
     car_mode_enabled: Optional[bool] = None
@@ -1265,6 +1304,11 @@ class SyncPushRequest(BaseModel):
     now_playing_seeker_style: Optional[str] = None
     earned_badges_json: Optional[str] = None
     extra_settings_json: Optional[str] = None
+    play_history_json: Optional[str] = None
+    smart_playlists_json: Optional[str] = None
+    tracked_playlists_json: Optional[str] = None
+    bookmarks_json: Optional[str] = None
+    bpm_by_source_track_id_json: Optional[str] = None
 
 
 class FolderBackupTrack(BaseModel):
@@ -2117,7 +2161,7 @@ async def _run_download_job(
     account_token: str,
     use_aria2: bool = False,
     throttle_seconds: int = 5,
-    concurrent_fragments: int = 1,
+    concurrent_fragments: int = 4,
 ) -> None:
     """
     Runs yt-dlp (with retries/verification) and the LUMISOUND_ID tagging step
@@ -2161,7 +2205,7 @@ async def _do_download_job(
     account_token: str,
     use_aria2: bool = False,
     throttle_seconds: int = 5,
-    concurrent_fragments: int = 1,
+    concurrent_fragments: int = 4,
 ) -> None:
     # Large playlists drive this endpoint hard via the iOS "Download All" pipeline,
     # and yt-dlp occasionally exits 0 while leaving a truncated/corrupt file behind
@@ -4806,6 +4850,212 @@ async def get_stats(payload: dict = Depends(get_current_user)):
     }
 
 
+def _track_id_from_url(url: str, source: str) -> str:
+    """Best-effort stable id from a track URL — for youtube.com/watch?v=X,
+    the 'v' param; otherwise the last non-empty path segment. Good enough for
+    StreamTrack.id/sourceTrackID purposes without a network round-trip."""
+    try:
+        parsed = urlsplit(url)
+        if source == "youtube":
+            match = re.search(r"[?&]v=([A-Za-z0-9_-]+)", parsed.query)
+            if match:
+                return match.group(1)
+            if "youtu.be" in parsed.netloc:
+                return parsed.path.strip("/")
+        segments = [s for s in parsed.path.split("/") if s]
+        return segments[-1] if segments else url
+    except Exception:
+        return url
+
+
+@app.get("/user/on-this-day")
+async def get_on_this_day(payload: dict = Depends(get_current_user)):
+    """'On This Day': tracks the user played on this same month/day in a
+    previous year, reconstructed directly from ios_play_history rows rather
+    than a fresh search — reflects exactly what was played and needs no
+    yt-dlp calls at request time. Rows without a track_url (local-file-only
+    plays) are skipped since the server has nothing to resolve them to."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT track_url, title, artist, played_at, YEAR(played_at) AS play_year
+                FROM ios_play_history
+                WHERE user_id = %s
+                  AND track_url IS NOT NULL AND track_url != ''
+                  AND MONTH(played_at) = MONTH(CURDATE())
+                  AND DAY(played_at) = DAY(CURDATE())
+                  AND YEAR(played_at) < YEAR(CURDATE())
+                ORDER BY played_at DESC
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+    this_year = datetime.now(timezone.utc).year
+    groups: "defaultdict[int, list[dict]]" = defaultdict(list)
+    seen_per_year: "defaultdict[int, set[str]]" = defaultdict(set)
+    for track_url, title, artist, played_at, play_year in rows:
+        source = _source_from_url(track_url)
+        track_id = _track_id_from_url(track_url, source)
+        if track_id in seen_per_year[play_year]:
+            continue
+        seen_per_year[play_year].add(track_id)
+        if len(groups[play_year]) >= 15:
+            continue
+        groups[play_year].append({
+            "id": track_id,
+            "title": title or "Unknown Title",
+            "artist": artist or "Unknown Artist",
+            "duration_seconds": 0,
+            "thumbnail_url": "",
+            "source": source,
+            "youtube_url": track_url,
+        })
+
+    return [
+        {"years_ago": this_year - year, "year": year, "tracks": tracks}
+        for year, tracks in sorted(groups.items(), key=lambda kv: kv[0], reverse=True)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Artist Bio (Feature: artist-bio) — MusicBrainz for facts, Wikipedia for text
+# ---------------------------------------------------------------------------
+
+# Both MusicBrainz's and Wikipedia's API policies expect a descriptive
+# User-Agent identifying the calling application; a missing/generic one
+# risks harsher rate-limiting or an outright block. Neither API needs a key.
+_ARTIST_BIO_USER_AGENT = "Lumisound-iOS-Bridge/1.0 (+https://github.com/HeavenlyXenusVR/Lumisound)"
+_ARTIST_BIO_CACHE_TTL_DAYS = 30
+
+
+def _musicbrainz_lookup_sync(name: str) -> Optional[dict]:
+    """Synchronous MusicBrainz artist search — call via asyncio.to_thread.
+    Used for structured facts (type, country, active years) that Wikipedia's
+    free-text summary doesn't reliably expose."""
+    query = urlencode({"query": f'artist:"{name}"', "fmt": "json", "limit": "1"})
+    req = urllib.request.Request(
+        f"https://musicbrainz.org/ws/2/artist/?{query}",
+        headers={"User-Agent": _ARTIST_BIO_USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        logger.debug("MusicBrainz lookup failed for %r: %s", name, exc)
+        return None
+    artists = data.get("artists") or []
+    return artists[0] if artists else None
+
+
+def _wikipedia_search_sync(query: str) -> Optional[str]:
+    """Synchronous Wikipedia search — call via asyncio.to_thread. Returns the
+    top matching page title (or None), used to disambiguate a plain artist
+    name into a real article title before fetching its summary."""
+    params = urlencode({
+        "action": "query", "list": "search", "srsearch": query,
+        "format": "json", "srlimit": "1",
+    })
+    req = urllib.request.Request(
+        f"https://en.wikipedia.org/w/api.php?{params}",
+        headers={"User-Agent": _ARTIST_BIO_USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        logger.debug("Wikipedia search failed for %r: %s", query, exc)
+        return None
+    results = (data.get("query") or {}).get("search") or []
+    return results[0]["title"] if results else None
+
+
+def _wikipedia_summary_sync(title: str) -> Optional[dict]:
+    """Synchronous Wikipedia REST 'page summary' fetch — call via
+    asyncio.to_thread. `title` must be a real page title (e.g. from
+    `_wikipedia_search_sync`), not a raw artist name — this endpoint does an
+    exact-title lookup, not a fuzzy search."""
+    encoded = urllib.parse.quote(title.replace(" ", "_"))
+    req = urllib.request.Request(
+        f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}",
+        headers={"User-Agent": _ARTIST_BIO_USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        logger.debug("Wikipedia summary fetch failed for %r: %s", title, exc)
+        return None
+
+
+@app.get("/api/artist/bio")
+async def get_artist_bio(
+    name: str = Query(..., min_length=1, max_length=255),
+    payload: dict = Depends(get_current_user),
+):
+    """Artist bio panel: MusicBrainz for disambiguation/basic facts, Wikipedia
+    for the bio text + photo. Neither needs an API key (unlike Spotify/
+    Anthropic elsewhere in this file), so this works out of the box on any
+    deployment. Results are cached 30 days — both APIs are free but
+    rate-limit-sensitive (MusicBrainz in particular asks for <=1 req/sec),
+    and an artist's bio doesn't change often enough to justify a fresh fetch
+    every time a user opens the same artist's page. A "not found" result is
+    cached too, so a typo'd/obscure name doesn't get re-queried on every visit."""
+    cache_key = name.strip().lower()
+    if not cache_key:
+        raise HTTPException(status_code=400, detail="name is required")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT bio_json, found FROM ios_artist_bio_cache "
+                "WHERE artist_name = %s AND cached_at > NOW() - INTERVAL %s DAY",
+                (cache_key, _ARTIST_BIO_CACHE_TTL_DAYS),
+            )
+            row = await cur.fetchone()
+    if row is not None:
+        bio_json, found = row
+        if found and bio_json:
+            return json.loads(bio_json)
+        return {"found": False}
+
+    mb_artist = await asyncio.to_thread(_musicbrainz_lookup_sync, name)
+    wiki_title = await asyncio.to_thread(_wikipedia_search_sync, f"{name} musician")
+    wiki_summary = await asyncio.to_thread(_wikipedia_summary_sync, wiki_title) if wiki_title else None
+
+    found = bool(wiki_summary and wiki_summary.get("extract"))
+    if found:
+        life_span = (mb_artist or {}).get("life-span") or {}
+        result = {
+            "found": True,
+            "name": (mb_artist or {}).get("name") or name,
+            "bio": wiki_summary.get("extract", ""),
+            "image_url": (wiki_summary.get("thumbnail") or {}).get("source", ""),
+            "wikipedia_url": (wiki_summary.get("content_urls") or {}).get("desktop", {}).get("page", ""),
+            "artist_type": (mb_artist or {}).get("type"),
+            "country": (mb_artist or {}).get("country"),
+            "begin_date": life_span.get("begin"),
+            "end_date": life_span.get("end"),
+            "tags": [t["name"] for t in (mb_artist or {}).get("tags", [])][:6],
+        }
+    else:
+        result = {"found": False}
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_artist_bio_cache (artist_name, bio_json, found) VALUES (%s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE bio_json = VALUES(bio_json), found = VALUES(found), cached_at = NOW()",
+                (cache_key, json.dumps(result), found),
+            )
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # User Settings Endpoints
 # ---------------------------------------------------------------------------
@@ -4958,9 +5208,12 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
     await cur.execute(
         "SELECT audio_settings_json, track_audio_settings_json, theme_color, "
         "vinyl_disc_enabled, show_queue_preview, songs_per_row, albums_per_row, "
-        "bg_animation, bg_opacity, preferred_audio_format, download_path, "
+        "bg_animation, bg_opacity, bg_enabled, bg_blur_radius, bg_shuffle_interval, "
+        "preferred_audio_format, download_path, "
         "car_mode_enabled, library_artists_columns, now_playing_artwork_style, "
-        "now_playing_seeker_style, earned_badges_json, extra_settings_json "
+        "now_playing_seeker_style, earned_badges_json, extra_settings_json, "
+        "play_history_json, smart_playlists_json, tracked_playlists_json, "
+        "bookmarks_json, bpm_by_source_track_id_json "
         "FROM ios_user_settings WHERE user_id = %s",
         (user_id,),
     )
@@ -4968,9 +5221,12 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
     if settings_row:
         (audio_settings_json, track_audio_settings_json, theme_color,
          vinyl_disc_enabled, show_queue_preview, songs_per_row, albums_per_row,
-         bg_animation, bg_opacity, preferred_audio_format, download_path,
+         bg_animation, bg_opacity, bg_enabled, bg_blur_radius, bg_shuffle_interval,
+         preferred_audio_format, download_path,
          car_mode_enabled, library_artists_columns, now_playing_artwork_style,
-         now_playing_seeker_style, earned_badges_json, extra_settings_json) = settings_row
+         now_playing_seeker_style, earned_badges_json, extra_settings_json,
+         play_history_json, smart_playlists_json, tracked_playlists_json,
+         bookmarks_json, bpm_by_source_track_id_json) = settings_row
     else:
         audio_settings_json = None
         track_audio_settings_json = None
@@ -4981,6 +5237,9 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
         albums_per_row = 2
         bg_animation = "fade"
         bg_opacity = 0.35
+        bg_enabled = True
+        bg_blur_radius = None
+        bg_shuffle_interval = None
         preferred_audio_format = "m4a"
         download_path = None
         car_mode_enabled = False
@@ -4989,6 +5248,11 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
         now_playing_seeker_style = None
         earned_badges_json = None
         extra_settings_json = None
+        play_history_json = None
+        smart_playlists_json = None
+        tracked_playlists_json = None
+        bookmarks_json = None
+        bpm_by_source_track_id_json = None
 
     return {
         "favorites": favorites,
@@ -5002,6 +5266,9 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
         "albums_per_row": albums_per_row if albums_per_row is not None else 2,
         "bg_animation": bg_animation or "fade",
         "bg_opacity": bg_opacity if bg_opacity is not None else 0.35,
+        "bg_enabled": bool(bg_enabled) if bg_enabled is not None else True,
+        "bg_blur_radius": bg_blur_radius,
+        "bg_shuffle_interval": bg_shuffle_interval,
         "preferred_audio_format": preferred_audio_format or "m4a",
         "download_path": download_path,
         "car_mode_enabled": bool(car_mode_enabled) if car_mode_enabled is not None else False,
@@ -5010,6 +5277,11 @@ async def _build_sync_snapshot(cur, user_id: str) -> dict:
         "now_playing_seeker_style": now_playing_seeker_style,
         "earned_badges_json": earned_badges_json,
         "extra_settings_json": extra_settings_json,
+        "play_history_json": play_history_json,
+        "smart_playlists_json": smart_playlists_json,
+        "tracked_playlists_json": tracked_playlists_json,
+        "bookmarks_json": bookmarks_json,
+        "bpm_by_source_track_id_json": bpm_by_source_track_id_json,
     }
 
 
@@ -5085,10 +5357,13 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
         INSERT INTO ios_user_settings
             (user_id, audio_settings_json, track_audio_settings_json, theme_color,
              vinyl_disc_enabled, show_queue_preview, songs_per_row, albums_per_row,
-             bg_animation, bg_opacity, preferred_audio_format, download_path,
+             bg_animation, bg_opacity, bg_enabled, bg_blur_radius, bg_shuffle_interval,
+             preferred_audio_format, download_path,
              car_mode_enabled, library_artists_columns, now_playing_artwork_style,
-             now_playing_seeker_style, earned_badges_json, extra_settings_json)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             now_playing_seeker_style, earned_badges_json, extra_settings_json,
+             play_history_json, smart_playlists_json, tracked_playlists_json,
+             bookmarks_json, bpm_by_source_track_id_json)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             audio_settings_json = %s,
             track_audio_settings_json = %s,
@@ -5099,6 +5374,9 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
             albums_per_row = %s,
             bg_animation = %s,
             bg_opacity = %s,
+            bg_enabled = %s,
+            bg_blur_radius = %s,
+            bg_shuffle_interval = %s,
             preferred_audio_format = %s,
             download_path = %s,
             car_mode_enabled = %s,
@@ -5106,7 +5384,12 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
             now_playing_artwork_style = %s,
             now_playing_seeker_style = %s,
             earned_badges_json = %s,
-            extra_settings_json = %s
+            extra_settings_json = %s,
+            play_history_json = %s,
+            smart_playlists_json = %s,
+            tracked_playlists_json = %s,
+            bookmarks_json = %s,
+            bpm_by_source_track_id_json = %s
         """,
         (
             user_id,
@@ -5119,6 +5402,9 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
             snapshot.get("albums_per_row", 2),
             snapshot.get("bg_animation") or "fade",
             snapshot.get("bg_opacity", 0.35),
+            snapshot.get("bg_enabled", True),
+            snapshot.get("bg_blur_radius"),
+            snapshot.get("bg_shuffle_interval"),
             snapshot.get("preferred_audio_format") or "m4a",
             snapshot.get("download_path"),
             snapshot.get("car_mode_enabled", False),
@@ -5127,6 +5413,11 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
             snapshot.get("now_playing_seeker_style"),
             snapshot.get("earned_badges_json"),
             snapshot.get("extra_settings_json"),
+            snapshot.get("play_history_json"),
+            snapshot.get("smart_playlists_json"),
+            snapshot.get("tracked_playlists_json"),
+            snapshot.get("bookmarks_json"),
+            snapshot.get("bpm_by_source_track_id_json"),
             # ON DUPLICATE KEY UPDATE values
             snapshot.get("audio_settings_json"),
             snapshot.get("track_audio_settings_json"),
@@ -5137,6 +5428,9 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
             snapshot.get("albums_per_row", 2),
             snapshot.get("bg_animation") or "fade",
             snapshot.get("bg_opacity", 0.35),
+            snapshot.get("bg_enabled", True),
+            snapshot.get("bg_blur_radius"),
+            snapshot.get("bg_shuffle_interval"),
             snapshot.get("preferred_audio_format") or "m4a",
             snapshot.get("download_path"),
             snapshot.get("car_mode_enabled", False),
@@ -5145,6 +5439,11 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
             snapshot.get("now_playing_seeker_style"),
             snapshot.get("earned_badges_json"),
             snapshot.get("extra_settings_json"),
+            snapshot.get("play_history_json"),
+            snapshot.get("smart_playlists_json"),
+            snapshot.get("tracked_playlists_json"),
+            snapshot.get("bookmarks_json"),
+            snapshot.get("bpm_by_source_track_id_json"),
         ),
     )
 
@@ -5291,10 +5590,13 @@ async def sync_push(
                 INSERT INTO ios_user_settings
                     (user_id, audio_settings_json, track_audio_settings_json, theme_color,
                      vinyl_disc_enabled, show_queue_preview, songs_per_row, albums_per_row,
-                     bg_animation, bg_opacity, preferred_audio_format, download_path,
+                     bg_animation, bg_opacity, bg_enabled, bg_blur_radius, bg_shuffle_interval,
+                     preferred_audio_format, download_path,
                      car_mode_enabled, library_artists_columns, now_playing_artwork_style,
-                     now_playing_seeker_style, earned_badges_json, extra_settings_json)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     now_playing_seeker_style, earned_badges_json, extra_settings_json,
+                     play_history_json, smart_playlists_json, tracked_playlists_json,
+                     bookmarks_json, bpm_by_source_track_id_json)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     audio_settings_json = IF(%s IS NULL, audio_settings_json, %s),
                     track_audio_settings_json = IF(%s IS NULL, track_audio_settings_json, %s),
@@ -5305,6 +5607,9 @@ async def sync_push(
                     albums_per_row = IF(%s IS NULL, albums_per_row, %s),
                     bg_animation = IF(%s IS NULL, bg_animation, %s),
                     bg_opacity = IF(%s IS NULL, bg_opacity, %s),
+                    bg_enabled = IF(%s IS NULL, bg_enabled, %s),
+                    bg_blur_radius = IF(%s IS NULL, bg_blur_radius, %s),
+                    bg_shuffle_interval = IF(%s IS NULL, bg_shuffle_interval, %s),
                     preferred_audio_format = IF(%s IS NULL, preferred_audio_format, %s),
                     download_path = IF(%s IS NULL, download_path, %s),
                     car_mode_enabled = IF(%s IS NULL, car_mode_enabled, %s),
@@ -5312,7 +5617,12 @@ async def sync_push(
                     now_playing_artwork_style = IF(%s IS NULL, now_playing_artwork_style, %s),
                     now_playing_seeker_style = IF(%s IS NULL, now_playing_seeker_style, %s),
                     earned_badges_json = IF(%s IS NULL, earned_badges_json, %s),
-                    extra_settings_json = IF(%s IS NULL, extra_settings_json, %s)
+                    extra_settings_json = IF(%s IS NULL, extra_settings_json, %s),
+                    play_history_json = IF(%s IS NULL, play_history_json, %s),
+                    smart_playlists_json = IF(%s IS NULL, smart_playlists_json, %s),
+                    tracked_playlists_json = IF(%s IS NULL, tracked_playlists_json, %s),
+                    bookmarks_json = IF(%s IS NULL, bookmarks_json, %s),
+                    bpm_by_source_track_id_json = IF(%s IS NULL, bpm_by_source_track_id_json, %s)
                 """,
                 (
                     user_id,
@@ -5325,6 +5635,9 @@ async def sync_push(
                     body.albums_per_row,
                     body.bg_animation,
                     body.bg_opacity,
+                    body.bg_enabled,
+                    body.bg_blur_radius,
+                    body.bg_shuffle_interval,
                     body.preferred_audio_format,
                     body.download_path,
                     body.car_mode_enabled,
@@ -5333,6 +5646,11 @@ async def sync_push(
                     body.now_playing_seeker_style,
                     body.earned_badges_json,
                     body.extra_settings_json,
+                    body.play_history_json,
+                    body.smart_playlists_json,
+                    body.tracked_playlists_json,
+                    body.bookmarks_json,
+                    body.bpm_by_source_track_id_json,
                     # ON DUPLICATE KEY UPDATE values (IF %s IS NULL, ..., %s)
                     body.audio_settings_json, body.audio_settings_json,
                     body.track_audio_settings_json, body.track_audio_settings_json,
@@ -5343,6 +5661,9 @@ async def sync_push(
                     body.albums_per_row, body.albums_per_row,
                     body.bg_animation, body.bg_animation,
                     body.bg_opacity, body.bg_opacity,
+                    body.bg_enabled, body.bg_enabled,
+                    body.bg_blur_radius, body.bg_blur_radius,
+                    body.bg_shuffle_interval, body.bg_shuffle_interval,
                     body.preferred_audio_format, body.preferred_audio_format,
                     body.download_path, body.download_path,
                     body.car_mode_enabled, body.car_mode_enabled,
@@ -5351,6 +5672,11 @@ async def sync_push(
                     body.now_playing_seeker_style, body.now_playing_seeker_style,
                     body.earned_badges_json, body.earned_badges_json,
                     body.extra_settings_json, body.extra_settings_json,
+                    body.play_history_json, body.play_history_json,
+                    body.smart_playlists_json, body.smart_playlists_json,
+                    body.tracked_playlists_json, body.tracked_playlists_json,
+                    body.bookmarks_json, body.bookmarks_json,
+                    body.bpm_by_source_track_id_json, body.bpm_by_source_track_id_json,
                 ),
             )
 
@@ -6315,6 +6641,62 @@ async def get_storage_usage(user: dict = Depends(get_current_user)):
     return usage
 
 
+def _format_bytes(n: int) -> str:
+    value = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} {unit}"
+        value /= 1024
+    return f"{value:.1f} GB"
+
+
+# In-memory per-user "highest storage-quota tier already warned about" —
+# resets on process restart, which just means at most one duplicate warning
+# after a redeploy. Not persisted: this is a courtesy nudge (via the
+# ios_notifications/APNs pipeline — see _create_notification), not a
+# critical alert, so it doesn't warrant its own schema/table just to dedupe
+# perfectly across restarts.
+_storage_warning_tier_sent: dict[str, float] = {}
+_STORAGE_WARNING_TIERS: tuple[float, ...] = (0.8, 0.95, 1.0)
+
+
+async def _maybe_warn_storage_quota(user_id: str) -> None:
+    """Fires a one-time-per-tier notification (real push, via
+    _create_notification) as a user's cloud storage usage crosses 80% / 95%
+    / 100% of their quota. Called after uploads (music, gallery images) —
+    the only ways usage grows. Best-effort: never raises, never blocks the
+    upload response it's scheduled from (see callers, which fire this via
+    asyncio.create_task rather than awaiting it inline)."""
+    try:
+        quota_bytes = await _get_user_quota_bytes(user_id)
+        if not quota_bytes:
+            return
+        usage = await _compute_storage_usage(user_id)
+        fraction = usage["used_bytes"] / quota_bytes
+        last_tier = _storage_warning_tier_sent.get(user_id, 0.0)
+        tier = max((t for t in _STORAGE_WARNING_TIERS if fraction >= t), default=None)
+        if tier is None or tier <= last_tier:
+            return
+        _storage_warning_tier_sent[user_id] = tier
+
+        if tier >= 1.0:
+            title = "Storage full"
+            body = f"You've used all {_format_bytes(quota_bytes)} of your cloud storage — new uploads will be rejected until you free some up."
+        else:
+            title = f"Storage {int(tier * 100)}% full"
+            body = f"You've used {_format_bytes(usage['used_bytes'])} of your {_format_bytes(quota_bytes)} quota."
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await _create_notification(
+                    cur, user_id, "storage_quota_warning", title, body,
+                    {"used_bytes": usage["used_bytes"], "quota_bytes": quota_bytes, "tier": tier},
+                )
+    except Exception as exc:
+        logger.debug("_maybe_warn_storage_quota failed for %s: %s", user_id, exc)
+
+
 # ---------------------------------------------------------------------------
 # Per-user music compression (gzip, reversible/lossless). See
 # USER_MUSIC_COMPRESSION. Stored files keep their original name/extension but
@@ -6758,6 +7140,8 @@ async def upload_user_music(
     except Exception as exc:
         logger.warning("upload_user_music: metadata insert failed for %s: %s", safe_name, exc)
         # Non-fatal — file was already saved successfully
+
+    asyncio.create_task(_maybe_warn_storage_quota(user_id))
 
     return {
         "filename": safe_name,
@@ -7515,6 +7899,7 @@ async def upload_gallery_image(
             row = await cur.fetchone()
 
     logger.info("upload_gallery_image: saved %s for user %s (%d bytes)", stored_filename, user_id, len(body))
+    asyncio.create_task(_maybe_warn_storage_quota(user_id))
     return {
         "id": row[0],
         "filename": row[1],
@@ -8814,16 +9199,103 @@ async def ingest_logs(request: Request):
 # ---------------------------------------------------------------------------
 
 
+_apns_client: Optional[aioapns.APNs] = None
+_apns_client_unavailable = False
+
+
+def _get_apns_client() -> Optional[aioapns.APNs]:
+    """Lazily builds the singleton APNs client. Returns None if push isn't
+    configured (no key material) or failed to initialize once — callers must
+    treat that as "push unavailable" and silently no-op, never raise."""
+    global _apns_client, _apns_client_unavailable
+    if _apns_client is not None:
+        return _apns_client
+    if _apns_client_unavailable or not (APNS_KEY_BASE64 and APNS_KEY_ID and APNS_TEAM_ID):
+        return None
+    try:
+        key_pem = base64.b64decode(APNS_KEY_BASE64).decode("utf-8")
+        _apns_client = aioapns.APNs(
+            key=key_pem,
+            key_id=APNS_KEY_ID,
+            team_id=APNS_TEAM_ID,
+            topic=APNS_TOPIC,
+            use_sandbox=APNS_USE_SANDBOX,
+        )
+    except Exception as exc:
+        logger.warning("APNs client init failed, push notifications disabled: %s", exc)
+        _apns_client_unavailable = True
+        return None
+    return _apns_client
+
+
+async def _send_push_best_effort(
+    user_id: str, notif_type: str, title: str, body: str, data: Optional[dict]
+) -> None:
+    """Sends a real APNs push to every device *user_id* has registered.
+    Runs as a detached task (see _create_notification) so it never adds
+    latency to — or can fail — the request that triggered the notification.
+    No-ops silently if APNs isn't configured, so self-hosted deployments
+    without an Apple push key keep working exactly as before (in-app/poll
+    -only notifications)."""
+    client = _get_apns_client()
+    if client is None:
+        return
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT device_token FROM ios_push_tokens WHERE user_id = %s",
+                    (user_id,),
+                )
+                tokens = [row[0] for row in await cur.fetchall()]
+    except Exception as exc:
+        logger.debug("_send_push_best_effort: token lookup failed: %s", exc)
+        return
+
+    dead_tokens: list[str] = []
+    for token in tokens:
+        request = aioapns.NotificationRequest(
+            device_token=token,
+            message={
+                "aps": {"alert": {"title": title, "body": body}, "sound": "default"},
+                "type": notif_type,
+                "data": data or {},
+            },
+            push_type=aioapns.PushType.ALERT,
+        )
+        try:
+            result = await client.send_notification(request)
+            if not result.is_successful and result.description in ("Unregistered", "BadDeviceToken"):
+                dead_tokens.append(token)
+        except Exception as exc:
+            logger.debug("_send_push_best_effort: send failed: %s", exc)
+
+    if dead_tokens:
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        "DELETE FROM ios_push_tokens WHERE device_token = %s",
+                        [(t,) for t in dead_tokens],
+                    )
+        except Exception as exc:
+            logger.debug("_send_push_best_effort: dead token cleanup failed: %s", exc)
+
+
 async def _create_notification(
     cur, user_id: str, type_: str, title: str, body: str = "", data: Optional[dict] = None
 ) -> str:
-    """Inserts a row into ios_notifications. Caller owns the cursor/transaction."""
+    """Inserts a row into ios_notifications and best-effort fires a real APNs
+    push for it. Caller owns the cursor/transaction."""
     notif_id = str(uuid.uuid4())
     await cur.execute(
         "INSERT INTO ios_notifications (id, user_id, type, title, body, data_json) "
         "VALUES (%s, %s, %s, %s, %s, %s)",
         (notif_id, user_id, type_, title, body, json.dumps(data or {})),
     )
+    asyncio.create_task(_send_push_best_effort(user_id, type_, title, body, data))
     return notif_id
 
 

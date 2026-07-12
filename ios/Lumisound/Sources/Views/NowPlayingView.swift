@@ -95,7 +95,6 @@ struct NowPlayingView: View {
         UserDefaults.standard.string(forKey: "nowPlaying_artworkStyle") ?? NowPlayingArtworkStyle.kaleidoscopeBloom.rawValue
     @ObservedObject var customStyleStore = CustomStyleStore.shared
     @ObservedObject var hiddenStylesStore = HiddenStylesStore.shared
-    @State var showCustomStyleEditor = false
     @State var editingCustomStyle: CustomNowPlayingStyle?
     @State var showStyleManager = false
 

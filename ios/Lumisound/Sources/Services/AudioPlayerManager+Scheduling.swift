@@ -149,6 +149,16 @@ extension AudioPlayerManager {
             prewarmBPM(for: currentSong)
             prewarmBPM(for: peekNextSong())
 
+            // Smart Auto Crossfade reads the live analyzer's overallLevel the
+            // instant beginCrossfade() fires (see smartFadeDuration) to react
+            // to how the outgoing track's ending actually sounds — starting
+            // the tap here, for the track's whole run rather than only in
+            // beginCrossfade() itself, gives its smoothing time to settle
+            // instead of reading a freshly-(re)started, still-zeroed reading.
+            if audioSettings.smartCrossfadeEnabled {
+                AudioVisualizerService.shared.start(for: .smartCrossfade)
+            }
+
             // Schedule crossfade to begin crossfadeDuration seconds before the track ends,
             // so the incoming track fades in while the current track is still playing.
             if audioSettings.crossfadeActive && audioSettings.crossfadeDuration > 0 {
@@ -180,13 +190,36 @@ extension AudioPlayerManager {
             if audioSettings.gaplessEnabled && !audioSettings.crossfadeActive {
                 Task { [weak self] in
                     guard let self else { return }
-                    try? await Task.sleep(nanoseconds: 100_000_000)
-                    await MainActor.run {
-                        guard self.isPlaying,
-                              self.audioSettings.gaplessEnabled,
-                              !self.audioSettings.crossfadeActive,
-                              !self.gaplessScheduled else { return }
-                        self.scheduleGaplessNext()
+                    // For a streamed next track, `scheduleGaplessNext` only
+                    // succeeds once `prefetchUpcomingStreamIfNeeded`'s
+                    // background download has actually finished — which the
+                    // very first 0.1s attempt usually beats. Keep retrying
+                    // every second (instead of giving up after one try) so a
+                    // slower prefetch still gets a chance to land gaplessly
+                    // before this track ends; bounded by the track's own
+                    // remaining length so it can't outlive the track.
+                    let deadline = await MainActor.run { Date().addingTimeInterval(max(0, self.duration - 1)) }
+                    var first = true
+                    while !Task.isCancelled {
+                        try? await Task.sleep(nanoseconds: first ? 100_000_000 : 1_000_000_000)
+                        first = false
+                        let shouldStop = await MainActor.run { () -> Bool in
+                            // scheduleGeneration only changes here on an explicit
+                            // skip/seek/new-track schedule (a natural gapless
+                            // handoff deliberately reuses it — see
+                            // scheduleGaplessNext's doc comment) — so this bails
+                            // cleanly if the user skipped/sought away instead of
+                            // a stale loop from an earlier track misfiring later.
+                            guard self.scheduleGeneration == gen,
+                                  self.isPlaying,
+                                  self.audioSettings.gaplessEnabled,
+                                  !self.audioSettings.crossfadeActive,
+                                  !self.gaplessScheduled
+                            else { return true }
+                            self.scheduleGaplessNext()
+                            return self.gaplessScheduled
+                        }
+                        if shouldStop || Date() >= deadline { break }
                     }
                 }
             }

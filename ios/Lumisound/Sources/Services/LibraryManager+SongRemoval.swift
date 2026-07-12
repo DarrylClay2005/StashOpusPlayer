@@ -4,31 +4,35 @@ import UIKit
 
 extension LibraryManager {
 
-    /// Permanently removes a locally-imported/downloaded song: deletes its
-    /// backing file, drops it from `importedSongs`/`allSongs`, and removes any
-    /// references to it from playlists and favorites. Used by the duplicate
-    /// finder to delete redundant copies. Only works for imported songs (those
-    /// with a file `url` and no `persistentID`) — songs from the Apple Music
-    /// library can't be deleted from within the app sandbox, so callers should
-    /// filter those out before offering deletion.
+    /// Permanently removes a locally-imported/downloaded song: moves its
+    /// backing file into Recently Deleted (recoverable for 30 days — see
+    /// `RecentlyDeletedService`), drops it from `importedSongs`/`allSongs`,
+    /// and removes any references to it from playlists and favorites. Used
+    /// by the duplicate finder to delete redundant copies. Only works for
+    /// imported songs (those with a file `url` and no `persistentID`) —
+    /// songs from the Apple Music library can't be removed from within the
+    /// app sandbox, so callers should filter those out before offering
+    /// deletion.
     func removeImportedSong(id songID: String) {
         guard let song = importedSongs.first(where: { $0.id == songID }) else { return }
-        if let url = song.url {
-            // Songs from user-watched folders (MusicFolderService) live outside the
-            // app sandbox and are only reachable via a security-scoped bookmark —
-            // without this, `removeItem` silently fails (the `try?` swallows an
-            // error), the song disappears from the library list, but the file
-            // stays on disk. This call is a harmless no-op for files already
-            // inside the app's own Documents directory (e.g. "Imported Music"
-            // and its subfolders).
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            do {
-                try FileManager.default.removeItem(at: url)
-            } catch {
-                appWarn("removeImportedSong: failed to delete file at \(url.path): \(error.localizedDescription)", category: "library")
-                ToastCenter.shared.show("Couldn't delete \"\(song.displayName)\" from disk", category: .error)
-                return
+        if song.url != nil, !(RecentlyDeletedService.shared?.trash(song: song) ?? false) {
+            // Trashing failed (e.g. the source is unreachable) — fall back to
+            // a hard delete so the song doesn't get stuck un-removable.
+            // Songs from user-watched folders (MusicFolderService) live
+            // outside the app sandbox and are only reachable via a
+            // security-scoped bookmark — without this, `removeItem` silently
+            // fails (the `try?` swallows an error), the song disappears from
+            // the library list, but the file stays on disk.
+            if let url = song.url {
+                let accessing = url.startAccessingSecurityScopedResource()
+                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch {
+                    appWarn("removeImportedSong: failed to delete file at \(url.path): \(error.localizedDescription)", category: "library")
+                    ToastCenter.shared.show("Couldn't delete \"\(song.displayName)\" from disk", category: .error)
+                    return
+                }
             }
         }
         importedSongs.removeAll { $0.id == songID }
@@ -39,7 +43,7 @@ extension LibraryManager {
         }
         persistence.savePlaylists(playlists)
         rebuildAllSongs()
-        ToastCenter.shared.show("Deleted \"\(song.displayName)\"", category: .info, icon: "trash")
+        ToastCenter.shared.show("Deleted \"\(song.displayName)\" — recoverable in Recently Deleted for 30 days", category: .info, icon: "trash")
     }
 
     /// Bulk version of `removeImportedSong` for Library's multi-select "Delete"
@@ -52,6 +56,10 @@ extension LibraryManager {
 
         for song in toDelete {
             guard let url = song.url else { continue }
+            let trashed = RecentlyDeletedService.shared?.trash(song: song) ?? false
+            guard !trashed else { continue }
+            // Trashing failed — fall back to a hard delete so the song
+            // doesn't get stuck un-removable.
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             do {
@@ -71,9 +79,17 @@ extension LibraryManager {
         persistence.savePlaylists(playlists)
         rebuildAllSongs()
         ToastCenter.shared.show(
-            "Deleted \(deletedIDs.count) song\(deletedIDs.count == 1 ? "" : "s")",
+            "Deleted \(deletedIDs.count) song\(deletedIDs.count == 1 ? "" : "s") — recoverable in Recently Deleted for 30 days",
             category: .info, icon: "trash"
         )
+    }
+
+    /// Re-adds a song restored from Recently Deleted (see
+    /// `RecentlyDeletedService.restore`) back into the library.
+    func readdRestoredSong(_ song: Song) {
+        guard !importedSongs.contains(where: { $0.id == song.id }) else { return }
+        importedSongs.append(song)
+        rebuildAllSongs()
     }
 
     /// Applies a user-confirmed metadata correction (e.g. from AcoustIDService

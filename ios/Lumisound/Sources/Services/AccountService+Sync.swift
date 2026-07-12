@@ -121,6 +121,38 @@ extension AccountService {
             return (try? JSONEncoder().encode(decoded)).flatMap { String(data: $0, encoding: .utf8) }
         }()
 
+        // Previously device-local-only stores — see SyncData's doc comments
+        // on each field for why these were gaps.
+        let playHistoryJSON: String? = {
+            let entries = PlayHistoryStore.shared.entries
+            guard !entries.isEmpty else { return nil }
+            return (try? JSONEncoder().encode(entries)).flatMap { String(data: $0, encoding: .utf8) }
+        }()
+        let smartPlaylistsJSON: String? = {
+            let playlists = SmartPlaylistStore.shared.playlists
+            guard !playlists.isEmpty else { return nil }
+            return (try? JSONEncoder().encode(playlists)).flatMap { String(data: $0, encoding: .utf8) }
+        }()
+        let trackedPlaylistsJSON: String? = {
+            let playlists = TrackedPlaylistStore.shared.playlists
+            guard !playlists.isEmpty else { return nil }
+            return (try? JSONEncoder().encode(playlists)).flatMap { String(data: $0, encoding: .utf8) }
+        }()
+        let bookmarksJSON: String? = {
+            let bookmarks = BookmarkStore.shared.bookmarksBySong
+            guard !bookmarks.isEmpty else { return nil }
+            return (try? JSONEncoder().encode(bookmarks)).flatMap { String(data: $0, encoding: .utf8) }
+        }()
+        let bpmBySourceTrackIDJSON: String? = {
+            var map: [String: Double] = [:]
+            for song in library.allSongs {
+                guard let sourceID = song.sourceTrackID, let bpm = song.bpm else { continue }
+                map[sourceID] = bpm
+            }
+            guard !map.isEmpty else { return nil }
+            return (try? JSONEncoder().encode(map)).flatMap { String(data: $0, encoding: .utf8) }
+        }()
+
         let payload = SyncData(
             favorites: favorites,
             playlists: playlists,
@@ -143,7 +175,12 @@ extension AccountService {
             nowPlayingArtworkStyle: nowPlayingArtworkStyle,
             nowPlayingSeekerStyle: nowPlayingSeekerStyle,
             earnedBadgesJSON: earnedBadgesJSON,
-            extraSettingsJSON: Self.buildExtraSettingsJSON()
+            extraSettingsJSON: Self.buildExtraSettingsJSON(),
+            playHistoryJSON: playHistoryJSON,
+            smartPlaylistsJSON: smartPlaylistsJSON,
+            trackedPlaylistsJSON: trackedPlaylistsJSON,
+            bookmarksJSON: bookmarksJSON,
+            bpmBySourceTrackIDJSON: bpmBySourceTrackIDJSON
         )
 
         do {
@@ -174,6 +211,32 @@ extension AccountService {
         ("glass_tintHue", .double),
         ("glass_useAccentTint", .bool),
         ("glass_translucency", .double),
+        // Remaining per-tab grid column counts — songs/albums/artists were
+        // already covered above via dedicated SyncData columns; these were
+        // simply never added when those later tabs picked up the same
+        // list/grid toggle.
+        ("library_favorites_columns", .int),
+        ("library_genres_columns", .int),
+        ("library_folders_columns", .int),
+        ("folderDetail_columns", .int),
+        ("albumDetail_columns", .int),
+        // Appearance customization (Settings → Appearance) — only accent
+        // color was covered before; a user who customized background theme/
+        // font/launch screen/transitions/panel style lost the rest on a
+        // fresh install.
+        ("app_background_theme", .string),
+        ("app_font_style", .string),
+        ("launch_screen_style", .string),
+        ("tab_transition_style", .string),
+        ("panel_material_style", .string),
+        ("panel_opacity", .double),
+        ("app_reduce_motion", .bool),
+        // yt-dlp download tuning beyond the aria2 toggle, and the
+        // "auto-backup downloads to cloud" preference.
+        ("ytdlp_download_folder", .string),
+        ("ytdlp_throttle_seconds", .int),
+        ("ytdlp_concurrent_fragments", .int),
+        ("autoCloudBackup", .bool),
     ]
 
     enum ExtraSettingKind { case bool, double, string, int }
@@ -412,6 +475,35 @@ extension AccountService {
             // auto-radio, notifications, Liquid Glass customization, …) — only
             // for keys not already set locally (new-device bootstrap).
             Self.applyExtraSettingsJSON(sync.extraSettingsJSON)
+
+            // Restore previously device-local-only stores. Each has its own
+            // merge policy (see the store's mergeFromSync doc comment) —
+            // none of these are a blind overwrite, so a fresher local value
+            // is never clobbered the same way audio settings/theme above
+            // are guarded against it.
+            if let json = sync.playHistoryJSON, let jsonData = json.data(using: .utf8),
+               let remote = try? JSONDecoder().decode([String: PlayHistoryEntry].self, from: jsonData) {
+                PlayHistoryStore.shared.mergeFromSync(remote)
+            }
+            if let json = sync.smartPlaylistsJSON, let jsonData = json.data(using: .utf8),
+               let remote = try? JSONDecoder().decode([SmartPlaylist].self, from: jsonData) {
+                SmartPlaylistStore.shared.mergeFromSync(remote)
+            }
+            if let json = sync.trackedPlaylistsJSON, let jsonData = json.data(using: .utf8),
+               let remote = try? JSONDecoder().decode([TrackedPlaylist].self, from: jsonData) {
+                TrackedPlaylistStore.shared.mergeFromSync(remote)
+            }
+            if let json = sync.bookmarksJSON, let jsonData = json.data(using: .utf8),
+               let remote = try? JSONDecoder().decode([String: [TrackBookmark]].self, from: jsonData) {
+                BookmarkStore.shared.mergeFromSync(remote)
+            }
+            if let json = sync.bpmBySourceTrackIDJSON, let jsonData = json.data(using: .utf8),
+               let remote = try? JSONDecoder().decode([String: Double].self, from: jsonData), !remote.isEmpty {
+                for song in library.allSongs {
+                    guard song.bpm == nil, let sourceID = song.sourceTrackID, let bpm = remote[sourceID] else { continue }
+                    library.storeBPM(bpm, for: song.id)
+                }
+            }
 
             lastSyncDate = Date()
             appLog("Pull sync complete (favorites: \(remoteIDs.count), playlists: \(sync.playlists.count))", category: "account")

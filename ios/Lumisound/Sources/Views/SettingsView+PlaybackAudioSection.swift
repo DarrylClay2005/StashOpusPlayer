@@ -36,20 +36,27 @@ extension SettingsView {
             }
             .tint(AppTheme.dynamicAccent)
             .onChange(of: player.audioSettings.smartCrossfadeEnabled) { on in
-                if on { player.audioSettings.crossfadeEnabled = false }
+                if on {
+                    player.audioSettings.crossfadeEnabled = false
+                    AudioVisualizerService.shared.start(for: .smartCrossfade)
+                } else {
+                    AudioVisualizerService.shared.stop(for: .smartCrossfade)
+                }
             }
 
             if player.audioSettings.smartCrossfadeEnabled {
-                Text("Analyzes each track's BPM and beatmatches the outgoing and incoming songs, aligning the fade to the beat for a seamless DJ-style transition. Falls back to a normal crossfade when tempos are too far apart or unknown.")
+                Text("Analyzes each track's BPM and beatmatches the outgoing and incoming songs, aligning the fade to the beat for a seamless DJ-style transition. Also reads how the outgoing track actually sounds right before it ends — a quiet fade-out gets a longer, gentler blend; a track still at full energy gets a tighter one. Falls back to a normal crossfade when tempo is unknown.")
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
                     .padding(.leading, 16)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            // Crossfade duration — shown when EITHER mode is on (it's the base /
-            // fallback duration that Smart Auto Crossfade adjusts around).
-            if player.audioSettings.crossfadeActive {
+            // Crossfade duration — a manual, fixed setting, which doesn't fit
+            // Smart Auto Crossfade's whole premise (it picks its own timing
+            // per-transition from tempo + live audio analysis — see
+            // `smartFadeDuration`). Shown only for plain manual Crossfade.
+            if player.audioSettings.crossfadeEnabled {
                 HStack {
                     Label("Duration", systemImage: "timer")
                         .foregroundStyle(AppTheme.textSecondary)
@@ -66,7 +73,9 @@ extension SettingsView {
                     }
                 }
                 .padding(.leading, 16)
+            }
 
+            if player.audioSettings.crossfadeActive {
                 HStack {
                     Label("Fade Curve", systemImage: "waveform.path")
                         .foregroundStyle(AppTheme.textSecondary)
@@ -171,9 +180,12 @@ extension SettingsView {
                         .foregroundStyle(AppTheme.textPrimary)
                 }
                 .tint(AppTheme.dynamicAccent)
+                .onChange(of: player.audioSettings.autoEQEnabled) { on in
+                    if !on { AudioVisualizerService.shared.stop(for: .autoEQ) }
+                }
 
                 if player.audioSettings.autoEQEnabled {
-                    Text("Automatically picks the best EQ preset for each track from its genre tag, falling back to its analyzed BPM when no genre is tagged.")
+                    Text("Automatically picks the best EQ preset for each track from its genre tag (falling back to its analyzed BPM when untagged), then fine-tunes the bass/treble balance a couple seconds into each track based on a live analysis of how it actually sounds.")
                         .font(.caption)
                         .foregroundStyle(AppTheme.textSecondary)
                         .padding(.leading, 16)

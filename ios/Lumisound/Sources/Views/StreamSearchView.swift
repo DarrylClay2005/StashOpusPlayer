@@ -16,8 +16,6 @@ struct StreamSearchView: View {
     @State var downloadingTrackIDs: Set<String> = []
     @State var downloadedTrackIDs: Set<String> = []
     @State var failedTrackIDs: Set<String> = []
-    @State var healthOK: Bool? = nil
-    @State var showHealthToast   = false
 
     // Server library download tracking (separate from streaming downloads)
     @State var downloadingServerTrackIDs: Set<String> = []

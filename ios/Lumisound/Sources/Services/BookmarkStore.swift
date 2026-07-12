@@ -44,6 +44,24 @@ final class BookmarkStore {
         save()
     }
 
+    /// Merges bookmarks pulled from the account backup (see
+    /// `AccountService.pullSync`) — unions per-song lists by bookmark id, so
+    /// restoring on a new device (or after a reinstall) never duplicates or
+    /// drops bookmarks already present locally.
+    func mergeFromSync(_ remote: [String: [TrackBookmark]]) {
+        var changed = false
+        for (songID, remoteList) in remote {
+            var local = bookmarksBySong[songID] ?? []
+            let existingIDs = Set(local.map { $0.id })
+            let toAdd = remoteList.filter { !existingIDs.contains($0.id) }
+            guard !toAdd.isEmpty else { continue }
+            local.append(contentsOf: toAdd)
+            bookmarksBySong[songID] = local
+            changed = true
+        }
+        if changed { save() }
+    }
+
     private func load() {
         if let data = UserDefaults.standard.data(forKey: key),
            let decoded = try? JSONDecoder().decode([String: [TrackBookmark]].self, from: data) {

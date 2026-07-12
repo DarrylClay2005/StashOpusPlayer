@@ -183,9 +183,13 @@ final class StreamingService: ObservableObject {
                let url = URL(string: savedPath) {
                 base = url
             } else {
-                guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-                    fatalError("Document directory unavailable")
-                }
+                // .documentDirectory essentially never fails to resolve on a real
+                // device, but a hard crash here would take down the whole app over
+                // a directory lookup — fall back to temporaryDirectory (always
+                // available) rather than fatalError, matching BPMAnalyzerService's
+                // cache-path fallback.
+                let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+                    ?? FileManager.default.temporaryDirectory
                 base = docs.appendingPathComponent("Imported Music")
             }
             // Place downloads inside the user's custom folder if one is set, so a

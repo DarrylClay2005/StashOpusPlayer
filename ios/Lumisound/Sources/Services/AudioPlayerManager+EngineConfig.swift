@@ -178,9 +178,14 @@ extension AudioPlayerManager {
     func configureReverb() {
         reverb.loadFactoryPreset(.mediumRoom)
         // The reverb node is always 100% wet — it only ever produces the tail;
-        // the blend with the dry signal happens at `reverbMixer`. The real
-        // reverb amount lives on `reverbWetMixer.outputVolume`, set (along with
-        // the dry bus at unity) by `applyAudioSettings()`.
+        // the actual dry/wet blend happens at `reverbMixer`, crossfading its
+        // two inputs: the dry bus (bus 0, gain set via
+        // `nightModeCompressor.destination(forMixer: reverbMixer, bus: 0)`)
+        // and the wet bus (bus 1, fed through `reverbWetMixer.outputVolume`).
+        // Both are (re-)applied by `applyAudioSettings()` on every settings
+        // pass; the values here are just a sane pre-first-pass default
+        // (0% wet / full dry) so reverb never plays at a stale level after a
+        // rebuild.
         reverb.wetDryMix = 100
         reverbWetMixer.outputVolume = 0
         reverbMixer.outputVolume = 1

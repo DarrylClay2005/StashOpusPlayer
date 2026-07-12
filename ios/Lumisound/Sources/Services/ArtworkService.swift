@@ -74,9 +74,12 @@ final class ArtworkService {
     private static let cacheVersionFileName = ".cache_format_version"
 
     private init() {
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-            fatalError("Caches directory unavailable")
-        }
+        // .cachesDirectory essentially never fails to resolve on a real device,
+        // but ArtworkService is a singleton created the moment any artwork view
+        // appears — a fatalError here would crash the app on nearly its first
+        // frame. Fall back to temporaryDirectory (always available) instead.
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         diskCacheURL = caches.appendingPathComponent("Artwork", isDirectory: true)
         try? FileManager.default.createDirectory(at: diskCacheURL, withIntermediateDirectories: true)
         purgeStaleArtworkCacheIfNeeded()

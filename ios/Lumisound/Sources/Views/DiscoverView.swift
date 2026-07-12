@@ -72,6 +72,10 @@ struct DiscoverView: View {
                             Label("Discover Mix", systemImage: "sparkles")
                                 .foregroundStyle(AppTheme.textPrimary)
                         }
+                        NavigationLink(destination: OnThisDayView()) {
+                            Label("On This Day", systemImage: "clock.arrow.circlepath")
+                                .foregroundStyle(AppTheme.textPrimary)
+                        }
                         NavigationLink(destination: SubscriptionsView()) {
                             Label("Subscriptions", systemImage: "person.crop.circle.badge.checkmark")
                                 .foregroundStyle(AppTheme.textPrimary)

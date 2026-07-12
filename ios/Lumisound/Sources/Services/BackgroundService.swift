@@ -185,6 +185,10 @@ final class BackgroundService: ObservableObject {
         static let isBlurredLegacy       = "bgService.isBlurred"
         static let imageFilenames        = "bg_image_filenames_v1"  // [String] of filenames
         static let imageAssetIDs         = "bg_image_asset_ids_v1"  // [String], same order as imageFilenames
+        /// How many of `images` (counting from the front, matching upload
+        /// order) are confirmed uploaded to the cloud gallery — see
+        /// `scheduleCloudGallerySync`/`resumeIncompleteCloudGallerySyncIfNeeded`.
+        static let cloudSyncedCount      = "bg_gallery_cloud_synced_count"
     }
 
     // MARK: Disk Storage Directory
@@ -308,13 +312,45 @@ final class BackgroundService: ObservableObject {
 
             if let newImages, !newImages.isEmpty {
                 // Upload-only path: just push the newly-added images.
+                //
+                // Backgrounding (or closing) the app mid-loop used to kill this
+                // plain Task outright — a regular URLSession data task gets no
+                // extra run time once the app suspends, so the backup silently
+                // stopped partway with no record of how far it got, and never
+                // resumed. Two fixes: (1) request a background execution
+                // window via beginBackgroundTask, giving iOS a real chance to
+                // let the in-flight upload(s) finish even if the user leaves
+                // the app immediately after adding photos; (2) persist how
+                // many images are confirmed synced after each success, so if
+                // the app IS killed before finishing, the next launch's
+                // resumeIncompleteCloudGallerySyncIfNeeded() picks up where it
+                // left off instead of silently staying incomplete forever.
+                let bgTaskID = await MainActor.run {
+                    UIApplication.shared.beginBackgroundTask(withName: "GalleryCloudUpload")
+                }
+                defer {
+                    if bgTaskID != .invalid {
+                        Task { @MainActor in UIApplication.shared.endBackgroundTask(bgTaskID) }
+                    }
+                }
+
+                let startOrder = self.images.count - newImages.count
                 for (offset, image) in newImages.enumerated() {
                     guard !Task.isCancelled else { return }
-                    let order = self.images.count - newImages.count + offset
+                    let order = startOrder + offset
                     do {
                         _ = try await streaming.uploadGalleryImage(image, token: token, displayOrder: order)
+                        let syncedCount = order + 1
+                        if syncedCount > UserDefaults.standard.integer(forKey: Keys.cloudSyncedCount) {
+                            UserDefaults.standard.set(syncedCount, forKey: Keys.cloudSyncedCount)
+                        }
                     } catch {
                         appWarn("BackgroundService: cloud gallery upload failed: \(error.localizedDescription)", category: "background")
+                        // Stop rather than skip ahead — a later image "succeeding"
+                        // while an earlier one failed would let cloudSyncedCount
+                        // advance past a real gap. resumeIncompleteCloudGallerySyncIfNeeded
+                        // retries from the first unconfirmed image on next launch/foreground.
+                        return
                     }
                 }
                 appLog("BackgroundService: auto-uploaded \(newImages.count) new gallery image(s) to cloud", category: "background")
@@ -336,10 +372,28 @@ final class BackgroundService: ObservableObject {
                     }
                     appLog("BackgroundService: pruned \(excess) cloud gallery image(s) after local removal", category: "background")
                 }
+                // Cloud is now reconciled to exactly `images.count` entries —
+                // clamp the resume marker so it can't stay stuck pointing past
+                // the (now smaller) local gallery.
+                UserDefaults.standard.set(self.images.count, forKey: Keys.cloudSyncedCount)
             } catch {
                 appWarn("BackgroundService: cloud gallery reconcile failed: \(error.localizedDescription)", category: "background")
             }
         }
+    }
+
+    /// Resumes an upload backup that got cut short (e.g. the app was closed
+    /// or suspended mid-loop) — compares the persisted "confirmed synced"
+    /// count against how many images actually exist locally now, and
+    /// re-uploads whatever tail is missing. Call on launch/foreground; no-ops
+    /// when nothing's pending (the common case).
+    func resumeIncompleteCloudGallerySyncIfNeeded() {
+        guard AccountService.shared?.isLoggedIn == true else { return }
+        let syncedCount = UserDefaults.standard.integer(forKey: Keys.cloudSyncedCount)
+        guard syncedCount < images.count else { return }
+        let pending = Array(images[syncedCount...])
+        appLog("resumeIncompleteCloudGallerySyncIfNeeded: resuming \(pending.count) unsynced gallery image(s)", category: "background")
+        scheduleCloudGallerySync(newImages: pending)
     }
 
     /// Called on first login after a fresh install/reinstall (when the local
@@ -389,6 +443,12 @@ final class BackgroundService: ObservableObject {
                 }
                 self.currentIndex = 0
                 self.startShuffling()
+                // These images came FROM the cloud, so they're already synced
+                // — without this, resumeIncompleteCloudGallerySyncIfNeeded()
+                // would see 0 confirmed-synced against a non-empty local
+                // gallery on the next launch and re-upload every one of them
+                // right back to the cloud as duplicates.
+                UserDefaults.standard.set(restored.count, forKey: Keys.cloudSyncedCount)
                 appLog("restoreGalleryFromCloudIfNeeded: restored \(restored.count) gallery image(s) from cloud", category: "background")
                 ToastCenter.shared.show("Restored \(restored.count) background image\(restored.count == 1 ? "" : "s") from your account", category: .success, icon: "icloud.and.arrow.down")
             } catch {
@@ -638,5 +698,11 @@ final class BackgroundService: ObservableObject {
         // local gallery images exist but the account has cloud-backed-up ones,
         // redownload them. No-ops for logged-out users or users with local images.
         restoreGalleryFromCloudIfNeeded()
+
+        // Resume any backup that was interrupted last session (app closed/
+        // suspended mid-upload) — no-ops when the gallery was already fully
+        // synced. Runs after restore so a fresh-install restore doesn't
+        // immediately "resume" uploading the images it just downloaded.
+        resumeIncompleteCloudGallerySyncIfNeeded()
     }
 }

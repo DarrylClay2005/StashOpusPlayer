@@ -367,6 +367,12 @@ final class AudioPlayerManager: ObservableObject {
     // has changed, preventing ghost completions from firing after a seek or skip.
     var scheduleGeneration: UInt64 = 0
 
+    // Bumped every time scheduleAnalyzerEQCorrection() runs — lets its delayed
+    // (analyzer-needs-a-couple-seconds-to-settle) correction bail out if the
+    // track has since changed, instead of applying a stale track's correction
+    // to whatever's playing by the time the delay elapses.
+    var eqCorrectionGeneration: UInt64 = 0
+
     // Audio interruption / route change
     var wasInterrupted = false
     // True when playback was auto-paused because the active output route

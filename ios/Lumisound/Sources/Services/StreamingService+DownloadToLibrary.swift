@@ -160,10 +160,10 @@ extension StreamingService {
         if throttle != 5 {
             queryItems.append(URLQueryItem(name: "throttle_seconds", value: String(max(0, min(60, throttle)))))
         }
-        let concurrentFrags = UserDefaults.standard.object(forKey: "ytdlp_concurrent_fragments") as? Int ?? 1
+        let concurrentFrags = UserDefaults.standard.object(forKey: "ytdlp_concurrent_fragments") as? Int ?? 4
         appLog("downloadToLibrary: job-based /api/download for \"\(track.title)\" [fmt: \(fmt), aria2: \(aria2Enabled), throttle: \(throttle)s, concurrentFrags: \(concurrentFrags)]", category: "network")
-        if concurrentFrags > 1 {
-            queryItems.append(URLQueryItem(name: "concurrent_fragments", value: String(min(16, concurrentFrags))))
+        if concurrentFrags != 4 {
+            queryItems.append(URLQueryItem(name: "concurrent_fragments", value: String(max(1, min(16, concurrentFrags)))))
         }
         // Defense-in-depth: also tell the bridge what the client already has, so
         // a stale/incomplete `existingSongs` snapshot still gets server-side dedupe.

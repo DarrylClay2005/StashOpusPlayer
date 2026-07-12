@@ -214,9 +214,23 @@ extension AudioPlayerManager {
     /// within ±50% of `base` so a very slow track doesn't balloon a short
     /// crossfade into a multi-second one (or vice versa for a fast track).
     func smartFadeDuration(base: TimeInterval, bpm: Double?) -> TimeInterval {
-        guard base > 0, let bpm, bpm > 0 else { return base }
+        // Live-analyzer nudge: a track still at full energy this close to
+        // its end reads as an abrupt cut — lean shorter/tighter so the
+        // overlap doesn't smear two loud passages together. Deliberately
+        // one-directional (never LONGER than the base) — `overallLevel`
+        // reads as `0` both for genuine silence and for "the analyzer
+        // tap hasn't had time to settle yet" (e.g. a very short track), and
+        // there's no way to tell those apart from a single reading; erring
+        // toward "no change" for the ambiguous case is safer than guessing
+        // it means an intentional quiet fade-out and stretching the
+        // duration on a measurement that might not be real yet.
+        let level = Double(min(1, max(0, AudioVisualizerService.shared.overallLevel)))
+        let levelMultiplier = 1.0 - level * 0.3 // 1.0x at level 0/unmeasured, 0.7x at full energy
+        let adjustedBase = base * levelMultiplier
+
+        guard adjustedBase > 0, let bpm, bpm > 0 else { return adjustedBase > 0 ? adjustedBase : base }
         let beatLength = 60.0 / bpm
-        let beats = max(1, (base / beatLength).rounded())
+        let beats = max(1, (adjustedBase / beatLength).rounded())
         let snapped = beats * beatLength
         return min(max(snapped, base * 0.5), base * 1.5)
     }
@@ -244,13 +258,54 @@ extension AudioPlayerManager {
 
     /// If "Auto EQ" is enabled, switches the EQ preset to match the current
     /// track's genre (preferred) or tempo (fallback) — see
-    /// `EQPreset.auto(forBPM:genre:)`. No-op if Auto EQ is off, neither signal
-    /// is usable, or the suggested preset is already active.
+    /// `EQPreset.auto(forBPM:genre:)` — then schedules a small analyzer-driven
+    /// correction on top of it. No-op if Auto EQ is off or neither genre nor
+    /// tempo is usable.
     func applyAutoEQIfNeeded(bpm: Double?) {
         guard audioSettings.autoEQEnabled else { return }
         let genre = currentSong?.genre
-        guard let preset = EQPreset.auto(forBPM: bpm, genre: genre),
-              audioSettings.eqPreset != preset else { return }
-        applyEQPreset(preset)
+        guard let preset = EQPreset.auto(forBPM: bpm, genre: genre) else { return }
+        if audioSettings.eqPreset != preset {
+            applyEQPreset(preset)
+        }
+        scheduleAnalyzerEQCorrection()
+    }
+
+    /// Genre/BPM alone can't see how THIS specific recording actually
+    /// sounds — a "Rock" preset picked for a quieter, bass-light-mixed rock
+    /// track still leaves it under-boosted down low, and an already
+    /// bass-heavy mix gets over-boosted further by the same preset. A couple
+    /// of seconds into the track (enough for the live analyzer's smoothing
+    /// to settle past the previous track's tail), nudge the preset's bass/
+    /// treble bands by a small amount based on the actually-measured
+    /// balance. This is Auto EQ using the app's one real "audio listener and
+    /// analyzer" (`AudioVisualizerService`) instead of only a static
+    /// genre/tempo lookup table.
+    private func scheduleAnalyzerEQCorrection() {
+        let generation = eqCorrectionGeneration &+ 1
+        eqCorrectionGeneration = generation
+        AudioVisualizerService.shared.start(for: .autoEQ)
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            await MainActor.run {
+                guard let self, self.eqCorrectionGeneration == generation,
+                      self.audioSettings.autoEQEnabled
+                else { return }
+                let analyzer = AudioVisualizerService.shared
+                // Bass vs. treble balance, roughly -1...1 (negative = measured
+                // bass-light, positive = measured bass-heavy relative to
+                // treble). Only correct on a real, clearly-measured imbalance —
+                // small differences are just normal spectral variation between
+                // tracks, not something to "fix".
+                let balance = analyzer.bassLevel - analyzer.trebleLevel
+                guard abs(balance) > 0.15 else { return }
+                let correction = max(-3.0, min(3.0, Double(-balance) * 6))
+                var bands = self.audioSettings.eqBands
+                guard bands.indices.contains(1) else { return }
+                bands[0] = Float(min(max(Double(bands[0]) + correction, -12), 12))
+                bands[1] = Float(min(max(Double(bands[1]) + correction * 0.7, -12), 12))
+                self.audioSettings.eqBands = bands
+            }
+        }
     }
 }
