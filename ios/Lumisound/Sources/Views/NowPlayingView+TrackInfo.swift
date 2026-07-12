@@ -6,22 +6,35 @@ extension NowPlayingView {
 
     // MARK: - Track Info + Favorite
 
-    /// SharePlay "listen together" entry point. `GroupActivitySharingButton`
-    /// is the system-provided button (it renders its own icon/menu and drives
-    /// the whole activation flow — FaceTime picker, permissions, etc.) — this
-    /// app only needs to hand it the activity to propose; actual cross-device
-    /// sync is handled separately by `SharePlayCoordinator` once a session
-    /// starts (see that type's doc comment for why sync is message-based
-    /// rather than a shared `AVPlaybackCoordinator` timeline). Requires the
-    /// Group Activities capability/entitlement — see integration notes
-    /// wherever project.yml/entitlements changes are tracked.
+    /// SharePlay "listen together" entry point. Calls the `GroupActivity`
+    /// protocol's own `activate()` directly (a core, stable part of the
+    /// GroupActivities framework since its introduction) rather than a
+    /// higher-level SwiftUI convenience wrapper — the OS still owns the whole
+    /// activation flow (FaceTime picker, permissions, etc.) once `activate()`
+    /// is called; this app only needs to hand it the activity to propose.
+    /// Actual cross-device sync is handled separately by `SharePlayCoordinator`
+    /// once a session starts (see that type's doc comment for why sync is
+    /// message-based rather than a shared `AVPlaybackCoordinator` timeline).
+    /// Requires the Group Activities capability/entitlement — see integration
+    /// notes wherever project.yml/entitlements changes are tracked.
     @ViewBuilder
     var sharePlayButton: some View {
         if let song = player.currentSong {
-            GroupActivitySharingButton {
-                ListenTogetherActivity(songTitle: song.title, artistName: song.artist)
+            Button {
+                Task {
+                    do {
+                        _ = try await ListenTogetherActivity(songTitle: song.title, artistName: song.artist).activate()
+                    } catch {
+                        appWarn("SharePlay activate failed: \(error.localizedDescription)", category: "general")
+                    }
+                }
+            } label: {
+                Image(systemName: "shareplay")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(width: 44, height: 44)
             }
-            .frame(width: 44, height: 44)
+            .buttonStyle(.plain)
         }
     }
 
