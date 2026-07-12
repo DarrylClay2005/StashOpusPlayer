@@ -342,9 +342,13 @@ struct LumisoundShortcuts: AppShortcutsProvider {
         )
         AppShortcut(
             intent: SearchAndPlayIntent(),
+            // No `\(\.$query)` interpolation here — only AppEntity/AppEnum
+            // parameters can be embedded in a phrase; `query` is a plain
+            // `String` (Siri still prompts for it via the intent's own
+            // parameter summary when the phrase alone is matched).
             phrases: [
-                "Play \(\.$query) in \(.applicationName)",
-                "Search for \(\.$query) in \(.applicationName)",
+                "Search and play in \(.applicationName)",
+                "Play a song in \(.applicationName)",
             ],
             shortTitle: "Search and Play",
             systemImageName: "magnifyingglass"
