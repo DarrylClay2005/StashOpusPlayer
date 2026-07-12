@@ -139,6 +139,7 @@ extension AudioPlayerManager {
         engine.attach(reverb)
         engine.attach(reverbMixer)
         engine.attach(reverbWetMixer)
+        engine.attach(reverbDryMixer)
         engine.attach(nightModeCompressor)
         engine.attach(limiter)
         engine.attach(environmentNode)
@@ -158,11 +159,12 @@ extension AudioPlayerManager {
         engine.connect(crossfadeMixer, to: timePitch, format: nil)
         engine.connect(timePitch, to: equalizer, format: nil)
         engine.connect(equalizer, to: nightModeCompressor, format: nil)
-        // Parallel reverb: compressor output fans out to the dry sum bus AND the reverb send.
+        // Parallel reverb: compressor output fans out to the dry gain stage AND the reverb send.
         engine.connect(nightModeCompressor, to: [
-            AVAudioConnectionPoint(node: reverbMixer, bus: 0),   // dry, full level
-            AVAudioConnectionPoint(node: reverb, bus: 0)         // wet send
+            AVAudioConnectionPoint(node: reverbDryMixer, bus: 0), // dry send
+            AVAudioConnectionPoint(node: reverb, bus: 0)          // wet send
         ], fromBus: 0, format: nil)
+        engine.connect(reverbDryMixer, to: reverbMixer, fromBus: 0, toBus: 0, format: nil)
         engine.connect(reverb, to: reverbWetMixer, format: nil)
         engine.connect(reverbWetMixer, to: reverbMixer, fromBus: 0, toBus: 1, format: nil)
         engine.connect(reverbMixer, to: limiter, format: nil)
@@ -179,15 +181,14 @@ extension AudioPlayerManager {
         reverb.loadFactoryPreset(.mediumRoom)
         // The reverb node is always 100% wet — it only ever produces the tail;
         // the actual dry/wet blend happens at `reverbMixer`, crossfading its
-        // two inputs: the dry bus (bus 0, gain set via
-        // `nightModeCompressor.destination(forMixer: reverbMixer, bus: 0)`)
-        // and the wet bus (bus 1, fed through `reverbWetMixer.outputVolume`).
-        // Both are (re-)applied by `applyAudioSettings()` on every settings
-        // pass; the values here are just a sane pre-first-pass default
-        // (0% wet / full dry) so reverb never plays at a stale level after a
-        // rebuild.
+        // two inputs: the dry bus (bus 0, gain via `reverbDryMixer.outputVolume`)
+        // and the wet bus (bus 1, gain via `reverbWetMixer.outputVolume`). Both
+        // are (re-)applied by `applyAudioSettings()` on every settings pass;
+        // the values here are just a sane pre-first-pass default (0% wet /
+        // full dry) so reverb never plays at a stale level after a rebuild.
         reverb.wetDryMix = 100
         reverbWetMixer.outputVolume = 0
+        reverbDryMixer.outputVolume = 1
         reverbMixer.outputVolume = 1
         loadedReverbPreset = .mediumRoom
     }

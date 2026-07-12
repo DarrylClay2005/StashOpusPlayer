@@ -167,21 +167,32 @@ final class AudioPlayerManager: ObservableObject {
     let equalizer = AVAudioUnitEQ(numberOfBands: 10)
     // Real-room reverb in a PARALLEL (send/return) topology, not an insert.
     //
-    // AVAudioUnitReverb's only blend control is `wetDryMix`, which *crossfades*
-    // dry↔wet: at any mix > 0 the dry signal is attenuated (mix 18 → dry at
-    // 82%). Wired inline that quietly degrades the direct signal whenever reverb
-    // is on — and it's on by default — which reads as "reverb lowers audio
-    // quality". Instead the EQ output fans out to two paths: a full-level dry
-    // path straight into `reverbMixer`, and a wet path through `reverb`
-    // (wetDryMix pinned at 100 = pure tail) scaled by `reverbWetMixer` and
-    // summed back in. The dry signal is therefore never touched — when reverb is
-    // off the wet bus is silent and playback is bit-perfect.
+    // AVAudioUnitReverb's only blend control is `wetDryMix`, wired inline that
+    // quietly degrades the direct signal whenever reverb is on — and it's on
+    // by default — which reads as "reverb lowers audio quality". Instead the
+    // EQ output fans out to two paths: a dry path through `reverbDryMixer`
+    // straight into `reverbMixer`, and a wet path through `reverb` (wetDryMix
+    // pinned at 100 = pure tail) scaled by `reverbWetMixer`, summed back in.
+    // When reverb is off (0% mix) the dry path is untouched/bit-perfect and
+    // the wet bus is silent, same as before — `reverbDryMixer.outputVolume`
+    // and `reverbWetMixer.outputVolume` only start diverging from
+    // dry=1/wet=0 once the mix slider actually moves off zero (see
+    // `applyAudioSettings`), crossfading the two as the mix increases so the
+    // effect is audible across the WHOLE 0-100% range instead of only near
+    // the top of it.
     let reverb = AVAudioUnitReverb()
     // Sums the dry path (bus 0) and the scaled wet path (bus 1) before the limiter.
     let reverbMixer = AVAudioMixerNode()
     // Single-input gain stage on the wet path; its outputVolume is the reverb
     // amount (reverbWetDryMix / 100), or 0 when reverb is disabled.
     let reverbWetMixer = AVAudioMixerNode()
+    // Single-input gain stage on the DRY path, mirroring `reverbWetMixer` —
+    // needed because the dry path's source (`nightModeCompressor`, an
+    // AVAudioUnitEffect) doesn't conform to AVAudioMixing and so has no
+    // per-destination `.destination(forMixer:bus:)` volume of its own; this
+    // node exists purely to give the dry path an independently-controllable
+    // gain the same way the wet path already has one.
+    let reverbDryMixer = AVAudioMixerNode()
     // Tracks which factory preset is currently loaded on `reverb` so
     // `applyAudioSettings` only calls `loadFactoryPreset` (a relatively heavy
     // call) when the user's chosen preset actually changes.

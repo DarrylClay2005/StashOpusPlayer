@@ -82,22 +82,22 @@ extension AudioPlayerManager {
         }
         let reverbWet = min(max(audioSettings.reverbWetDryMix, 0), 100) / 100.0
         let wetFraction = Double(audioSettings.reverbEnabled ? reverbWet : 0)
-        // Equal-power crossfade between the dry bus (reverbMixer bus 0) and the
-        // wet/reverb bus (reverbWetMixer -> reverbMixer bus 1) — previously the
-        // dry bus had no gain control at all and stayed at its implicit unity
-        // level regardless of the slider, so raising "wet mix" only ever added
-        // a reverb tail on top of an unchanged, always-dominant dry signal. A
-        // reverb tail's own energy is naturally much lower than the direct
-        // sound, so that made the effect barely audible until the wet gain was
-        // pushed close to its 100% ceiling — reported as "can't hear a
-        // difference until ~80%". Now both buses ramp in a proper crossfade
-        // (cos/sin keeps perceived loudness constant through the middle of the
-        // range, unlike a naive linear blend), so every point on the slider
-        // produces an audible change, and 100% is a true full-wet signal.
+        // Equal-power crossfade between the dry bus (reverbDryMixer -> reverbMixer
+        // bus 0) and the wet/reverb bus (reverbWetMixer -> reverbMixer bus 1) —
+        // previously the dry bus had no gain control at all and stayed at its
+        // implicit unity level regardless of the slider, so raising "wet mix"
+        // only ever added a reverb tail on top of an unchanged, always-dominant
+        // dry signal. A reverb tail's own energy is naturally much lower than
+        // the direct sound, so that made the effect barely audible until the
+        // wet gain was pushed close to its 100% ceiling — reported as "can't
+        // hear a difference until ~80%". Now both buses ramp in a proper
+        // crossfade (cos/sin keeps perceived loudness constant through the
+        // middle of the range, unlike a naive linear blend), so every point on
+        // the slider produces an audible change, and 100% is a true full-wet signal.
         let wetGain = sin(wetFraction * .pi / 2)
         let dryGain = cos(wetFraction * .pi / 2)
         reverbWetMixer.outputVolume = Float(wetGain)
-        nightModeCompressor.destination(forMixer: reverbMixer, bus: 0)?.volume = Float(dryGain)
+        reverbDryMixer.outputVolume = Float(dryGain)
 
         setSpatialAudioRouting(audioSettings.spatialAudioEnabled ?? false, monoEnabled: audioSettings.monoAudioEnabled ?? false)
 
