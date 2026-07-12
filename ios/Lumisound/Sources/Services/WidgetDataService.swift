@@ -114,6 +114,28 @@ final class WidgetDataService {
         }
     }
 
+    /// Lightweight update: writes just the current track's favorite flag and
+    /// reloads timelines. Mirrors `updatePlayState`'s shape/throttling but
+    /// leaves every other widget key untouched.
+    ///
+    /// Called from `AudioPlayerManager` in three places: when `currentSong`
+    /// changes (so the heart badge matches the new track right away), just
+    /// before entering the background (to catch a favorite toggled from
+    /// in-app UI, e.g. `NowPlayingView`, while paused — the position timer
+    /// that would otherwise catch this doesn't run while paused), and after
+    /// `toggleFavoriteFromWidget()` reconciles a widget button tap against
+    /// the real `LibraryManager.favoriteSongIDs` (see that method's comment
+    /// for why the widget extension can't just write the authoritative
+    /// value itself).
+    func updateFavoriteState(isFavorite: Bool) {
+        guard let ud = defaults else {
+            logMissingAppGroupOnce()
+            return
+        }
+        ud.set(isFavorite, forKey: "widget_is_favorite")
+        reloadTimelinesThrottled()
+    }
+
     // MARK: - Private Helpers
 
     /// Downscales artwork to widget size before writing it to the App Group.

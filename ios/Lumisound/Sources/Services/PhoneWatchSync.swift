@@ -22,6 +22,7 @@ final class PhoneWatchSync: NSObject, ObservableObject {
         let session = WCSession.default
         session.delegate = self
         session.activate()
+        startAccountHandoffPolling()
     }
 
     func update(song: Song?, isPlaying: Bool, artwork: UIImage?) {
@@ -54,6 +55,60 @@ final class PhoneWatchSync: NSObject, ObservableObject {
     private func handle(_ payload: [String: Any]) {
         guard let cmd = payload["command"] as? String else { return }
         commandHandler?(cmd)
+    }
+
+    // MARK: - Account handoff (phone -> watch)
+    //
+    // Lets the watch's standalone "Watch Library" playback log in without the
+    // user typing credentials, by relaying the phone's already-authenticated
+    // bridge URL + bearer token. Uses `transferUserInfo` (a queued,
+    // guaranteed-delivery channel), never `updateApplicationContext`, so it
+    // can't clobber the Now Playing mirror context sent by
+    // `update(song:isPlaying:artwork:)` above — that call fully replaces the
+    // single application-context dictionary every time, so mixing account
+    // keys into it would risk losing them on the next Now Playing update (or
+    // vice versa). Polls `AccountService.shared` (the existing ambient weak
+    // reference — see AccountService.swift) instead of requiring a new call
+    // site in the login/logout flow, so this stays a self-contained, additive
+    // change to this file alone.
+
+    private var lastPushedToken: String?
+    private var lastPushedBridgeURL: String?
+    private var accountHandoffTimer: Timer?
+
+    private func startAccountHandoffPolling() {
+        accountHandoffTimer?.invalidate()
+        pushAccountHandoffIfNeeded()
+        accountHandoffTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pushAccountHandoffIfNeeded() }
+        }
+    }
+
+    private func pushAccountHandoffIfNeeded() {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+
+        let token = AccountService.shared?.token
+        let bridgeURL = AccountService.shared?.bridgeURL
+        guard token != lastPushedToken || bridgeURL != lastPushedBridgeURL else { return }
+        lastPushedToken = token
+        lastPushedBridgeURL = bridgeURL
+
+        // Built up as concrete non-optional values only — WCSession's transfer
+        // dictionaries are plist-style and embedding a boxed `nil` (`x as Any`
+        // where `x` is `nil`) is a real footgun here, not just a style nit.
+        var payload: [String: Any] = [:]
+        if let bridgeURL {
+            payload["bridgeURL"] = bridgeURL
+        }
+        if let token {
+            payload["accountToken"] = token
+        } else {
+            payload["accountTokenCleared"] = true
+        }
+        guard !payload.isEmpty else { return }
+        session.transferUserInfo(payload)
     }
 }
 

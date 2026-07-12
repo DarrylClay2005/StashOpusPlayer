@@ -6,5 +6,20 @@
     <array>
         <string>group.com.lumisound.ios</string>
     </array>
+    <!-- SharePlay ("Listen Together" — see ListenTogetherActivity.swift /
+         SharePlayCoordinator.swift). Self-serviceable via Xcode's Signing &
+         Capabilities "Group Activities" toggle — unlike CarPlay's entitlement
+         below (commented out), this one needs no separate Apple approval. -->
+    <key>com.apple.developer.group-session</key>
+    <true/>
+    <!-- CarPlay (see CarPlaySceneDelegate.swift) is intentionally NOT enabled
+         here. com.apple.developer.carplay-audio is a restricted entitlement —
+         Apple must grant it to this app's paid developer account per
+         https://developer.apple.com/contact/carplay/ before Xcode will even
+         let this key be added to a provisioning profile; adding it here today
+         would just fail codesigning. Once granted, add:
+           <key>com.apple.developer.carplay-audio</key>
+           <true/>
+    -->
 </dict>
 </plist>

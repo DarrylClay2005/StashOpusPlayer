@@ -64,6 +64,8 @@ extension StreamSearchView {
             guard let token = account.token else { return }
             Task { await streaming.fetchUserMusic(token: token, search: searchText) }
             Task { await streaming.fetchDownloadHistory(token: token, search: searchText) }
+        } else if StreamingService.isSpotifyURL(searchText) {
+            Task { await streaming.resolveSpotify(url: searchText, existingSongs: library.allSongs) }
         } else if StreamingService.isPlaylistURL(searchText) {
             Task { await streaming.resolvePlaylist(url: searchText, existingSongs: library.allSongs) }
         } else {

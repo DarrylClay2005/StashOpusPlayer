@@ -12,6 +12,8 @@ struct TVContentView: View {
                 TabView {
                     TVLibraryView(client: client, token: token)
                         .tabItem { Label("My Library", systemImage: "music.note.house") }
+                    TVPlaylistsView(client: client, token: token)
+                        .tabItem { Label("Playlists", systemImage: "music.note.list") }
                     TVSearchView(client: client)
                         .tabItem { Label("Search", systemImage: "magnifyingglass") }
                     TVAccountView(account: account)

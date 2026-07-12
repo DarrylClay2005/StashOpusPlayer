@@ -17,6 +17,15 @@ struct FavoritesView: View {
     @EnvironmentObject private var player: AudioPlayerManager
 
     @State private var sortOrder: FavoritesSortOrder = .title
+    /// Same list/grid customization already available on Songs/Albums/Artists/
+    /// Folders (see SongsTab/AlbumsTab's identical `@AppStorage` + toolbar
+    /// menu pattern) — Favorites had no such control despite being just as
+    /// much a song list as those tabs.
+    @AppStorage("library_favorites_columns") private var favoritesColumns: Int = 1
+
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 12), count: favoritesColumns)
+    }
 
     // MARK: Sorted favorites
 
@@ -39,77 +48,92 @@ struct FavoritesView: View {
     // MARK: Body
 
     var body: some View {
-        List {
-            if favorites.isEmpty {
-                EmptyStateView(
-                    icon: "heart.slash",
-                    title: "No favorites",
-                    message: "Long-press any song and choose \"Add to Favorites\"."
-                )
-                .listRowBackground(Color.clear)
-            } else {
-                // Play All / Shuffle buttons
-                Section {
-                    HStack(spacing: 12) {
-                        Button {
-                            player.setQueue(favorites, startIndex: 0, autoplay: true)
-                        } label: {
-                            Label("Play All", systemImage: "play.fill")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(AppTheme.dynamicAccent)
+        Group {
+            if favoritesColumns == 1 {
+                List {
+                    if favorites.isEmpty {
+                        emptyState.listRowBackground(Color.clear)
+                    } else {
+                        // Play All / Shuffle buttons
+                        Section {
+                            playAllShuffleRow
+                                .listRowBackground(Color.clear)
 
-                        Button {
-                            let shuffled = favorites.shuffled()
-                            player.setQueue(shuffled, startIndex: 0, autoplay: true)
-                        } label: {
-                            Label("Shuffle", systemImage: "shuffle")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
+                            // Song count header
+                            Text("\(favorites.count) \(favorites.count == 1 ? "song" : "songs")")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .listRowBackground(Color.clear)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(AppTheme.dynamicAccent)
+                        .listSectionSeparator(.hidden)
+
+                        // Favorites list
+                        ForEach(favorites) { song in
+                            FavoriteRow(song: song, isCurrent: player.currentSong?.id == song.id)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    player.play(song: song, in: favorites)
+                                }
+                                .listRowBackground(AppTheme.surface.opacity(0.5))
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        library.toggleFavorite(songID: song.id)
+                                    } label: {
+                                        Label("Unfavorite", systemImage: "heart.slash")
+                                    }
+                                    .tint(AppTheme.error)
+                                }
+                        }
                     }
-                    .listRowBackground(Color.clear)
-
-                    // Song count header
-                    Text("\(favorites.count) \(favorites.count == 1 ? "song" : "songs")")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .listRowBackground(Color.clear)
                 }
-                .listSectionSeparator(.hidden)
-
-                // Favorites list
-                ForEach(favorites) { song in
-                    FavoriteRow(song: song, isCurrent: player.currentSong?.id == song.id)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            player.play(song: song, in: favorites)
+                // `.plain`, not `.insetGrouped` — matches every other song-list screen
+                // (SongsTab, ArtistsTab, GenresTab, PlaylistsView, Artist/AlbumDetailView).
+                // `.insetGrouped` renders each Section as its own floating rounded card
+                // with real gaps between them, and with `.scrollContentBackground(.hidden)`
+                // those gaps show the full gallery background straight through —
+                // exactly the "UI is split into disconnected pieces" look reported
+                // against this screen specifically (every other tab already used `.plain`).
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            } else {
+                ScrollView {
+                    if favorites.isEmpty {
+                        emptyState.padding(.top, 60)
+                    } else {
+                        VStack(spacing: 12) {
+                            playAllShuffleRow
+                            Text("\(favorites.count) \(favorites.count == 1 ? "song" : "songs")")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.textSecondary)
                         }
-                        .listRowBackground(AppTheme.surface.opacity(0.5))
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                library.toggleFavorite(songID: song.id)
-                            } label: {
-                                Label("Unfavorite", systemImage: "heart.slash")
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+
+                        LazyVGrid(columns: gridColumns, spacing: 12) {
+                            ForEach(favorites) { song in
+                                Button {
+                                    player.play(song: song, in: favorites)
+                                } label: {
+                                    SongGridCell(song: song, isCurrent: player.currentSong?.id == song.id)
+                                }
+                                .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        library.toggleFavorite(songID: song.id)
+                                    } label: {
+                                        Label("Unfavorite", systemImage: "heart.slash")
+                                    }
+                                }
                             }
-                            .tint(AppTheme.error)
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.top, 12)
+                        .padding(.bottom, 190)
+                    }
                 }
+                .background(Color.clear.ignoresSafeArea())
             }
         }
-        // `.plain`, not `.insetGrouped` — matches every other song-list screen
-        // (SongsTab, ArtistsTab, GenresTab, PlaylistsView, Artist/AlbumDetailView).
-        // `.insetGrouped` renders each Section as its own floating rounded card
-        // with real gaps between them, and with `.scrollContentBackground(.hidden)`
-        // those gaps show the full gallery background straight through —
-        // exactly the "UI is split into disconnected pieces" look reported
-        // against this screen specifically (every other tab already used `.plain`).
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
         // Own gallery/theme background (pushed detail views don't inherit the
         // root's), so it matches the rest of the app instead of system black.
         .background(GalleryBackgroundView().ignoresSafeArea())
@@ -136,6 +160,61 @@ struct FavoritesView: View {
                 }
                 .tint(AppTheme.dynamicAccent)
             }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button {
+                        favoritesColumns = 1
+                    } label: {
+                        Label("1 Column", systemImage: "rectangle.grid.1x2")
+                    }
+                    Button {
+                        favoritesColumns = 2
+                    } label: {
+                        Label("2 Columns", systemImage: "square.grid.2x2")
+                    }
+                    Button {
+                        favoritesColumns = 3
+                    } label: {
+                        Label("3 Columns", systemImage: "square.grid.3x3")
+                    }
+                } label: {
+                    Image(systemName: favoritesColumns == 1 ? "rectangle.grid.1x2" : favoritesColumns == 2 ? "square.grid.2x2" : "square.grid.3x3")
+                }
+                .tint(AppTheme.dynamicAccent)
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        EmptyStateView(
+            icon: "heart.slash",
+            title: "No favorites",
+            message: "Long-press any song and choose \"Add to Favorites\"."
+        )
+    }
+
+    private var playAllShuffleRow: some View {
+        HStack(spacing: 12) {
+            Button {
+                player.setQueue(favorites, startIndex: 0, autoplay: true)
+            } label: {
+                Label("Play All", systemImage: "play.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(AppTheme.dynamicAccent)
+
+            Button {
+                let shuffled = favorites.shuffled()
+                player.setQueue(shuffled, startIndex: 0, autoplay: true)
+            } label: {
+                Label("Shuffle", systemImage: "shuffle")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(AppTheme.dynamicAccent)
         }
     }
 }

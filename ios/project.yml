@@ -19,7 +19,7 @@ settings:
     SWIFT_VERSION: "5.10"
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
     TARGETED_DEVICE_FAMILY: "1,2"
-    MARKETING_VERSION: "1.4.61"
+    MARKETING_VERSION: "1.4.73"
     CURRENT_PROJECT_VERSION: "1"
     ENABLE_BITCODE: "NO"
     DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
@@ -112,16 +112,40 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lumisound.ios.watchkitapp
         INFOPLIST_FILE: LumisoundWatch/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: LumisoundWatch/LumisoundWatch.entitlements
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
         TARGETED_DEVICE_FAMILY: "4"
         SKIP_INSTALL: "NO"
+    dependencies:
+      - target: LumisoundWatchWidget
     scheme:
       buildAction:
         targets:
           - LumisoundWatch
       archiveAction:
         config: Release
+
+  # Watch complication + Smart Stack widget (now-playing title/artist/play
+  # state), embedded in LumisoundWatch. Reads from the watch's OWN local
+  # `group.com.lumisound.ios` container — a physically separate app-group
+  # instance from the iPhone's, watchOS doesn't share one across devices —
+  # written by WatchLocalPlayerManager/WatchWidgetDataService.
+  LumisoundWatchWidget:
+    type: app-extension
+    platform: watchOS
+    deploymentTarget: "9.0"
+    sources:
+      - path: LumisoundWatch/WatchWidget/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lumisound.ios.watchkitapp.widget
+        INFOPLIST_FILE: LumisoundWatch/WatchWidget/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: LumisoundWatch/WatchWidget/LumisoundWatchWidget.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        SKIP_INSTALL: "YES"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
 
   # tvOS app — standalone (its own scheme), installed via atvloadly from the
   # tvOS .ipa produced by release-tvos.yml. Not tied to the iOS scheme.

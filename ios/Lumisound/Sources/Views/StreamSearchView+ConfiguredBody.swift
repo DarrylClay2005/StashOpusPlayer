@@ -137,6 +137,7 @@ extension StreamSearchView {
             if src == "my" {
                 guard let token = account.token else { return }
                 Task { await streaming.fetchUserMusic(token: token) }
+                Task { await streaming.fetchStorageUsage(token: token) }
             } else if src == "server" {
                 // Browse the whole server library on open (empty query) so the
                 // Server tab actually shows content instead of an empty prompt.
@@ -146,6 +147,7 @@ extension StreamSearchView {
         .onAppear {
             if selectedSource == "my", let token = account.token {
                 Task { await streaming.fetchUserMusic(token: token) }
+                Task { await streaming.fetchStorageUsage(token: token) }
             }
             if selectedSource == "server" {
                 Task { await streaming.searchServerLibrary(query: searchText) }
@@ -179,6 +181,7 @@ extension StreamSearchView {
                         if didAccess { url.stopAccessingSecurityScopedResource() }
                     }
                     await streaming.fetchUserMusic(token: token)
+                    await streaming.fetchStorageUsage(token: token)
                 }
             case .failure(let error):
                 streaming.errorMessage = "File picker error: \(error.localizedDescription)"

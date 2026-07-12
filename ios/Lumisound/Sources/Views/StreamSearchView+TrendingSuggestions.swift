@@ -9,7 +9,7 @@ extension StreamSearchView {
         Group {
             if trendingQueries.isEmpty {
                 Spacer()
-                Text("Search YouTube or SoundCloud, or paste a playlist URL — including a Bandcamp track or album link.")
+                Text("Search YouTube or SoundCloud, or paste a playlist URL — including a Bandcamp track/album link or a Spotify track/album/playlist link.")
                     .font(AppTheme.bodyFont(size: 14))
                     .foregroundStyle(AppTheme.textSecondary)
                     .multilineTextAlignment(.center)

@@ -14,6 +14,7 @@ struct LumisoundApp: App {
     @StateObject private var bridgeHealth = BridgeHealthService()
     @StateObject private var moodService = MoodPlaylistService()
     @StateObject private var cacheManager = CacheManagerService()
+    @StateObject private var sharePlay = SharePlayCoordinator()
 
     @State private var showLaunch = true
 
@@ -40,6 +41,7 @@ struct LumisoundApp: App {
                     .environmentObject(bridgeHealth)
                     .environmentObject(moodService)
                     .environmentObject(cacheManager)
+                    .environmentObject(sharePlay)
                     .opacity(showLaunch ? 0 : 1)
                     .animation(.easeInOut(duration: 0.4), value: showLaunch)
 
@@ -73,6 +75,14 @@ struct LumisoundApp: App {
                     // Wire player to library so it can resolve track BPM for
                     // beat-aware crossfades.
                     player.libraryManager = libraryManager
+
+                    // Wire SharePlay up to live app state, same reason App
+                    // Intents use weak `.shared` singletons — this needs to
+                    // reach the player/library/streaming instances constructed
+                    // by this View's @StateObjects.
+                    sharePlay.player = player
+                    sharePlay.library = libraryManager
+                    sharePlay.streaming = streaming
 
                     // Route transport commands from the watch companion to the player.
                     PhoneWatchSync.shared.commandHandler = { command in

@@ -57,9 +57,7 @@ struct BackgroundSettingsView: View {
 
                 // Preview current background image
                 if bg.isEnabled, !bg.images.isEmpty {
-                    Image(uiImage: bg.images[bg.currentIndex % bg.images.count])
-                        .resizable()
-                        .scaledToFill()
+                    AnimatedImageView(image: bg.images[bg.currentIndex % bg.images.count], contentMode: .scaleAspectFill)
                         .frame(maxWidth: .infinity)
                         .frame(height: 120)
                         .clipped()
@@ -94,19 +92,47 @@ struct BackgroundSettingsView: View {
                     guard !items.isEmpty else { return }
                     isLoadingPhotos = true
                     Task {
-                        var loaded: [UIImage] = []
+                        var loadedImages: [UIImage] = []
+                        var loadedIDs: [String?] = []
+                        var loadedGIFData: [Data?] = []
+                        var duplicateCount = 0
                         for item in items {
+                            // Skip photos already in the gallery rather than
+                            // re-adding a duplicate — the system picker itself
+                            // can't be told which assets to hide, so this is a
+                            // post-selection filter instead.
+                            if let identifier = item.itemIdentifier, bg.isAssetAlreadyAdded(identifier) {
+                                duplicateCount += 1
+                                continue
+                            }
                             guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-                            // Downsample on import so a large gallery doesn't hog memory.
-                            if let image = BackgroundService.downsampledImage(from: data, maxDimension: 1280) {
-                                loaded.append(image)
+                            if isGIFData(data), let animated = UIImage.gifImage(data: data) {
+                                // Keep GIFs at full resolution/animated — the
+                                // downsample path below would flatten them to
+                                // a single static frame.
+                                loadedImages.append(animated)
+                                loadedIDs.append(item.itemIdentifier)
+                                loadedGIFData.append(data)
+                            } else if let image = BackgroundService.downsampledImage(from: data, maxDimension: 1280) {
+                                loadedImages.append(image)
+                                loadedIDs.append(item.itemIdentifier)
+                                loadedGIFData.append(nil)
                             } else if let image = UIImage(data: data) {
-                                loaded.append(image)
+                                loadedImages.append(image)
+                                loadedIDs.append(item.itemIdentifier)
+                                loadedGIFData.append(nil)
                             }
                         }
                         await MainActor.run {
-                            if !loaded.isEmpty {
-                                bg.addImages(loaded)
+                            if !loadedImages.isEmpty {
+                                bg.addImages(loadedImages, assetIDs: loadedIDs, gifDataList: loadedGIFData)
+                            }
+                            if duplicateCount > 0 {
+                                ToastCenter.shared.show(
+                                    "Skipped \(duplicateCount) photo\(duplicateCount == 1 ? "" : "s") already in your gallery",
+                                    category: .info,
+                                    icon: "photo.badge.checkmark"
+                                )
                             }
                             selectedItems = []
                             isLoadingPhotos = false

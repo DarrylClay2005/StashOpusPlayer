@@ -128,6 +128,9 @@ final class StreamingService: ObservableObject {
     @Published var isLoadingDownloadHistory = false
     @Published var isUploadingUserMusic = false
     @Published var uploadProgress: Double = 0
+    /// Cloud storage usage/quota for the logged-in user — see `fetchStorageUsage(token:)`.
+    /// `nil` until the first successful fetch.
+    @Published var storageUsage: StorageUsage? = nil
 
     // MARK: User Music Metadata state (rich metadata from /user/music/metadata)
 

@@ -38,6 +38,17 @@ final class AudioPlayerManager: ObservableObject {
                 applyTrackAudioSettings(previousID: oldValue?.id)
                 pushPlaybackStateToBridge()
                 scheduleHistoryLog()
+                // Keep the widget's heart badge in sync with the new track
+                // immediately, rather than waiting for the next play/pause
+                // toggle or backgrounding event to catch up.
+                WidgetDataService.shared.updateFavoriteState(
+                    isFavorite: currentSong.flatMap { LibraryManager.shared?.isFavorite(songID: $0.id) } ?? false
+                )
+                // If a SharePlay "listen together" session is active, let the
+                // other participants know the track changed — no-ops when no
+                // session is active or when this change came FROM applying a
+                // remote participant's message (see SharePlayCoordinator).
+                SharePlayCoordinator.shared?.broadcastTrackChange(song: currentSong, isPlaying: isPlaying, position: position)
             }
         }
     }
@@ -57,6 +68,7 @@ final class AudioPlayerManager: ObservableObject {
             guard isPlaying != oldValue else { return }
             WidgetDataService.shared.updatePlayState(isPlaying: isPlaying, position: position, duration: duration)
             pushPlaybackStateToBridge()
+            SharePlayCoordinator.shared?.broadcastPlayState(isPlaying: isPlaying, position: position)
         }
     }
     /// Backing store for `position`/`duration` — see `PlaybackProgress` for why
@@ -396,7 +408,19 @@ final class AudioPlayerManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.savePlaybackState() }
+            Task { @MainActor in
+                self?.savePlaybackState()
+                // Reconcile the widget's favorite badge right before the app
+                // (and its Home Screen widgets) are the only thing visible —
+                // covers a favorite toggled from in-app UI while paused,
+                // which the position timer wouldn't otherwise catch since it
+                // doesn't run when not playing.
+                if let song = self?.currentSong {
+                    WidgetDataService.shared.updateFavoriteState(
+                        isFavorite: LibraryManager.shared?.isFavorite(songID: song.id) ?? false
+                    )
+                }
+            }
         }
 
         // Receive playback control commands posted from the WidgetKit extension.
@@ -409,6 +433,32 @@ final class AudioPlayerManager: ObservableObject {
         DarwinWidgetBridge.shared.addObserver(name: DarwinWidgetBridge.skipPrevious) { [weak self] in
             Task { @MainActor [weak self] in self?.skipToPrevious() }
         }
+        // "com.lumisound.ios.widget.toggleFavorite" — kept as a literal here
+        // rather than a `DarwinWidgetBridge` static (unlike the three above)
+        // since this name is only used by the widget-favorite feature; see
+        // `WidgetNotificationNames.toggleFavorite` in the widget extension
+        // for the matching definition.
+        DarwinWidgetBridge.shared.addObserver(name: "com.lumisound.ios.widget.toggleFavorite") { [weak self] in
+            Task { @MainActor [weak self] in self?.toggleFavoriteFromWidget() }
+        }
+    }
+
+    /// Invoked when the widget's `ToggleFavoriteIntent` posts its Darwin
+    /// notification while this app process is alive. The widget extension
+    /// can't reach `LibraryManager` directly (it runs in its own process),
+    /// so it already wrote an optimistic guess straight to the shared App
+    /// Group — here we perform the real toggle and push the authoritative
+    /// result back, overwriting that guess. If the app is fully suspended
+    /// or not running when the button is tapped, this never runs and the
+    /// widget's optimistic value is all the user gets until they next open
+    /// the app — iOS does not allow a widget `AppIntent` to launch the app
+    /// silently in the background.
+    func toggleFavoriteFromWidget() {
+        guard let song = currentSong else { return }
+        LibraryManager.shared?.toggleFavorite(songID: song.id)
+        WidgetDataService.shared.updateFavoriteState(
+            isFavorite: LibraryManager.shared?.isFavorite(songID: song.id) ?? false
+        )
     }
 
     deinit {

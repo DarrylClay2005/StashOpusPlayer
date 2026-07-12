@@ -94,6 +94,15 @@ final class TVPlayerModel: ObservableObject {
         loadCurrent()
     }
 
+    /// Jumps directly to a track elsewhere in the queue — used by the "Up
+    /// Next" panel so picking a track doesn't require stepping through
+    /// `next()` one at a time.
+    func jump(to index: Int) {
+        guard queue.indices.contains(index), index != currentIndex else { return }
+        currentIndex = index
+        loadCurrent()
+    }
+
     func previous() {
         // If we're more than 3s in, restart the track instead of skipping back.
         if position > 3 {
@@ -121,6 +130,7 @@ final class TVPlayerModel: ObservableObject {
 struct TVPlayerView: View {
     let context: TVPlayContext
     @StateObject private var model = TVPlayerModel()
+    @State private var showUpNext = false
 
     private var displayed: TVPlayable? {
         model.current ?? context.queue.first(where: { $0.id == context.startID })
@@ -151,15 +161,85 @@ struct TVPlayerView: View {
                                 .font(.system(size: 22, weight: .medium))
                                 .foregroundStyle(.secondary)
                                 .padding(.leading, 12)
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.25)) { showUpNext.toggle() }
+                            } label: {
+                                Label("Up Next", systemImage: "list.bullet")
+                            }
                         }
                     }
                 }
                 .frame(maxWidth: 760, alignment: .leading)
             }
             .padding(.horizontal, 110)
+
+            if showUpNext {
+                upNextPanel
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
         .onAppear { model.start(context: context) }
         .onDisappear { model.stop() }
+    }
+
+    // MARK: Up Next panel
+    //
+    // Slides over the artwork/transport rather than using `.sheet` — tvOS's
+    // focus engine handles an in-place overlay more predictably than a modal
+    // here, and it keeps the now-playing transport reachable underneath.
+
+    private var upNextPanel: some View {
+        HStack(spacing: 0) {
+            Spacer()
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("Up Next")
+                        .font(.system(size: 30, weight: .bold))
+                    Spacer()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) { showUpNext = false }
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                }
+                .padding(.horizontal, 40)
+                .padding(.top, 50)
+                .padding(.bottom, 20)
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(model.queue.enumerated()), id: \.element.id) { index, item in
+                            Button {
+                                model.jump(to: index)
+                            } label: {
+                                HStack(spacing: 20) {
+                                    Image(systemName: index == model.currentIndex ? "speaker.wave.2.fill" : "music.note")
+                                        .foregroundStyle(index == model.currentIndex ? Color.accentColor : Color.secondary)
+                                        .frame(width: 30)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(item.title).font(.title3).lineLimit(1)
+                                        Text(item.artist.isEmpty ? "Unknown Artist" : item.artist)
+                                            .font(.callout)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 40)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.card)
+                        }
+                    }
+                    .padding(.bottom, 40)
+                }
+            }
+            .frame(width: 620, alignment: .top)
+            .frame(maxHeight: .infinity)
+            .background(.black.opacity(0.85))
+        }
+        .ignoresSafeArea()
     }
 
     @ViewBuilder private var backdrop: some View {

@@ -42,6 +42,27 @@ extension StreamingService {
         )
     }
 
+    /// Fetches this account's Personal Cloud Library storage usage/quota from
+    /// `GET /user/storage/usage`, publishing it on `storageUsage`. Silent no-op
+    /// on failure (leaves whatever was previously loaded, if anything) — this
+    /// is a "nice to have" stat, not worth an error banner over.
+    func fetchStorageUsage(token: String) async {
+        guard var request = makeRequest("/user/storage/usage") else { return }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
+                appWarn("fetchStorageUsage: HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)", category: "network")
+                return
+            }
+            storageUsage = try JSONDecoder().decode(StorageUsage.self, from: data)
+        } catch {
+            appWarn("fetchStorageUsage: \(error.localizedDescription)", category: "network")
+        }
+    }
+
     /// Fetches the user's personal music library from the server.
     func fetchUserMusic(token: String, search: String = "") async {
         appLog("fetchUserMusic: search=\"\(search)\"", category: "network")

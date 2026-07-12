@@ -82,6 +82,18 @@ extension StreamSearchView {
                         }
                     }
 
+                    // Storage usage — the one piece of the Personal Cloud
+                    // Library the server has always tracked (GET
+                    // /user/storage/usage) but the app never showed, so this
+                    // screen read as "a file list with no sense of what your
+                    // account actually holds or how much room is left."
+                    if let usage = streaming.storageUsage {
+                        Section {
+                            StorageUsageRow(usage: usage)
+                        }
+                        .listRowBackground(AppTheme.surface)
+                    }
+
                     // Upload button header
                     Section {
                         Button {
@@ -139,5 +151,51 @@ extension StreamSearchView {
                 .scrollContentBackground(.hidden)
             }
         }
+    }
+}
+
+// MARK: - StorageUsageRow
+
+/// Compact "used of quota" summary + progress bar for the Personal Cloud
+/// Library, shown at the top of the "My Library" tab.
+private struct StorageUsageRow: View {
+    let usage: StorageUsage
+
+    private static let byteFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        return f
+    }()
+
+    private var usedText: String { Self.byteFormatter.string(fromByteCount: Int64(usage.usedBytes)) }
+    private var quotaText: String { Self.byteFormatter.string(fromByteCount: Int64(usage.quotaBytes)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Storage", systemImage: "internaldrive")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                Text(usage.isUnlimited ? usedText : "\(usedText) of \(quotaText)")
+                    .font(.footnote)
+                    .foregroundStyle(usage.quotaExceeded ? AppTheme.error : AppTheme.textSecondary)
+            }
+
+            if let fraction = usage.usedFraction {
+                ProgressView(value: fraction)
+                    .tint(usage.quotaExceeded ? AppTheme.error : AppTheme.dynamicAccent)
+            }
+
+            Text("\(usage.musicCount) \(usage.musicCount == 1 ? "track" : "tracks")\(usage.galleryBytes > 0 ? " · gallery backups included" : "")")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+
+            if usage.quotaExceeded {
+                Text("You're over your storage quota — delete a few tracks or ask the server admin to raise it.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.error)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }

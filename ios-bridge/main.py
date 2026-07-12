@@ -1,5 +1,6 @@
 import array
 import asyncio
+import base64
 import hashlib
 import html
 import io
@@ -34,11 +35,14 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
+import pyotp
 import yt_dlp
 
 from auth import (
     create_token,
+    create_totp_pending_token,
     decode_token,
+    decode_totp_pending_token,
     hash_password_async,
     verify_password_async,
 )
@@ -100,6 +104,15 @@ SUPPORTED_AUDIO_EXTS: frozenset[str] = frozenset({
 # richGridRenderer/lockupViewModel grid UI's continuation simply stops being
 # returned by YouTube's browse API after ~2 pages).
 YOUTUBE_API_KEY: str = os.getenv("YOUTUBE_API_KEY", "")
+# Optional: Spotify Web API app credentials (developer.spotify.com/dashboard —
+# a free "Web API" app registration, no user OAuth needed). Powers
+# /api/spotify/resolve: a client-credentials token only grants access to public
+# catalog *metadata* (track/playlist/album names) — never audio, which Spotify
+# DRM-protects and this server never touches. Each resolved track is matched to
+# a real playable result via the same YouTube search path /api/search uses.
+# Unset (default) disables Spotify link import entirely.
+SPOTIFY_CLIENT_ID: str = os.getenv("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET: str = os.getenv("SPOTIFY_CLIENT_SECRET", "")
 # Discord webhook URL that new in-app bug reports are posted to, so they're
 # seen immediately instead of sitting unnoticed in ios_bug_reports. This is a
 # standalone admin/developer channel — entirely separate from any per-user
@@ -2689,6 +2702,227 @@ async def resolve_playlist(
     return _filter_existing_tracks(tracks, source, existing_ids, inventory_ids)
 
 
+# ---------------------------------------------------------------------------
+# Spotify link import — metadata-only lookup + match to a playable YouTube result
+# ---------------------------------------------------------------------------
+
+_SPOTIFY_URL_RE = re.compile(
+    r"open\.spotify\.com/(?:intl-[a-z]{2}/)?(track|album|playlist)/([A-Za-z0-9]+)"
+)
+
+# Cached client-credentials token — shared across requests/users since it grants
+# only public-catalog access, not anything user-specific.
+_spotify_app_token: dict[str, object] = {}
+
+
+def _spotify_get_app_token_sync() -> Optional[str]:
+    """Fetches (and caches until near-expiry) a Spotify Web API client-credentials
+    token. Returns None if SPOTIFY_CLIENT_ID/SECRET aren't configured, or on any
+    request failure."""
+    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+        return None
+    cached_token = _spotify_app_token.get("token")
+    expires_at = _spotify_app_token.get("expires_at", 0.0)
+    if cached_token and time.monotonic() < expires_at:
+        return cached_token  # type: ignore[return-value]
+
+    body = urlencode({"grant_type": "client_credentials"}).encode()
+    creds = base64.b64encode(f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode()).decode()
+    req = urllib.request.Request(
+        "https://accounts.spotify.com/api/token",
+        data=body,
+        headers={
+            "Authorization": f"Basic {creds}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        logger.warning("Spotify token request failed: %s", exc)
+        return None
+
+    token = data.get("access_token")
+    if not token:
+        return None
+    # Refresh a little ahead of actual expiry rather than exactly at it.
+    _spotify_app_token["token"] = token
+    _spotify_app_token["expires_at"] = time.monotonic() + max(int(data.get("expires_in", 3600)) - 60, 60)
+    return token
+
+
+def _spotify_web_api_get_sync(path: str, params: Optional[dict] = None) -> Optional[dict]:
+    """Synchronous GET against the Spotify Web API — call via asyncio.to_thread.
+    The target host is a hardcoded Spotify domain, not derived from user input
+    beyond the already-validated track/playlist/album id, so this doesn't need
+    the SSRF guard used for arbitrary user-supplied playlist URLs."""
+    token = _spotify_get_app_token_sync()
+    if not token:
+        return None
+    query = f"?{urlencode(params)}" if params else ""
+    req = urllib.request.Request(
+        f"https://api.spotify.com/v1/{path}{query}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())
+    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        logger.warning("Spotify Web API request failed (%s): %s", path, exc)
+        return None
+
+
+def _extract_spotify_ref(url: str) -> Optional[tuple[str, str]]:
+    """Returns (kind, id) — kind is 'track', 'album', or 'playlist' — for a
+    Spotify share link, or None if the URL doesn't match."""
+    match = _SPOTIFY_URL_RE.search(url)
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def _spotify_track_query(track: dict) -> dict:
+    """Extracts {title, artist, duration_seconds} from a Spotify track object."""
+    title = track.get("name") or "Unknown Title"
+    artists = ", ".join(a.get("name", "") for a in (track.get("artists") or []) if a.get("name"))
+    duration_seconds = int((track.get("duration_ms") or 0) / 1000)
+    return {"title": title, "artist": artists or "Unknown Artist", "duration_seconds": duration_seconds}
+
+
+async def _spotify_collect_tracks(kind: str, spotify_id: str, limit: int) -> list[dict]:
+    """Returns a list of {title, artist, duration_seconds} dicts for a Spotify
+    track/album/playlist reference. Raises RuntimeError on any lookup failure
+    (including "Spotify Web API not configured", which is checked earlier by
+    the caller but re-raised here too as a safety net)."""
+    if kind == "track":
+        data = await asyncio.to_thread(_spotify_web_api_get_sync, f"tracks/{spotify_id}")
+        if not data:
+            raise RuntimeError("Spotify track lookup failed")
+        return [_spotify_track_query(data)]
+
+    path = "playlists" if kind == "playlist" else "albums"
+    items: list[dict] = []
+    offset = 0
+    page_size = 100
+    while len(items) < limit:
+        data = await asyncio.to_thread(
+            _spotify_web_api_get_sync,
+            f"{path}/{spotify_id}/tracks",
+            {"limit": min(page_size, limit - len(items)), "offset": offset},
+        )
+        if not data:
+            break
+        page = data.get("items") or []
+        if not page:
+            break
+        for entry in page:
+            # Playlist items wrap the track under an "track" key (and can be a
+            # locally-added file, podcast episode, or removed track — all None
+            # in that case); album items are already flat track objects.
+            track = entry.get("track") if kind == "playlist" else entry
+            if not track or track.get("type") not in (None, "track"):
+                continue
+            items.append(_spotify_track_query(track))
+        if not data.get("next"):
+            break
+        offset += page_size
+    if not items:
+        raise RuntimeError("Spotify playlist/album lookup returned no tracks")
+    return items[:limit]
+
+
+# Caps concurrent yt-dlp/YouTube-Data-API match lookups per request, so a
+# 200-track playlist resolve doesn't spawn 200 simultaneous subprocesses/HTTP
+# calls (the same reason /api/download/batch throttles its own concurrency).
+_SPOTIFY_MATCH_CONCURRENCY = 5
+
+
+async def _match_spotify_track_to_youtube(
+    spotify_track: dict, api_key: str, user_id: Optional[str], semaphore: asyncio.Semaphore
+) -> Optional[dict]:
+    """Best-guess match of a Spotify track's title/artist to a playable YouTube
+    result, via the same search path /api/search uses (YouTube Data API first,
+    falling back to a single yt-dlp ytsearch1). Returns a StreamTrack-shaped
+    dict, or None if no match was found."""
+    query = f"{spotify_track['artist']} {spotify_track['title']}".strip()
+    async with semaphore:
+        if api_key:
+            results = await asyncio.to_thread(_youtube_search_via_api_sync, query, 1, api_key)
+            if results:
+                return results[0]
+        try:
+            entries = await _run_ytdlp(
+                *(await _ytdlp_listing_args(f"ytsearch1:{query}", "youtube", user_id)),
+                timeout=20.0,
+            )
+        except Exception:
+            return None
+        if not entries:
+            return None
+        return _parse_track(entries[0], "youtube")
+
+
+@app.get("/api/spotify/resolve")
+async def resolve_spotify(
+    request: Request,
+    url: str = Query(..., description="Spotify track/album/playlist share URL"),
+    limit: int = Query(100, ge=1, le=200, description="Max tracks to resolve"),
+    existing_ids: Optional[str] = Query(
+        None, description="See /api/resolve — same 'source:id' manifest format."
+    ),
+):
+    """Resolves a Spotify share link (track, album, or playlist) to playable
+    tracks. Spotify's own audio is never streamed by this endpoint or by this
+    server at all — only public catalog metadata is read (via a
+    client-credentials token, which grants no user-data or playback access) —
+    each track is then matched to a real playable YouTube result. Matching is
+    best-effort: tracks with no good match are silently dropped rather than
+    failing the whole request."""
+    await check_auth(request)
+
+    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=501,
+            detail="Spotify import isn't configured on this server "
+                   "(SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET unset).",
+        )
+
+    ref = _extract_spotify_ref(url)
+    if not ref:
+        raise HTTPException(status_code=400, detail="Not a recognized Spotify track/album/playlist URL")
+    kind, spotify_id = ref
+
+    user_id = _account_token_user_id(request)
+    inventory_ids = await _user_inventory_source_ids(user_id)
+
+    cache_key = f"spotify:{kind}:{spotify_id}:{limit}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return _filter_existing_tracks(cached, "youtube", existing_ids, inventory_ids)
+
+    try:
+        spotify_tracks = await _spotify_collect_tracks(kind, spotify_id, limit)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    api_key = YOUTUBE_API_KEY
+    if user_id:
+        api_key = await _youtube_api_key_for_user(user_id)
+
+    semaphore = asyncio.Semaphore(_SPOTIFY_MATCH_CONCURRENCY)
+    matched = await asyncio.gather(
+        *(_match_spotify_track_to_youtube(t, api_key, user_id, semaphore) for t in spotify_tracks)
+    )
+    tracks = [t for t in matched if t is not None]
+    if not tracks:
+        raise HTTPException(status_code=404, detail="Could not match any tracks from this Spotify link")
+
+    _cache_set(cache_key, tracks)
+    return _filter_existing_tracks(tracks, "youtube", existing_ids, inventory_ids)
+
+
 # Directory where extracted per-playlist links.txt files are written. Lives
 # under the yt-dlp cache so it persists in the mounted volume and can be reused.
 YTDLP_LINKS_DIR = pathlib.Path(os.getenv("YTDLP_LINKS_DIR", "/app/.cache/yt-dlp/links"))
@@ -3051,7 +3285,7 @@ async def login(body: LoginRequest, request: Request):
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT id, username, email, display_name, avatar_url, created_at, "
-                "last_login, password_hash, is_active "
+                "last_login, password_hash, is_active, totp_enabled "
                 "FROM ios_users WHERE username = %s",
                 (body.username.strip(),),
             )
@@ -3062,7 +3296,7 @@ async def login(body: LoginRequest, request: Request):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     (user_id, username, email, display_name, avatar_url,
-     created_at, last_login, password_hash, is_active) = row
+     created_at, last_login, password_hash, is_active, totp_enabled) = row
 
     if not is_active:
         logger.warning("Login attempt for disabled account: %r (user_id=%s)", username, user_id)
@@ -3072,6 +3306,18 @@ async def login(body: LoginRequest, request: Request):
     if not await verify_password_async(body.password, password_hash):
         logger.warning("Failed password attempt for username: %r (user_id=%s)", username, user_id)
         raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    # Feature: TOTP two-factor auth. Password alone isn't enough for an
+    # account with 2FA enabled — no session is created yet (last_login isn't
+    # touched either) until the code is verified via /auth/2fa/login. The
+    # pending token is a separate, short-lived, purpose-scoped JWT (see
+    # auth.create_totp_pending_token) — NOT a session token, so it can never
+    # be used as a Bearer token against any authenticated endpoint.
+    if totp_enabled:
+        return {
+            "requires_2fa": True,
+            "pending_token": create_totp_pending_token(user_id),
+        }
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -3093,6 +3339,158 @@ async def login(body: LoginRequest, request: Request):
     token = create_token(user_id, token_id)
 
     # Fetch full user row so we return date_of_birth and all fields consistently.
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, username, email, display_name, avatar_url, created_at, last_login, date_of_birth, "
+                "share_listening_activity, ai_assisted_suggestions "
+                "FROM ios_users WHERE id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+
+    return {"user": _user_dict(row), "token": token}
+
+
+# ---------------------------------------------------------------------------
+# Feature: TOTP two-factor authentication
+# ---------------------------------------------------------------------------
+
+
+class TOTPVerifyRequest(BaseModel):
+    code: str
+
+
+class TOTPDisableRequest(BaseModel):
+    password: str
+
+
+class TOTP2FALoginRequest(BaseModel):
+    pending_token: str
+    code: str
+    device_name: Optional[str] = None
+
+
+@app.post("/auth/2fa/setup")
+async def setup_2fa(payload: dict = Depends(get_current_user)):
+    """Generates a new TOTP secret and returns it (plus an otpauth:// URI a
+    client can render as a QR code). Does NOT enable 2FA yet — the secret is
+    only activated once the user proves they actually captured it correctly
+    via /auth/2fa/verify, so a half-completed setup can never lock anyone out.
+    Calling this again before verifying replaces the pending secret."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT username FROM ios_users WHERE id = %s", (user_id,))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="User not found")
+            username = row[0]
+
+            secret = pyotp.random_base32()
+            await cur.execute(
+                "UPDATE ios_users SET totp_secret = %s, totp_enabled = FALSE WHERE id = %s",
+                (secret, user_id),
+            )
+
+    otpauth_url = pyotp.totp.TOTP(secret).provisioning_uri(name=username, issuer_name="Lumisound")
+    return {"secret": secret, "otpauth_url": otpauth_url}
+
+
+@app.post("/auth/2fa/verify")
+async def verify_2fa(body: TOTPVerifyRequest, payload: dict = Depends(get_current_user)):
+    """Confirms the code from an authenticator app matches the secret set up
+    via /auth/2fa/setup, and — only on success — actually turns 2FA on."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT totp_secret FROM ios_users WHERE id = %s", (user_id,))
+            row = await cur.fetchone()
+
+    if not row or not row[0]:
+        raise HTTPException(status_code=400, detail="Call /auth/2fa/setup first")
+    secret = row[0]
+
+    # valid_window=1 tolerates the code from one 30s step before/after "now",
+    # for ordinary clock drift between the user's phone and this server.
+    if not pyotp.TOTP(secret).verify(body.code, valid_window=1):
+        raise HTTPException(status_code=400, detail="Incorrect code")
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("UPDATE ios_users SET totp_enabled = TRUE WHERE id = %s", (user_id,))
+
+    return {"status": "enabled"}
+
+
+@app.post("/auth/2fa/disable")
+async def disable_2fa(body: TOTPDisableRequest, payload: dict = Depends(get_current_user)):
+    """Turns 2FA off. Requires the account password again (not just a valid
+    session) since a stolen/left-open session shouldn't be enough on its own
+    to strip an account's second factor."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT password_hash FROM ios_users WHERE id = %s", (user_id,))
+            row = await cur.fetchone()
+
+    if not row or not await verify_password_async(body.password, row[0]):
+        raise HTTPException(status_code=401, detail="Incorrect password")
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_users SET totp_enabled = FALSE, totp_secret = NULL WHERE id = %s",
+                (user_id,),
+            )
+    return {"status": "disabled"}
+
+
+@app.post("/auth/2fa/login")
+async def login_2fa(body: TOTP2FALoginRequest, request: Request):
+    """Completes a login that /auth/login paused for 2FA (see its
+    `requires_2fa` response) — verifies the code and, only then, creates the
+    real session exactly the way a non-2FA /auth/login does."""
+    _check_auth_rate(_get_client_ip(request))  # same brute-force throttle as password login
+
+    user_id = decode_totp_pending_token(body.pending_token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="2FA login session expired — please log in again")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT totp_secret, totp_enabled, is_active FROM ios_users WHERE id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+
+    if not row or not row[1] or not row[0]:
+        raise HTTPException(status_code=401, detail="2FA is not enabled for this account")
+    secret, _enabled, is_active = row
+    if not is_active:
+        raise HTTPException(status_code=403, detail="Account is disabled")
+
+    if not pyotp.TOTP(secret).verify(body.code, valid_window=1):
+        raise HTTPException(status_code=401, detail="Incorrect code")
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            token_id = str(uuid.uuid4())
+            expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+            device_name = body.device_name or "Unknown device"
+            await cur.execute(
+                "INSERT INTO ios_user_sessions (token_id, user_id, expires_at, device_name) VALUES (%s, %s, %s, %s)",
+                (token_id, user_id, expires_at, device_name),
+            )
+            await cur.execute("UPDATE ios_users SET last_login = NOW() WHERE id = %s", (user_id,))
+
+    token = create_token(user_id, token_id)
+
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -5205,6 +5603,88 @@ async def social_discover(
     }
 
 
+@app.get("/social/similar-listeners")
+async def similar_listeners_recommendations(
+    limit: int = Query(20, ge=1, le=100),
+    payload: dict = Depends(get_current_user),
+):
+    """Personalized recommendations via real user-to-user collaborative
+    filtering: finds other opted-in users whose most-played artists overlap
+    with the caller's own, then surfaces tracks THOSE similar listeners play a
+    lot — distinct from /social/discover (global trending, not personalized to
+    the caller) and from the seeded-from-your-own-artists Discover Mix (a
+    YouTube "similar artist" search, not real listening data from other
+    people). Only ever reads from users who've opted in via
+    share_listening_activity, same as the rest of /social/*; the caller's OWN
+    top artists are read regardless of their own opt-in status, since that's
+    just their own data being used to find people like them."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT artist, COUNT(*) AS play_count
+                FROM ios_play_history
+                WHERE user_id = %s AND artist IS NOT NULL AND artist != ''
+                GROUP BY artist
+                ORDER BY play_count DESC
+                LIMIT 15
+                """,
+                (user_id,),
+            )
+            my_top_artists = [r[0] for r in await cur.fetchall()]
+
+            if not my_top_artists:
+                return {"tracks": [], "similar_listener_count": 0, "reason": "not_enough_history"}
+
+            artist_placeholders = ",".join(["%s"] * len(my_top_artists))
+
+            await cur.execute(
+                f"""
+                SELECT h.user_id, COUNT(*) AS overlap_score
+                FROM ios_play_history h
+                JOIN ios_users u ON u.id = h.user_id
+                WHERE u.share_listening_activity = TRUE AND u.is_active = TRUE
+                  AND h.user_id != %s
+                  AND h.artist IN ({artist_placeholders})
+                GROUP BY h.user_id
+                ORDER BY overlap_score DESC
+                LIMIT 20
+                """,
+                (user_id, *my_top_artists),
+            )
+            similar_user_ids = [r[0] for r in await cur.fetchall()]
+
+            if not similar_user_ids:
+                return {"tracks": [], "similar_listener_count": 0, "reason": "no_similar_listeners"}
+
+            user_placeholders = ",".join(["%s"] * len(similar_user_ids))
+            await cur.execute(
+                f"""
+                SELECT title, artist, COUNT(*) AS play_count, COUNT(DISTINCT user_id) AS listener_count
+                FROM ios_play_history
+                WHERE user_id IN ({user_placeholders})
+                  AND title IS NOT NULL AND title != ''
+                  AND artist NOT IN ({artist_placeholders})
+                GROUP BY title, artist
+                ORDER BY listener_count DESC, play_count DESC
+                LIMIT %s
+                """,
+                (*similar_user_ids, *my_top_artists, limit),
+            )
+            track_rows = await cur.fetchall()
+
+    return {
+        "similar_listener_count": len(similar_user_ids),
+        "tracks": [
+            {"title": r[0], "artist": r[1], "play_count": r[2], "listener_count": r[3]}
+            for r in track_rows
+        ],
+    }
+
+
 @app.get("/social/trending-by-energy")
 async def trending_by_energy(
     days: int = Query(7, ge=1, le=90),
@@ -7245,6 +7725,162 @@ async def submit_lyrics_correction(request: Request, body: LyricsCorrectionReque
                 (cache_id, body.title, body.artist, body.synced_lyrics, body.plain_lyrics),
             )
     return {"status": "saved"}
+
+
+# ---------------------------------------------------------------------------
+# Feature: search my library by lyrics — find a song from a remembered lyric
+# snippet instead of title/artist. Built on the existing shared lyrics cache
+# (ios_lyrics_cache is keyed by title+artist, not per-user, so warming it for
+# one user's library benefits every user's search) plus a FULLTEXT index over
+# its lyric text (see schema.sql).
+# ---------------------------------------------------------------------------
+
+
+def _lyrics_snippet(lyrics: str, query_lower: str, max_length: int = 200) -> str:
+    """Returns a short excerpt of *lyrics* centered on the first line matching
+    *query_lower* verbatim, or just the first non-empty line if nothing
+    matches exactly (MySQL/MariaDB FULLTEXT NATURAL LANGUAGE MODE can match on
+    stemmed/partial terms that don't appear verbatim in any single line)."""
+    lines = [line.strip() for line in lyrics.splitlines() if line.strip()]
+    for line in lines:
+        if query_lower in line.lower():
+            return line[:max_length]
+    return lines[0][:max_length] if lines else ""
+
+
+async def _fetch_and_cache_lyrics(title: str, artist: str, duration: Optional[int]) -> bool:
+    """Shared fetch+cache core for warming ios_lyrics_cache — used by
+    /user/lyrics/prefetch. Deliberately NOT shared with /api/lyrics (which has
+    its own copy of this same lrclib.net fetch) to avoid touching that
+    existing, already-working endpoint's code path. Returns whether lyrics
+    were found; never overwrites a user-submitted correction."""
+    cache_id = _lyrics_cache_id(title, artist)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT found FROM ios_lyrics_cache WHERE id = %s", (cache_id,))
+            cached = await cur.fetchone()
+    if cached is not None:
+        return bool(cached[0])
+
+    params = {"track_name": title, "artist_name": artist}
+    if duration:
+        params["duration"] = str(duration)
+    query = "&".join(f"{k}={urllib.parse.quote(v)}" for k, v in params.items())
+    url = f"https://lrclib.net/api/get?{query}"
+
+    def _fetch() -> Optional[dict]:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Lumisound-iOS-Bridge/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return None
+
+    data = await asyncio.to_thread(_fetch)
+    found_result = bool(data and (data.get("syncedLyrics") or data.get("plainLyrics")))
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    INSERT INTO ios_lyrics_cache (id, title, artist, synced_lyrics, plain_lyrics, found)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        synced_lyrics = IF(is_user_submitted, synced_lyrics, VALUES(synced_lyrics)),
+                        plain_lyrics = IF(is_user_submitted, plain_lyrics, VALUES(plain_lyrics)),
+                        found = IF(is_user_submitted, found, VALUES(found))
+                    """,
+                    (
+                        cache_id, title, artist,
+                        data.get("syncedLyrics") if data else None,
+                        data.get("plainLyrics") if data else None,
+                        found_result,
+                    ),
+                )
+    except Exception as exc:
+        logger.warning("_fetch_and_cache_lyrics: cache write failed for %s/%s: %s", title, artist, exc)
+
+    return found_result
+
+
+class LyricsPrefetchTrack(BaseModel):
+    title: str
+    artist: str = ""
+    duration: Optional[int] = None
+
+
+class LyricsPrefetchRequest(BaseModel):
+    tracks: list[LyricsPrefetchTrack]
+
+
+# Caps how many uncached lookups one request performs — each is a real
+# lrclib.net round-trip, so a request warming an entire large library would be
+# slow and hammer lrclib.net. Clients with bigger libraries should call this
+# repeatedly in batches (e.g. from a background task), same pattern as
+# /api/download/batch's job-based chunking.
+_LYRICS_PREFETCH_MAX_PER_REQUEST = 25
+
+
+@app.post("/user/lyrics/prefetch")
+async def prefetch_lyrics(
+    body: LyricsPrefetchRequest,
+    payload: dict = Depends(get_current_user),
+):
+    """Warms the shared lyrics cache for a batch of (title, artist) pairs from
+    the caller's own library, so /api/lyrics/search has something to find
+    beyond whatever's already been opportunistically cached by Now Playing
+    lookups. See _LYRICS_PREFETCH_MAX_PER_REQUEST for the per-request cap."""
+    tracks = body.tracks[:_LYRICS_PREFETCH_MAX_PER_REQUEST]
+    results = await asyncio.gather(
+        *(_fetch_and_cache_lyrics(t.title, t.artist, t.duration) for t in tracks)
+    )
+    return {"requested": len(tracks), "found": sum(1 for r in results if r)}
+
+
+@app.get("/api/lyrics/search")
+async def search_lyrics(
+    request: Request,
+    q: str = Query(..., min_length=2, max_length=200),
+    limit: int = Query(25, ge=1, le=100),
+):
+    """Full-text search over cached lyrics, so a user can find a song from a
+    remembered lyric snippet instead of a title/artist. Only searches entries
+    the bridge has already cached (see /user/lyrics/prefetch to warm the
+    cache for a whole library) with actual lyric text (found = TRUE). Note:
+    MySQL/MariaDB's default FULLTEXT NATURAL LANGUAGE MODE ignores very short
+    words and common stopwords, so a 2-3 letter or extremely common query may
+    return no matches even if the phrase is present verbatim — a known
+    FULLTEXT limitation, not a bug in this endpoint."""
+    await check_auth(request)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT title, artist, plain_lyrics,
+                       MATCH(title, artist, plain_lyrics) AGAINST (%s IN NATURAL LANGUAGE MODE) AS relevance
+                FROM ios_lyrics_cache
+                WHERE found = TRUE AND plain_lyrics IS NOT NULL
+                  AND MATCH(title, artist, plain_lyrics) AGAINST (%s IN NATURAL LANGUAGE MODE)
+                ORDER BY relevance DESC
+                LIMIT %s
+                """,
+                (q, q, limit),
+            )
+            rows = await cur.fetchall()
+
+    q_lower = q.lower()
+    return [
+        {
+            "title": title,
+            "artist": artist,
+            "snippet": _lyrics_snippet(plain_lyrics or "", q_lower),
+        }
+        for title, artist, plain_lyrics, _relevance in rows
+    ]
 
 
 # ---------------------------------------------------------------------------

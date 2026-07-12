@@ -27,16 +27,67 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
     let artist: String
     let album: String
     let duration: Double
+    let trackNumber: String
     let hasArtwork: Bool
     let serverPath: String
     let filename: String
     let ext: String
 
+    var durationText: String {
+        let s = Int(duration)
+        return "\(s / 60):\(String(format: "%02d", s % 60))"
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, title, artist, album, duration, filename, ext
-        case hasArtwork = "has_artwork"
-        case serverPath = "server_path"
+        case trackNumber = "track_number"
+        case hasArtwork  = "has_artwork"
+        case serverPath  = "server_path"
     }
+}
+
+// MARK: - TVPlaylist / TVPlaylistTrack (cross-device synced playlists)
+//
+// Mirrors GET /user/playlists (see AccountModels.swift's `SharedPlaylistTrack`
+// / `SharedPlaylistDetail` on iOS for the reference shape). Playlists on the
+// bridge are a generic list of tracks, each backed by either a `local_song_id`
+// (an on-device library item — meaningless off the phone that added it, since
+// tvOS has no local file/media library access at all) or a `track_url` (the
+// URL the adding device played that track from — for a Personal Cloud Library
+// song this is the bridge's own `/user/music/stream` URL, which *is* playable
+// here). Only tracks with an http(s) `track_url` are playable on tvOS.
+
+struct TVPlaylistTrack: Codable, Hashable, Identifiable {
+    let id: String
+    let trackURL: String?
+    let localSongID: String?
+    let title: String
+    let artist: String?
+    let album: String?
+    let durationSeconds: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case trackURL       = "track_url"
+        case localSongID    = "local_song_id"
+        case title, artist, album
+        case durationSeconds = "duration_seconds"
+    }
+
+    /// True when this entry has a remote stream URL rather than only a
+    /// `file://` path from the device that added it.
+    var isRemotelyPlayable: Bool {
+        guard let trackURL else { return false }
+        return trackURL.hasPrefix("http://") || trackURL.hasPrefix("https://")
+    }
+}
+
+struct TVPlaylist: Codable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    let description: String?
+    let folder: String?
+    let tracks: [TVPlaylistTrack]
 }
 
 // MARK: - TVPlayable (unified playback item)
@@ -73,6 +124,11 @@ final class TVBridgeClient: ObservableObject {
     @Published var isLoadingLibrary = false
     @Published var libraryError: String?
     @Published var libraryConfigured = true
+
+    // Synced playlists
+    @Published var playlists: [TVPlaylist] = []
+    @Published var isLoadingPlaylists = false
+    @Published var playlistsError: String?
 
     /// In-flight search query, so a stale/slower response can't overwrite a newer one.
     private var activeSearch = ""
@@ -181,6 +237,33 @@ final class TVBridgeClient: ObservableObject {
         }
     }
 
+    // MARK: Playlists
+
+    func fetchPlaylists(token: String) async {
+        isLoadingPlaylists = true
+        playlistsError = nil
+        defer { isLoadingPlaylists = false }
+
+        guard let url = URL(string: baseURL + "/user/playlists") else { return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 30
+
+        do {
+            let (data, response) = try await dataWithRetry(req)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                playlistsError = http.statusCode == 401
+                    ? "Your session expired. Please log in again."
+                    : "Couldn’t load your playlists. Tap Retry."
+                return
+            }
+            playlists = try JSONDecoder().decode([TVPlaylist].self, from: data)
+        } catch {
+            playlistsError = "Couldn’t load your playlists. Tap Retry."
+            playlists = []
+        }
+    }
+
     // MARK: URL builders
 
     /// Bridge proxy stream URL for a search result — AVPlayer streams this directly.
@@ -231,6 +314,25 @@ final class TVBridgeClient: ObservableObject {
             artist: track.artist,
             streamURL: url,
             artworkURL: userMusicArtworkURL(for: track),
+            authToken: token
+        )
+    }
+
+    /// Only produces a playable for tracks with a remote stream URL — see
+    /// `TVPlaylistTrack.isRemotelyPlayable`. Playlist tracks backed only by a
+    /// `local_song_id` (an on-device library item on whichever iPhone/iPad
+    /// added them) have no artwork endpoint tvOS can key against, so no
+    /// artwork is attached; the player falls back to its placeholder art.
+    func playable(from track: TVPlaylistTrack, token: String) -> TVPlayable? {
+        guard track.isRemotelyPlayable, let urlString = track.trackURL, let url = URL(string: urlString) else {
+            return nil
+        }
+        return TVPlayable(
+            id: track.id,
+            title: track.title,
+            artist: track.artist ?? "",
+            streamURL: url,
+            artworkURL: nil,
             authToken: token
         )
     }

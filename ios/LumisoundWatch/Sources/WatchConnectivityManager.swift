@@ -50,6 +50,27 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
         if (context["artwork"] as? Data) == nil, context["clearArtwork"] as? Bool == true {
             artworkData = nil
         }
+        // Mirror into the watch's local app-group storage so the complication
+        // (a separate WidgetKit extension target — see WatchWidget/Sources)
+        // can show the phone-mirrored Now Playing state too. Only re-push when
+        // this particular context update actually carried Now Playing keys —
+        // an account-handoff-only payload (below) shouldn't trigger a reload
+        // with stale/unrelated values.
+        if context["title"] != nil || context["isPlaying"] != nil {
+            WatchWidgetDataService.update(title: title, artist: artist, isPlaying: isPlaying)
+        }
+
+        // Account handoff pushed by PhoneWatchSync (phone side, additive —
+        // see PhoneWatchSync.pushAccountHandoffIfNeeded) — lets the user use
+        // the standalone Watch Library without typing credentials on-watch.
+        if context["accountTokenCleared"] as? Bool == true {
+            WatchAccountStore.shared.clearHandoff()
+        } else if context["bridgeURL"] != nil || context["accountToken"] != nil {
+            WatchAccountStore.shared.applyHandoff(
+                bridgeURL: context["bridgeURL"] as? String,
+                token: context["accountToken"] as? String
+            )
+        }
     }
 }
 

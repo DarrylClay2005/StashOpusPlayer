@@ -35,6 +35,15 @@ final class SleepTimerService: ObservableObject {
     /// Called after the fade reaches zero — should pause/stop playback.
     var onExpire: (() -> Void)?
 
+    // Mirrors AudioPlayerManager.shared/LibraryManager.shared — gives App
+    // Intents (invoked directly by Siri/Shortcuts, with no SwiftUI environment
+    // access) a way to reach the live sleep timer instance.
+    static weak var shared: SleepTimerService?
+
+    init() {
+        Self.shared = self
+    }
+
     func start(duration: TimeInterval? = nil) {
         let d = duration ?? selectedDuration
         selectedDuration = d

@@ -15,6 +15,14 @@ services:
       # playlists via playlistItems.list, which paginates with no ~205-entry
       # cap (unlike yt-dlp's flat-playlist scrape). Falls back to yt-dlp if unset.
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
+      # Optional: Spotify Web API app credentials (developer.spotify.com/dashboard
+      # -> Create app -> Web API; no OAuth/redirect URI needed for this use).
+      # When both are set, /api/spotify/resolve lets clients paste a Spotify
+      # track/album/playlist share link — only public metadata is read from
+      # Spotify (never audio), and each track is matched to a playable YouTube
+      # result. Unset disables Spotify link import entirely.
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
       - IOS_BRIDGE_API_KEY=${IOS_BRIDGE_API_KEY:-}
       # Optional: Anthropic API key (console.anthropic.com). When set, powers
       # the opt-in "AI-assisted suggestions" feature (see intelligence.py) —

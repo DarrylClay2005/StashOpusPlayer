@@ -57,6 +57,20 @@ final class BackgroundService: ObservableObject {
         didSet { saveSettings() }
     }
     @Published var images: [UIImage] = []
+    /// `PhotosPickerItem.itemIdentifier` (or a generated UUID placeholder for
+    /// entries with no known source identifier — cloud-restored images,
+    /// orphaned-disk-scan recovery) for each entry in `images`, same order/
+    /// count, always kept in lockstep. Lets the picker refuse to re-add a
+    /// photo the user has already uploaded to the gallery — see
+    /// `isAssetAlreadyAdded(_:)`.
+    @Published private(set) var imageAssetIDs: [String] = []
+    /// Original GIF file bytes for any animated entry in `images` (nil for
+    /// everything else) — same order/count as `images`. `UIImage` has no
+    /// lossless way to re-encode an animated image back to GIF bytes, so the
+    /// raw data has to be carried alongside it from pick-time through to
+    /// `saveImagesToDisk()`, which writes it straight to a `.gif` file instead
+    /// of flattening to JPEG.
+    private var imageGIFData: [Data?] = []
     /// Small (≤200px) previews for the management grid in
     /// `BackgroundSettingsView`, kept in lockstep with `images` via
     /// `rebuildThumbnails()`. Rendering that grid directly off `images`
@@ -170,6 +184,7 @@ final class BackgroundService: ObservableObject {
         /// Legacy on/off blur switch — read once during migration in `loadSettings()`.
         static let isBlurredLegacy       = "bgService.isBlurred"
         static let imageFilenames        = "bg_image_filenames_v1"  // [String] of filenames
+        static let imageAssetIDs         = "bg_image_asset_ids_v1"  // [String], same order as imageFilenames
     }
 
     // MARK: Disk Storage Directory
@@ -204,8 +219,21 @@ final class BackgroundService: ObservableObject {
         thumbnails = images.map { ImageDownsampler.downscaled($0, maxPixelSize: 200) }
     }
 
-    func addImages(_ newImages: [UIImage]) {
+    /// - Parameters:
+    ///   - assetIDs: `PhotosPickerItem.itemIdentifier` per new image, same
+    ///     order/count as `newImages`. A `nil` entry (or omitting this
+    ///     parameter entirely) gets a generated UUID placeholder instead — it
+    ///     just means that particular image can never be recognized as a
+    ///     duplicate of a future pick, not an error.
+    ///   - gifDataList: original GIF file bytes per new image (nil for
+    ///     non-animated entries), same order/count as `newImages`. See
+    ///     `imageGIFData`'s doc comment.
+    func addImages(_ newImages: [UIImage], assetIDs: [String?]? = nil, gifDataList: [Data?]? = nil) {
+        let ids = (assetIDs ?? Array(repeating: nil, count: newImages.count)).map { $0 ?? UUID().uuidString }
+        let gifs = gifDataList ?? Array(repeating: nil, count: newImages.count)
         images.append(contentsOf: newImages)
+        imageAssetIDs.append(contentsOf: ids)
+        imageGIFData.append(contentsOf: gifs)
         rebuildThumbnails()
         saveImagesToDisk()
         if !isEnabled {
@@ -220,11 +248,25 @@ final class BackgroundService: ObservableObject {
         scheduleCloudGallerySync(newImages: newImages)
     }
 
+    /// True if `assetIdentifier` (a `PhotosPickerItem.itemIdentifier`) matches
+    /// a photo already in the gallery — lets the picker silently skip
+    /// re-adding a photo the user has already uploaded instead of creating a
+    /// duplicate entry.
+    func isAssetAlreadyAdded(_ assetIdentifier: String) -> Bool {
+        imageAssetIDs.contains(assetIdentifier)
+    }
+
     func removeImage(at index: Int) {
         guard images.indices.contains(index) else { return }
         images.remove(at: index)
         if thumbnails.indices.contains(index) {
             thumbnails.remove(at: index)
+        }
+        if imageAssetIDs.indices.contains(index) {
+            imageAssetIDs.remove(at: index)
+        }
+        if imageGIFData.indices.contains(index) {
+            imageGIFData.remove(at: index)
         }
         if images.isEmpty {
             currentIndex = 0
@@ -239,6 +281,8 @@ final class BackgroundService: ObservableObject {
     func clearAll() {
         images.removeAll()
         thumbnails.removeAll()
+        imageAssetIDs.removeAll()
+        imageGIFData.removeAll()
         currentIndex = 0
         saveImagesToDisk()
         scheduleCloudGallerySync()
@@ -330,7 +374,13 @@ final class BackgroundService: ObservableObject {
                 guard !restored.isEmpty else { return }
                 // Append directly to `images`/disk rather than via `addImages` —
                 // avoids re-triggering an upload of the images we just downloaded.
+                // Cloud gallery entries carry no local asset identifier or raw
+                // GIF bytes (the cloud backup path always stores/returns a
+                // decoded static image) — placeholder UUIDs and nil GIF data
+                // keep the parallel arrays in lockstep with `images`.
                 self.images = restored
+                self.imageAssetIDs = (0..<restored.count).map { _ in UUID().uuidString }
+                self.imageGIFData = Array(repeating: nil, count: restored.count)
                 self.rebuildThumbnails()
                 self.saveImagesToDisk()
                 if !self.isEnabled {
@@ -358,15 +408,32 @@ final class BackgroundService: ObservableObject {
         }
         let fm = FileManager.default
         var loaded: [UIImage] = []
+        var loadedGIFData: [Data?] = []
         for name in filenames {
             let path = imageStorageDir.appendingPathComponent(name)
-            if let data = try? Data(contentsOf: path), let img = UIImage(data: data) {
-                loaded.append(img)
-            } else {
+            guard let data = try? Data(contentsOf: path) else {
                 appWarn("loadImagesFromDisk: failed to load \(name)", category: "background")
+                continue
+            }
+            if (name as NSString).pathExtension.lowercased() == "gif", let animated = UIImage.gifImage(data: data) {
+                loaded.append(animated)
+                loadedGIFData.append(data)
+            } else if let img = UIImage(data: data) {
+                loaded.append(img)
+                loadedGIFData.append(nil)
+            } else {
+                appWarn("loadImagesFromDisk: failed to decode \(name)", category: "background")
             }
         }
         images = loaded
+        imageGIFData = loadedGIFData
+        // Asset IDs are persisted separately from filenames (same intended
+        // order) — padded with fresh UUIDs if short, e.g. upgrading from a
+        // version of the app that predates this feature, so indices can never
+        // drift out of lockstep with `images`.
+        var savedIDs = defaults.stringArray(forKey: Keys.imageAssetIDs) ?? []
+        while savedIDs.count < loaded.count { savedIDs.append(UUID().uuidString) }
+        imageAssetIDs = Array(savedIDs.prefix(loaded.count))
         rebuildThumbnails()
         appLog("loadImagesFromDisk: loaded \(loaded.count)/\(filenames.count) images", category: "background")
         if isEnabled && !images.isEmpty {
@@ -374,28 +441,40 @@ final class BackgroundService: ObservableObject {
         }
     }
 
-    /// Scans imageStorageDir for JPEG/PNG files and rebuilds the UserDefaults manifest.
-    /// Called after a reinstall when the manifest key is missing but image files still exist.
+    /// Scans imageStorageDir for JPEG/PNG/GIF files and rebuilds the UserDefaults
+    /// manifest. Called after a reinstall when the manifest key is missing but
+    /// image files still exist. No asset identifiers survive this path (there's
+    /// nothing on disk to recover them from) — each recovered image gets a
+    /// fresh UUID placeholder, same as any other "unknown source" entry.
     private func rebuildManifestFromDisk() {
         let fm = FileManager.default
         guard fm.fileExists(atPath: imageStorageDir.path) else { return }
-        let imageExts: Set<String> = ["jpg", "jpeg", "png", "heic"]
+        let imageExts: Set<String> = ["jpg", "jpeg", "png", "heic", "gif"]
         let files = (try? fm.contentsOfDirectory(atPath: imageStorageDir.path)) ?? []
         let imageFiles = files
             .filter { imageExts.contains(($0 as NSString).pathExtension.lowercased()) }
             .sorted()
         guard !imageFiles.isEmpty else { return }
         var loaded: [UIImage] = []
+        var loadedGIFData: [Data?] = []
         for name in imageFiles {
             let path = imageStorageDir.appendingPathComponent(name)
-            if let data = try? Data(contentsOf: path), let img = UIImage(data: data) {
+            guard let data = try? Data(contentsOf: path) else { continue }
+            if (name as NSString).pathExtension.lowercased() == "gif", let animated = UIImage.gifImage(data: data) {
+                loaded.append(animated)
+                loadedGIFData.append(data)
+            } else if let img = UIImage(data: data) {
                 loaded.append(img)
+                loadedGIFData.append(nil)
             }
         }
         guard !loaded.isEmpty else { return }
         images = loaded
+        imageGIFData = loadedGIFData
+        imageAssetIDs = (0..<loaded.count).map { _ in UUID().uuidString }
         rebuildThumbnails()
         UserDefaults.standard.set(imageFiles, forKey: Keys.imageFilenames)
+        UserDefaults.standard.set(imageAssetIDs, forKey: Keys.imageAssetIDs)
         appLog("rebuildManifestFromDisk: restored \(loaded.count) image(s) from disk", category: "background")
         if isEnabled { startShuffling() }
     }
@@ -409,9 +488,18 @@ final class BackgroundService: ObservableObject {
 
         var filenames: [String] = []
         for (i, img) in images.enumerated() {
-            let name = "bg_\(i)_\(Int(Date().timeIntervalSince1970)).jpg"
+            let rawGIF = imageGIFData.indices.contains(i) ? imageGIFData[i] : nil
+            // Animated entries write their ORIGINAL GIF bytes rather than
+            // `img.jpegData(...)` — re-encoding an animated UIImage to JPEG
+            // only captures its first frame, which would silently un-animate
+            // the background on the very next app launch.
+            let ext = rawGIF != nil ? "gif" : "jpg"
+            let name = "bg_\(i)_\(Int(Date().timeIntervalSince1970)).\(ext)"
             let path = imageStorageDir.appendingPathComponent(name)
-            if let data = img.jpegData(compressionQuality: 0.8) {
+            if let rawGIF {
+                try? rawGIF.write(to: path)
+                filenames.append(name)
+            } else if let data = img.jpegData(compressionQuality: 0.8) {
                 try? data.write(to: path)
                 filenames.append(name)
             }
@@ -425,6 +513,7 @@ final class BackgroundService: ObservableObject {
         }
 
         UserDefaults.standard.set(filenames, forKey: Keys.imageFilenames)
+        UserDefaults.standard.set(Array(imageAssetIDs.prefix(filenames.count)), forKey: Keys.imageAssetIDs)
     }
 
     // MARK: Shuffle Control

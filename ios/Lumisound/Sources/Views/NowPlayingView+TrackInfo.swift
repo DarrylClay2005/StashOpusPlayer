@@ -1,9 +1,29 @@
 import SwiftUI
 import UIKit
+import GroupActivities
 
 extension NowPlayingView {
 
     // MARK: - Track Info + Favorite
+
+    /// SharePlay "listen together" entry point. `GroupActivitySharingButton`
+    /// is the system-provided button (it renders its own icon/menu and drives
+    /// the whole activation flow — FaceTime picker, permissions, etc.) — this
+    /// app only needs to hand it the activity to propose; actual cross-device
+    /// sync is handled separately by `SharePlayCoordinator` once a session
+    /// starts (see that type's doc comment for why sync is message-based
+    /// rather than a shared `AVPlaybackCoordinator` timeline). Requires the
+    /// Group Activities capability/entitlement — see integration notes
+    /// wherever project.yml/entitlements changes are tracked.
+    @ViewBuilder
+    var sharePlayButton: some View {
+        if let song = player.currentSong {
+            GroupActivitySharingButton {
+                ListenTogetherActivity(songTitle: song.title, artistName: song.artist)
+            }
+            .frame(width: 44, height: 44)
+        }
+    }
 
     var trackInfoSection: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -59,6 +79,8 @@ extension NowPlayingView {
             }
             .animation(.easeInOut(duration: 0.25), value: player.currentSong?.id)
             Spacer(minLength: 8)
+
+            sharePlayButton
 
             if let song = player.currentSong {
                 Button {

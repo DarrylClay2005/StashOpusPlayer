@@ -65,3 +65,41 @@ def decode_token(token: str) -> dict | None:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# TOTP two-factor auth — pending-login token
+# ---------------------------------------------------------------------------
+#
+# Deliberately a separate token type from create_token/decode_token's session
+# tokens, rather than reusing them with a short expire_days: a session token's
+# "jti" is expected by get_current_user to reference a live row in
+# ios_user_sessions, and giving one out before the user has actually completed
+# 2FA would let the password-only step act as a fully authenticated session if
+# any endpoint ever forgot to check the extra claim. A pending token instead
+# carries its own "purpose" claim and is verified by a completely separate
+# function that no authenticated endpoint calls.
+
+TOTP_PENDING_EXPIRE_SECONDS = 300  # 5 minutes to enter the code
+
+
+def create_totp_pending_token(user_id: str) -> str:
+    payload = {
+        "sub": user_id,
+        "purpose": "totp_pending",
+        "exp": datetime.now(timezone.utc) + timedelta(seconds=TOTP_PENDING_EXPIRE_SECONDS),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def decode_totp_pending_token(token: str) -> str | None:
+    """Returns the pending user_id if *token* is a valid, unexpired
+    totp_pending token, else None."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except Exception:
+        return None
+    if payload.get("purpose") != "totp_pending":
+        return None
+    return payload.get("sub")

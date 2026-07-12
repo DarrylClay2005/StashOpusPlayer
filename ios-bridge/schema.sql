@@ -725,3 +725,25 @@ CREATE TABLE IF NOT EXISTS ios_weekly_mix_cache (
     generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+
+-- ---------------------------------------------------------------------------
+-- 3 more server-side features (2026-07-11)
+-- ---------------------------------------------------------------------------
+
+-- Feature: search my library by lyrics (see /api/lyrics/search,
+-- /user/lyrics/prefetch in main.py). MATCH()'s column list must exactly match
+-- a FULLTEXT index's columns, hence (title, artist, plain_lyrics) here rather
+-- than plain_lyrics alone — lets a query also hit on title/artist words.
+ALTER TABLE ios_lyrics_cache ADD FULLTEXT INDEX IF NOT EXISTS ft_lyrics_search (title, artist, plain_lyrics);
+
+-- Feature: TOTP two-factor authentication (see /auth/2fa/* in main.py).
+-- totp_secret is only meaningful once totp_enabled is TRUE (set by
+-- /auth/2fa/verify after the user proves they scanned the QR code correctly —
+-- /auth/2fa/setup alone does not turn 2FA on, so a half-finished setup can't
+-- lock anyone out).
+ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64) NULL;
+ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Feature: /social/similar-listeners collaborative-filtering recommendations.
+-- No new tables — reuses ios_play_history and the existing
+-- share_listening_activity opt-in (see the /social/* section in main.py).

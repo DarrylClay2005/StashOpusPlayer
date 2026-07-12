@@ -81,6 +81,38 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - StorageUsage  (personal cloud library storage/quota, GET /user/storage/usage)
+
+/// Cloud storage usage/quota for the logged-in user's Personal Cloud Library
+/// (uploaded music + gallery background images). `quotaBytes == 0` means
+/// unlimited — the server admin hasn't set a cap, either server-wide or for
+/// this specific account.
+struct StorageUsage: Decodable, Equatable {
+    let musicBytes: Int
+    let musicCount: Int
+    let galleryBytes: Int
+    let usedBytes: Int
+    let quotaBytes: Int
+    let quotaExceeded: Bool
+
+    var isUnlimited: Bool { quotaBytes == 0 }
+
+    /// 0...1, clamped — nil when unlimited (there's nothing to show a fraction of).
+    var usedFraction: Double? {
+        guard !isUnlimited, quotaBytes > 0 else { return nil }
+        return min(1, max(0, Double(usedBytes) / Double(quotaBytes)))
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case musicBytes    = "music_bytes"
+        case musicCount    = "music_count"
+        case galleryBytes  = "gallery_bytes"
+        case usedBytes     = "used_bytes"
+        case quotaBytes    = "quota_bytes"
+        case quotaExceeded = "quota_exceeded"
+    }
+}
+
 // MARK: - DownloadHistoryTrack  (server-side record of past /api/download calls)
 
 /// A track this account has downloaded before, as recorded server-side by

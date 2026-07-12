@@ -20,6 +20,9 @@ import AppIntents
 enum LumisoundIntentError: Error, CustomLocalizedStringResourceConvertible {
     case appNotReady
     case noFavorites
+    case playlistNotFound
+    case emptyPlaylist
+    case noSearchResults
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
@@ -27,6 +30,12 @@ enum LumisoundIntentError: Error, CustomLocalizedStringResourceConvertible {
             return "Lumisound needs to finish loading — please try again in a moment."
         case .noFavorites:
             return "You don't have any favorite songs yet."
+        case .playlistNotFound:
+            return "That playlist couldn't be found — it may have been deleted or renamed."
+        case .emptyPlaylist:
+            return "That playlist doesn't have any songs yet."
+        case .noSearchResults:
+            return "Couldn't find anything to play for that search."
         }
     }
 }
@@ -80,6 +89,192 @@ struct SkipToNextTrackIntent: AppIntent {
     }
 }
 
+struct SkipToPreviousTrackIntent: AppIntent {
+    static var title: LocalizedStringResource = "Skip to Previous Track"
+    static var description = IntentDescription("Skips to the previous track in Lumisound.")
+    static var openAppWhenRun: Bool = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let player = AudioPlayerManager.shared else {
+            throw LumisoundIntentError.appNotReady
+        }
+        player.skipToPrevious()
+        return .result()
+    }
+}
+
+struct ToggleShuffleIntent: AppIntent {
+    static var title: LocalizedStringResource = "Toggle Shuffle"
+    static var description = IntentDescription("Toggles shuffle in Lumisound.")
+    static var openAppWhenRun: Bool = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let player = AudioPlayerManager.shared else {
+            throw LumisoundIntentError.appNotReady
+        }
+        player.toggleShuffle()
+        return .result()
+    }
+}
+
+struct CycleRepeatModeIntent: AppIntent {
+    static var title: LocalizedStringResource = "Cycle Repeat Mode"
+    static var description = IntentDescription("Cycles Lumisound's repeat mode between off, repeat-all, and repeat-one.")
+    static var openAppWhenRun: Bool = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let player = AudioPlayerManager.shared else {
+            throw LumisoundIntentError.appNotReady
+        }
+        player.cycleRepeatMode()
+        return .result()
+    }
+}
+
+/// Lets Siri/Shortcuts start a sleep timer without opening the app first (it
+/// still foregrounds the app per `openAppWhenRun`'s doc above, since
+/// `SleepTimerService.shared` only exists once the app's normal launch
+/// sequence has run — same constraint as every other intent in this file).
+struct StartSleepTimerIntent: AppIntent {
+    static var title: LocalizedStringResource = "Start Sleep Timer"
+    static var description = IntentDescription("Starts Lumisound's sleep timer for a number of minutes.")
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Minutes", default: 30)
+    var minutes: Int
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Start a \(\.$minutes)-minute sleep timer")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let sleepTimer = SleepTimerService.shared else {
+            throw LumisoundIntentError.appNotReady
+        }
+        let clampedMinutes = min(max(minutes, 1), 240)
+        sleepTimer.start(duration: TimeInterval(clampedMinutes * 60))
+        return .result()
+    }
+}
+
+/// An `AppEntity` wrapper around `Playlist` so Siri/Shortcuts can offer the
+/// user's playlists by name as a pickable parameter (with autocomplete/
+/// disambiguation handled by the system from `PlaylistEntityQuery` below).
+struct PlaylistEntity: AppEntity {
+    let id: UUID
+    let name: String
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Playlist"
+    static var defaultQuery = PlaylistEntityQuery()
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)")
+    }
+}
+
+struct PlaylistEntityQuery: EntityQuery, EntityStringQuery {
+    @MainActor
+    private func allPlaylists() -> [Playlist] {
+        LibraryManager.shared?.playlists ?? []
+    }
+
+    func entities(for identifiers: [UUID]) async throws -> [PlaylistEntity] {
+        await MainActor.run {
+            allPlaylists()
+                .filter { identifiers.contains($0.id) }
+                .map { PlaylistEntity(id: $0.id, name: $0.name) }
+        }
+    }
+
+    func suggestedEntities() async throws -> [PlaylistEntity] {
+        await MainActor.run {
+            allPlaylists().map { PlaylistEntity(id: $0.id, name: $0.name) }
+        }
+    }
+
+    func entities(matching string: String) async throws -> [PlaylistEntity] {
+        await MainActor.run {
+            allPlaylists()
+                .filter { $0.name.localizedCaseInsensitiveContains(string) }
+                .map { PlaylistEntity(id: $0.id, name: $0.name) }
+        }
+    }
+}
+
+struct PlayPlaylistIntent: AppIntent {
+    static var title: LocalizedStringResource = "Play Playlist"
+    static var description = IntentDescription("Plays one of your playlists in Lumisound.")
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Playlist")
+    var playlist: PlaylistEntity
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Play \(\.$playlist) in Lumisound")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let library = LibraryManager.shared, let player = AudioPlayerManager.shared else {
+            throw LumisoundIntentError.appNotReady
+        }
+        guard let match = library.playlists.first(where: { $0.id == playlist.id }) else {
+            throw LumisoundIntentError.playlistNotFound
+        }
+        let songs = library.songs(for: match)
+        guard !songs.isEmpty else {
+            throw LumisoundIntentError.emptyPlaylist
+        }
+        player.setQueue(songs, startIndex: 0, autoplay: true)
+        return .result()
+    }
+}
+
+/// Searches the streaming bridge (YouTube by default) for *query* and plays the
+/// best match, queuing a few more related results as Up Next — mirrors the
+/// Auto-Radio seeding pattern in `LumisoundApp.swift` (which calls
+/// `relatedTracks` rather than `search(query:source:)` specifically so it
+/// doesn't clobber the published `searchResults` state the Stream Search tab's
+/// UI is bound to; this intent has the exact same requirement, since the app
+/// is being foregrounded and the user may already have a search in progress).
+struct SearchAndPlayIntent: AppIntent {
+    static var title: LocalizedStringResource = "Search and Play"
+    static var description = IntentDescription("Searches and plays a song in Lumisound.")
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Search")
+    var query: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Play \(\.$query) in Lumisound")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let player = AudioPlayerManager.shared, let streaming = StreamingService.shared else {
+            throw LumisoundIntentError.appNotReady
+        }
+        let tracks = await streaming.relatedTracks(query: query, source: "youtube", limit: 5)
+        guard !tracks.isEmpty else {
+            throw LumisoundIntentError.noSearchResults
+        }
+        var songs: [Song] = []
+        for track in tracks {
+            guard let url = try? await streaming.streamURL(for: track) else { continue }
+            songs.append(streaming.toSong(track: track, streamURL: url))
+        }
+        guard !songs.isEmpty else {
+            throw LumisoundIntentError.noSearchResults
+        }
+        player.setQueue(songs, startIndex: 0, autoplay: true)
+        return .result()
+    }
+}
+
 struct LumisoundShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -105,6 +300,54 @@ struct LumisoundShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Next Track",
             systemImageName: "forward.fill"
+        )
+        AppShortcut(
+            intent: SkipToPreviousTrackIntent(),
+            phrases: [
+                "Skip to the previous track in \(.applicationName)",
+                "Play the previous song in \(.applicationName)",
+            ],
+            shortTitle: "Previous Track",
+            systemImageName: "backward.fill"
+        )
+        AppShortcut(
+            intent: ToggleShuffleIntent(),
+            phrases: ["Toggle shuffle in \(.applicationName)"],
+            shortTitle: "Toggle Shuffle",
+            systemImageName: "shuffle"
+        )
+        AppShortcut(
+            intent: CycleRepeatModeIntent(),
+            phrases: ["Cycle repeat mode in \(.applicationName)"],
+            shortTitle: "Repeat Mode",
+            systemImageName: "repeat"
+        )
+        AppShortcut(
+            intent: StartSleepTimerIntent(),
+            phrases: [
+                "Start a sleep timer in \(.applicationName)",
+                "Set a sleep timer in \(.applicationName)",
+            ],
+            shortTitle: "Sleep Timer",
+            systemImageName: "moon.zzz.fill"
+        )
+        AppShortcut(
+            intent: PlayPlaylistIntent(),
+            phrases: [
+                "Play \(\.$playlist) in \(.applicationName)",
+                "Play my \(\.$playlist) playlist in \(.applicationName)",
+            ],
+            shortTitle: "Play Playlist",
+            systemImageName: "music.note.list"
+        )
+        AppShortcut(
+            intent: SearchAndPlayIntent(),
+            phrases: [
+                "Play \(\.$query) in \(.applicationName)",
+                "Search for \(\.$query) in \(.applicationName)",
+            ],
+            shortTitle: "Search and Play",
+            systemImageName: "magnifyingglass"
         )
     }
 }

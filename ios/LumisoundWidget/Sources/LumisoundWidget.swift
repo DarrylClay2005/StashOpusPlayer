@@ -29,6 +29,7 @@ struct LumisoundEntry: TimelineEntry {
     let artist: String
     let bpm: Double?
     let isPlaying: Bool
+    let isFavorite: Bool
     let artwork: UIImage?
     /// Playback position (seconds) as of `anchorDate`.
     let position: TimeInterval
@@ -54,7 +55,7 @@ struct LumisoundWidgetProvider: TimelineProvider {
 
     func placeholder(in context: Context) -> LumisoundEntry {
         LumisoundEntry(date: Date(), title: "Track Title", artist: "Artist", bpm: nil, isPlaying: false,
-                        artwork: nil, position: 0, duration: 0, anchorDate: Date())
+                        isFavorite: false, artwork: nil, position: 0, duration: 0, anchorDate: Date())
     }
 
     func getSnapshot(in context: Context, completion: @escaping (LumisoundEntry) -> Void) {
@@ -73,6 +74,7 @@ struct LumisoundWidgetProvider: TimelineProvider {
         let rawBPM    = ud?.double(forKey: "widget_track_bpm") ?? 0
         let bpm: Double? = rawBPM > 0 ? rawBPM : nil
         let isPlaying = ud?.bool(forKey: "widget_is_playing") ?? false
+        let isFavorite = ud?.bool(forKey: "widget_is_favorite") ?? false
         let position  = ud?.double(forKey: "widget_position") ?? 0
         let duration  = ud?.double(forKey: "widget_duration") ?? 0
         let anchor    = ud?.double(forKey: "widget_anchor_date")
@@ -84,7 +86,8 @@ struct LumisoundWidgetProvider: TimelineProvider {
             artwork = UIImage(contentsOfFile: container.appendingPathComponent(relPath).path)
         }
         return LumisoundEntry(date: Date(), title: title, artist: artist, bpm: bpm, isPlaying: isPlaying,
-                               artwork: artwork, position: position, duration: duration, anchorDate: anchorDate)
+                               isFavorite: isFavorite, artwork: artwork, position: position, duration: duration,
+                               anchorDate: anchorDate)
     }
 }
 
@@ -252,7 +255,7 @@ struct WidgetMediumView: View {
                     Spacer()
 
                     if #available(iOS 17.0, *) {
-                        HStack(spacing: 22) {
+                        HStack(spacing: 18) {
                             Button(intent: SkipPreviousIntent()) {
                                 Image(systemName: "backward.fill")
                                     .font(.system(size: 18, weight: .medium))
@@ -271,6 +274,13 @@ struct WidgetMediumView: View {
                                 Image(systemName: "forward.fill")
                                     .font(.system(size: 18, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.85))
+                            }
+                            .buttonStyle(.plain)
+
+                            Button(intent: ToggleFavoriteIntent()) {
+                                Image(systemName: entry.isFavorite ? "heart.fill" : "heart")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundStyle(entry.isFavorite ? Color.pink : Color.white.opacity(0.85))
                             }
                             .buttonStyle(.plain)
                         }
@@ -358,7 +368,7 @@ struct WidgetLargeView: View {
                 }
 
                 if #available(iOS 17.0, *) {
-                    HStack(spacing: 36) {
+                    HStack(spacing: 30) {
                         Button(intent: SkipPreviousIntent()) {
                             Image(systemName: "backward.fill")
                                 .font(.system(size: 22, weight: .medium))
@@ -377,6 +387,13 @@ struct WidgetLargeView: View {
                             Image(systemName: "forward.fill")
                                 .font(.system(size: 22, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.85))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(intent: ToggleFavoriteIntent()) {
+                            Image(systemName: entry.isFavorite ? "heart.fill" : "heart")
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundStyle(entry.isFavorite ? Color.pink : Color.white.opacity(0.85))
                         }
                         .buttonStyle(.plain)
                     }

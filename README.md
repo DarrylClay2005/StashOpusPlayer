@@ -53,6 +53,7 @@ bridge, and build-from-source instructions.
 | Feature | Details |
 |---|---|
 | **Search & stream** | YouTube and SoundCloud search, with playlist/album URL resolution (up to 50 tracks) |
+| **Spotify link import** | Paste a Spotify track/album/playlist link — the bridge reads public Spotify metadata only (never audio, which Spotify DRM-protects) and matches each track to a playable YouTube result. Requires the server operator to set `SPOTIFY_CLIENT_ID`/`SPOTIFY_CLIENT_SECRET` |
 | **Downloads** | Save streamed tracks to your local library with format choice (Opus, MP3, AAC, Best) |
 | **Personal Cloud Library** | Upload your own files to a private server folder; play and manage from any device |
 | **Discover Mix** | A personalised mix seeded from your most-played artists, excluding anything you already have |

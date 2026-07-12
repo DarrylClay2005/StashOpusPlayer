@@ -144,11 +144,29 @@
     <key>UIViewControllerBasedStatusBarAppearance</key>
     <false/>
 
-    <!-- Scene manifest (no multi-window) -->
+    <!-- Scene manifest (no multi-window on the phone side; CarPlay gets its
+         own scene role — see CarPlaySceneDelegate.swift). The CarPlay
+         configuration is inert without the com.apple.developer.carplay-audio
+         entitlement (see Lumisound.entitlements' comment) — a head unit
+         simply won't connect to it until that's granted and added. -->
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>
         <false/>
+        <key>UISceneConfigurations</key>
+        <dict>
+            <key>CPTemplateApplicationSceneSessionRoleApplication</key>
+            <array>
+                <dict>
+                    <key>UISceneClassName</key>
+                    <string>CPTemplateApplicationScene</string>
+                    <key>UISceneConfigurationName</key>
+                    <string>CarPlay Configuration</string>
+                    <key>UISceneDelegateClassName</key>
+                    <string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
+                </dict>
+            </array>
+        </dict>
     </dict>
 
     <!-- Launch screen (storyboard-free) -->

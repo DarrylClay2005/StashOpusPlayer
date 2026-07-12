@@ -30,9 +30,7 @@ struct GalleryBackgroundView: View {
                     // blanked to the background before the next image faded in.
                     ZStack {
                         ForEach([bg.currentIndex], id: \.self) { index in
-                            Image(uiImage: bg.images[index % bg.images.count])
-                                .resizable()
-                                .scaledToFill()
+                            AnimatedImageView(image: bg.images[index % bg.images.count], contentMode: .scaleAspectFill)
                                 .frame(width: geo.size.width, height: geo.size.height)
                                 .clipped()
                                 .modifier(KenBurnsModifier(isActive: bg.kenBurnsEnabled && !reduceMotion))
