@@ -378,6 +378,33 @@ extension StreamingService {
             switch httpResponse.statusCode {
             case 200..<300:
                 break
+            case 404:
+                // The bridge deletes a finished job's durable copy the first
+                // time it's served (see /api/download/result). If the app
+                // was backgrounded (not killed) while this exact poll loop
+                // was in flight, iOS can suspend and later resume it well
+                // after the job finished — by then, StreamingService's own
+                // background reconciliation (see
+                // StreamingService+PendingDownloads.swift, fired on app
+                // launch/foreground) may have already claimed and imported
+                // this same job first. Blindly retrying here would both
+                // waste a full re-download AND risk a duplicate copy under
+                // a slightly different filename, since the retry loop
+                // doesn't re-run this function's own pre-download dedupe
+                // check. Check the ledger for a copy that landed via that
+                // path before concluding this was a real failure.
+                try? FileManager.default.removeItem(at: downloadedURL)
+                let sourceTrackID = "\(track.source):\(track.id)"
+                if let existingName = DownloadLedgerStore.shared.filename(for: sourceTrackID) {
+                    let existingURL = importDir.appendingPathComponent(existingName)
+                    if FileManager.default.fileExists(atPath: existingURL.path),
+                       CorruptFileFinderService.isValidAudioFile(at: existingURL) {
+                        appLog("downloadToLibrary: \"\(track.title)\" was already imported via background reconciliation while this poll was in flight — adopting it", category: "network")
+                        return existingURL
+                    }
+                }
+                appWarn("downloadToLibrary: HTTP 404 fetching result for \"\(track.title)\" and no reconciled copy found — will retry", category: "network")
+                throw StreamingError.incompleteDownload
             default:
                 appError("downloadToLibrary: HTTP \(httpResponse.statusCode) fetching result for \"\(track.title)\"", category: "network")
                 throw StreamingError.incompleteDownload

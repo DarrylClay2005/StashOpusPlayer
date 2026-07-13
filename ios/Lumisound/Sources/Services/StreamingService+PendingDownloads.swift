@@ -12,6 +12,36 @@ import Foundation
 // "download_ready" silent push — see AppDelegate and BackgroundRefreshService)
 // so a download that finishes while the app isn't open still lands in the
 // library on its own, without the user needing to notice anything.
+//
+// Those trigger points genuinely overlap in practice — a normal "reopen the
+// app" fires BOTH the launch `.task` AND the scenePhase == .active handler
+// close together, and each independently lists /api/download/pending and
+// tries to fetch the same job_id. /api/download/result deletes its durable
+// copy after being served once, so whichever call wins gets 200 and the
+// other gets 404 — confirmed in production logs as repeated 200-then-404
+// pairs for the same job_id. That race was harmless on its own (the winner
+// still imports correctly) but wasteful and, combined with zero logging on
+// that specific failure branch, impossible to diagnose from the field. The
+// gate below collapses concurrent calls into a single in-flight fetch so
+// there's only ever one claimant per reconciliation pass.
+private actor PendingDownloadsReconcileGate {
+    private var inFlight: Task<Int, Never>?
+
+    func run(_ work: @escaping () async -> Int) async -> Int {
+        if let inFlight {
+            appLog("reconcilePendingDownloads: already in flight, joining existing call instead of racing it", category: "network")
+            return await inFlight.value
+        }
+        let task = Task { await work() }
+        inFlight = task
+        let result = await task.value
+        inFlight = nil
+        return result
+    }
+}
+
+private let pendingDownloadsReconcileGate = PendingDownloadsReconcileGate()
+
 extension StreamingService {
 
     struct PendingDownloadInfo: Decodable {
@@ -56,7 +86,14 @@ extension StreamingService {
     /// fetched (see /api/download/result's pending-download branch).
     @discardableResult
     func reconcilePendingDownloads(destinationDir: URL? = nil) async -> Int {
+        await pendingDownloadsReconcileGate.run { [self] in
+            await performReconcilePendingDownloads(destinationDir: destinationDir)
+        }
+    }
+
+    private func performReconcilePendingDownloads(destinationDir: URL?) async -> Int {
         let pending = await fetchPendingDownloads()
+        appLog("reconcilePendingDownloads: \(pending.count) pending job(s) found", category: "network")
         guard !pending.isEmpty else { return 0 }
 
         let importDir = destinationDir ?? downloadDirectory
@@ -68,6 +105,7 @@ extension StreamingService {
             imported += 1
         }
 
+        appLog("reconcilePendingDownloads: imported \(imported)/\(pending.count) pending job(s)", category: "network")
         if imported > 0 {
             await LibraryManager.shared?.scanLocalDocumentsAsync()
             let label = imported == 1 ? "1 download" : "\(imported) downloads"
@@ -97,6 +135,17 @@ extension StreamingService {
             return false
         }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            // 404 here almost always means another concurrent reconcile call
+            // (or the original foreground download flow, if it was still
+            // polling when the app resumed) already claimed and deleted this
+            // job's durable copy first — expected under the race described
+            // above, not a real failure. Anything else IS worth flagging.
+            if status == 404 {
+                appLog("reconcilePendingDownloads: job \(entry.job_id) already claimed elsewhere (404) — skipping", category: "network")
+            } else {
+                appWarn("reconcilePendingDownloads: unexpected HTTP \(status) fetching job \(entry.job_id)", category: "network")
+            }
             try? FileManager.default.removeItem(at: downloadedURL)
             return false
         }

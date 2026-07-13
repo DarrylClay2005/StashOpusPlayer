@@ -411,6 +411,10 @@ async def _persist_finished_job(
         dest_path.unlink(missing_ok=True)
         return None
 
+    logger.info(
+        "_persist_finished_job: job=%s user=%s source=%s durably stored at %s",
+        job_id, user_id, source_track_id, dest_path,
+    )
     return dest_path
 
 
@@ -431,6 +435,7 @@ async def _delete_pending_download(job_id: str) -> None:
         file_path = pathlib.Path(row[0])
         file_path.unlink(missing_ok=True)
         shutil.rmtree(file_path.parent, ignore_errors=True)
+        logger.info("_delete_pending_download: job=%s durable copy removed after being served", job_id)
 
 
 async def _sweep_stale_pending_downloads() -> None:
@@ -2668,6 +2673,7 @@ async def _do_download_job(
                             data={"job_id": job_id, "source_track_id": f"{source}:{id}"},
                             content_available=True,
                         )
+                logger.info("_notify_download_ready: job=%s user=%s notification sent (APNs best-effort)", job_id, user_id)
             except Exception:
                 logger.exception("Failed to send download_ready notification for job %s", job_id)
 
@@ -2795,6 +2801,7 @@ async def list_pending_downloads(request: Request):
                 (user_id,),
             )
             rows = await cur.fetchall()
+    logger.info("list_pending_downloads: user=%s returning %d pending job(s)", user_id, len(rows))
     return JSONResponse({
         "pending": [
             {
