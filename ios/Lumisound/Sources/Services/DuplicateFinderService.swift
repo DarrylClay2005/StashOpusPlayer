@@ -99,28 +99,35 @@ final class DuplicateFinderService: ObservableObject {
     /// or trimming, so an exact match is too strict.
     static let durationTolerance: TimeInterval = 2.0
 
-    /// Groups `songs` into sets of likely duplicates. Two songs are considered
-    /// duplicates if either:
-    ///  - they share the same non-empty `sourceTrackID` (e.g. both were
-    ///    downloaded from the same YouTube/SoundCloud track via the stream
-    ///    search, tagged with the `LUMISOUND_ID` metadata tag) — this is the
-    ///    "definite duplicate" case, regardless of duration, or
-    ///  - they have the same normalized title + artist (case/whitespace/
-    ///    punctuation-insensitive) AND their durations are within
-    ///    `durationTolerance` of each other — this catches duplicates imported
-    ///    from different sources (e.g. once via Apple Music, once via download,
-    ///    or two separate re-downloads of the same track under different
-    ///    filenames/IDs). Title+artist matches whose durations differ by more
-    ///    than the tolerance are treated as distinct tracks (e.g. a "Radio Edit"
-    ///    vs an "Extended Mix" sharing a title) and are not grouped together.
+    /// Groups `songs` into sets of likely duplicates, in three passes (see
+    /// `findDuplicates`):
+    ///  1. Same non-empty `sourceTrackID` (e.g. both downloaded from the same
+    ///     YouTube/SoundCloud track, tagged with the `LUMISOUND_ID` metadata
+    ///     tag) — the "definite duplicate" case, regardless of duration.
+    ///  2. For everything else, candidates are first narrowed by duration
+    ///     (`durationTolerance`), then CONFIRMED by actually comparing how
+    ///     the audio sounds — `AudioFingerprintService.matchThreshold`
+    ///     cosine similarity on a coarse spectral profile — for any song
+    ///     whose file is locally readable. This is what catches duplicates
+    ///     re-titled or re-tagged differently across sources, which text
+    ///     matching alone can't.
+    ///  3. Songs a duration cluster couldn't fingerprint (Apple Music items,
+    ///     unreadable files) or that didn't acoustically match anything fall
+    ///     back to the old normalized title + artist check within that same
+    ///     duration cluster.
     func runScan(songs: [Song]) async {
         guard !isScanning else { return }
         isScanning = true
+        appLog("DuplicateFinderService: scan started (\(songs.count) songs)", category: "audio")
 
-        let groups = await Task.detached(priority: .utility) {
-            DuplicateFinderService.findDuplicates(in: songs)
-        }.value
+        let groups = await DuplicateFinderService.findDuplicates(in: songs)
 
+        appLog(
+            "DuplicateFinderService: scan finished — \(groups.count) group(s), reasons: "
+                + Dictionary(grouping: groups, by: { $0.reason.label })
+                    .map { "\($0.key)×\($0.value.count)" }.sorted().joined(separator: ", "),
+            category: "audio"
+        )
         duplicateGroups = groups
         let now = Date()
         lastScanDate = now
@@ -166,7 +173,20 @@ final class DuplicateFinderService: ObservableObject {
 
     // MARK: - Private Worker (nonisolated, runs off main actor)
 
-    nonisolated private static func findDuplicates(in songs: [Song]) -> [DuplicateGroup] {
+    /// Hard cap on total fingerprints computed per scan — bounds worst-case
+    /// scan time on a large library where many unrelated songs happen to
+    /// share a close duration (a weak signal on its own; see the clustering
+    /// step below). Cache hits (repeat scans) don't count against this.
+    private static let maxFingerprintsPerScan = 150
+
+    /// Duration clusters larger than this skip acoustic comparison entirely
+    /// and fall straight back to the title+artist check — a cluster this
+    /// size means duration alone isn't narrowing things down at all (e.g. a
+    /// library with many similarly-timed tracks), so fingerprinting every
+    /// pair would spend most of the budget on near-certain non-matches.
+    private static let maxClusterSizeForAcoustic = 20
+
+    nonisolated private static func findDuplicates(in songs: [Song]) async -> [DuplicateGroup] {
         var groups: [DuplicateGroup] = []
         var consumed = Set<String>()
 
@@ -181,32 +201,117 @@ final class DuplicateFinderService: ObservableObject {
             groups.append(DuplicateGroup(id: UUID(), songs: group, reason: .sameSourceTrack))
             consumed.formUnion(group.map(\.id))
         }
+        appLog("DuplicateFinderService: pass 1 (source track ID) — \(consumed.count) song(s) grouped", category: "audio")
 
-        // Second pass: group remaining songs by normalized title + artist, then
-        // split each of those groups further by duration — only songs whose
-        // durations fall within `durationTolerance` of each other are considered
-        // the same track (re-downloads/re-encodes vs. genuinely different
-        // versions sharing a title, e.g. "Radio Edit" vs "Extended Mix").
-        var byTitleArtist: [String: [Song]] = [:]
-        for song in songs where !consumed.contains(song.id) {
-            let key = normalize(song.title) + "|" + normalizeArtist(song.artist)
-            guard !key.isEmpty, key != "|" else { continue }
-            byTitleArtist[key, default: []].append(song)
-        }
-        for (_, candidates) in byTitleArtist where candidates.count > 1 {
-            for cluster in clusterByDuration(candidates) where cluster.count > 1 {
-                groups.append(DuplicateGroup(id: UUID(), songs: cluster, reason: .sameTitleAndArtist))
+        // Second pass: cluster whatever's left by duration alone (not
+        // gated on title matching first, unlike before) — within each
+        // cluster, prefer ACTUALLY LISTENING to confirm a match over
+        // trusting text: songs with a locally-readable file are compared
+        // acoustically via AudioFingerprintService (the offline counterpart
+        // to the live Auto EQ/Smart Crossfade analyzer — see its doc
+        // comment), and only songs that can't be fingerprinted (Apple Music
+        // items, unreadable files) or that don't acoustically match anything
+        // fall back to the old normalized-title+artist check.
+        let remaining = songs.filter { !consumed.contains($0.id) }
+        let clusters = clusterByDuration(remaining)
+        var fingerprintsComputed = 0
+        var acousticGroupCount = 0
+        var fallbackGroupCount = 0
+
+        for cluster in clusters where cluster.count > 1 {
+            var clusterConsumed = Set<String>()
+
+            let fingerprintable = cluster.filter { song in
+                guard let url = song.url else { return false }
+                return FileManager.default.fileExists(atPath: url.path)
+            }
+            if fingerprintable.count > 1 && fingerprintable.count <= maxClusterSizeForAcoustic {
+                var vectors: [String: [Float]] = [:]
+                for song in fingerprintable {
+                    guard let url = song.url else { continue }
+                    if fingerprintsComputed >= maxFingerprintsPerScan {
+                        appWarn("DuplicateFinderService: fingerprint budget (\(maxFingerprintsPerScan)) exhausted this scan — remaining candidates fall back to title matching", category: "audio")
+                        break
+                    }
+                    if let vector = await AudioFingerprintService.shared.fingerprint(for: url) {
+                        vectors[song.id] = vector
+                        fingerprintsComputed += 1
+                    }
+                }
+
+                // Union-find: group songs whose pairwise cosine similarity
+                // clears the match threshold, so A-matches-B-matches-C all
+                // land in one group even if A-vs-C alone were borderline.
+                var parent: [String: String] = [:]
+                func find(_ x: String) -> String {
+                    var x = x
+                    while let p = parent[x], p != x { x = p }
+                    return x
+                }
+                func union(_ a: String, _ b: String) {
+                    let ra = find(a), rb = find(b)
+                    if ra != rb { parent[ra] = rb }
+                }
+                for id in vectors.keys { parent[id] = id }
+                let ids = Array(vectors.keys)
+                for i in 0..<ids.count {
+                    for j in (i + 1)..<ids.count {
+                        guard let va = vectors[ids[i]], let vb = vectors[ids[j]] else { continue }
+                        let similarity = AudioFingerprintService.cosineSimilarity(va, vb)
+                        if similarity >= AudioFingerprintService.matchThreshold {
+                            union(ids[i], ids[j])
+                        }
+                        appLog(
+                            "DuplicateFinderService: acoustic similarity \(String(format: "%.4f", similarity)) between \"\(cluster.first(where: { $0.id == ids[i] })?.title ?? ids[i])\" and \"\(cluster.first(where: { $0.id == ids[j] })?.title ?? ids[j])\"",
+                            category: "audio"
+                        )
+                    }
+                }
+                var byRoot: [String: [Song]] = [:]
+                for song in fingerprintable where vectors[song.id] != nil {
+                    byRoot[find(song.id), default: []].append(song)
+                }
+                for (_, matched) in byRoot where matched.count > 1 {
+                    groups.append(DuplicateGroup(id: UUID(), songs: matched, reason: .acousticMatch))
+                    clusterConsumed.formUnion(matched.map(\.id))
+                    acousticGroupCount += 1
+                }
+            }
+
+            // Fallback for whatever the acoustic pass didn't account for
+            // (non-fingerprintable songs, songs whose fingerprint didn't
+            // match anything, or an oversized cluster that skipped
+            // fingerprinting entirely) — same normalized title+artist
+            // check as before, scoped to this duration cluster.
+            let leftover = cluster.filter { !clusterConsumed.contains($0.id) }
+            var byTitleArtist: [String: [Song]] = [:]
+            for song in leftover {
+                let key = normalize(song.title) + "|" + normalizeArtist(song.artist)
+                guard !key.isEmpty, key != "|" else { continue }
+                byTitleArtist[key, default: []].append(song)
+            }
+            for (_, matched) in byTitleArtist where matched.count > 1 {
+                groups.append(DuplicateGroup(id: UUID(), songs: matched, reason: .sameTitleAndArtist))
+                fallbackGroupCount += 1
             }
         }
+        appLog(
+            "DuplicateFinderService: pass 2 — \(fingerprintsComputed) fingerprint(s) computed, "
+                + "\(acousticGroupCount) acoustic group(s), \(fallbackGroupCount) title-fallback group(s)",
+            category: "audio"
+        )
 
         return groups.sorted { $0.songs.count > $1.songs.count }
     }
 
-    /// Splits `songs` (already grouped by normalized title + artist) into clusters
-    /// where every pair of durations within a cluster is within
-    /// `durationTolerance` of each other. Sorts by duration first and then does a
-    /// simple chain-grouping pass, so e.g. durations [120, 121, 122, 200, 201]
-    /// with a 2s tolerance become two clusters: [120, 121, 122] and [200, 201].
+    /// Splits `songs` into clusters where every pair of durations within a
+    /// cluster is within `durationTolerance` of each other — the candidate
+    /// pool for pass 2's acoustic/title-fallback check above (duration alone
+    /// is a weak signal, which is exactly why that pass confirms a real
+    /// match acoustically rather than trusting a duration cluster on its
+    /// own). Sorts by duration first and then does a simple chain-grouping
+    /// pass, so e.g. durations [120, 121, 122, 200, 201] with a 2s tolerance
+    /// become two clusters: [120, 121, 122] and [200, 201].
     nonisolated private static func clusterByDuration(_ songs: [Song]) -> [[Song]] {
         let sorted = songs.sorted { $0.duration < $1.duration }
         var clusters: [[Song]] = []
@@ -348,11 +453,13 @@ struct DuplicateGroup: Identifiable {
 
 enum DuplicateReason {
     case sameSourceTrack
+    case acousticMatch
     case sameTitleAndArtist
 
     var label: String {
         switch self {
         case .sameSourceTrack: return "Same source track"
+        case .acousticMatch: return "Sounds identical"
         case .sameTitleAndArtist: return "Same title & artist"
         }
     }

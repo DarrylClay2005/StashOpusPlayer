@@ -72,7 +72,14 @@ final class AudioVisualizerService: ObservableObject {
     func start(for reason: AnalysisReason = .liveSpectrumUI) {
         let wasInactive = activeReasons.isEmpty
         activeReasons.insert(reason)
+        appLog("AudioVisualizerService: start(for: \(reason)) — active reasons now \(activeReasons)", category: "audio")
         guard wasInactive else { return }
+        guard AudioPlayerManager.shared != nil else {
+            appWarn("AudioVisualizerService: start(for: \(reason)) requested but AudioPlayerManager.shared is nil — tap not installed", category: "audio")
+            return
+        }
+        appLog("AudioVisualizerService: installing analyzer tap on the main mixer", category: "audio")
+        lastLevelLogTime = .distantPast
         AudioPlayerManager.shared?.startVisualizerTap { [weak self] buffer in
             self?.process(buffer: buffer)
         }
@@ -83,7 +90,9 @@ final class AudioVisualizerService: ObservableObject {
     /// reason that was never started (a harmless no-op).
     func stop(for reason: AnalysisReason = .liveSpectrumUI) {
         activeReasons.remove(reason)
+        appLog("AudioVisualizerService: stop(for: \(reason)) — active reasons now \(activeReasons)", category: "audio")
         guard activeReasons.isEmpty else { return }
+        appLog("AudioVisualizerService: removing analyzer tap — no reasons remain active", category: "audio")
         AudioPlayerManager.shared?.stopVisualizerTap()
         magnitudes = Array(repeating: 0, count: Self.barCount)
         bassLevel = 0
@@ -91,6 +100,13 @@ final class AudioVisualizerService: ObservableObject {
         trebleLevel = 0
         overallLevel = 0
     }
+
+    /// Throttle for the periodic band-level trace below — `applySmoothed`
+    /// runs on every audio buffer (tens of times/sec), so logging every call
+    /// would flood the log; this proves the analyzer is actually receiving
+    /// and processing live audio (not stuck at 0) without the spam.
+    private var lastLevelLogTime: Date = .distantPast
+    private let levelLogInterval: TimeInterval = 3.0
 
     /// Runs on the audio render thread (the tap's callback), not the main
     /// thread — `nonisolated` so it can execute there directly instead of
@@ -177,5 +193,21 @@ final class AudioVisualizerService: ObservableObject {
         midLevel = midLevel * smoothing + bands.mid * (1 - smoothing)
         trebleLevel = trebleLevel * smoothing + bands.treble * (1 - smoothing)
         overallLevel = overallLevel * smoothing + bands.overall * (1 - smoothing)
+
+        // Proof-of-life trace: confirms the analyzer is actually reading
+        // live signal (levels tracking what's playing) rather than silently
+        // stuck at 0 for every active reason — throttled so it's readable
+        // instead of one line per buffer.
+        let now = Date()
+        if now.timeIntervalSince(lastLevelLogTime) >= levelLogInterval {
+            lastLevelLogTime = now
+            appLog(
+                String(
+                    format: "AudioVisualizerService: levels bass=%.2f mid=%.2f treble=%.2f overall=%.2f (reasons: %@)",
+                    bassLevel, midLevel, trebleLevel, overallLevel, "\(activeReasons)"
+                ),
+                category: "audio"
+            )
+        }
     }
 }

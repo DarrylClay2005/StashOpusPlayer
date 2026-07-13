@@ -228,11 +228,23 @@ extension AudioPlayerManager {
         let levelMultiplier = 1.0 - level * 0.3 // 1.0x at level 0/unmeasured, 0.7x at full energy
         let adjustedBase = base * levelMultiplier
 
-        guard adjustedBase > 0, let bpm, bpm > 0 else { return adjustedBase > 0 ? adjustedBase : base }
+        guard adjustedBase > 0, let bpm, bpm > 0 else {
+            let result = adjustedBase > 0 ? adjustedBase : base
+            appLog(
+                String(format: "smartFadeDuration: measuredLevel=%.2f multiplier=%.2f base=%.2fs -> %.2fs (no BPM, beat-snap skipped)", level, levelMultiplier, base, result),
+                category: "audio"
+            )
+            return result
+        }
         let beatLength = 60.0 / bpm
         let beats = max(1, (adjustedBase / beatLength).rounded())
         let snapped = beats * beatLength
-        return min(max(snapped, base * 0.5), base * 1.5)
+        let result = min(max(snapped, base * 0.5), base * 1.5)
+        appLog(
+            String(format: "smartFadeDuration: measuredLevel=%.2f multiplier=%.2f base=%.2fs adjusted=%.2fs bpm=%.1f -> snapped=%.2fs -> clamped=%.2fs", level, levelMultiplier, base, adjustedBase, bpm, snapped, result),
+            category: "audio"
+        )
+        return result
     }
 
     /// Kicks off (cached) BPM analysis for `song` so its tempo is available by
@@ -262,9 +274,16 @@ extension AudioPlayerManager {
     /// correction on top of it. No-op if Auto EQ is off or neither genre nor
     /// tempo is usable.
     func applyAutoEQIfNeeded(bpm: Double?) {
-        guard audioSettings.autoEQEnabled else { return }
+        guard audioSettings.autoEQEnabled else {
+            appLog("applyAutoEQIfNeeded: Auto EQ disabled, skipping", category: "audio")
+            return
+        }
         let genre = currentSong?.genre
-        guard let preset = EQPreset.auto(forBPM: bpm, genre: genre) else { return }
+        guard let preset = EQPreset.auto(forBPM: bpm, genre: genre) else {
+            appLog("applyAutoEQIfNeeded: no usable genre/BPM for \"\(currentSong?.title ?? "?")\" (genre=\(genre ?? "nil"), bpm=\(bpm.map { String($0) } ?? "nil")) — skipping", category: "audio")
+            return
+        }
+        appLog("applyAutoEQIfNeeded: preset \(audioSettings.eqPreset) -> \(preset) for \"\(currentSong?.title ?? "?")\" (genre=\(genre ?? "nil"), bpm=\(bpm.map { String($0) } ?? "nil"))", category: "audio")
         if audioSettings.eqPreset != preset {
             applyEQPreset(preset)
         }
@@ -285,12 +304,19 @@ extension AudioPlayerManager {
         let generation = eqCorrectionGeneration &+ 1
         eqCorrectionGeneration = generation
         AudioVisualizerService.shared.start(for: .autoEQ)
+        appLog("scheduleAnalyzerEQCorrection: generation \(generation) armed, measuring in 2.5s", category: "audio")
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_500_000_000)
             await MainActor.run {
-                guard let self, self.eqCorrectionGeneration == generation,
-                      self.audioSettings.autoEQEnabled
-                else { return }
+                guard let self else { return }
+                guard self.eqCorrectionGeneration == generation else {
+                    appLog("scheduleAnalyzerEQCorrection: generation \(generation) superseded (now \(self.eqCorrectionGeneration)) — discarding", category: "audio")
+                    return
+                }
+                guard self.audioSettings.autoEQEnabled else {
+                    appLog("scheduleAnalyzerEQCorrection: generation \(generation) fired but Auto EQ was disabled meanwhile — discarding", category: "audio")
+                    return
+                }
                 let analyzer = AudioVisualizerService.shared
                 // Bass vs. treble balance, roughly -1...1 (negative = measured
                 // bass-light, positive = measured bass-heavy relative to
@@ -298,13 +324,21 @@ extension AudioPlayerManager {
                 // small differences are just normal spectral variation between
                 // tracks, not something to "fix".
                 let balance = analyzer.bassLevel - analyzer.trebleLevel
-                guard abs(balance) > 0.15 else { return }
+                guard abs(balance) > 0.15 else {
+                    appLog(String(format: "scheduleAnalyzerEQCorrection: generation \(generation) measured bass=%.2f treble=%.2f (balance=%.2f) — within tolerance, no correction", analyzer.bassLevel, analyzer.trebleLevel, balance), category: "audio")
+                    return
+                }
                 let correction = max(-3.0, min(3.0, Double(-balance) * 6))
                 var bands = self.audioSettings.eqBands
                 guard bands.indices.contains(1) else { return }
+                let oldBand0 = bands[0], oldBand1 = bands[1]
                 bands[0] = Float(min(max(Double(bands[0]) + correction, -12), 12))
                 bands[1] = Float(min(max(Double(bands[1]) + correction * 0.7, -12), 12))
                 self.audioSettings.eqBands = bands
+                appLog(
+                    String(format: "scheduleAnalyzerEQCorrection: generation \(generation) measured balance=%.2f -> correction=%.2fdB — band0 %.1f->%.1f, band1 %.1f->%.1f", balance, correction, oldBand0, bands[0], oldBand1, bands[1]),
+                    category: "audio"
+                )
             }
         }
     }
