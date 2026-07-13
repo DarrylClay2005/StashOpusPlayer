@@ -1,23 +1,37 @@
 services:
+  # POT (proof-of-origin token) server for yt-dlp — a valid token meaningfully
+  # speeds up/stabilizes YouTube extraction, which otherwise routinely takes
+  # 70-100+ seconds per video without one (YouTube's anti-bot check). The
+  # ios-bridge image already has the matching client-side plugin installed
+  # (see its Dockerfile) and points at this service by default below.
+  # https://github.com/Brainicism/bgutil-ytdlp-pot-provider
+  bgutil-pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: bgutil_pot_provider
+    restart: always
+    ports:
+      - "4416:4416"
+
   ios-bridge:
     build: .
     container_name: ios_bridge
     restart: always
     network_mode: "host"
+    depends_on:
+      - bgutil-pot-provider
     environment:
       - YTDLP_CACHE_DIR=/app/.cache/yt-dlp
       # YouTube session cookies (Netscape format) used for flat-playlist extraction,
       # so playlist imports/resolves aren't capped at ~100 entries. Swap out
       # ./cookies.txt on the host to refresh the session without a rebuild.
       - YTDLP_COOKIES_FILE=/app/cookies.txt
-      # Optional: base URL of a bgutil-ytdlp-pot-provider POT server (see
-      # main.py's YTDLP_POT_PROVIDER_URL comment) — speeds up/stabilizes
-      # YouTube extraction. This container uses network_mode: host, so once
-      # a bgutil-pot-provider service's port is published to the host, it's
-      # reachable at http://127.0.0.1:<published-port> here. Also requires
-      # the bgutil-ytdlp-pot-provider pip plugin installed in this image.
-      # Unset (default) — no change from current behavior.
-      - YTDLP_POT_PROVIDER_URL=${YTDLP_POT_PROVIDER_URL:-}
+      # Base URL of the bgutil-pot-provider service above (see main.py's
+      # YTDLP_POT_PROVIDER_URL comment). This container uses
+      # network_mode: host, so the provider's published port is reachable at
+      # http://127.0.0.1:<port> here, same as if it were running directly on
+      # the host. Set to empty to disable (yt-dlp just extracts without a
+      # token, as before this was added).
+      - YTDLP_POT_PROVIDER_URL=${YTDLP_POT_PROVIDER_URL:-http://127.0.0.1:4416}
       # Optional: YouTube Data API v3 key (console.cloud.google.com, enable
       # "YouTube Data API v3"). When set, /api/resolve enumerates YouTube
       # playlists via playlistItems.list, which paginates with no ~205-entry

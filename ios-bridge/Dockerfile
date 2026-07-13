@@ -25,7 +25,14 @@ ENV PATH="/usr/local/bin:${PATH}"
 # of "Unable to find stream URL" extraction failures.
 # yt-dlp-ejs bundles the JS challenge solver script yt-dlp now requires for
 # YouTube extraction, so Deno can run it without fetching remote components.
-RUN pip install --no-cache-dir yt-dlp==2026.6.9 yt-dlp-ejs
+# bgutil-ytdlp-pot-provider is the CLIENT half of the proof-of-origin-token
+# plugin (retrieves tokens from the bgutil-pot-provider HTTP server started
+# alongside this container — see docker-compose.yml) — a valid PO token
+# meaningfully speeds up/stabilizes YouTube extraction, which otherwise
+# routinely takes 70-100+ seconds per video without one. No-ops harmlessly if
+# YTDLP_POT_PROVIDER_URL is unset (yt-dlp just extracts without a token, as
+# before this was added).
+RUN pip install --no-cache-dir yt-dlp==2026.6.9 yt-dlp-ejs bgutil-ytdlp-pot-provider
 
 WORKDIR /app
 
