@@ -589,6 +589,32 @@ CREATE TABLE IF NOT EXISTS ios_download_history (
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
+-- Durable record of a finished /api/download job whose file hasn't been
+-- fetched by the client yet. Previously a finished job's file lived only in
+-- an ephemeral temp dir and was deleted 15 minutes after creation regardless
+-- of whether the client had fetched it — if the app was closed/backgrounded
+-- while a job was still running (or briefly after), the finished download
+-- was silently lost with no way to recover it. Rows here persist (bounded by
+-- a long-term sweep, see _sweep_stale_pending_downloads) until the client
+-- fetches the file via /api/download/result, so a job started from any
+-- session/device state can always be picked up later by
+-- GET /api/download/pending — on next app launch, next foreground, the next
+-- BGAppRefreshTask run, or immediately via a silent push (see
+-- _send_push_best_effort's content_available parameter).
+CREATE TABLE IF NOT EXISTS ios_pending_downloads (
+    job_id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    source_track_id VARCHAR(280) NOT NULL,
+    title TEXT,
+    artist TEXT,
+    file_path TEXT NOT NULL,
+    media_type VARCHAR(50) NOT NULL,
+    filename TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_pending_user (user_id, created_at),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
 -- Per-user snapshot of the source ids CURRENTLY in the user's on-device library
 -- (Song.sourceTrackID values + download-ledger ids), uploaded periodically by
 -- the app. yt-dlp/the bridge can never see the device's folders, so this is how

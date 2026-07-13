@@ -200,6 +200,11 @@ struct SettingsHelpView: View {
                 body: "Settings → Storage & Cache → Downloaded Music opens a dedicated list of every downloaded/imported track with its on-disk size, sortable by size or date. Swipe a track to delete it, or tap Select to remove several at once — useful for finding and clearing out the largest files when you're low on storage."
             ),
             HelpTopic(
+                icon: "icloud.and.arrow.down",
+                title: "Background Downloads",
+                body: "Once a download starts, the actual conversion happens on the server — it keeps running even if you close the app or lose signal partway through. When it finishes, Lumisound is notified and quietly fetches the finished track into your library on its own, whether that happens seconds later or the next time you open the app. If a download seems to have vanished, it hasn't — just reopen the app and it'll be picked up automatically."
+            ),
+            HelpTopic(
                 icon: "trash.slash",
                 title: "Recently Deleted",
                 body: "Deleting a downloaded track (from the Downloads Manager or the general Library view) doesn't remove it immediately — it moves to Recently Deleted (accessible from the Downloads Manager) for 30 days, where you can restore it or delete it permanently right away. This is a safety net for an accidental bulk delete; after 30 days it's purged automatically."

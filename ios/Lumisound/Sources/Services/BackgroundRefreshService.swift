@@ -68,6 +68,14 @@ enum BackgroundRefreshService {
         await AccountService.shared?.checkAllSubscriptions()
 
         guard let library = LibraryManager.shared, let streaming = StreamingService.shared else { return }
+
+        // Pick up any downloads that finished server-side while the app
+        // wasn't around to fetch them (see StreamingService+PendingDownloads)
+        // — done first and cheaply (a single GET when there's nothing
+        // pending), so it isn't starved by runAutoDownloads below if this
+        // task's tight execution budget runs out first.
+        await streaming.reconcilePendingDownloads()
+
         await TrackedPlaylistStore.shared.runAutoDownloads(streaming: streaming, library: library)
     }
 }

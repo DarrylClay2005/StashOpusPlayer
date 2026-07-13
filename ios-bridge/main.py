@@ -74,6 +74,16 @@ logger = logging.getLogger("ios-bridge")
 YTDLP_CACHE_DIR: str = os.getenv("YTDLP_CACHE_DIR", "/app/.cache/yt-dlp")
 YTDLP_COOKIES_FILE: str = os.getenv("YTDLP_COOKIES_FILE", "/app/cookies.txt")
 API_KEY: str = os.getenv("IOS_BRIDGE_API_KEY", "")
+# Durable holding area for finished /api/download jobs — see the
+# "/api/download job tracking" section below for why this exists (the old
+# model kept finished files only in an ephemeral temp dir, deleted 15 minutes
+# after creation regardless of whether the client ever fetched them, which
+# silently lost the download for anyone who closed/backgrounded the app while
+# a job was still running). Ideally a bind-mounted volume so it survives
+# container rebuilds; falls back to a plain temp path if unset so this still
+# works (just without surviving a container restart) on deployments that
+# don't add the extra volume mount.
+PENDING_DOWNLOADS_DIR: str = os.getenv("PENDING_DOWNLOADS_DIR", "/tmp/lumisound_pending_downloads")
 SERVER_MUSIC_DIR: str = os.getenv("SERVER_MUSIC_DIR", "")
 # Per-user music directory. Each user gets {USER_MUSIC_DIR}/{user_id}/.
 # Falls back to {SERVER_MUSIC_DIR}/users/ if SERVER_MUSIC_DIR is set.
@@ -328,6 +338,15 @@ def _truncate_filename_bytes(name: str, max_bytes: int = 100) -> str:
 
 
 def _sweep_stale_download_jobs() -> None:
+    """Sweeps abandoned jobs (any status) whose ephemeral temp dir has sat
+    around unfetched past _DOWNLOAD_JOB_MAX_AGE. For "done" jobs that were
+    successfully durably persisted (see `_persist_finished_job`), this is a
+    no-op in practice — that code path already pops the job and removes its
+    tmp_dir itself, immediately, well before this 15-minute window. This
+    sweep remains the ONLY cleanup for anonymous (no account token) job
+    results, since those are never persisted to `ios_pending_downloads` at
+    all — there's no user to durably scope them to — so they keep exactly
+    the original ephemeral-only behavior."""
     now = time.monotonic()
     stale = [jid for jid, job in _DOWNLOAD_JOBS.items() if now - job["created"] > _DOWNLOAD_JOB_MAX_AGE]
     for jid in stale:
@@ -335,6 +354,113 @@ def _sweep_stale_download_jobs() -> None:
         tmp_dir = job.get("tmp_dir")
         if tmp_dir is not None:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+_PENDING_DOWNLOAD_MAX_AGE_DAYS = 30  # orphan safety net — see ios_pending_downloads
+_last_pending_downloads_sweep = 0.0
+_PENDING_DOWNLOADS_SWEEP_INTERVAL = 3600  # once/hour is plenty for a 30-day horizon
+
+
+def _maybe_sweep_stale_pending_downloads() -> None:
+    """Throttled trigger for `_sweep_stale_pending_downloads` — called from
+    every /api/download request (like `_sweep_stale_download_jobs`), but the
+    real sweep does a DB round-trip, so it's rate-limited to once/hour rather
+    than firing on every single request."""
+    global _last_pending_downloads_sweep
+    now = time.monotonic()
+    if now - _last_pending_downloads_sweep < _PENDING_DOWNLOADS_SWEEP_INTERVAL:
+        return
+    _last_pending_downloads_sweep = now
+    asyncio.create_task(_sweep_stale_pending_downloads())
+
+
+async def _persist_finished_job(
+    job_id: str, user_id: str, source_track_id: str, title: str, artist: str,
+    output_file: pathlib.Path, media_type: str, filename: str,
+) -> Optional[pathlib.Path]:
+    """Moves a finished job's file out of its ephemeral per-attempt temp dir
+    into the durable PENDING_DOWNLOADS_DIR and records it in
+    ios_pending_downloads, so it survives both the 15-minute job sweep and a
+    bridge container restart until the client actually fetches it. Returns
+    the new durable path, or None (best-effort — the file still being
+    servable via the in-memory job entry during this process's lifetime is
+    an acceptable degradation) if the move/DB-write failed."""
+    try:
+        dest_dir = pathlib.Path(PENDING_DOWNLOADS_DIR) / job_id
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = dest_dir / filename
+        shutil.copy2(output_file, dest_path)
+    except Exception as exc:
+        logger.warning("_persist_finished_job: failed to durably store job %s: %s", job_id, exc)
+        return None
+
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    INSERT INTO ios_pending_downloads
+                        (job_id, user_id, source_track_id, title, artist, file_path, media_type, filename)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (job_id, user_id, source_track_id, title, artist, str(dest_path), media_type, filename),
+                )
+    except Exception as exc:
+        logger.warning("_persist_finished_job: failed to record job %s in DB: %s", job_id, exc)
+        dest_path.unlink(missing_ok=True)
+        return None
+
+    return dest_path
+
+
+async def _delete_pending_download(job_id: str) -> None:
+    """Removes a durably-stored finished job's DB row and file (called once
+    the client has successfully fetched it via /api/download/result)."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT file_path FROM ios_pending_downloads WHERE job_id = %s", (job_id,))
+                row = await cur.fetchone()
+                await cur.execute("DELETE FROM ios_pending_downloads WHERE job_id = %s", (job_id,))
+    except Exception as exc:
+        logger.warning("_delete_pending_download: DB cleanup failed for job %s: %s", job_id, exc)
+        return
+    if row and row[0]:
+        file_path = pathlib.Path(row[0])
+        file_path.unlink(missing_ok=True)
+        shutil.rmtree(file_path.parent, ignore_errors=True)
+
+
+async def _sweep_stale_pending_downloads() -> None:
+    """Long-horizon orphan cleanup for finished downloads a client never
+    fetched (uninstalled app, never opened it again, etc.) — runs
+    opportunistically (see call site in download_track), unlike the
+    per-request in-memory sweep above."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT job_id, file_path FROM ios_pending_downloads "
+                    "WHERE created_at < NOW() - INTERVAL %s DAY",
+                    (_PENDING_DOWNLOAD_MAX_AGE_DAYS,),
+                )
+                rows = await cur.fetchall()
+                if rows:
+                    await cur.execute(
+                        "DELETE FROM ios_pending_downloads WHERE created_at < NOW() - INTERVAL %s DAY",
+                        (_PENDING_DOWNLOAD_MAX_AGE_DAYS,),
+                    )
+    except Exception as exc:
+        logger.warning("_sweep_stale_pending_downloads: failed: %s", exc)
+        return
+    for _job_id, file_path in rows:
+        if file_path:
+            p = pathlib.Path(file_path)
+            p.unlink(missing_ok=True)
+            shutil.rmtree(p.parent, ignore_errors=True)
 
 # ---------------------------------------------------------------------------
 # Rate limiter for auth endpoints (Fix 2)
@@ -2093,6 +2219,7 @@ async def download_track(
     """
     await check_auth(request)
     _sweep_stale_download_jobs()
+    _maybe_sweep_stale_pending_downloads()
 
     source = source.lower()
     format = format.lower()
@@ -2494,17 +2621,95 @@ async def _do_download_job(
         job_id, source, id, actual_ext, file_size, time.monotonic() - job_start, use_aria2,
     )
 
+    # Background-download durability: copy the finished file into durable
+    # storage and notify the client immediately via APNs, so a download that
+    # finishes while the app is backgrounded/closed still reaches the user's
+    # library without them needing to reopen the app and wait through the
+    # full poll timeout. Fire-and-forget — must never affect the response
+    # /api/download/result serves from the (still-intact) tmp_dir above.
+    if user_id:
+        async def _notify_download_ready() -> None:
+            dest = await _persist_finished_job(
+                job_id=job_id, user_id=user_id, source_track_id=f"{source}:{id}",
+                title=title or id, artist=artist or "",
+                output_file=output_file, media_type=media_type, filename=job["filename"],
+            )
+            if dest is None:
+                return
+            # The durable copy now exists and is recorded in
+            # ios_pending_downloads — hand the job off to that DB-backed
+            # model entirely rather than leaving a second, ephemeral copy
+            # around indefinitely (the in-memory "done" job would otherwise
+            # never get swept — see _sweep_stale_download_jobs — since a
+            # client that's still mid-poll could legitimately fetch it
+            # anywhere up to 15 minutes out). A client that was already
+            # mid-request against the in-memory entry lands on the
+            # DB-fallback path in /api/download/status and /result, which
+            # serves the exact same file from `dest` instead.
+            _DOWNLOAD_JOBS.pop(job_id, None)
+            if tmp_dir is not None:
+                # Grace period, not an immediate rmtree — a concurrent
+                # /api/download/result call that read the (still in-memory
+                # at that instant) job just before this pop could still be
+                # mid-stream from `output_file` inside tmp_dir; deleting out
+                # from under that stream would truncate the client's file.
+                async def _cleanup_tmp_dir_later(path: pathlib.Path) -> None:
+                    await asyncio.sleep(5)
+                    shutil.rmtree(path, ignore_errors=True)
+                asyncio.create_task(_cleanup_tmp_dir_later(tmp_dir))
+            try:
+                pool = await get_pool()
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        await _create_notification(
+                            cur, user_id, "download_ready",
+                            title="Download Ready",
+                            body=f"“{title or id}” is ready to add to your library",
+                            data={"job_id": job_id, "source_track_id": f"{source}:{id}"},
+                            content_available=True,
+                        )
+            except Exception:
+                logger.exception("Failed to send download_ready notification for job %s", job_id)
+
+        asyncio.create_task(_notify_download_ready())
+
+
+async def _pending_download_row(job_id: str, user_id: Optional[str]) -> Optional[dict]:
+    """Looks up a durably-stored finished job in ios_pending_downloads,
+    scoped to `user_id` so one account can't poll/fetch another's job_id."""
+    if not user_id:
+        return None
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT file_path, media_type, filename FROM ios_pending_downloads "
+                "WHERE job_id = %s AND user_id = %s",
+                (job_id, user_id),
+            )
+            row = await cur.fetchone()
+    if not row:
+        return None
+    return {"file_path": row[0], "media_type": row[1], "filename": row[2]}
+
 
 @app.get("/api/download/status")
 async def download_status(request: Request, job_id: str = Query(...)):
-    """Poll target for the job_id returned by /api/download. See `_DOWNLOAD_JOBS`."""
+    """Poll target for the job_id returned by /api/download. See `_DOWNLOAD_JOBS`.
+    Falls back to `ios_pending_downloads` when the job isn't in the in-memory
+    dict — e.g. the bridge process restarted after the job finished but
+    before the client fetched the result; the durable copy survives that."""
     await check_auth(request)
     job = _DOWNLOAD_JOBS.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Unknown job_id")
-    if job["status"] == "error":
-        return JSONResponse({"status": "error", "code": job["code"], "detail": job["detail"]})
-    return JSONResponse({"status": job["status"]})
+    if job:
+        if job["status"] == "error":
+            return JSONResponse({"status": "error", "code": job["code"], "detail": job["detail"]})
+        return JSONResponse({"status": job["status"]})
+
+    user_id = _account_token_user_id(request)
+    if await _pending_download_row(job_id, user_id):
+        return JSONResponse({"status": "done"})
+    raise HTTPException(status_code=404, detail="Unknown job_id")
 
 
 @app.get("/api/download/result")
@@ -2514,11 +2719,23 @@ async def download_result(request: Request, job_id: str = Query(...)):
     while the job is still running, or re-raises the job's error status once
     failed. Either way, a terminal call here removes the job and (on success)
     schedules the temp dir for cleanup after the file has been streamed.
+    Falls back to the durable `ios_pending_downloads` copy (see
+    `_pending_download_row`) when the job isn't in the in-memory dict.
     """
     await check_auth(request)
     job = _DOWNLOAD_JOBS.get(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Unknown job_id")
+        user_id = _account_token_user_id(request)
+        pending = await _pending_download_row(job_id, user_id)
+        if not pending:
+            raise HTTPException(status_code=404, detail="Unknown job_id")
+        response = FileResponse(
+            path=pending["file_path"],
+            media_type=pending["media_type"],
+            filename=pending["filename"],
+        )
+        asyncio.create_task(_delete_pending_download(job_id))
+        return response
 
     if job["status"] == "pending":
         return JSONResponse({"status": "pending"}, status_code=202)
@@ -2542,12 +2759,56 @@ async def download_result(request: Request, job_id: str = Query(...)):
         shutil.rmtree(path, ignore_errors=True)
 
     asyncio.create_task(_cleanup_later(tmp_dir))
+    # The durable copy (if _persist_finished_job already ran) is now
+    # redundant with the file just served from tmp_dir — remove it so a
+    # later /api/download/pending reconciliation pass doesn't try to import
+    # the same track a second time.
+    asyncio.create_task(_delete_pending_download(job_id))
 
     return FileResponse(
         path=str(output_file),
         media_type=media_type,
         filename=filename,
     )
+
+
+@app.get("/api/download/pending")
+async def list_pending_downloads(request: Request):
+    """Lists every finished-but-unfetched download job for the calling user —
+    the reconciliation source of truth for background downloads. The client
+    calls this on app launch, app-foreground, each BGAppRefreshTask run, and
+    immediately on receiving a "download_ready" silent push, fetching (via
+    /api/download/result?job_id=...) and importing whatever it finds. This
+    works regardless of which device/session originally started the job, and
+    regardless of how long the client was closed for — see
+    `_persist_finished_job`/`ios_pending_downloads`."""
+    await check_auth(request)
+    user_id = _account_token_user_id(request)
+    if not user_id:
+        return JSONResponse({"pending": []})
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT job_id, source_track_id, title, artist, media_type, filename, created_at "
+                "FROM ios_pending_downloads WHERE user_id = %s ORDER BY created_at ASC",
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+    return JSONResponse({
+        "pending": [
+            {
+                "job_id": r[0],
+                "source_track_id": r[1],
+                "title": r[2],
+                "artist": r[3],
+                "media_type": r[4],
+                "filename": r[5],
+                "created_at": r[6].isoformat() if r[6] else None,
+            }
+            for r in rows
+        ]
+    })
 
 
 async def _verify_downloaded_audio(path: pathlib.Path) -> bool:
@@ -9229,14 +9490,24 @@ def _get_apns_client() -> Optional[aioapns.APNs]:
 
 
 async def _send_push_best_effort(
-    user_id: str, notif_type: str, title: str, body: str, data: Optional[dict]
+    user_id: str, notif_type: str, title: str, body: str, data: Optional[dict],
+    content_available: bool = False,
 ) -> None:
     """Sends a real APNs push to every device *user_id* has registered.
     Runs as a detached task (see _create_notification) so it never adds
     latency to — or can fail — the request that triggered the notification.
     No-ops silently if APNs isn't configured, so self-hosted deployments
     without an Apple push key keep working exactly as before (in-app/poll
-    -only notifications)."""
+    -only notifications).
+
+    `content_available` additionally sets `aps.content-available = 1`
+    alongside the normal alert — iOS still shows the alert/sound as usual,
+    but ALSO invokes `application(_:didReceiveRemoteNotification:
+    fetchCompletionHandler:)` on the client (if implemented) with a background
+    execution window, even while the app is suspended or not running. Used by
+    the download-ready notification so a finished background download can be
+    fetched and imported into the library immediately instead of waiting for
+    the user to next open the app."""
     client = _get_apns_client()
     if client is None:
         return
@@ -9255,10 +9526,13 @@ async def _send_push_best_effort(
 
     dead_tokens: list[str] = []
     for token in tokens:
+        aps: dict = {"alert": {"title": title, "body": body}, "sound": "default"}
+        if content_available:
+            aps["content-available"] = 1
         request = aioapns.NotificationRequest(
             device_token=token,
             message={
-                "aps": {"alert": {"title": title, "body": body}, "sound": "default"},
+                "aps": aps,
                 "type": notif_type,
                 "data": data or {},
             },
@@ -9285,17 +9559,19 @@ async def _send_push_best_effort(
 
 
 async def _create_notification(
-    cur, user_id: str, type_: str, title: str, body: str = "", data: Optional[dict] = None
+    cur, user_id: str, type_: str, title: str, body: str = "", data: Optional[dict] = None,
+    content_available: bool = False,
 ) -> str:
     """Inserts a row into ios_notifications and best-effort fires a real APNs
-    push for it. Caller owns the cursor/transaction."""
+    push for it. Caller owns the cursor/transaction. See
+    `_send_push_best_effort` for what `content_available` does."""
     notif_id = str(uuid.uuid4())
     await cur.execute(
         "INSERT INTO ios_notifications (id, user_id, type, title, body, data_json) "
         "VALUES (%s, %s, %s, %s, %s, %s)",
         (notif_id, user_id, type_, title, body, json.dumps(data or {})),
     )
-    asyncio.create_task(_send_push_best_effort(user_id, type_, title, body, data))
+    asyncio.create_task(_send_push_best_effort(user_id, type_, title, body, data, content_available))
     return notif_id
 
 

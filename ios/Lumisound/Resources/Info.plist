@@ -116,6 +116,11 @@
     <array>
         <string>audio</string>
         <string>fetch</string>
+        <!-- Lets a "download_ready" content-available push invoke
+             AppDelegate's didReceiveRemoteNotification:fetchCompletionHandler:
+             to fetch/import a finished background download immediately,
+             even while the app is suspended or not running. -->
+        <string>remote-notification</string>
     </array>
 
     <!-- BGTaskScheduler identifier for BackgroundRefreshService's periodic

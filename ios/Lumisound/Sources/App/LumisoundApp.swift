@@ -75,6 +75,13 @@ struct LumisoundApp: App {
             .onChange(of: scenePhase) { phase in
                 if phase == .background {
                     appLock.lock()
+                } else if phase == .active {
+                    // Catch-all safety net for background downloads: covers
+                    // both "silent push never arrived" (Apple doesn't
+                    // guarantee delivery/timing) and jobs that finished
+                    // between BGAppRefreshTask runs. Cheap when there's
+                    // nothing pending (a single GET request).
+                    Task { await streaming.reconcilePendingDownloads() }
                 }
             }
             .task {
@@ -156,6 +163,17 @@ struct LumisoundApp: App {
                         await TrackedPlaylistStore.shared.runAutoDownloads(
                             streaming: streaming, library: libraryManager
                         )
+                    }
+
+                    // Pick up any downloads that finished while the app was
+                    // closed (see StreamingService+PendingDownloads) — the
+                    // scenePhase == .active handler below covers returning
+                    // to the foreground later, but that onChange doesn't
+                    // fire for the very first launch. Same unstructured-Task
+                    // reasoning as runAutoDownloads above: must survive this
+                    // .task being cancelled by a quick "open and close".
+                    Task {
+                        await streaming.reconcilePendingDownloads()
                     }
 
                     // If logged in, pull latest state from DB as primary storage source.

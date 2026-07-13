@@ -72,8 +72,15 @@ services:
       # (reversible/lossless — transparently decompressed on stream/download).
       # Only affects NEW uploads; already-stored files keep working either way.
       - USER_MUSIC_COMPRESSION=${USER_MUSIC_COMPRESSION:-0}
+      # Durable holding area for finished /api/download jobs the client hasn't
+      # fetched yet, so a download that completes while the app is closed/
+      # backgrounded survives both the old 15-minute temp-dir sweep AND a
+      # container restart until the client reconciles it. Bind-mounted below
+      # (unlike the plain-temp-path fallback) so it survives rebuilds/redeploys.
+      - PENDING_DOWNLOADS_DIR=${PENDING_DOWNLOADS_DIR:-/app/.cache/pending-downloads}
     volumes:
       - ./cache/yt-dlp:/app/.cache/yt-dlp
+      - ./cache/pending-downloads:/app/.cache/pending-downloads
       - ./cookies.txt:/app/cookies.txt
       - /mnt/FastSSD/lumisound-user-music:/usermusic
       # Optional: server-wide shared music directory (read-only)
