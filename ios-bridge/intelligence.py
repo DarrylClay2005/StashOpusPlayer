@@ -24,6 +24,7 @@ key, an Anthropic outage, or a rate limit never breaks a request path that
 worked before this feature existed.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -31,7 +32,7 @@ import time
 
 import anthropic
 
-from db import get_pool
+from db import get_pool, log_event
 
 logger = logging.getLogger("ios-bridge.intelligence")
 
@@ -120,13 +121,30 @@ async def call_intelligence(
             messages=[{"role": "user", "content": json.dumps(user_content)}],
         )
         text = next(block.text for block in response.content if block.type == "text")
-        return json.loads(text)
+        parsed = json.loads(text)
+        # Fire-and-forget: don't let the event-log write add latency to a
+        # request that already got its answer. One row per call (never
+        # per-item — callers invoke this once per request, not in a loop
+        # over a library), so volume stays low.
+        asyncio.create_task(log_event(
+            "intelligence", "analysis_completed",
+            detail={"task": task, "model": INTELLIGENCE_MODEL},
+        ))
+        return parsed
     except anthropic.RateLimitError:
         _cooldown_until[task] = time.monotonic() + _COOLDOWN_SECONDS
         logger.warning("intelligence task %s rate-limited; cooling down %ds", task, _COOLDOWN_SECONDS)
+        asyncio.create_task(log_event(
+            "intelligence", "analysis_rate_limited", level="warn",
+            message=f"cooling down {_COOLDOWN_SECONDS}s", detail={"task": task},
+        ))
         return None
-    except Exception:
+    except Exception as exc:
         logger.exception("intelligence task %s failed", task)
+        asyncio.create_task(log_event(
+            "intelligence", "analysis_failed", level="error",
+            message=str(exc)[:500], detail={"task": task},
+        ))
         return None
 
 

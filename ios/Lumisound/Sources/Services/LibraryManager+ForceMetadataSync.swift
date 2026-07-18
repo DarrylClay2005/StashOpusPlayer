@@ -18,6 +18,7 @@ extension LibraryManager {
         defer { isForcingMetadataSync = false }
 
         appLog("Force metadata sync: rescanning Documents + watched folders", category: "library")
+        RemoteLogger.log(category: "sync", event: "force_metadata_sync_started")
         await scanLocalDocumentsAsync()
         await scanWatchedFoldersAsync(using: folderService)
 
@@ -71,6 +72,13 @@ extension LibraryManager {
         rebuildAllSongs()
 
         appLog("Force metadata sync: updated \(updatedCount) of \(total) song(s), filled artwork for \(artworkFilledCount)", category: "library")
+        // One summary event for the whole run, not one per track — `total`
+        // can be the entire library, and the loop above already amortizes
+        // its own network calls per-track; adding a remote-log call there
+        // too would be the same tight-loop-of-blocking-calls pattern that's
+        // previously caused main-thread hangs on large libraries.
+        RemoteLogger.log(category: "sync", event: "force_metadata_sync_completed",
+                          detail: ["updated": updatedCount, "total": total, "artworkFilled": artworkFilledCount])
         lastScanResult = "Force metadata sync: updated \(updatedCount) of \(total) song(s), artwork filled for \(artworkFilledCount)"
     }
 }

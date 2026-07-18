@@ -51,6 +51,8 @@ extension LibraryManager {
         let newSongs = await resolveSongs(for: newURLs)
 
         appLog("scanWatchedFolders: \(newSongs.count) song(s) from \(urls.count) folder(s)", category: "library")
+        RemoteLogger.log(category: "sync", event: "watched_folders_scan_completed",
+                          detail: ["newSongs": newSongs.count, "folders": urls.count])
         importedSongs.append(contentsOf: newSongs)
         importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
         rebuildAllSongs()
@@ -181,6 +183,9 @@ extension LibraryManager {
         let priorAttempts = defaults.integer(forKey: Self.scanAttemptCounterKey)
         if priorAttempts >= 2 {
             appWarn("scanMediaLibrary: \(priorAttempts) consecutive incomplete attempts — refusing to retry automatically", category: "library")
+            RemoteLogger.logError(category: "sync", event: "media_library_scan_crash_loop",
+                                   message: "refusing to retry automatically",
+                                   detail: ["priorAttempts": priorAttempts])
             scanCrashGuardActive = true
             errorMessage = "The media library scan has been crashing repeatedly. Imported/local files still work — switch \"Default Scan Source\" to App Storage in Settings, or tap Retry to try again."
             return
@@ -223,6 +228,8 @@ extension LibraryManager {
             }
 
             appLog("scanMediaLibrary: found \(scanned.count) song(s)", category: "library")
+            RemoteLogger.log(category: "sync", event: "media_library_scan_completed",
+                              detail: ["found": scanned.count, "totalItems": items.count])
             self.mediaSongs = scanned
             self.rebuildAllSongs()
             self.scanProgress = nil
@@ -277,6 +284,8 @@ extension LibraryManager {
             do {
                 let imported = try await importer.importFiles(from: urls)
                 appLog("Import complete: \(imported.count) file(s) added", category: "library")
+                RemoteLogger.log(category: "sync", event: "file_import_completed",
+                                  detail: ["imported": imported.count, "requested": urls.count])
                 importedSongs.append(contentsOf: imported)
                 importedSongs = Array(
                     Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id })
@@ -286,6 +295,9 @@ extension LibraryManager {
                 ToastCenter.shared.show("Imported \(imported.count) \(songWord)", category: .success, icon: "tray.and.arrow.down.fill")
             } catch {
                 appError("Import failed: \(error.localizedDescription)", category: "library")
+                RemoteLogger.logError(category: "sync", event: "file_import_failed",
+                                       message: error.localizedDescription,
+                                       detail: ["requested": urls.count])
                 errorMessage = error.localizedDescription
                 ToastCenter.shared.show("Import failed: \(error.localizedDescription)", category: .error)
             }

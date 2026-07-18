@@ -47,7 +47,7 @@ from auth import (
     hash_password_async,
     verify_password_async,
 )
-from db import get_pool, init_db
+from db import get_pool, init_db, log_event
 from intelligence import (
     call_intelligence,
     get_recent_corrections,
@@ -567,18 +567,45 @@ async def _app_logs_janitor() -> None:
             logger.exception("app logs janitor: prune failed")
 
 
+_EVENT_LOG_RETENTION_DAYS = 30
+
+
+async def _event_log_janitor() -> None:
+    """Periodically prune old rows from ios_app_event_log (see db.log_event)
+    so the general structured event log never grows unbounded. Kept separate
+    from _app_logs_janitor's retention window since ios_app_event_log is a
+    lower-volume, higher-value audit trail (one row per business event, not
+    per debug-log line) worth keeping around longer."""
+    while True:
+        await asyncio.sleep(86400)  # once a day
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    deleted = await cur.execute(
+                        "DELETE FROM ios_app_event_log WHERE created_at < NOW() - INTERVAL %s DAY",
+                        (_EVENT_LOG_RETENTION_DAYS,),
+                    )
+            if deleted:
+                logger.info("event log janitor: pruned %d rows older than %d days", deleted, _EVENT_LOG_RETENTION_DAYS)
+        except Exception:
+            logger.exception("event log janitor: prune failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     await cleanup_orphan_temp_dirs()
     janitor = asyncio.create_task(_auth_attempts_janitor())
     app_logs_janitor = asyncio.create_task(_app_logs_janitor())
+    event_log_janitor = asyncio.create_task(_event_log_janitor())
     subscription_poller = asyncio.create_task(_subscription_polling_loop())
     duplicate_scanner = asyncio.create_task(_duplicate_scan_loop())
     weekly_mix_generator = asyncio.create_task(_weekly_mix_loop())
     yield
     janitor.cancel()
     app_logs_janitor.cancel()
+    event_log_janitor.cancel()
     subscription_poller.cancel()
     duplicate_scanner.cancel()
     weekly_mix_generator.cancel()
@@ -1571,6 +1598,19 @@ class DiscordRpcConfigRequest(BaseModel):
     small_image: Optional[str] = None
     show_buttons: bool = True
     enabled: bool = True
+
+
+class LogEventRequest(BaseModel):
+    """Body for POST /api/log-event — see RemoteLogger.swift on the client
+    side and db.log_event on the bridge side. category/event are short,
+    low-cardinality labels (e.g. category="sync", event="pull_completed");
+    message is a free-form human-readable summary; detail is an optional
+    structured payload (counts, durations, ids)."""
+    category: str
+    event: str
+    level: str = "info"
+    message: str = ""
+    detail: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -3584,6 +3624,8 @@ async def register(body: RegisterRequest, request: Request):
             )
             row = await cur.fetchone()
 
+    await log_event("auth", "register", user_id=user_id, message=f"new account registered: {username!r}")
+
     return {"user": _user_dict(row), "token": token}
 
 
@@ -3605,6 +3647,8 @@ async def login(body: LoginRequest, request: Request):
 
     if not row:
         logger.warning("Login attempt for unknown username: %r", body.username.strip())
+        await log_event("auth", "login_failed", level="warn",
+                         message=f"unknown username: {body.username.strip()!r}")
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     (user_id, username, email, display_name, avatar_url,
@@ -3612,11 +3656,15 @@ async def login(body: LoginRequest, request: Request):
 
     if not is_active:
         logger.warning("Login attempt for disabled account: %r (user_id=%s)", username, user_id)
+        await log_event("auth", "login_failed", user_id=user_id, level="warn",
+                         message="account is disabled")
         raise HTTPException(status_code=403, detail="Account is disabled")
 
     # Fix 1: run bcrypt off the event loop
     if not await verify_password_async(body.password, password_hash):
         logger.warning("Failed password attempt for username: %r (user_id=%s)", username, user_id)
+        await log_event("auth", "login_failed", user_id=user_id, level="warn",
+                         message="incorrect password")
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     # Feature: TOTP two-factor auth. Password alone isn't enough for an
@@ -3626,6 +3674,8 @@ async def login(body: LoginRequest, request: Request):
     # auth.create_totp_pending_token) — NOT a session token, so it can never
     # be used as a Bearer token against any authenticated endpoint.
     if totp_enabled:
+        await log_event("auth", "login_2fa_required", user_id=user_id,
+                         message="password verified, awaiting TOTP code")
         return {
             "requires_2fa": True,
             "pending_token": create_totp_pending_token(user_id),
@@ -3660,6 +3710,8 @@ async def login(body: LoginRequest, request: Request):
                 (user_id,),
             )
             row = await cur.fetchone()
+
+    await log_event("auth", "login_success", user_id=user_id, message=f"device={device_name!r}")
 
     return {"user": _user_dict(row), "token": token}
 
@@ -3707,6 +3759,7 @@ async def setup_2fa(payload: dict = Depends(get_current_user)):
             )
 
     otpauth_url = pyotp.totp.TOTP(secret).provisioning_uri(name=username, issuer_name="Lumisound")
+    await log_event("auth", "totp_setup_started", user_id=user_id, message="new TOTP secret generated (not yet enabled)")
     return {"secret": secret, "otpauth_url": otpauth_url}
 
 
@@ -3728,12 +3781,14 @@ async def verify_2fa(body: TOTPVerifyRequest, payload: dict = Depends(get_curren
     # valid_window=1 tolerates the code from one 30s step before/after "now",
     # for ordinary clock drift between the user's phone and this server.
     if not pyotp.TOTP(secret).verify(body.code, valid_window=1):
+        await log_event("auth", "totp_verify_failed", user_id=user_id, level="warn", message="incorrect code")
         raise HTTPException(status_code=400, detail="Incorrect code")
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("UPDATE ios_users SET totp_enabled = TRUE WHERE id = %s", (user_id,))
 
+    await log_event("auth", "totp_enabled", user_id=user_id, message="2FA enabled")
     return {"status": "enabled"}
 
 
@@ -3750,6 +3805,7 @@ async def disable_2fa(body: TOTPDisableRequest, payload: dict = Depends(get_curr
             row = await cur.fetchone()
 
     if not row or not await verify_password_async(body.password, row[0]):
+        await log_event("auth", "totp_disable_failed", user_id=user_id, level="warn", message="incorrect password")
         raise HTTPException(status_code=401, detail="Incorrect password")
 
     async with pool.acquire() as conn:
@@ -3758,6 +3814,7 @@ async def disable_2fa(body: TOTPDisableRequest, payload: dict = Depends(get_curr
                 "UPDATE ios_users SET totp_enabled = FALSE, totp_secret = NULL WHERE id = %s",
                 (user_id,),
             )
+    await log_event("auth", "totp_disabled", user_id=user_id, message="2FA disabled")
     return {"status": "disabled"}
 
 
@@ -3770,6 +3827,7 @@ async def login_2fa(body: TOTP2FALoginRequest, request: Request):
 
     user_id = decode_totp_pending_token(body.pending_token)
     if not user_id:
+        await log_event("auth", "login_2fa_failed", level="warn", message="pending token expired or invalid")
         raise HTTPException(status_code=401, detail="2FA login session expired — please log in again")
 
     pool = await get_pool()
@@ -3785,9 +3843,11 @@ async def login_2fa(body: TOTP2FALoginRequest, request: Request):
         raise HTTPException(status_code=401, detail="2FA is not enabled for this account")
     secret, _enabled, is_active = row
     if not is_active:
+        await log_event("auth", "login_2fa_failed", user_id=user_id, level="warn", message="account is disabled")
         raise HTTPException(status_code=403, detail="Account is disabled")
 
     if not pyotp.TOTP(secret).verify(body.code, valid_window=1):
+        await log_event("auth", "login_2fa_failed", user_id=user_id, level="warn", message="incorrect code")
         raise HTTPException(status_code=401, detail="Incorrect code")
 
     async with pool.acquire() as conn:
@@ -3813,6 +3873,8 @@ async def login_2fa(body: TOTP2FALoginRequest, request: Request):
             )
             row = await cur.fetchone()
 
+    await log_event("auth", "login_2fa_success", user_id=user_id, message="2FA login completed")
+
     return {"user": _user_dict(row), "token": token}
 
 
@@ -3827,6 +3889,7 @@ async def logout(payload: dict = Depends(get_current_user)):
                     "DELETE FROM ios_user_sessions WHERE token_id = %s", (token_id,)
                 )
         _session_cache.pop(token_id, None)
+    await log_event("auth", "logout", user_id=payload.get("sub"), message="session ended")
 
 
 @app.get("/auth/sessions")
@@ -3876,6 +3939,9 @@ async def revoke_session(token_id: str, payload: dict = Depends(get_current_user
                 (token_id, user_id),
             )
     _session_cache.pop(token_id, None)
+    is_current = token_id == payload.get("jti")
+    await log_event("auth", "session_revoked", user_id=user_id,
+                     message=f"revoked {'current' if is_current else 'other'} device session")
 
 
 class ChangePasswordRequest(BaseModel):
@@ -3902,6 +3968,8 @@ async def change_password(body: ChangePasswordRequest, payload: dict = Depends(g
                 raise HTTPException(status_code=401, detail="User not found")
 
             if not await verify_password_async(body.current_password, row[0]):
+                await log_event("auth", "change_password_failed", user_id=user_id, level="warn",
+                                 message="current password incorrect")
                 raise HTTPException(status_code=401, detail="Current password is incorrect")
 
             new_hash = await hash_password_async(body.new_password)
@@ -3913,6 +3981,8 @@ async def change_password(body: ChangePasswordRequest, payload: dict = Depends(g
                 "DELETE FROM ios_user_sessions WHERE user_id = %s AND token_id != %s",
                 (user_id, current_token_id),
             )
+
+    await log_event("auth", "change_password", user_id=user_id, message="password changed; other sessions revoked")
 
 
 class DeleteAccountRequest(BaseModel):
@@ -3934,6 +4004,8 @@ async def delete_account(body: DeleteAccountRequest, payload: dict = Depends(get
                 raise HTTPException(status_code=401, detail="User not found")
 
             if not await verify_password_async(body.password, row[0]):
+                await log_event("auth", "delete_account_failed", user_id=user_id, level="warn",
+                                 message="incorrect password")
                 raise HTTPException(status_code=401, detail="Incorrect password")
 
             await cur.execute("DELETE FROM ios_users WHERE id = %s", (user_id,))
@@ -3946,6 +4018,10 @@ async def delete_account(body: DeleteAccountRequest, payload: dict = Depends(get
         shutil.rmtree(music_dir, ignore_errors=True)
 
     logger.info("delete_account: user %s deleted their account", user_id)
+    # user_id no longer FKs to a row in ios_users at this point (just deleted
+    # above) — pass user_id=None so the FK-constrained column doesn't force a
+    # failed insert; the id is still in the free-text message for traceability.
+    await log_event("auth", "delete_account", message=f"user {user_id} deleted their account")
 
 
 @app.get("/auth/me")
@@ -4047,6 +4123,7 @@ async def update_privacy(body: PrivacyRequest, payload: dict = Depends(get_curre
                     f"UPDATE ios_users SET {set_clause} WHERE id = %s AND is_active = TRUE",
                     (*updates.values(), user_id),
                 )
+        await log_event("settings", "privacy_updated", user_id=user_id, detail=updates)
 
     return updates
 
@@ -4203,6 +4280,10 @@ async def intelligence_feedback(
     feedback is a learning signal, not something the client should retry or
     surface an error for."""
     await record_correction(body.memory_id, body.correction)
+    asyncio.create_task(log_event(
+        "intelligence", "suggestion_corrected", user_id=payload.get("sub"),
+        detail={"memory_id": body.memory_id},
+    ))
     return {"ok": True}
 
 
@@ -4301,6 +4382,11 @@ async def put_expanded_settings(request: Request, user: dict = Depends(get_curre
                 f"ON DUPLICATE KEY UPDATE {set_clause}",
                 [user["sub"]] + list(updates.values()) + list(updates.values()),
             )
+    # Log which settings keys changed, not their values — some expanded
+    # settings fields may carry sensitive user preferences not worth
+    # persisting verbatim into a general audit log.
+    asyncio.create_task(log_event("settings", "expanded_settings_updated", user_id=user["sub"],
+                                   detail={"keys": sorted(updates.keys())}))
     return {"ok": True}
 
 
@@ -4390,6 +4476,7 @@ async def create_playlist(
             row = await cur.fetchone()
 
     pl_id, name, description, created_at, updated_at, folder, tags_json = row
+    await log_event("playlist", "playlist_created", user_id=user_id, detail={"playlist_id": pl_id})
     return {
         "id": pl_id,
         "name": name,
@@ -4449,6 +4536,7 @@ async def update_playlist(
             row = await cur.fetchone()
 
     pl_id, name, description, created_at, updated_at, folder, tags_json = row
+    await log_event("playlist", "playlist_updated", user_id=user_id, detail={"playlist_id": playlist_id})
     return {
         "id": pl_id,
         "name": name,
@@ -4478,6 +4566,7 @@ async def delete_playlist(
             )
             if cur.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Playlist not found")
+    await log_event("playlist", "playlist_deleted", user_id=user_id, detail={"playlist_id": playlist_id})
 
 
 @app.get("/user/playlists/{playlist_id}")
@@ -4587,6 +4676,7 @@ async def add_favorite(
                 (user_id, body.song_id, body.title, body.artist, body.album),
             )
 
+    asyncio.create_task(log_event("favorites", "favorite_added", user_id=user_id, detail={"song_id": body.song_id}))
     return {"song_id": body.song_id, "status": "added"}
 
 
@@ -4603,6 +4693,7 @@ async def remove_favorite(
                 "DELETE FROM ios_user_favorites WHERE user_id = %s AND song_id = %s",
                 (user_id, song_id),
             )
+    asyncio.create_task(log_event("favorites", "favorite_removed", user_id=user_id, detail={"song_id": song_id}))
 
 
 # ---------------------------------------------------------------------------
@@ -4979,14 +5070,19 @@ async def fingerprint_identify(
                 pass
 
     if not fingerprint or duration <= 0:
+        await log_event("metadata", "fingerprint_identify_failed", user_id=user_id, level="warn",
+                         message="could not analyze file (unsupported format or corrupt audio)")
         raise HTTPException(status_code=422, detail="Could not analyze this file (unsupported format or corrupt audio)")
 
     status_code, lookup_data = await asyncio.to_thread(_acoustid_lookup_sync, api_key, duration, fingerprint)
     if status_code != 200:
         error_msg = (lookup_data.get("error") or {}).get("message", "AcoustID lookup failed")
+        await log_event("metadata", "fingerprint_identify_failed", user_id=user_id, level="error", message=error_msg)
         raise HTTPException(status_code=502, detail=error_msg)
 
     match = _best_acoustid_match(lookup_data)
+    await log_event("metadata", "fingerprint_identify_completed", user_id=user_id,
+                     detail={"matched": bool(match)})
     if not match:
         return {"matched": False}
     return {"matched": True, **match}
@@ -7802,7 +7898,16 @@ async def backfill_user_music_metadata(
                 )
                 processed += 1
 
-    return {"processed": processed, "remaining": max(0, len(pending) - processed)}
+    remaining = max(0, len(pending) - processed)
+    # One event per call, not per track — `batch` can hold up to 20 tracks,
+    # and this endpoint is polled repeatedly until `remaining` hits 0, so a
+    # per-track log_event here would multiply into a lot of avoidable DB
+    # round trips for a bulk operation that's already logged as one unit.
+    asyncio.create_task(log_event(
+        "metadata", "backfill_batch_completed", user_id=user_id,
+        detail={"processed": processed, "remaining": remaining},
+    ))
+    return {"processed": processed, "remaining": remaining}
 
 
 @app.get("/user/music/recommendations")
@@ -8489,7 +8594,15 @@ async def prefetch_lyrics(
     results = await asyncio.gather(
         *(_fetch_and_cache_lyrics(t.title, t.artist, t.duration) for t in tracks)
     )
-    return {"requested": len(tracks), "found": sum(1 for r in results if r)}
+    found = sum(1 for r in results if r)
+    # One event for the whole batch, not per track (up to 25 lrclib.net
+    # round-trips already happen per call — logging per-track would just
+    # multiply that same anti-pattern onto the DB).
+    asyncio.create_task(log_event(
+        "metadata", "lyrics_prefetch_completed", user_id=payload.get("sub"),
+        detail={"requested": len(tracks), "found": found},
+    ))
+    return {"requested": len(tracks), "found": found}
 
 
 @app.get("/api/lyrics/search")
@@ -9412,6 +9525,10 @@ async def submit_bug_report(
         }
         await _post_discord_webhook(BUG_REPORT_WEBHOOK_URL, embed)
 
+    asyncio.create_task(log_event(
+        "support", "bug_report_submitted", user_id=user_id,
+        detail={"report_id": report_id, "category": body.category[:30]},
+    ))
     return {"id": report_id, "status": "received"}
 
 
@@ -9460,6 +9577,39 @@ async def ingest_logs(request: Request):
                     )
     except Exception:
         pass  # Logging must never fail the app
+
+
+@app.post("/api/log-event", status_code=204)
+async def api_log_event(body: LogEventRequest, request: Request):
+    """Accepts one structured business event from the iOS client (see
+    RemoteLogger.swift) and writes it to ios_app_event_log via db.log_event,
+    tagged source="ios_client". Distinct from /internal/logs above: this is
+    for a handful of meaningful lifecycle events (a scan finishing, a backup
+    completing) with structured category/event/level/detail fields, not bulk
+    debug-log-line ingestion.
+
+    Deliberately tolerant of a missing/invalid bearer token — unlike normal
+    authenticated endpoints (which 401), a background sync/scan event that
+    fires with a stale or absent token still gets recorded, just without a
+    user_id attached, since losing the audit trail for exactly the requests
+    most likely to race a token refresh would defeat the point of logging.
+    """
+    user_id: Optional[str] = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        payload = decode_token(auth_header[7:].strip())
+        if payload:
+            user_id = payload.get("sub")
+
+    await log_event(
+        body.category[:30],
+        body.event[:60],
+        source="ios_client",
+        user_id=user_id,
+        level=body.level[:10] if body.level else "info",
+        message=body.message[:2000] if body.message else "",
+        detail=body.detail,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -10130,6 +10280,8 @@ async def create_user_webhook(body: UserWebhookRequest, payload: dict = Depends(
                 "INSERT INTO ios_user_webhooks (id, user_id, event_type, webhook_url) VALUES (%s, %s, %s, %s)",
                 (webhook_id, user_id, body.event_type, body.webhook_url),
             )
+    await log_event("webhooks", "webhook_created", user_id=user_id,
+                     detail={"webhook_id": webhook_id, "event_type": body.event_type})
     return {"id": webhook_id}
 
 
@@ -10599,6 +10751,8 @@ async def add_collaborator(
                 {"playlist_id": playlist_id, "role": body.role},
             )
 
+    await log_event("playlist", "collaborator_added", user_id=user_id,
+                     detail={"playlist_id": playlist_id, "target_user_id": target_id, "role": body.role})
     return {"playlist_id": playlist_id, "username": target_username, "role": body.role}
 
 
@@ -10657,6 +10811,9 @@ async def remove_collaborator(
             )
             if cur.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Collaborator not found")
+
+    await log_event("playlist", "collaborator_removed", user_id=user_id,
+                     detail={"playlist_id": playlist_id, "target_user_id": collab_user_id})
 
 
 @app.get("/user/playlists/shared-with-me")
@@ -10726,6 +10883,8 @@ async def add_playlist_track(
                 (playlist_id,),
             )
 
+    asyncio.create_task(log_event("playlist", "track_added", user_id=user_id,
+                                   detail={"playlist_id": playlist_id, "track_id": track_id}))
     return {"id": track_id, "position": next_position}
 
 
@@ -10865,6 +11024,7 @@ async def delete_scrobble_links(payload: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("DELETE FROM ios_scrobble_links WHERE user_id = %s", (user_id,))
+    await log_event("scrobble", "scrobble_links_removed", user_id=user_id)
 
 
 def _audioscrobbler_api_get(base_url: str, params: dict, secret: str) -> dict:
@@ -10951,6 +11111,7 @@ async def lastfm_link_session(body: LastfmLinkRequest, payload: dict = Depends(g
                 (user_id, session_key, username),
             )
 
+    await log_event("scrobble", "lastfm_linked", user_id=user_id, detail={"lastfm_username": username})
     return {"lastfm_username": username}
 
 
@@ -11007,6 +11168,7 @@ async def librefm_link_session(body: LastfmLinkRequest, payload: dict = Depends(
                 (user_id, session_key, username),
             )
 
+    await log_event("scrobble", "librefm_linked", user_id=user_id, detail={"librefm_username": username})
     return {"librefm_username": username}
 
 
@@ -11241,6 +11403,8 @@ async def register_push_token(body: PushTokenRequest, payload: dict = Depends(ge
                 "ON DUPLICATE KEY UPDATE platform = VALUES(platform)",
                 (user_id, body.device_token, body.platform),
             )
+    asyncio.create_task(log_event("push", "push_token_registered", user_id=user_id,
+                                   detail={"platform": body.platform}))
     return {"status": "ok"}
 
 
@@ -11254,6 +11418,7 @@ async def unregister_push_token(device_token: str, payload: dict = Depends(get_c
                 "DELETE FROM ios_push_tokens WHERE user_id = %s AND device_token = %s",
                 (user_id, device_token),
             )
+    asyncio.create_task(log_event("push", "push_token_unregistered", user_id=user_id))
 
 
 @app.get("/user/notifications")
@@ -11377,6 +11542,9 @@ async def set_discord_webhook(body: DiscordWebhookRequest, payload: dict = Depen
                     "UPDATE ios_discord_webhooks SET enabled = %s WHERE user_id = %s",
                     (body.enabled, user_id),
                 )
+    # Never log the webhook URL itself — just that it was configured/toggled.
+    await log_event("webhooks", "discord_webhook_set", user_id=user_id,
+                     detail={"url_changed": body.webhook_url is not None, "enabled": body.enabled})
     return {"status": "ok"}
 
 
@@ -11387,6 +11555,7 @@ async def delete_discord_webhook(payload: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("DELETE FROM ios_discord_webhooks WHERE user_id = %s", (user_id,))
+    await log_event("webhooks", "discord_webhook_removed", user_id=user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -11428,6 +11597,7 @@ async def set_youtube_api_key(body: YoutubeApiKeyRequest, payload: dict = Depend
                 "ON DUPLICATE KEY UPDATE youtube_api_key = VALUES(youtube_api_key)",
                 (user_id, body.api_key),
             )
+    await log_event("settings", "youtube_api_key_set", user_id=user_id)
     return {"status": "ok"}
 
 
@@ -11441,6 +11611,7 @@ async def delete_youtube_api_key(payload: dict = Depends(get_current_user)):
                 "UPDATE ios_user_settings SET youtube_api_key = NULL WHERE user_id = %s",
                 (user_id,),
             )
+    await log_event("settings", "youtube_api_key_removed", user_id=user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -11482,6 +11653,7 @@ async def set_acoustid_api_key(body: AcoustIDApiKeyRequest, payload: dict = Depe
                 "ON DUPLICATE KEY UPDATE acoustid_api_key = VALUES(acoustid_api_key)",
                 (user_id, body.api_key),
             )
+    await log_event("settings", "acoustid_api_key_set", user_id=user_id)
     return {"status": "ok"}
 
 
@@ -11495,6 +11667,7 @@ async def delete_acoustid_api_key(payload: dict = Depends(get_current_user)):
                 "UPDATE ios_user_settings SET acoustid_api_key = NULL WHERE user_id = %s",
                 (user_id,),
             )
+    await log_event("settings", "acoustid_api_key_removed", user_id=user_id)
 
 
 async def _acoustid_api_key_for_user(user_id: str) -> Optional[str]:
@@ -11875,6 +12048,7 @@ async def set_discord_rpc_config(body: DiscordRpcConfigRequest, payload: dict = 
                 "show_buttons = VALUES(show_buttons), enabled = VALUES(enabled)",
                 (user_id, body.discord_client_id, body.large_image, body.small_image, body.show_buttons, body.enabled),
             )
+    await log_event("settings", "discord_rpc_config_set", user_id=user_id, detail={"enabled": body.enabled})
     return {"status": "ok"}
 
 
@@ -11885,6 +12059,7 @@ async def delete_discord_rpc_config(payload: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("DELETE FROM ios_discord_rpc_config WHERE user_id = %s", (user_id,))
+    await log_event("settings", "discord_rpc_config_removed", user_id=user_id)
 
 
 # ---------------------------------------------------------------------------

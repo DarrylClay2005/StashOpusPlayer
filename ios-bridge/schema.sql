@@ -809,3 +809,32 @@ ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEF
 -- Feature: /social/similar-listeners collaborative-filtering recommendations.
 -- No new tables — reuses ios_play_history and the existing
 -- share_listening_activity opt-in (see the /social/* section in main.py).
+
+-- ---------------------------------------------------------------------------
+-- General-purpose DB event logging sweep
+-- ---------------------------------------------------------------------------
+
+-- Structured cross-system event log (auth, sync, backup, metadata/
+-- intelligence, etc.) — see db.log_event() and POST /api/log-event in
+-- main.py. Distinct from ios_app_logs (raw client debug-log-line ingestion
+-- from AppLogger's local buffer) and the narrower ios_sync_log/
+-- ios_search_log tables: this one is a single reusable sink for "something
+-- happened" events from both the bridge itself (source='bridge') and the
+-- iOS client (source='ios_client'), with an optional structured JSON detail
+-- blob. user_id is nullable since some events (e.g. a failed login attempt
+-- for an unknown username) have no known user yet.
+CREATE TABLE IF NOT EXISTS ios_app_event_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    source VARCHAR(20) NOT NULL DEFAULT 'bridge',
+    user_id VARCHAR(36) NULL,
+    category VARCHAR(30) NOT NULL,
+    event VARCHAR(60) NOT NULL,
+    level VARCHAR(10) NOT NULL DEFAULT 'info',
+    message TEXT,
+    detail JSON NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_category_created (category, created_at),
+    INDEX idx_user_created (user_id, created_at),
+    INDEX idx_level (level),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE SET NULL
+);
