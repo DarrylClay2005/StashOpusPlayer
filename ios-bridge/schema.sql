@@ -809,3 +809,128 @@ ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEF
 -- Feature: /social/similar-listeners collaborative-filtering recommendations.
 -- No new tables — reuses ios_play_history and the existing
 -- share_listening_activity opt-in (see the /social/* section in main.py).
+
+-- ---------------------------------------------------------------------------
+-- Social Ecosystem: profiles, friends, presence (2026-07-18)
+--
+-- Everything below is additive and namespaced ios_social_ / ios_presence_ so
+-- it can never collide with another workstream's tables. All new endpoints
+-- live under the /api/social/* prefix in main.py (deliberately distinct from
+-- the pre-existing global, non-friend-scoped /social/* activity/discover
+-- feed above, which is a different feature this doesn't replace).
+-- ---------------------------------------------------------------------------
+
+-- One row per user with a customized profile (created lazily on first save —
+-- a user who never visits their profile screen simply has no row here, and
+-- GET /api/social/profile/{id} falls back to defaults). main_accent_hex /
+-- sub_accent_hex are validated server-side against a curated palette (see
+-- AccentColorPickerView.swift) rather than accepting arbitrary hex strings
+-- from the client, so a malformed value can never make a profile unreadable.
+-- share_now_playing is the privacy hook requested for presence: when FALSE,
+-- this user's now_playing_* fields are withheld from both the presence
+-- endpoints and the friend activity feed (online/offline still shows).
+CREATE TABLE IF NOT EXISTS ios_social_profiles (
+    user_id VARCHAR(36) PRIMARY KEY,
+    bio VARCHAR(280) NULL,
+    main_accent_hex VARCHAR(7) NULL,
+    sub_accent_hex VARCHAR(7) NULL,
+    share_now_playing BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Up to 5 user-pinned "favorite songs" shown on the profile, ordered by
+-- `position` (0-4). Saved as a full replace (delete-then-insert in one
+-- transaction) from PUT /api/social/profile/pinned-tracks rather than
+-- incremental add/remove endpoints — simplest correct way to let the user
+-- freely reorder/swap a small fixed-size list. Denormalized title/artist/
+-- album (like ios_user_favorites and ios_playlist_tracks already do) so a
+-- pin still displays something sensible even if source_track_id is null
+-- (a purely local import) or the source later disappears.
+CREATE TABLE IF NOT EXISTS ios_social_pinned_tracks (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    position INT NOT NULL DEFAULT 0,
+    source_track_id VARCHAR(255) NULL,
+    track_url TEXT NULL,
+    title TEXT NOT NULL,
+    artist TEXT NULL,
+    album TEXT NULL,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_pinned_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Friend requests. `status` moves pending -> accepted/declined/cancelled and
+-- is never deleted (keeps a simple audit trail / prevents immediate re-spam
+-- after a decline within the app's own request-throttling logic). Accepting
+-- a request writes the symmetric pair into ios_social_friends below rather
+-- than this table being queried for "are we friends" at read time.
+CREATE TABLE IF NOT EXISTS ios_social_friend_requests (
+    id VARCHAR(36) PRIMARY KEY,
+    from_user_id VARCHAR(36) NOT NULL,
+    to_user_id VARCHAR(36) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    responded_at TIMESTAMP NULL,
+    INDEX idx_freq_to (to_user_id, status),
+    INDEX idx_freq_from (from_user_id, status),
+    FOREIGN KEY (from_user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Friendships, stored as a symmetric pair of rows (A,B) + (B,A) on accept —
+-- a small denormalization that keeps every "who are my friends" /
+-- "am I friends with X" query a single indexed lookup on `user_id` alone,
+-- instead of an OR'd two-column match on every read. Both rows are deleted
+-- together on unfriend or on either side blocking the other.
+CREATE TABLE IF NOT EXISTS ios_social_friends (
+    user_id VARCHAR(36) NOT NULL,
+    friend_id VARCHAR(36) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, friend_id),
+    INDEX idx_friends_friend (friend_id),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
+    FOREIGN KEY (friend_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Basic abuse handling for the friends feature: a block is one-directional
+-- (user_id blocked blocked_id) but enforced both ways at query time (neither
+-- side can friend-request, view the other's profile, or see them in
+-- presence/activity once either has blocked the other). Blocking also tears
+-- down any existing friendship/pending request between the two (see
+-- POST /api/social/block/{user_id}).
+CREATE TABLE IF NOT EXISTS ios_social_blocks (
+    user_id VARCHAR(36) NOT NULL,
+    blocked_id VARCHAR(36) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, blocked_id),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
+    FOREIGN KEY (blocked_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- One row per user, upserted on every POST /api/social/presence heartbeat
+-- (client polls every 30-60s while foregrounded — see PresenceService.swift).
+-- "Online" is derived, not stored as a trusted-forever flag: callers should
+-- treat a user as online only when is_online = TRUE *and* last_seen_at is
+-- recent (main.py uses a 90s freshness window — 1.5x the client's slowest
+-- polling cadence — so a force-quit/crashed app without the best-effort
+-- "going offline" beacon still reads as offline shortly after, not forever
+-- online). now_playing_title/artist are always stored as reported (same
+-- "store raw, gate on read" convention the pre-existing global
+-- share_listening_activity feed above already uses for ios_play_history) —
+-- every /api/social/presence/* read filters them out whenever the owning
+-- profile has share_now_playing = FALSE, so they are never returned by the
+-- API to anyone while the toggle is off, and toggling it doesn't require
+-- rewriting this row.
+CREATE TABLE IF NOT EXISTS ios_presence_state (
+    user_id VARCHAR(36) PRIMARY KEY,
+    is_online BOOLEAN NOT NULL DEFAULT FALSE,
+    is_playing BOOLEAN NOT NULL DEFAULT FALSE,
+    now_playing_title VARCHAR(500) NULL,
+    now_playing_artist VARCHAR(500) NULL,
+    last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
