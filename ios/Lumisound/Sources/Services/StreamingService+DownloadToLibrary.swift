@@ -135,11 +135,20 @@ extension StreamingService {
         }
 
         // Hit the /api/download endpoint which runs yt-dlp with metadata embedding.
+        // `title` is `safeName` — a filesystem-safe, length-capped filename hint
+        // ONLY. `full_title` carries the real, untruncated track title separately,
+        // so the bridge's download history/pending-downloads/notifications/embedded
+        // metadata tag always reflect the full title rather than a filename-safe
+        // truncation of it (previously the bridge had no way to tell the two
+        // apart, since only `title` — already shortened here — was ever sent, so
+        // every title-consuming surface downstream silently inherited the
+        // truncation meant only for the on-disk filename).
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "id",       value: track.id),
             URLQueryItem(name: "source",   value: track.source),
             URLQueryItem(name: "format",   value: fmt),
             URLQueryItem(name: "title",    value: safeName),
+            URLQueryItem(name: "full_title", value: track.title),
             URLQueryItem(name: "artist",   value: track.artist),
             URLQueryItem(name: "thumbnail", value: track.thumbnailURL),
             URLQueryItem(name: "duration", value: String(track.durationSeconds)),
@@ -469,9 +478,7 @@ extension StreamingService {
 
         // Pre-seed the artwork cache with the track's thumbnail so it's immediately
         // available when scanLocalDocuments() creates the Song for this file.
-        if !track.thumbnailURL.isEmpty, let thumbURL = URL(string: track.thumbnailURL) {
-            await ArtworkService.shared.prefetchRemoteImage(url: thumbURL, forKey: destURL.lastPathComponent)
-        }
+        await prefetchArtworkWithFallback(for: track, cacheKey: destURL.lastPathComponent)
 
         return destURL
     }
@@ -636,9 +643,7 @@ extension StreamingService {
         }
 
         appLog("Download complete: \(destURL.lastPathComponent)", category: "network")
-        if !track.thumbnailURL.isEmpty, let thumbURL = URL(string: track.thumbnailURL) {
-            await ArtworkService.shared.prefetchRemoteImage(url: thumbURL, forKey: destURL.lastPathComponent)
-        }
+        await prefetchArtworkWithFallback(for: track, cacheKey: destURL.lastPathComponent)
         return destURL
     }
 
@@ -722,6 +727,51 @@ extension StreamingService {
         case "audio/wav", "audio/x-wav", "audio/wave": return "wav"
         case "audio/webm":      return "webm"
         default:                return nil
+        }
+    }
+
+    // MARK: - Artwork prefetch with fallback
+
+    /// Prefetches thumbnail artwork for a freshly-downloaded track, verifying
+    /// the primary thumbnail URL is actually reachable first and falling back
+    /// to YouTube's guaranteed-to-exist `hqdefault.jpg` when it isn't.
+    ///
+    /// The bridge already picks a sensible thumbnail (`_pick_youtube_thumbnail`
+    /// in main.py prefers dimensioned/confirmed entries over yt-dlp's raw
+    /// guesses), but a URL that was valid at search/resolve time can still be
+    /// stale/expired by the time a download finishes, and non-YouTube
+    /// extractors don't get the same server-side treatment — so this is a
+    /// second, client-side safety net rather than a duplicate of that fix.
+    /// Without it, a 404/expired thumbnail silently left the track with no
+    /// artwork at all instead of degrading to a lower-quality-but-working image.
+    func prefetchArtworkWithFallback(for track: StreamTrack, cacheKey: String) async {
+        guard !track.thumbnailURL.isEmpty, let primaryURL = URL(string: track.thumbnailURL) else {
+            return
+        }
+        if await urlIsReachable(primaryURL) {
+            await ArtworkService.shared.prefetchRemoteImage(url: primaryURL, forKey: cacheKey)
+            return
+        }
+        appWarn("prefetchArtworkWithFallback: primary thumbnail unreachable for \"\(track.title)\" (\(primaryURL)) — trying fallback", category: "network")
+        if track.source == "youtube", let fallbackURL = URL(string: "https://i.ytimg.com/vi/\(track.id)/hqdefault.jpg"),
+           await urlIsReachable(fallbackURL) {
+            await ArtworkService.shared.prefetchRemoteImage(url: fallbackURL, forKey: cacheKey)
+            return
+        }
+        appWarn("prefetchArtworkWithFallback: no working thumbnail found for \"\(track.title)\" — leaving artwork empty", category: "network")
+    }
+
+    /// Lightweight, short-timeout, best-effort HEAD-request reachability check.
+    private func urlIsReachable(_ url: URL) async -> Bool {
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 5
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return false }
+            return (200..<300).contains(http.statusCode)
+        } catch {
+            return false
         }
     }
 }
