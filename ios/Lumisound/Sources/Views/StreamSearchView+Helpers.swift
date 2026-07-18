@@ -55,6 +55,35 @@ extension StreamSearchView {
         }
     }
 
+    /// SF Symbol for each source tab — used by the pill selector so each tab
+    /// carries an at-a-glance icon instead of text alone.
+    func sourceIcon(_ src: String) -> String {
+        switch src {
+        case "youtube":    return "play.rectangle.fill"
+        case "soundcloud": return "cloud.fill"
+        case "server":     return "externaldrive.fill"
+        case "my":         return "person.crop.circle.fill"
+        default:           return "magnifyingglass"
+        }
+    }
+
+    /// Human-readable "how long ago" text for `trendingLastUpdated`, used by
+    /// the trending header's staleness indicator. Deliberately coarse (no
+    /// live-ticking timer) — good enough to tell "just fetched" from "this is
+    /// old, tap refresh" without adding a repeating timer to the view.
+    var trendingUpdatedText: String {
+        guard let last = trendingLastUpdated else { return "" }
+        let seconds = Int(Date().timeIntervalSince(last))
+        if seconds < 5 { return "Updated just now" }
+        if seconds < 60 { return "Updated \(seconds)s ago" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "Updated \(minutes)m ago" }
+        let hours = minutes / 60
+        if hours < 24 { return "Updated \(hours)h ago" }
+        let days = hours / 24
+        return "Updated \(days)d ago"
+    }
+
     func triggerSearch() {
         failedTrackIDs.removeAll()
         appBreadcrumb("Searched \"\(searchText)\" [source: \(selectedSource)]")

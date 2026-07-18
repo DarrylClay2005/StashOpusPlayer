@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct UserMusicTrackRow: View {
     let track: UserMusicTrack
     let artworkURL: URL?
+    var isDeleting: Bool = false
     let onPlay: () -> Void
     let onInfo: () -> Void
     let onDelete: () -> Void
@@ -16,7 +17,12 @@ struct UserMusicTrackRow: View {
                 switch phase {
                 case .success(let image):
                     image.resizable().aspectRatio(contentMode: .fill)
-                case .failure, .empty:
+                case .empty:
+                    Image(systemName: "music.note")
+                        .font(.system(size: 18))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .overlay(ShimmerOverlay())
+                case .failure:
                     Image(systemName: "music.note")
                         .font(.system(size: 18))
                         .foregroundStyle(AppTheme.textSecondary)
@@ -24,13 +30,14 @@ struct UserMusicTrackRow: View {
                     Color.clear
                 }
             }
-            .frame(width: 44, height: 44)
+            .frame(width: 48, height: 48)
             .background(AppTheme.elevatedSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipped()
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title)
-                    .font(AppTheme.bodyFont(size: 14))
+                    .font(AppTheme.bodyFont(size: 14).weight(.semibold))
                     .foregroundStyle(AppTheme.textPrimary)
                     .lineLimit(1)
                 if !track.artist.isEmpty && track.artist != "Unknown Artist" {
@@ -60,7 +67,8 @@ struct UserMusicTrackRow: View {
                     .foregroundStyle(AppTheme.textSecondary)
                     .frame(width: 28, height: 28)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableButtonStyle())
+            .disabled(isDeleting)
 
             Button(action: onPlay) {
                 Image(systemName: "play.circle.fill")
@@ -68,18 +76,34 @@ struct UserMusicTrackRow: View {
                     .foregroundStyle(AppTheme.dynamicAccent)
                     .frame(width: 32, height: 32)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableButtonStyle())
+            .disabled(isDeleting)
 
             Button(role: .destructive, action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.system(size: 16))
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .frame(width: 28, height: 28)
+                if isDeleting {
+                    ProgressView()
+                        .tint(AppTheme.error)
+                        .frame(width: 28, height: 28)
+                } else {
+                    Image(systemName: "trash")
+                        .font(.system(size: 16))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .frame(width: 28, height: 28)
+                }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableButtonStyle())
+            .disabled(isDeleting)
         }
-        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .adaptiveGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous), fallback: .ultraThinMaterial)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.white.opacity(0.05), lineWidth: 1)
+        )
+        .opacity(isDeleting ? 0.55 : 1)
+        .animation(.easeOut(duration: 0.2), value: isDeleting)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onPlay)
+        .onTapGesture { if !isDeleting { onPlay() } }
     }
 }

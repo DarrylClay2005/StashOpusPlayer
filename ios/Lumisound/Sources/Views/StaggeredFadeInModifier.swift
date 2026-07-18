@@ -14,8 +14,13 @@ struct StaggeredFadeInModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .opacity(visible ? 1 : 0)
+            // Small upward slide alongside the fade — rows settle into place
+            // rather than just materializing, giving the staggered reveal a
+            // bit more life without anything approaching a spring-per-frame
+            // cost.
+            .offset(y: visible ? 0 : 6)
             .animation(
-                .easeOut(duration: 0.25).delay(delay),
+                .easeOut(duration: 0.3).delay(delay),
                 value: visible
             )
             .onAppear { visible = true }

@@ -7,26 +7,28 @@ extension StreamSearchView {
 
     var configuredBody: some View {
         VStack(spacing: 0) {
-            // Source picker
-            Picker("Source", selection: $selectedSource) {
-                ForEach(sources, id: \.self) { src in
-                    Text(sourceLabel(src)).tag(src)
+            // Source picker — a custom icon+label pill row (matching the
+            // sliding-pill language DiscoverView's tab selector already
+            // established) instead of the stock `.segmented` Picker, which
+            // rendered with default iOS colors and no accent tint or icons.
+            sourcePillSelector
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+                .onChange(of: selectedSource) { _ in
+                    if !searchText.isEmpty {
+                        triggerSearch()
+                    }
                 }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
-            .onChange(of: selectedSource) { _ in
-                if !searchText.isEmpty {
-                    triggerSearch()
-                }
-            }
 
-            // Error banner
+            // Error banner — glass card with an icon-scale pop-in and a
+            // dismiss control, sliding down from the top instead of just
+            // appearing, so a failure reads as a distinct event rather than
+            // a static line of red text.
             if let error = streaming.errorMessage {
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 15))
                         .foregroundStyle(AppTheme.warning)
                     Text(error)
                         .font(AppTheme.bodyFont(size: 13))
@@ -34,16 +36,35 @@ extension StreamSearchView {
                         .lineLimit(2)
                     Spacer()
                     if !searchText.isEmpty {
-                        Button("Retry") {
+                        Button {
                             triggerSearch()
+                        } label: {
+                            Text("Retry")
+                                .font(AppTheme.bodyFont(size: 13).weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(AppTheme.warning, in: Capsule())
                         }
-                        .font(AppTheme.bodyFont(size: 13).weight(.semibold))
-                        .foregroundStyle(AppTheme.dynamicAccent)
+                        .buttonStyle(PressableButtonStyle())
                     }
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            streaming.errorMessage = nil
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(PressableButtonStyle())
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(AppTheme.warning.opacity(0.12))
+                .padding(.vertical, 10)
+                .adaptiveGlass(tint: AppTheme.warning, in: Rectangle(), fallback: AppTheme.warning.opacity(0.14))
+                .overlay(Divider().background(AppTheme.warning.opacity(0.3)), alignment: .bottom)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             // Results
@@ -55,6 +76,7 @@ extension StreamSearchView {
                 streamResultsBody
             }
         }
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: streaming.errorMessage != nil)
         .searchable(
             text: $searchText,
             placement: .navigationBarDrawer(displayMode: .always),
@@ -153,7 +175,7 @@ extension StreamSearchView {
                 Task { await streaming.searchServerLibrary(query: searchText) }
             }
             if trendingQueries.isEmpty {
-                Task { trendingQueries = await streaming.searchTrending() }
+                loadTrending(days: trendingWindowDays)
             }
             refreshDownloadedStatus()
         }
@@ -185,6 +207,48 @@ extension StreamSearchView {
                 }
             case .failure(let error):
                 streaming.errorMessage = "File picker error: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Custom icon+label pill row replacing the stock `.segmented` Picker —
+    /// each source gets an icon, the active pill slides via
+    /// `matchedGeometryEffect` (namespace lives on `StreamSearchView` itself
+    /// since extensions can't hold `@Namespace` storage), and taps get the
+    /// same tactile press feedback as every other control in this redesign.
+    var sourcePillSelector: some View {
+        HStack(spacing: 6) {
+            ForEach(sources, id: \.self) { src in
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        selectedSource = src
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: sourceIcon(src))
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(sourceLabel(src))
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(selectedSource == src ? .white : AppTheme.textSecondary)
+                    .background {
+                        if selectedSource == src {
+                            Capsule(style: .continuous)
+                                .fill(AppTheme.dynamicAccentGradient)
+                                .shadow(color: AppTheme.dynamicAccent.opacity(0.4), radius: 6, x: 0, y: 3)
+                                .matchedGeometryEffect(id: "sourcePill", in: sourcePillNamespace)
+                        } else {
+                            Capsule(style: .continuous)
+                                .fill(AppTheme.surface.opacity(0.6))
+                                .overlay(Capsule().stroke(.white.opacity(0.06), lineWidth: 1))
+                        }
+                    }
+                }
+                .buttonStyle(PressableButtonStyle())
             }
         }
     }
