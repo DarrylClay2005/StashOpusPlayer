@@ -86,6 +86,16 @@ final class SleepTimerService: ObservableObject {
             timer = nil
             isActive = false
             appLog("SleepTimer: expired — beginning fade", category: "general")
+            // Real device notification so the user learns the timer ended
+            // even if the app isn't in the foreground — the fade itself is
+            // silent otherwise, so without this the only visible sign is
+            // music gradually getting quieter with no explanation.
+            NotificationService.shared.notify(
+                title: "Sleep Timer Ended",
+                body: "Playback is fading out.",
+                identifier: "sleep-timer-\(Date().timeIntervalSince1970)",
+                topic: "sleep_timer_ending"
+            )
             beginFade()
         }
     }

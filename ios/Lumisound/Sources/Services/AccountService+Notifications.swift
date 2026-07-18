@@ -74,4 +74,19 @@ extension AccountService {
         guard let token = UserDefaults.standard.string(forKey: Self.deviceTokenKey) else { return }
         await unregisterPushToken(token)
     }
+
+    /// Re-sends this device's already-obtained APNs token to the server, if
+    /// it has one cached. `registerPushToken(_:)` above intentionally skips
+    /// its network call while logged out — which is the common case, since
+    /// APNs registration typically completes (and caches the token here)
+    /// before the user has signed in on a fresh install. Without this, that
+    /// token was never actually reaching the server even after the user
+    /// later logged in, silently leaving that device unable to receive real
+    /// pushes until its token happened to change. `NotificationService`
+    /// calls this whenever `isLoggedIn` flips to `true`; it's a harmless
+    /// no-op otherwise (nothing logged in, or no token cached yet).
+    func resendStoredPushTokenIfNeeded() async {
+        guard isLoggedIn, let token = UserDefaults.standard.string(forKey: Self.deviceTokenKey) else { return }
+        await registerPushToken(token)
+    }
 }

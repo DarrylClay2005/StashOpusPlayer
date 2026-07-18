@@ -143,6 +143,18 @@ extension SettingsView {
                     // really did rescan, re-tag, and re-enrich every track.
                     if let result = library.lastScanResult {
                         ToastCenter.shared.show(result, category: .success, icon: "checkmark.circle")
+                        // Also a real device notification (gated by the
+                        // "Background Scan & Import" toggle in Settings →
+                        // Notifications) — this can run long enough that the
+                        // user has switched away from the app entirely by the
+                        // time it finishes, and the toast alone is silent to
+                        // anyone not looking at this screen.
+                        NotificationService.shared.notify(
+                            title: "Library Sync Complete",
+                            body: result,
+                            identifier: "background-import-\(Date().timeIntervalSince1970)",
+                            topic: "background_import"
+                        )
                     }
                 }
             } label: {
