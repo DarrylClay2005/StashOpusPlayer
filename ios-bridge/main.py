@@ -12519,6 +12519,12 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
                 (user_id,),
             )
             pinned = await cur.fetchall()
+            # Account creation date, not the (lazily-created) social profile
+            # row's own timestamp — "Member Since" should reflect how long
+            # someone has actually had a Lumisound account, matching what
+            # users expect from the same concept on Discord/etc.
+            await cur.execute("SELECT created_at FROM ios_users WHERE id = %s", (user_id,))
+            user_row = await cur.fetchone()
 
     return {
         "user_id": user_id,
@@ -12526,6 +12532,7 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
         "main_accent_hex": row[1] if row else None,
         "sub_accent_hex": row[2] if row else None,
         "share_now_playing": bool(row[3]) if row else True,
+        "member_since": user_row[0].isoformat() if user_row and user_row[0] else None,
         "pinned_tracks": [
             {
                 "id": p[0], "source_track_id": p[1], "track_url": p[2],
@@ -12620,7 +12627,7 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
                 raise HTTPException(status_code=404, detail="User not found")
 
             await cur.execute(
-                "SELECT id, username, display_name, avatar_url FROM ios_users "
+                "SELECT id, username, display_name, avatar_url, created_at FROM ios_users "
                 "WHERE id = %s AND is_active = TRUE",
                 (user_id,),
             )
@@ -12648,11 +12655,12 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
             is_friend = (await cur.fetchone()) is not None
 
     return {
-        **_public_user_fields(user_row),
+        **_public_user_fields((user_row[0], user_row[1], user_row[2], user_row[3])),
         "bio": profile_row[0] if profile_row else None,
         "main_accent_hex": profile_row[1] if profile_row else None,
         "sub_accent_hex": profile_row[2] if profile_row else None,
         "is_friend": is_friend,
+        "member_since": user_row[4].isoformat() if user_row[4] else None,
         "pinned_tracks": [
             {"source_track_id": p[0], "track_url": p[1], "title": p[2], "artist": p[3], "album": p[4]}
             for p in pinned

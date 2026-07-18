@@ -12,11 +12,13 @@ struct ProfileView: View {
     @EnvironmentObject private var account: AccountService
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var social: SocialService
+    @EnvironmentObject private var player: AudioPlayerManager
 
     @State private var draftBio: String = ""
     @State private var mainAccentHex: String? = nil
     @State private var subAccentHex: String? = nil
     @State private var shareNowPlaying: Bool = true
+    @State private var memberSince: String? = nil
     @State private var pinnedTracks: [PinnedTrack] = []
     @State private var isSaving = false
     @State private var editingSlot: Int? = nil // which pinned-track slot the picker sheet is editing
@@ -30,42 +32,55 @@ struct ProfileView: View {
         ZStack {
             Color.clear.ignoresSafeArea()
 
-            List {
-                // MARK: Header — mirrors how this profile renders to others,
-                // using the user's own chosen main/sub accent colors.
-                Section {
-                    VStack(spacing: 12) {
+            ScrollView {
+                VStack(spacing: 16) {
+                    // MARK: Header — banner + avatar mirrors how this profile
+                    // renders to others, using the user's own chosen
+                    // main/sub accent colors.
+                    ProfileHeaderCard(
+                        mainAccent: mainAccentColor,
+                        subAccent: subAccentColor,
+                        displayName: account.currentUser?.displayName ?? account.currentUser?.username ?? "",
+                        username: account.currentUser?.username ?? "",
+                        isOnline: true
+                    ) {
                         ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [mainAccentColor, subAccentColor],
-                                        startPoint: .topLeading, endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 88, height: 88)
-
                             if let img = account.avatarImage {
                                 AnimatedImageView(image: img, contentMode: .scaleAspectFill)
-                                    .frame(width: 80, height: 80)
-                                    .clipShape(Circle())
                             } else {
-                                Text(initials)
-                                    .font(.largeTitle.bold())
-                                    .foregroundStyle(.white)
+                                Rectangle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [mainAccentColor, subAccentColor],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .overlay(
+                                        Text(initials)
+                                            .font(.title.bold())
+                                            .foregroundStyle(.white)
+                                    )
                             }
-
                             if isUploadingAvatar {
-                                Circle().fill(.black.opacity(0.45)).frame(width: 88, height: 88)
+                                Color.black.opacity(0.45)
                                 ProgressView().tint(.white)
                             }
                         }
-                        .shadow(color: mainAccentColor.opacity(0.4), radius: 10, x: 0, y: 4)
-
+                    } action: {
                         PhotosPicker(selection: $photosPickerItem, matching: .images, photoLibrary: .shared()) {
-                            Text("Change Avatar (GIF supported)")
-                                .font(AppTheme.bodyFont(size: 13))
-                                .foregroundStyle(mainAccentColor)
+                            HStack {
+                                Image(systemName: "photo.badge.plus")
+                                Text("Change Avatar (GIF supported)")
+                                    .font(AppTheme.bodyFont(size: 13))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .foregroundStyle(mainAccentColor)
+                            .adaptiveGlass(
+                                tint: mainAccentColor.opacity(0.14),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous),
+                                fallback: AppTheme.surface
+                            )
                         }
                         .onChange(of: photosPickerItem) { item in
                             guard let item else { return }
@@ -78,125 +93,118 @@ struct ProfileView: View {
                                 photosPickerItem = nil
                             }
                         }
+                    }
 
-                        Text(account.currentUser?.displayName ?? account.currentUser?.username ?? "")
-                            .font(.title3.bold())
-                            .foregroundStyle(mainAccentColor)
-                        if let username = account.currentUser?.username {
-                            Text("@\(username)")
-                                .font(AppTheme.bodyFont(size: 13))
+                    // MARK: Now Playing — live local playback state, not a
+                    // fetch (this is the owner's own device).
+                    if let song = player.currentSong, player.isPlaying {
+                        ProfileInfoCard(title: "Listening To", icon: "waveform", tint: mainAccentColor) {
+                            NowPlayingActivityRow(
+                                title: song.title, artist: song.artist.isEmpty ? nil : song.artist,
+                                tint: mainAccentColor
+                            )
+                        }
+                    }
+
+                    // MARK: Bio
+                    ProfileInfoCard(title: "Bio / Status", icon: "text.quote", tint: mainAccentColor) {
+                        TextField("Add a short bio or status…", text: $draftBio, axis: .vertical)
+                            .lineLimit(3...6)
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .onChange(of: draftBio) { newValue in
+                                if newValue.count > 280 { draftBio = String(newValue.prefix(280)) }
+                            }
+                        HStack {
+                            Spacer()
+                            Text("\(draftBio.count)/280")
+                                .font(AppTheme.monoFont(size: 11))
                                 .foregroundStyle(AppTheme.textSecondary)
                         }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                }
-                .listRowBackground(AppTheme.surface)
 
-                // MARK: Bio
-                Section {
-                    TextField("Add a short bio or status…", text: $draftBio, axis: .vertical)
-                        .lineLimit(3...6)
-                        .foregroundStyle(AppTheme.textPrimary)
-                        .onChange(of: draftBio) { newValue in
-                            if newValue.count > 280 { draftBio = String(newValue.prefix(280)) }
-                        }
-                    HStack {
-                        Spacer()
-                        Text("\(draftBio.count)/280")
-                            .font(AppTheme.monoFont(size: 11))
+                    // MARK: Member Since
+                    ProfileInfoCard(title: "Member Since", icon: "calendar", tint: subAccentColor) {
+                        MemberSinceRow(memberSince: memberSince)
+                    }
+
+                    // MARK: Accent colors — Discord-style two-tone
+                    ProfileInfoCard(title: "Profile Colors", icon: "paintpalette.fill", tint: mainAccentColor) {
+                        AccentColorPickerView(title: "Main Accent", selectedHex: $mainAccentHex)
+                            .padding(.vertical, 6)
+                        AccentColorPickerView(title: "Sub Accent", selectedHex: $subAccentHex)
+                            .padding(.vertical, 6)
+                        Text("Main drives your profile's primary chrome; Sub drives secondary highlights — shown to anyone who visits your profile.")
+                            .font(AppTheme.bodyFont(size: 12))
                             .foregroundStyle(AppTheme.textSecondary)
                     }
-                } header: {
-                    sectionHeader("Bio / Status")
-                }
-                .listRowBackground(AppTheme.surface)
 
-                // MARK: Accent colors — Discord-style two-tone
-                Section {
-                    AccentColorPickerView(title: "Main Accent", selectedHex: $mainAccentHex)
-                        .padding(.vertical, 6)
-                    AccentColorPickerView(title: "Sub Accent", selectedHex: $subAccentHex)
-                        .padding(.vertical, 6)
-                } header: {
-                    sectionHeader("Profile Colors")
-                } footer: {
-                    Text("Main drives your profile's primary chrome; Sub drives secondary highlights — shown to anyone who visits your profile.")
-                        .font(AppTheme.bodyFont(size: 12))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .listRowBackground(AppTheme.surface)
-
-                // MARK: Pinned favorite tracks
-                Section {
-                    ForEach(0..<5, id: \.self) { slot in
-                        Button {
-                            editingSlot = slot
-                        } label: {
-                            HStack {
-                                Image(systemName: "pin.fill")
-                                    .foregroundStyle(slot < pinnedTracks.count ? subAccentColor : AppTheme.textSecondary.opacity(0.4))
-                                if slot < pinnedTracks.count {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(pinnedTracks[slot].title)
-                                            .foregroundStyle(AppTheme.textPrimary)
-                                            .lineLimit(1)
-                                        if let artist = pinnedTracks[slot].artist, !artist.isEmpty {
-                                            Text(artist)
-                                                .font(AppTheme.bodyFont(size: 12))
-                                                .foregroundStyle(AppTheme.textSecondary)
-                                                .lineLimit(1)
+                    // MARK: Pinned favorite tracks
+                    ProfileInfoCard(title: "Pinned Favorite Tracks", icon: "pin.fill", tint: subAccentColor) {
+                        VStack(spacing: 10) {
+                            ForEach(0..<5, id: \.self) { slot in
+                                Button {
+                                    editingSlot = slot
+                                } label: {
+                                    HStack {
+                                        if slot < pinnedTracks.count {
+                                            PinnedTrackRow(
+                                                title: pinnedTracks[slot].title,
+                                                artist: pinnedTracks[slot].artist,
+                                                tint: subAccentColor
+                                            )
+                                        } else {
+                                            HStack {
+                                                Image(systemName: "pin.fill")
+                                                    .font(.caption)
+                                                    .foregroundStyle(AppTheme.textSecondary.opacity(0.4))
+                                                Text("Empty slot")
+                                                    .font(AppTheme.bodyFont(size: 14))
+                                                    .foregroundStyle(AppTheme.textSecondary)
+                                                Spacer()
+                                            }
                                         }
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption2)
+                                            .foregroundStyle(AppTheme.textSecondary)
                                     }
-                                } else {
-                                    Text("Empty slot")
-                                        .foregroundStyle(AppTheme.textSecondary)
                                 }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2)
-                                    .foregroundStyle(AppTheme.textSecondary)
+                                if slot < 4 {
+                                    Divider().background(AppTheme.textSecondary.opacity(0.15))
+                                }
                             }
                         }
+                        Text("Pick up to 5 tracks to feature on your public profile.")
+                            .font(AppTheme.bodyFont(size: 12))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .padding(.top, 4)
                     }
-                } header: {
-                    sectionHeader("Pinned Favorite Tracks")
-                } footer: {
-                    Text("Pick up to 5 tracks to feature on your public profile.")
-                        .font(AppTheme.bodyFont(size: 12))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .listRowBackground(AppTheme.surface)
 
-                // MARK: Privacy — now-playing sharing hook for presence
-                Section {
-                    Toggle(isOn: $shareNowPlaying) {
-                        Label("Share Now Playing with Friends", systemImage: "waveform")
-                            .foregroundStyle(AppTheme.textPrimary)
+                    // MARK: Privacy — now-playing sharing hook for presence
+                    ProfileInfoCard(title: "Presence Privacy", icon: "eye.slash", tint: mainAccentColor) {
+                        Toggle(isOn: $shareNowPlaying) {
+                            Label("Share Now Playing with Friends", systemImage: "waveform")
+                                .foregroundStyle(AppTheme.textPrimary)
+                        }
+                        .tint(mainAccentColor)
+                        .onChange(of: shareNowPlaying) { newValue in
+                            Task { await social.updateProfile(shareNowPlaying: newValue) }
+                        }
+                        Text("When off, friends only see that you're online — not what you're currently playing. This also hides you from the Friends Activity feed.")
+                            .font(AppTheme.bodyFont(size: 12))
+                            .foregroundStyle(AppTheme.textSecondary)
                     }
-                    .tint(mainAccentColor)
-                    .onChange(of: shareNowPlaying) { newValue in
-                        Task { await social.updateProfile(shareNowPlaying: newValue) }
-                    }
-                } header: {
-                    sectionHeader("Presence Privacy")
-                } footer: {
-                    Text("When off, friends only see that you're online — not what you're currently playing. This also hides you from the Friends Activity feed.")
-                        .font(AppTheme.bodyFont(size: 12))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .listRowBackground(AppTheme.surface)
 
-                if let err = social.errorMessage {
-                    Section {
-                        Label(err, systemImage: "exclamationmark.triangle")
-                            .font(AppTheme.bodyFont(size: 13))
-                            .foregroundStyle(AppTheme.error)
+                    if let err = social.errorMessage {
+                        ProfileInfoCard(tint: AppTheme.error) {
+                            Label(err, systemImage: "exclamationmark.triangle")
+                                .font(AppTheme.bodyFont(size: 13))
+                                .foregroundStyle(AppTheme.error)
+                        }
                     }
-                    .listRowBackground(AppTheme.surface)
                 }
+                .padding(.top, 4)
+                .padding(.bottom, 40)
             }
-            .scrollContentBackground(.hidden)
         }
         .navigationTitle("My Profile")
         .navigationBarTitleDisplayMode(.inline)
@@ -248,6 +256,7 @@ struct ProfileView: View {
         mainAccentHex = profile.mainAccentHex
         subAccentHex = profile.subAccentHex
         shareNowPlaying = profile.shareNowPlaying
+        memberSince = profile.memberSince
         pinnedTracks = profile.pinnedTracks
     }
 
@@ -286,13 +295,6 @@ struct ProfileView: View {
             // indication why.
             applyLoadedProfile()
         }
-    }
-
-    private func sectionHeader(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(AppTheme.bodyFont(size: 11))
-            .foregroundStyle(AppTheme.textSecondary)
-            .kerning(0.8)
     }
 }
 

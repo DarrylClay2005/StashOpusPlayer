@@ -31,6 +31,7 @@ struct MySocialProfile: Decodable {
     let mainAccentHex: String?
     let subAccentHex: String?
     let shareNowPlaying: Bool
+    let memberSince: String?
     let pinnedTracks: [PinnedTrack]
 
     enum CodingKeys: String, CodingKey {
@@ -39,6 +40,7 @@ struct MySocialProfile: Decodable {
         case mainAccentHex   = "main_accent_hex"
         case subAccentHex    = "sub_accent_hex"
         case shareNowPlaying = "share_now_playing"
+        case memberSince     = "member_since"
         case pinnedTracks    = "pinned_tracks"
     }
 }
@@ -53,6 +55,7 @@ struct PublicSocialProfile: Decodable, Identifiable {
     let mainAccentHex: String?
     let subAccentHex: String?
     let isFriend: Bool
+    let memberSince: String?
     let pinnedTracks: [PinnedTrack]
 
     var id: String { userId }
@@ -66,6 +69,7 @@ struct PublicSocialProfile: Decodable, Identifiable {
         case mainAccentHex = "main_accent_hex"
         case subAccentHex  = "sub_accent_hex"
         case isFriend      = "is_friend"
+        case memberSince   = "member_since"
         case pinnedTracks  = "pinned_tracks"
     }
 }

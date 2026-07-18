@@ -39,82 +39,64 @@ struct PublicProfileView: View {
             if isLoading {
                 ProgressView().tint(AppTheme.dynamicAccent)
             } else if let profile {
-                List {
-                    Section {
-                        VStack(spacing: 10) {
-                            ZStack {
-                                Circle()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [mainAccentColor, subAccentColor],
-                                            startPoint: .topLeading, endPoint: .bottomTrailing
-                                        )
-                                    )
-                                    .frame(width: 84, height: 84)
-                                SocialAvatarView(userId: userId, size: 78, fallbackFill: .clear)
+                ScrollView {
+                    VStack(spacing: 16) {
+                        ProfileHeaderCard(
+                            mainAccent: mainAccentColor,
+                            subAccent: subAccentColor,
+                            displayName: profile.displayName ?? profile.username,
+                            username: profile.username,
+                            isOnline: presence?.online ?? false
+                        ) {
+                            SocialAvatarView(userId: userId, size: 84, fallbackFill: .clear)
+                        } action: {
+                            friendActionControl
+                        }
+
+                        if presence?.online == true, presence?.isPlaying == true,
+                           let title = presence?.nowPlayingTitle {
+                            ProfileInfoCard(title: "Listening To", icon: "waveform", tint: mainAccentColor) {
+                                NowPlayingActivityRow(title: title, artist: presence?.nowPlayingArtist, tint: mainAccentColor)
                             }
-                            .shadow(color: mainAccentColor.opacity(0.4), radius: 8, x: 0, y: 4)
+                        }
 
-                            Text(profile.displayName ?? profile.username)
-                                .font(.title3.bold())
-                                .foregroundStyle(mainAccentColor)
-                            Text("@\(profile.username)")
-                                .font(AppTheme.bodyFont(size: 13))
-                                .foregroundStyle(AppTheme.textSecondary)
-
-                            PresenceIndicatorView(presence: presence)
-                                .padding(.top, 2)
-
-                            if let bio = profile.bio, !bio.isEmpty {
+                        if let bio = profile.bio, !bio.isEmpty {
+                            ProfileInfoCard(title: "Bio / Status", icon: "text.quote", tint: mainAccentColor) {
                                 Text(bio)
                                     .font(AppTheme.bodyFont(size: 14))
                                     .foregroundStyle(AppTheme.textPrimary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.top, 6)
                             }
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                    }
-                    .listRowBackground(AppTheme.surface)
 
-                    Section {
-                        friendActionControl
-                    }
-                    .listRowBackground(AppTheme.surface)
+                        ProfileInfoCard(title: "Member Since", icon: "calendar", tint: subAccentColor) {
+                            MemberSinceRow(memberSince: profile.memberSince)
+                        }
 
-                    if !profile.pinnedTracks.isEmpty {
-                        Section {
-                            ForEach(Array(profile.pinnedTracks.enumerated()), id: \.offset) { _, track in
-                                HStack {
-                                    Image(systemName: "pin.fill")
-                                        .foregroundStyle(subAccentColor)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(track.title).foregroundStyle(AppTheme.textPrimary)
-                                        if let artist = track.artist, !artist.isEmpty {
-                                            Text(artist)
-                                                .font(AppTheme.bodyFont(size: 12))
-                                                .foregroundStyle(AppTheme.textSecondary)
+                        if !profile.pinnedTracks.isEmpty {
+                            ProfileInfoCard(title: "Pinned Favorite Tracks", icon: "pin.fill", tint: subAccentColor) {
+                                VStack(spacing: 10) {
+                                    ForEach(Array(profile.pinnedTracks.enumerated()), id: \.offset) { index, track in
+                                        PinnedTrackRow(title: track.title, artist: track.artist, tint: subAccentColor)
+                                        if index < profile.pinnedTracks.count - 1 {
+                                            Divider().background(AppTheme.textSecondary.opacity(0.15))
                                         }
                                     }
                                 }
                             }
-                        } header: {
-                            sectionHeader("Pinned Favorite Tracks")
                         }
-                        .listRowBackground(AppTheme.surface)
-                    }
 
-                    if profile.isFriend {
-                        Section {
-                            Button(role: .destructive) { showBlockConfirm = true } label: {
-                                Label("Block User", systemImage: "hand.raised.fill")
+                        if profile.isFriend {
+                            ProfileInfoCard(tint: AppTheme.error) {
+                                Button(role: .destructive) { showBlockConfirm = true } label: {
+                                    Label("Block User", systemImage: "hand.raised.fill")
+                                        .frame(maxWidth: .infinity)
+                                }
                             }
                         }
-                        .listRowBackground(AppTheme.surface)
                     }
+                    .padding(.top, 4)
+                    .padding(.bottom, 40)
                 }
-                .scrollContentBackground(.hidden)
             } else {
                 Text("This profile isn't available.")
                     .foregroundStyle(AppTheme.textSecondary)
@@ -212,12 +194,5 @@ struct PublicProfileView: View {
         isLoading = true
         defer { isLoading = false }
         profile = await social.fetchPublicProfile(userId: userId)
-    }
-
-    private func sectionHeader(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(AppTheme.bodyFont(size: 11))
-            .foregroundStyle(AppTheme.textSecondary)
-            .kerning(0.8)
     }
 }
