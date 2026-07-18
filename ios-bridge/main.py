@@ -914,14 +914,84 @@ async def _run_ytdlp(*args: str, timeout: float = 30.0) -> list[dict]:
     return results
 
 
+# Auto-generated YouTube "Topic" channels (e.g. "Artist Name - Topic")
+# publish one machine-generated video per track for an artist's full
+# discography. Defined here (rather than down near _is_topic_channel_video,
+# the only place it used to live) so both the download-time diagnostic AND
+# every metadata-extraction/enumeration path below can share one definition
+# instead of a second ad-hoc string literal drifting out of sync with it.
+_TOPIC_CHANNEL_SUFFIX = " - Topic"
+
+
+def _strip_topic_suffix(name: str) -> str:
+    """Strips a trailing " - Topic" from a YouTube auto-generated channel
+    name, so it reads as a normal artist name (e.g. "Some Band - Topic" ->
+    "Some Band"). No-op for anything that doesn't end with the suffix."""
+    name = (name or "").strip()
+    if name.endswith(_TOPIC_CHANNEL_SUFFIX):
+        return name[: -len(_TOPIC_CHANNEL_SUFFIX)].strip()
+    return name
+
+
+def _pick_youtube_thumbnail(entry: dict, track_id: str) -> str:
+    """Picks a thumbnail URL that's actually likely to resolve, for a
+    YouTube entry.
+
+    yt-dlp's YouTube extractor mixes confirmed thumbnails (reported by
+    YouTube itself, with real `width`/`height`) with synthesized *guesses*
+    at other conventional sizes (notably `maxresdefault.jpg`), appended
+    regardless of whether that size actually exists for the video — many
+    videos (older uploads, and especially auto-generated "Topic" channel
+    tracks, which are frequently uploaded without a custom HD thumbnail at
+    all) have no maxres source image, so blindly trusting `entry["thumbnail"]`
+    or the last item of `entry["thumbnails"]` (previously this function's
+    entire selection logic) can hand back a URL that 404s, leaving the track
+    with no artwork.
+
+    Entries carrying real `width` are the ones YouTube itself vouches for as
+    existing; prefer the highest-resolution one of those. Only fall back to
+    a dimension-less URL, and finally to YouTube's `i.ytimg.com/.../hqdefault.jpg`
+    (auto-generated for every valid video ID, so always fetchable), when
+    nothing dimensioned is available.
+    """
+    thumbnails = entry.get("thumbnails") or []
+    dimensioned = [t for t in thumbnails if t.get("url") and t.get("width")]
+    if dimensioned:
+        best = max(dimensioned, key=lambda t: (t.get("width") or 0, t.get("preference") or 0))
+        return best["url"]
+    if entry.get("thumbnail"):
+        return entry["thumbnail"]
+    if thumbnails:
+        # No dimensioned entries at all — still better than nothing, but not
+        # trusted enough to prefer over a guaranteed-to-exist hqdefault below
+        # when we know the video id.
+        fallback = thumbnails[-1].get("url", "")
+        if fallback:
+            return fallback
+    if track_id:
+        return f"https://i.ytimg.com/vi/{track_id}/hqdefault.jpg"
+    return ""
+
+
 def _parse_track(entry: dict, source: str) -> dict:
     """Normalise a yt-dlp flat-playlist or full dump into a StreamTrack dict."""
     track_id = entry.get("id") or entry.get("webpage_url_basename") or ""
     # 'track' is the clean song title where an extractor provides one (e.g.
     # Bandcamp's full --dump-json 'title' is "Artist - Track", redundant with
-    # the 'artist' field below — 'track' has just "Track"). Falls through to
-    # 'title'/'fulltitle' for extractors (YouTube, SoundCloud) that don't set it.
+    # the 'artist' field below — 'track' has just "Track". YouTube "Topic"
+    # channel uploads also set 'track' to the clean song title, without the
+    # video title's occasional extra noise). Falls through to
+    # 'title'/'fulltitle' for extractors (SoundCloud, and YouTube videos that
+    # don't set 'track') that don't set it.
     title = entry.get("track") or entry.get("title") or entry.get("fulltitle") or "Unknown Title"
+
+    # A YouTube "Topic" channel upload's `channel`/`uploader` field is the
+    # channel name itself, e.g. "Some Band - Topic" — detect that BEFORE
+    # picking `artist` below, so the noisy " - Topic" suffix can be stripped
+    # if the extraction falls through to the channel name (the 'artist' tag,
+    # when present, is already clean and takes priority as before).
+    raw_channel_name = entry.get("channel") or entry.get("uploader") or ""
+    is_topic_channel = raw_channel_name.strip().endswith(_TOPIC_CHANNEL_SUFFIX)
 
     # Artist: uploader / channel / artist tag, in priority order.
     # SoundCloud flat-playlist entries often use uploader_id rather than uploader.
@@ -933,6 +1003,8 @@ def _parse_track(entry: dict, source: str) -> dict:
         or entry.get("creator")
         or "Unknown Artist"
     )
+    if is_topic_channel:
+        artist = _strip_topic_suffix(artist)
 
     duration_raw = entry.get("duration") or 0
     try:
@@ -940,12 +1012,17 @@ def _parse_track(entry: dict, source: str) -> dict:
     except (ValueError, TypeError):
         duration_seconds = 0
 
-    # Thumbnail: prefer 'thumbnail', fall back to first item in 'thumbnails' list
-    thumbnail_url = entry.get("thumbnail") or ""
-    if not thumbnail_url:
-        thumbnails = entry.get("thumbnails") or []
-        if thumbnails:
-            thumbnail_url = thumbnails[-1].get("url", "")
+    # Thumbnail: for YouTube, avoid trusting an unconfirmed guessed URL (see
+    # _pick_youtube_thumbnail); other extractors keep the previous
+    # best-effort "first real thumbnail, else last of the list" behavior.
+    if source == "youtube":
+        thumbnail_url = _pick_youtube_thumbnail(entry, track_id)
+    else:
+        thumbnail_url = entry.get("thumbnail") or ""
+        if not thumbnail_url:
+            thumbnails = entry.get("thumbnails") or []
+            if thumbnails:
+                thumbnail_url = thumbnails[-1].get("url", "")
 
     # Canonical URL
     youtube_url = (
@@ -962,6 +1039,11 @@ def _parse_track(entry: dict, source: str) -> dict:
         "thumbnail_url": thumbnail_url,
         "source": source,
         "youtube_url": youtube_url,
+        # Surfaced so a client can show a "Topic channel" badge/label or
+        # otherwise treat this as a first-class source variant rather than a
+        # generic YouTube video — see the sibling StreamSearchView workstream
+        # note in this branch's summary.
+        "is_topic_channel": is_topic_channel,
     }
 
 
@@ -1129,6 +1211,70 @@ async def _record_download_history(
             )
 
 
+async def _log_download_attempt(
+    user_id: Optional[str],
+    source: str,
+    source_id: str,
+    title: Optional[str],
+    status: str,
+    error_message: Optional[str],
+    duration_ms: Optional[int],
+) -> None:
+    """Best-effort row in `ios_download_log` (see schema.sql) for one
+    /api/download job — one row per job (not per internal yt-dlp retry
+    attempt), covering both success and failure. Distinct from
+    `ios_download_history` (which only records successful, account-linked
+    downloads, upserted by track for "My Library"/stats) — this table is a
+    plain append-only attempt log, kept for anonymous downloads too
+    (user_id NULL), so failures are diagnosable without an account. Always
+    called via `asyncio.create_task` by callers — never awaited inline —
+    so a logging hiccup can't add latency to (or fail) the download itself."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    INSERT INTO ios_download_log
+                        (user_id, source, source_id, title, status, error_message, duration_ms, completed_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    """,
+                    (user_id, source, source_id, title, status, error_message, duration_ms),
+                )
+    except Exception:
+        logger.exception("Failed to record ios_download_log entry for %s:%s (status=%s)", source, source_id, status)
+
+
+async def _log_stream_attempt(
+    user_id: Optional[str],
+    source: str,
+    source_id: str,
+    title: Optional[str],
+    status: str,
+    error_message: Optional[str],
+    duration_ms: Optional[int],
+) -> None:
+    """Best-effort row in `ios_stream_log` (see schema.sql) for one
+    streaming-URL-resolution attempt (/api/stream, /api/stream/proxy) —
+    the streaming-side counterpart to `_log_download_attempt`. Same
+    fire-and-forget contract: callers use `asyncio.create_task`, and a
+    logging failure here must never surface to the player."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    INSERT INTO ios_stream_log
+                        (user_id, source, source_id, title, status, error_message, duration_ms, completed_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    """,
+                    (user_id, source, source_id, title, status, error_message, duration_ms),
+                )
+    except Exception:
+        logger.exception("Failed to record ios_stream_log entry for %s:%s (status=%s)", source, source_id, status)
+
+
 async def _youtube_api_key_for_user(user_id: str) -> str:
     """Returns the user's personal YouTube Data API key if they've set one,
     otherwise falls back to the server-wide YOUTUBE_API_KEY env var."""
@@ -1172,8 +1318,15 @@ _YOUTUBE_CHANNEL_URL_RE = re.compile(
 
 
 def _youtube_thumbnail_from_snippet(snippet: dict) -> str:
+    """Picks the best available thumbnail from a YouTube Data API `snippet`'s
+    `thumbnails` dict. The API only lists sizes that actually exist for a
+    given video/channel, so (unlike yt-dlp's own thumbnail guesses, see
+    _pick_youtube_thumbnail) there's no 404 risk here — but the preference
+    order must still include the higher tiers (`maxres`/`standard`) or a
+    caller silently gets worse-than-available artwork even when the API
+    offered better."""
     thumbnails = (snippet or {}).get("thumbnails") or {}
-    for size in ("high", "medium", "default"):
+    for size in ("maxres", "standard", "high", "medium", "default"):
         if size in thumbnails:
             return thumbnails[size].get("url", "")
     return ""
@@ -1263,7 +1416,22 @@ async def _channel_uploads_via_api(channel_id: str, max_results: int, api_key: s
     (channels.list?part=contentDetails + playlistItems.list), which costs
     ~1-2 quota units total — versus search.list?order=date, which costs 100
     units per call regardless of maxResults. Raises on any API error so the
-    caller can fall back to yt-dlp."""
+    caller can fall back to yt-dlp.
+
+    `max_results` is passed straight through to playlistItems.list's own
+    maxResults/pagination-less single page — callers wanting a full
+    "Topic" channel discography (which can run past a couple hundred
+    tracks) should pass a large `max_results` rather than relying on a
+    separate enumeration path; this function itself has no artificial cap
+    beyond what the caller requests, unlike yt-dlp's flat-playlist scrape
+    (~205-entry cap) used as the fallback in _channel_uploads_via_ytdlp.
+
+    Auto-generated "Topic" channels (see _TOPIC_CHANNEL_SUFFIX) publish
+    their channel name as e.g. "Some Band - Topic" — `videoOwnerChannelTitle`/
+    `channel_title` here would otherwise carry that noise straight into the
+    track's `artist` field, so it's stripped before use, and each track is
+    flagged `is_topic_channel` for the client.
+    """
     data = await asyncio.to_thread(
         _youtube_data_api_get, "channels",
         {"part": "contentDetails,snippet", "id": channel_id},
@@ -1275,31 +1443,74 @@ async def _channel_uploads_via_api(channel_id: str, max_results: int, api_key: s
     uploads_playlist_id = (
         (items[0].get("contentDetails") or {}).get("relatedPlaylists") or {}
     ).get("uploads")
-    channel_title = (items[0].get("snippet") or {}).get("title") or "Unknown Artist"
+    raw_channel_title = (items[0].get("snippet") or {}).get("title") or "Unknown Artist"
+    is_topic_channel = raw_channel_title.strip().endswith(_TOPIC_CHANNEL_SUFFIX)
+    channel_title = _strip_topic_suffix(raw_channel_title) if is_topic_channel else raw_channel_title
     if not uploads_playlist_id:
         return []
 
-    data = await asyncio.to_thread(
-        _youtube_data_api_get, "playlistItems",
-        {"part": "snippet", "playlistId": uploads_playlist_id, "maxResults": max_results},
-        api_key,
-    )
-    tracks = []
-    for item in data.get("items") or []:
-        snippet = item.get("snippet") or {}
-        video_id = (snippet.get("resourceId") or {}).get("videoId")
-        title = snippet.get("title") or ""
-        if not video_id or title in ("Deleted video", "Private video"):
+    # Paginate via nextPageToken until `max_results` is reached — a single
+    # playlistItems.list call is capped at 50 by the API regardless of the
+    # maxResults value requested, so without this loop a "Topic" channel
+    # discography beyond the first 50 uploads was silently truncated no
+    # matter how large a `max_results`/`limit` the caller asked for.
+    tracks: list[dict] = []
+    page_token: Optional[str] = None
+    while len(tracks) < max_results:
+        params = {
+            "part": "snippet",
+            "playlistId": uploads_playlist_id,
+            "maxResults": min(50, max_results - len(tracks)),
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        data = await asyncio.to_thread(_youtube_data_api_get, "playlistItems", params, api_key)
+        for item in data.get("items") or []:
+            snippet = item.get("snippet") or {}
+            video_id = (snippet.get("resourceId") or {}).get("videoId")
+            title = snippet.get("title") or ""
+            if not video_id or title in ("Deleted video", "Private video"):
+                continue
+            raw_artist = snippet.get("videoOwnerChannelTitle") or raw_channel_title
+            is_track_topic_channel = is_topic_channel or raw_artist.strip().endswith(_TOPIC_CHANNEL_SUFFIX)
+            artist = _strip_topic_suffix(raw_artist) if is_track_topic_channel else (raw_artist or channel_title)
+            tracks.append({
+                "id": video_id,
+                "title": title or "Unknown Title",
+                "artist": artist or channel_title,
+                "duration_seconds": 0,
+                "thumbnail_url": _youtube_thumbnail_from_snippet(snippet),
+                "source": "youtube",
+                "youtube_url": f"https://youtube.com/watch?v={video_id}",
+                "is_topic_channel": is_track_topic_channel,
+            })
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+
+    # Batch-fetch real durations (videos.list accepts up to 50 IDs/call) —
+    # playlistItems.list's snippet part carries no duration at all, so
+    # without this every uploaded track showed "0:00" everywhere this
+    # function's results are used (channel-uploads preview, subscription
+    # checks, and the /api/resolve channel path below).
+    for batch_start in range(0, len(tracks), 50):
+        batch = tracks[batch_start:batch_start + 50]
+        try:
+            durations_data = await asyncio.to_thread(
+                _youtube_data_api_get, "videos",
+                {"part": "contentDetails", "id": ",".join(t["id"] for t in batch)},
+                api_key,
+            )
+        except Exception as exc:
+            logger.warning("_channel_uploads_via_api: duration batch fetch failed: %s", exc)
             continue
-        tracks.append({
-            "id": video_id,
-            "title": title or "Unknown Title",
-            "artist": snippet.get("videoOwnerChannelTitle") or channel_title,
-            "duration_seconds": 0,
-            "thumbnail_url": _youtube_thumbnail_from_snippet(snippet),
-            "source": "youtube",
-            "youtube_url": f"https://youtube.com/watch?v={video_id}",
-        })
+        durations = {
+            v["id"]: _parse_iso8601_duration((v.get("contentDetails") or {}).get("duration", ""))
+            for v in durations_data.get("items", [])
+        }
+        for t in batch:
+            t["duration_seconds"] = durations.get(t["id"], 0)
+
     return tracks
 
 
@@ -1775,6 +1986,7 @@ async def stream(
         target_url = f"https://youtube.com/watch?v={id}"
 
     user_id = _account_token_user_id(request)
+    stream_start = time.monotonic()
     cache_key = f"{source}:{id}:{format}"
     cached = _STREAM_URL_CACHE.get(cache_key)
     if cached and cached[1] > time.monotonic():
@@ -1785,9 +1997,19 @@ async def stream(
         stream_url, failure_reason = await _get_raw_url(target_url, format_flag=format_flag, user_id=user_id)
         if stream_url:
             _STREAM_URL_CACHE[cache_key] = (stream_url, time.monotonic() + _STREAM_URL_TTL)
+    duration_ms = int((time.monotonic() - stream_start) * 1000)
     if not stream_url:
+        asyncio.create_task(_log_stream_attempt(
+            user_id=user_id, source=source, source_id=id, title=None,
+            status="failed", error_message=failure_reason or "No stream URL found",
+            duration_ms=duration_ms,
+        ))
         raise HTTPException(status_code=404, detail=failure_reason or "No stream URL found")
 
+    asyncio.create_task(_log_stream_attempt(
+        user_id=user_id, source=source, source_id=id, title=None,
+        status="success", error_message=None, duration_ms=duration_ms,
+    ))
     return {"url": stream_url, "expires_in": 21600}
 
 
@@ -1818,6 +2040,7 @@ async def stream_proxy(
         target_url = f"https://youtube.com/watch?v={id}"
 
     user_id = _account_token_user_id(request)
+    proxy_resolve_start = time.monotonic()
     cache_key = f"{source}:{id}:{format}"
     cached = _STREAM_URL_CACHE.get(cache_key)
     if cached and cached[1] > time.monotonic():
@@ -1827,8 +2050,18 @@ async def stream_proxy(
             target_url, format_flag=_format_flag(format), user_id=user_id
         )
         if not raw_url:
+            asyncio.create_task(_log_stream_attempt(
+                user_id=user_id, source=source, source_id=id, title=None,
+                status="failed", error_message=failure_reason or "No stream URL found",
+                duration_ms=int((time.monotonic() - proxy_resolve_start) * 1000),
+            ))
             raise HTTPException(status_code=404, detail=failure_reason or "No stream URL found")
         _STREAM_URL_CACHE[cache_key] = (raw_url, time.monotonic() + _STREAM_URL_TTL)
+        asyncio.create_task(_log_stream_attempt(
+            user_id=user_id, source=source, source_id=id, title=None,
+            status="success", error_message=None,
+            duration_ms=int((time.monotonic() - proxy_resolve_start) * 1000),
+        ))
 
     req_headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
@@ -2049,8 +2282,6 @@ def _ytdlp_auth_failure_reason(stderr: bytes) -> Optional[str]:
     return None
 
 
-_TOPIC_CHANNEL_SUFFIX = " - Topic"
-
 _TOPIC_CHANNEL_UNAVAILABLE_DETAIL = (
     'Blocked by YouTube: this is an auto-generated "Topic" channel track and '
     "can't be extracted right now — not an app bug, may resolve itself later."
@@ -2182,7 +2413,18 @@ async def download_track(
     source: str = Query("youtube", description="youtube, soundcloud, or bandcamp"),
     url: Optional[str] = Query(None, description="Full URL (required for soundcloud/bandcamp)"),
     format: str = Query("m4a", description="Audio format: mp3, m4a, flac, opus, best"),
-    title: Optional[str] = Query(None, description="Safe filename hint (no extension)"),
+    title: Optional[str] = Query(None, description="Safe filename hint (no extension) — the client "
+                     "may sanitize/shorten this for filesystem limits, so it is NOT guaranteed to be "
+                     "the full track title. Used only for the on-disk filename; see full_title for "
+                     "the value stored/displayed as the track's title."),
+    full_title: Optional[str] = Query(
+        None,
+        description="Full, untruncated track title — recorded in download history/pending-downloads, "
+                     "used in notification/webhook payloads, and embedded as the file's title tag. "
+                     "Kept separate from `title` (the filename hint) so a filesystem-safe/shortened "
+                     "filename is never mistaken for the real display title. Falls back to `title` "
+                     "then `id` if omitted (older clients).",
+    ),
     artist: Optional[str] = Query(None, description="Artist name, recorded in download history"),
     thumbnail: Optional[str] = Query(None, description="Thumbnail URL, recorded in download history"),
     duration: Optional[int] = Query(None, description="Duration in seconds, recorded in download history"),
@@ -2267,6 +2509,7 @@ async def download_track(
         expected_ext=expected_ext,
         safe_title=safe_title,
         title=title,
+        full_title=full_title,
         artist=artist,
         thumbnail=thumbnail,
         duration=duration,
@@ -2287,6 +2530,7 @@ async def _run_download_job(
     expected_ext: str,
     safe_title: str,
     title: Optional[str],
+    full_title: Optional[str],
     artist: Optional[str],
     thumbnail: Optional[str],
     duration: Optional[int],
@@ -2300,13 +2544,27 @@ async def _run_download_job(
     for one /api/download request, then records the result in `_DOWNLOAD_JOBS`
     for /api/download/status and /api/download/result to pick up. Split out of
     download_track() so the HTTP request can return instantly with a job_id.
+
+    Resolves `user_id` from `account_token` once here (rather than inside
+    `_do_download_job`) so BOTH the success path and every failure path below
+    can attribute an `ios_download_log` row to the right user — the log
+    entry needs to exist even when the job never gets far enough for
+    `_do_download_job`'s own user-scoped bookkeeping to run.
     """
+    job_start = time.monotonic()
+    user_id: Optional[str] = None
+    if account_token:
+        token_payload = decode_token(account_token)
+        if token_payload:
+            user_id = token_payload.get("sub")
+    display_title = full_title or title or id
+
     try:
         await _do_download_job(
             job_id=job_id, source=source, id=id, target_url=target_url,
             extra_args=extra_args, expected_ext=expected_ext, safe_title=safe_title,
-            title=title, artist=artist, thumbnail=thumbnail, duration=duration,
-            account_token=account_token, use_aria2=use_aria2,
+            title=title, full_title=full_title, artist=artist, thumbnail=thumbnail, duration=duration,
+            user_id=user_id, use_aria2=use_aria2,
             throttle_seconds=throttle_seconds, concurrent_fragments=concurrent_fragments,
         )
     except HTTPException as exc:
@@ -2314,12 +2572,22 @@ async def _run_download_job(
         job["status"] = "error"
         job["code"] = exc.status_code
         job["detail"] = exc.detail
+        asyncio.create_task(_log_download_attempt(
+            user_id=user_id, source=source, source_id=id, title=display_title,
+            status="failed", error_message=str(exc.detail),
+            duration_ms=int((time.monotonic() - job_start) * 1000),
+        ))
     except Exception as exc:
         logger.exception("download job %s failed", job_id)
         job = _DOWNLOAD_JOBS.get(job_id, {})
         job["status"] = "error"
         job["code"] = 500
         job["detail"] = str(exc)
+        asyncio.create_task(_log_download_attempt(
+            user_id=user_id, source=source, source_id=id, title=display_title,
+            status="failed", error_message=str(exc),
+            duration_ms=int((time.monotonic() - job_start) * 1000),
+        ))
 
 
 async def _do_download_job(
@@ -2331,10 +2599,11 @@ async def _do_download_job(
     expected_ext: str,
     safe_title: str,
     title: Optional[str],
+    full_title: Optional[str],
     artist: Optional[str],
     thumbnail: Optional[str],
     duration: Optional[int],
-    account_token: str,
+    user_id: Optional[str],
     use_aria2: bool = False,
     throttle_seconds: int = 5,
     concurrent_fragments: int = 4,
@@ -2350,13 +2619,16 @@ async def _do_download_job(
     tmp_dir: Optional[pathlib.Path] = None
     job_start = time.monotonic()
 
-    # Resolve the calling user once — used both for per-user cookies below and
-    # for the download-history write at the end of this function.
-    user_id: Optional[str] = None
-    if account_token:
-        token_payload = decode_token(account_token)
-        if token_payload:
-            user_id = token_payload.get("sub")
+    # `title` is only ever a (possibly-truncated/sanitized) filename hint — see
+    # the Query() doc comment on download_track(). `display_title` is what
+    # actually gets shown to the user or embedded as metadata: the full,
+    # untruncated title if the client sent one, falling back to the filename
+    # hint and finally the bare id for older clients that don't send either.
+    display_title = full_title or title or id
+
+    # user_id is resolved once by the caller (_run_download_job) from
+    # account_token — used both for per-user cookies below and for the
+    # download-history write at the end of this function.
     cookie_args = await _ytdlp_cookie_args(user_id)
     last_stderr = b""
 
@@ -2535,6 +2807,20 @@ async def _do_download_job(
         # app could never dedupe re-downloads by id and re-fetched owned tracks.
         tag_cmd += ["-movflags", "+faststart+use_metadata_tags"]
     tag_cmd += ["-metadata", f"LUMISOUND_ID={source_id}"]
+    # Explicitly (re)write the title/artist tags from our own resolved,
+    # untruncated display_title/artist rather than trusting whatever yt-dlp's
+    # own --embed-metadata wrote a moment earlier. yt-dlp embeds from its own
+    # fresh re-extraction of target_url, which for some sources/extractors can
+    # differ from what search/resolve already determined was the clean title
+    # (e.g. a YouTube "Topic" channel track's noisy raw video title vs. the
+    # clean track/artist fields _parse_track prefers) — overriding here
+    # guarantees the file's own tag always matches the full, untruncated title
+    # the user searched for/saw, not a filename-safe truncation of it and not
+    # a possibly-noisier independent re-extraction.
+    if display_title:
+        tag_cmd += ["-metadata", f"title={display_title}"]
+    if artist:
+        tag_cmd += ["-metadata", f"artist={artist}"]
     # Defense-in-depth alongside yt-dlp's own --embed-thumbnail: store the
     # thumbnail URL as a metadata tag too, so if embedding ever silently fails
     # for a given container/extractor (or the app's artwork disk cache is
@@ -2588,7 +2874,7 @@ async def _do_download_job(
                 user_id=user_id,
                 source=source,
                 source_id=id,
-                title=title or id,
+                title=display_title,
                 artist=artist or "",
                 thumbnail_url=thumbnail or "",
                 duration_seconds=duration or 0,
@@ -2599,8 +2885,14 @@ async def _do_download_job(
         # Feature: generalized outbound webhooks. Fire-and-forget — a broken
         # webhook URL must never affect the download itself.
         asyncio.create_task(_fire_user_webhooks(user_id, "download_complete", {
-            "source": source, "source_id": id, "title": title or id, "artist": artist or "",
+            "source": source, "source_id": id, "title": display_title, "artist": artist or "",
         }))
+
+    asyncio.create_task(_log_download_attempt(
+        user_id=user_id, source=source, source_id=id, title=display_title,
+        status="success", error_message=None,
+        duration_ms=int((time.monotonic() - job_start) * 1000),
+    ))
 
     content_type_map = {
         "mp3":  "audio/mpeg",
@@ -2636,7 +2928,7 @@ async def _do_download_job(
         async def _notify_download_ready() -> None:
             dest = await _persist_finished_job(
                 job_id=job_id, user_id=user_id, source_track_id=f"{source}:{id}",
-                title=title or id, artist=artist or "",
+                title=display_title, artist=artist or "",
                 output_file=output_file, media_type=media_type, filename=job["filename"],
             )
             if dest is None:
@@ -2669,7 +2961,7 @@ async def _do_download_job(
                         await _create_notification(
                             cur, user_id, "download_ready",
                             title="Download Ready",
-                            body=f"“{title or id}” is ready to add to your library",
+                            body=f"“{display_title}” is ready to add to your library",
                             data={"job_id": job_id, "source_track_id": f"{source}:{id}"},
                             content_available=True,
                         )
@@ -2980,6 +3272,27 @@ async def resolve_playlist(
                     return _filter_existing_tracks(tracks, source, existing_ids, inventory_ids)
                 except Exception as exc:
                     logger.warning("YouTube Data API resolve failed, falling back to yt-dlp: %s", exc)
+            elif _YOUTUBE_CHANNEL_URL_RE.search(url) or url.strip().startswith("@"):
+                # A channel URL/@handle (not a `list=` playlist) — most
+                # relevantly, a YouTube "Topic" channel's own page, pasted so
+                # the user can "Download All" that artist's whole
+                # auto-generated discography. Resolve to a channel_id and
+                # enumerate its full uploads playlist via the Data API
+                # (paginated, uncapped by `limit`) rather than falling
+                # through to the generic yt-dlp flat-playlist scrape below,
+                # which caps out around ~205 entries — well short of many
+                # Topic channels' full catalogs.
+                cache_key = f"resolve_channel:{url}:{limit}"
+                cached = _cache_get(cache_key)
+                if cached is not None:
+                    return _filter_existing_tracks(cached, source, existing_ids, inventory_ids)
+                try:
+                    channel_info = await _resolve_youtube_channel(url, api_key)
+                    tracks = await _channel_uploads_via_api(channel_info["channel_id"], limit, api_key)
+                    _cache_set(cache_key, tracks)
+                    return _filter_existing_tracks(tracks, source, existing_ids, inventory_ids)
+                except Exception as exc:
+                    logger.warning("YouTube Data API channel resolve failed, falling back to yt-dlp: %s", exc)
 
     # yt-dlp fallback (non-YouTube-API-key path, or YouTube Data API failed
     # above) — cache the resolved tracks so repeat resolves of the same
@@ -2999,7 +3312,15 @@ async def resolve_playlist(
     if source in ("soundcloud", "bandcamp"):
         args = ["--dump-json", url]
     else:
-        args = ["--dump-json", "--flat-playlist", *(await _ytdlp_cookie_args(user_id)), url]
+        # --playlist-end bounds yt-dlp's own enumeration to what was actually
+        # requested — without it yt-dlp scrapes as much of the channel/playlist
+        # as its internal flat-playlist cap allows (~205 entries) before the
+        # result is sliced down to `limit` in Python below, wasting time on a
+        # channel with a large discography (exactly what a YouTube "Topic"
+        # channel with a full artist catalog tends to be) when this fallback
+        # is reached (no YouTube API key configured, or the API path above failed).
+        args = ["--dump-json", "--flat-playlist", "--playlist-end", str(limit),
+                *(await _ytdlp_cookie_args(user_id)), url]
 
     try:
         entries = await _run_ytdlp(*args, timeout=120.0)

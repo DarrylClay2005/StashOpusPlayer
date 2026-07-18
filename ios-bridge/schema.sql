@@ -809,3 +809,54 @@ ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEF
 -- Feature: /social/similar-listeners collaborative-filtering recommendations.
 -- No new tables — reuses ios_play_history and the existing
 -- share_listening_activity opt-in (see the /social/* section in main.py).
+
+-- ---------------------------------------------------------------------------
+-- Download/streaming attempt logging (2026-07-18)
+-- ---------------------------------------------------------------------------
+
+-- Append-only log of every /api/download job attempt (start-to-finish, not
+-- per internal yt-dlp retry) — start, success, or failure with a reason —
+-- keyed loosely by (source, source_id) rather than a unique constraint since
+-- the same track can be legitimately re-downloaded/re-attempted many times.
+-- Distinct from ios_download_history (which only upserts successful,
+-- account-linked downloads for "My Library"/stats): this is a plain diagnostic
+-- trail that also covers anonymous downloads (user_id NULL) and failures, so
+-- "why did my download fail" can be answered without grepping raw app logs.
+-- user_id uses ON DELETE SET NULL (not CASCADE, unlike most other per-user
+-- tables here) so a deleted account's download history stays available for
+-- aggregate/ops diagnostics instead of disappearing with the account.
+CREATE TABLE IF NOT EXISTS ios_download_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(36) NULL,
+    source VARCHAR(20) NOT NULL,
+    source_id VARCHAR(280) NOT NULL,
+    title TEXT NULL,
+    status VARCHAR(20) NOT NULL,
+    error_message TEXT NULL,
+    duration_ms INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP NULL,
+    INDEX idx_user_created (user_id, created_at),
+    INDEX idx_source_id (source, source_id),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE SET NULL
+);
+
+-- Streaming-side counterpart to ios_download_log: one row per
+-- streaming-URL-resolution attempt (/api/stream, /api/stream/proxy) — a
+-- track being played, not downloaded, so "status"/"error_message" describe
+-- whether yt-dlp/the extractor produced a playable URL, not a downloaded file.
+CREATE TABLE IF NOT EXISTS ios_stream_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(36) NULL,
+    source VARCHAR(20) NOT NULL,
+    source_id VARCHAR(280) NOT NULL,
+    title TEXT NULL,
+    status VARCHAR(20) NOT NULL,
+    error_message TEXT NULL,
+    duration_ms INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP NULL,
+    INDEX idx_user_created (user_id, created_at),
+    INDEX idx_source_id (source, source_id),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE SET NULL
+);
