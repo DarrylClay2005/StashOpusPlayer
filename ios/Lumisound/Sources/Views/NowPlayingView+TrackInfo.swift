@@ -117,7 +117,7 @@ extension NowPlayingView {
                         .font(.system(size: 22, weight: .medium))
                         .foregroundStyle(library.isFavorite(songID: song.id) ? screenStyle.accentColor : AppTheme.textSecondary)
                         .frame(width: 44, height: 44)
-                        .contentTransition(.symbolEffect(.replace))
+                        .symbolReplaceTransition()
                 }
                 .buttonStyle(PressableButtonStyle())
             }

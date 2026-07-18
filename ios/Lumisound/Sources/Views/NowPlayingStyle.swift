@@ -2,6 +2,21 @@ import SwiftUI
 import AVFoundation
 import UIKit
 
+extension View {
+    /// `.contentTransition(.symbolEffect(.replace))` needs iOS 17 — this
+    /// app's deployment target is iOS 16 — so this falls back to a plain
+    /// opacity content transition on 16, which still crossfades the SF
+    /// Symbol change, just without the "replace" morph animation.
+    @ViewBuilder
+    func symbolReplaceTransition() -> some View {
+        if #available(iOS 17.0, *) {
+            self.contentTransition(.symbolEffect(.replace))
+        } else {
+            self.contentTransition(.opacity)
+        }
+    }
+}
+
 // MARK: - NowPlayingArtworkStyle
 
 enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {

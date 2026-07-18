@@ -83,7 +83,7 @@ extension NowPlayingView {
                 Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 28 * scale, weight: .bold))
                     .foregroundStyle(.white)
-                    .contentTransition(.symbolEffect(.replace))
+                    .symbolReplaceTransition()
             }
         }
         .buttonStyle(PressableButtonStyle())

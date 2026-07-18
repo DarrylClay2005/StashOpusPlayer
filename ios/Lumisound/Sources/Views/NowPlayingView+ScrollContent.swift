@@ -12,18 +12,29 @@ extension NowPlayingView {
                 topBar
 
                 // ── Hero card: artwork or full lyrics, depending on displayMode ──
-                heroSection
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                    .animation(.easeInOut(duration: 0.25), value: displayMode)
-                    // Subtle scroll-linked parallax — the hero card eases down
-                    // in scale/opacity as it scrolls toward the top edge,
-                    // rather than just hard-clipping, for a touch more
-                    // premium "liveliness" while scrolling to the panels below.
-                    .scrollTransition(.animated) { content, phase in
-                        content
-                            .scaleEffect(phase.isIdentity ? 1.0 : 0.94)
-                            .opacity(phase.isIdentity ? 1.0 : 0.85)
-                    }
+                // `.scrollTransition` (the scroll-linked parallax below) needs
+                // iOS 17 — this app's deployment target is iOS 16 — so it's
+                // only applied on 17+; iOS 16 falls back to just the
+                // transition/animation with no parallax rather than failing
+                // to build entirely.
+                if #available(iOS 17.0, *) {
+                    heroSection
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                        .animation(.easeInOut(duration: 0.25), value: displayMode)
+                        // Subtle scroll-linked parallax — the hero card eases down
+                        // in scale/opacity as it scrolls toward the top edge,
+                        // rather than just hard-clipping, for a touch more
+                        // premium "liveliness" while scrolling to the panels below.
+                        .scrollTransition(.animated) { content, phase in
+                            content
+                                .scaleEffect(phase.isIdentity ? 1.0 : 0.94)
+                                .opacity(phase.isIdentity ? 1.0 : 0.85)
+                        }
+                } else {
+                    heroSection
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                        .animation(.easeInOut(duration: 0.25), value: displayMode)
+                }
 
                 trackInfoSection
                 timelineSection
