@@ -20,7 +20,7 @@ extension NowPlayingView {
     /// Every upcoming song, manual + auto, in play order.
     var upNextSongs: [Song] { manualUpNextSongs + autoUpNextSongs }
 
-    private var playingFromLabel: String { player.playingFromContextLabel(library: library) }
+    private var queuePreviewContextLabel: String { player.playingFromContextLabel(library: library) }
 
     /// The compact "Up Next" card shown in the segmented panel picker's
     /// "Queue" tab. Collapsible via the existing `showQueuePreview`
@@ -43,7 +43,7 @@ extension NowPlayingView {
             isExpanded: $showQueuePreview,
             content: {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(playingFromLabel)
+                    Text(queuePreviewContextLabel)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AppTheme.textSecondary)
                         .lineLimit(1)
