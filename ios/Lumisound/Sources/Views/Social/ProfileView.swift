@@ -218,9 +218,6 @@ struct ProfileView: View {
             await social.fetchMyProfile()
             applyLoadedProfile()
         }
-        .onChange(of: social.myProfile?.userId) { _ in
-            applyLoadedProfile()
-        }
         .sheet(item: Binding(
             get: { editingSlot.map { PinnedSlot(index: $0) } },
             set: { editingSlot = $0?.index }
@@ -280,6 +277,14 @@ struct ProfileView: View {
                 subAccentHex: subAccentHex,
                 shareNowPlaying: shareNowPlaying
             )
+            // Re-sync local @State from whatever the server actually persisted
+            // (updateProfile() already refetches into social.myProfile) rather
+            // than trusting the optimistic local edit — otherwise a save that
+            // silently fails/partially applies leaves the screen showing a
+            // value that was never actually stored, and re-entering this
+            // screen later would look like "the change didn't take" with no
+            // indication why.
+            applyLoadedProfile()
         }
     }
 

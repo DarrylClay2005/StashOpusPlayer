@@ -477,8 +477,13 @@ struct AccountView: View {
                         .foregroundStyle(AppTheme.textSecondary)
                 }
                 .listRowBackground(AppTheme.surface)
-                .task {
-                    await social.fetchFriendRequests()
+                .onAppear {
+                    // `.onAppear` (not `.task`, which only runs once for this
+                    // view instance's lifetime) so the badge count doesn't go
+                    // stale just from popping back to this screen after
+                    // visiting Friends/Requests — it refires every time this
+                    // screen becomes visible again, including the first time.
+                    Task { await social.fetchFriendRequests() }
                 }
 
                 // MARK: Social / Discovery Section

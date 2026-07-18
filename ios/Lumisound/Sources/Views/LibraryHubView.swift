@@ -310,9 +310,21 @@ private struct HubSpeedDialTile: View {
     let tileWidth: CGFloat
 
     @EnvironmentObject private var library: LibraryManager
-    @EnvironmentObject private var player: AudioPlayerManager
 
-    private var listenedFraction: Double? { library.listenedFraction(of: shortcut.songs) }
+    // Snapshotted once (see `.task(id:)` below) rather than recomputed every
+    // body evaluation: both `listenedFraction` and `collageSongs` scan the
+    // shortcut's full song list (and, for the former, do a PlayHistoryStore
+    // lookup per song), and this tile previously also held an unused
+    // `@EnvironmentObject var player: AudioPlayerManager` — since SwiftUI
+    // invalidates every view holding a reference to an ObservableObject on
+    // ANY of its `@Published` changes (not just ones the view actually
+    // reads), that meant every visible speed-dial tile redid both scans on
+    // every play/pause/track-change/queue-mutation even though this view
+    // never used `player` for anything. Dropping the dependency and caching
+    // the results fixes both the unnecessary re-renders and the repeated
+    // O(n) work.
+    @State private var listenedFraction: Double? = nil
+    @State private var collage: [Song] = []
 
     var body: some View {
         NavigationLink {
@@ -320,7 +332,7 @@ private struct HubSpeedDialTile: View {
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HubArtworkCollage(
-                    songs: library.collageSongs(from: shortcut.songs),
+                    songs: collage,
                     size: tileWidth,
                     placeholderIcon: shortcut.icon
                 )
@@ -346,6 +358,10 @@ private struct HubSpeedDialTile: View {
             .frame(width: tileWidth, alignment: .leading)
         }
         .buttonStyle(PressableButtonStyle())
+        .task(id: shortcut.id) {
+            listenedFraction = library.listenedFraction(of: shortcut.songs)
+            collage = library.collageSongs(from: shortcut.songs)
+        }
     }
 
     @ViewBuilder
@@ -521,9 +537,10 @@ private struct HubMixCard: View {
     let mix: SmartPlaylist
     @EnvironmentObject private var library: LibraryManager
 
-    private var songs: [Song] {
-        mix.evaluate(over: library.allSongs, favorites: library.favoriteSongIDs)
-    }
+    // Snapshotted once per mix rather than re-evaluated (a full rule scan
+    // over the library) on every body re-render — same reasoning as
+    // `HubSpeedDialTile`'s `listenedFraction`/`collage` caching above.
+    @State private var songs: [Song] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -559,6 +576,9 @@ private struct HubMixCard: View {
             }
         }
         .frame(width: 168, alignment: .leading)
+        .task(id: mix.id) {
+            songs = mix.evaluate(over: library.allSongs, favorites: library.favoriteSongIDs)
+        }
     }
 }
 

@@ -71,6 +71,17 @@ struct SocialAvatarView: View {
 
     @State private var image: UIImage? = nil
 
+    /// Per-user in-memory cache — without this, every `SocialAvatarView`
+    /// re-fetches `/user/avatar/{id}` over the network AND redecodes the
+    /// image (a real cost for GIFs, which decode every frame up front) from
+    /// scratch each time its row is recreated, which `List`/`LazyVStack`
+    /// view recycling does constantly while scrolling a friends list up and
+    /// down. Keyed by userId; not evicted (avatars are small and this is a
+    /// social feature, not a media-heavy one), so a session's worth of seen
+    /// avatars just stays warm.
+    @MainActor
+    private static var cache: [String: UIImage] = [:]
+
     var body: some View {
         ZStack {
             if let image {
@@ -89,7 +100,13 @@ struct SocialAvatarView: View {
             }
         }
         .task(id: userId) {
-            image = await Self.loadAvatar(userId: userId)
+            if let cached = Self.cache[userId] {
+                image = cached
+                return
+            }
+            guard let loaded = await Self.loadAvatar(userId: userId) else { return }
+            Self.cache[userId] = loaded
+            image = loaded
         }
     }
 
