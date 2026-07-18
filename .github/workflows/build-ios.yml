@@ -61,7 +61,13 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            SKIP_INSTALL=NO 2>&1 | tee /tmp/xcodebuild.log | tail -20
+            SKIP_INSTALL=NO 2>&1 | tee /tmp/xcodebuild.log | tail -20 || true
+          # `pipefail` (the GitHub Actions default) makes this whole pipeline
+          # "fail" the instant xcodebuild does, which combined with `-e` used
+          # to abort the script right here — before the diagnostic grep below
+          # ever ran, so a real compile error never actually got printed. The
+          # trailing `|| true` keeps us going so it does; the `[ -z "$APP" ]`
+          # check further down still fails the job correctly either way.
           if grep -q "error:" /tmp/xcodebuild.log; then
             echo "--- Compiler errors ---"
             grep "error:" /tmp/xcodebuild.log | head -30
