@@ -18,13 +18,23 @@ enum LibraryBackupService {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(backup) else { throw LibraryBackupError.encodingFailed }
+        guard let data = try? encoder.encode(backup) else {
+            RemoteLogger.logError(category: "backup", event: "export_failed", message: "encoding failed")
+            throw LibraryBackupError.encodingFailed
+        }
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HHmm"
         let filename = "Lumisound_Backup_\(formatter.string(from: backup.exportedAt)).json"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-        try data.write(to: url, options: .atomic)
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            RemoteLogger.logError(category: "backup", event: "export_failed", message: error.localizedDescription)
+            throw error
+        }
+        RemoteLogger.log(category: "backup", event: "export_completed",
+                          detail: ["playlists": backup.playlists.count, "favorites": backup.favoriteSongIDs.count])
         return url
     }
 
@@ -35,12 +45,21 @@ enum LibraryBackupService {
         let didStartAccessing = url.startAccessingSecurityScopedResource()
         defer { if didStartAccessing { url.stopAccessingSecurityScopedResource() } }
 
-        let data = try Data(contentsOf: url)
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            RemoteLogger.logError(category: "backup", event: "import_failed", message: error.localizedDescription)
+            throw error
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let backup = try? decoder.decode(LibraryBackup.self, from: data) else {
+            RemoteLogger.logError(category: "backup", event: "import_failed", message: "decoding failed")
             throw LibraryBackupError.decodingFailed
         }
+        RemoteLogger.log(category: "backup", event: "import_decoded",
+                          detail: ["playlists": backup.playlists.count, "favorites": backup.favoriteSongIDs.count])
         return backup
     }
 }

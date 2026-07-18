@@ -1,4 +1,5 @@
 import aiomysql
+import json
 import logging
 import os
 import pathlib
@@ -60,3 +61,57 @@ async def init_db():
                 await conn.rollback()
                 logger.exception("init_db failed; rolled back schema migration")
                 raise
+
+
+# ---------------------------------------------------------------------------
+# General-purpose structured event logging (ios_app_event_log)
+# ---------------------------------------------------------------------------
+#
+# A single reusable sink for "something happened" events across systems that
+# previously had no DB-side audit trail at all (auth, sync, backups,
+# metadata/intelligence operations, etc.). Deliberately distinct from:
+#   - ios_app_logs: raw client debug-log lines (file/line/level), ingested in
+#     bulk from the iOS app's local AppLogger buffer via POST /internal/logs.
+#   - ios_sync_log / ios_search_log: narrow, single-purpose logs that predate
+#     this table and are left as-is.
+# ios_app_event_log instead models a *structured business event*: a
+# source (which side produced it), an optional user, a category, a short
+# event name, a severity level, a human-readable message, and an optional
+# JSON detail blob for anything structured (counts, durations, ids). Both the
+# bridge itself and the iOS client (via POST /api/log-event, see main.py) can
+# write to it, so the same table can answer "what happened for this user
+# across the whole app" instead of being split per-feature.
+async def log_event(
+    category: str,
+    event: str,
+    *,
+    source: str = "bridge",
+    user_id: str | None = None,
+    level: str = "info",
+    message: str = "",
+    detail: dict | None = None,
+) -> None:
+    """Best-effort structured event log. Never raises — logging must never
+    break the request/operation that produced the event, so any failure here
+    (DB unreachable, bad JSON, etc.) is caught and reported only via the
+    ordinary Python logger."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "INSERT INTO ios_app_event_log "
+                    "(source, user_id, category, event, level, message, detail) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        (source or "bridge")[:20],
+                        user_id[:36] if user_id else None,
+                        category[:30],
+                        event[:60],
+                        (level or "info")[:10],
+                        (message or "")[:2000],
+                        json.dumps(detail) if detail is not None else None,
+                    ),
+                )
+    except Exception:
+        logger.exception("log_event failed (category=%s event=%s)", category, event)

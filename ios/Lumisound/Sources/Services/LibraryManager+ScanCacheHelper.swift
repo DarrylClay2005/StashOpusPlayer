@@ -94,6 +94,14 @@ extension LibraryManager {
 
         await EnrichmentCacheStore.shared.persist()
 
+        // One event for the whole resolve call, not per checkpoint/file —
+        // this can run over thousands of files in checkpointed batches, and
+        // logging inside that loop would reintroduce the exact
+        // blocking-call-per-item-in-a-big-loop pattern that's previously
+        // caused main-thread hangs here.
+        RemoteLogger.log(category: "sync", event: "resolve_songs_completed",
+                          detail: ["cached": cachedSongs.count, "resolved": newSongs.count])
+
         return cachedSongs + newSongs
     }
 }

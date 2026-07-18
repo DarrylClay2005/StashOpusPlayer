@@ -99,8 +99,12 @@ final class AccountService: ObservableObject {
             _ = try await makeRequest("/user/library/inventory", method: "POST",
                                       body: InventoryBody(source_ids: Array(ids)))
             appLog("syncLibraryInventory: uploaded \(ids.count) source id(s)", category: "account")
+            // One event per debounced push, not per source id.
+            RemoteLogger.log(category: "sync", event: "library_inventory_synced", detail: ["count": ids.count])
         } catch {
             appWarn("syncLibraryInventory failed: \(error.localizedDescription)", category: "account")
+            RemoteLogger.logError(category: "sync", event: "library_inventory_sync_failed",
+                                   message: error.localizedDescription)
         }
     }
 

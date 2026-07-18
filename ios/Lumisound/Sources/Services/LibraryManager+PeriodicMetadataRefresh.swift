@@ -71,6 +71,12 @@ extension LibraryManager {
         guard updatedCount > 0 else { return }
 
         appLog("Periodic metadata refresh: updated \(updatedCount) song(s)", category: "library")
+        // One event for the whole batch (never per-track — this loop already
+        // covers up to metadataRefreshBatchSize tracks, and logging inside
+        // it would repeat the exact per-item-in-a-loop pattern that's caused
+        // main-thread hangs here before).
+        RemoteLogger.log(category: "sync", event: "metadata_refresh_batch",
+                          detail: ["updated": updatedCount, "batchSize": count])
         ScanCacheService.shared.persist()
         rebuildAllSongs()
     }

@@ -80,6 +80,10 @@ extension LibraryManager {
         guard updatedCount > 0 else { return }
 
         appLog("Periodic metadata re-enrichment: updated \(updatedCount) song(s)", category: "library")
+        // One event per sweep, not per candidate — `candidates` can be a
+        // large fraction of the library on a fresh install/restore.
+        RemoteLogger.log(category: "sync", event: "metadata_reenrichment_batch",
+                          detail: ["checked": candidates.count, "updated": updatedCount])
         ScanCacheService.shared.persist()
         await EnrichmentCacheStore.shared.persist()
         rebuildAllSongs()

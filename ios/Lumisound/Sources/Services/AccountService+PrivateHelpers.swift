@@ -21,6 +21,14 @@ extension AccountService {
 
     func handleUnauthorized() {
         appWarn("JWT expired or invalid — clearing session", category: "account")
+        // Snapshot the token before clearing it below — RemoteLogger's send
+        // is fire-and-forget and runs on a later run-loop turn, so reading
+        // the *live* token from inside it would very likely already see nil
+        // and lose this event's user attribution entirely.
+        let priorToken = token
+        RemoteLogger.logError(category: "auth", event: "session_expired",
+                               message: "JWT expired or invalid — clearing local session",
+                               authToken: priorToken)
         UserDefaults.standard.removeObject(forKey: Self.tokenKey)
         UserDefaults.standard.removeObject(forKey: Self.userKey)
         token = nil
@@ -30,6 +38,14 @@ extension AccountService {
     }
 
     func clearSession() {
+        // Covers logout, account deletion, and self/other session revocation
+        // (see AccountService+PublicAPI.swift / +Sessions.swift /
+        // +PasswordAndDeletion.swift, which all call this) — logged once
+        // here rather than at each call site so every path that ends a
+        // local session is covered without duplicating the event. Snapshot
+        // the token first — see handleUnauthorized above for why.
+        let priorToken = token
+        RemoteLogger.log(category: "auth", event: "local_session_cleared", authToken: priorToken)
         token = nil
         currentUser = nil
         isLoggedIn = false
