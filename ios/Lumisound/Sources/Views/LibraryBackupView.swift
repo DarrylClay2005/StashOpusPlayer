@@ -104,20 +104,24 @@ struct LibraryBackupView: View {
     }
 
     private func exportBackup() {
+        appLog("LibraryBackupView: user tapped Export Backup", category: "library")
         let backup = LibraryBackup(playlists: library.playlists, favoriteSongIDs: library.favoriteSongIDs)
         do {
             exportURL = try LibraryBackupService.exportBackup(backup)
             showShareSheet = true
         } catch {
+            appError("LibraryBackupView: export failed: \(error.localizedDescription)", category: "library")
             importErrorMessage = "Couldn't create the backup file. Please try again."
         }
     }
 
     private func handleImportResult(_ result: Result<URL, Error>) {
         switch result {
-        case .failure:
+        case .failure(let error):
+            appWarn("LibraryBackupView: file importer failed: \(error.localizedDescription)", category: "library")
             importErrorMessage = "Couldn't read that file."
         case .success(let url):
+            appLog("LibraryBackupView: user picked \(url.lastPathComponent) to import", category: "library")
             do {
                 let backup = try LibraryBackupService.decodeBackup(from: url)
                 let (imported, skipped) = library.importBackup(backup)
@@ -128,6 +132,7 @@ struct LibraryBackupView: View {
                     icon: "square.and.arrow.down"
                 )
             } catch {
+                appError("LibraryBackupView: import failed for \(url.lastPathComponent): \(error.localizedDescription)", category: "library")
                 importErrorMessage = "That file doesn't look like a Lumisound backup."
             }
         }

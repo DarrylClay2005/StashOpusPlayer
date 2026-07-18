@@ -18,13 +18,22 @@ enum LibraryBackupService {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(backup) else { throw LibraryBackupError.encodingFailed }
+        guard let data = try? encoder.encode(backup) else {
+            appError("exportBackup: JSON encoding failed for \(backup.playlists.count) playlist(s)", category: "library")
+            throw LibraryBackupError.encodingFailed
+        }
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HHmm"
         let filename = "Lumisound_Backup_\(formatter.string(from: backup.exportedAt)).json"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-        try data.write(to: url, options: .atomic)
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            appError("exportBackup: write failed for \(filename): \(error.localizedDescription)", category: "library")
+            throw error
+        }
+        appLog("exportBackup: wrote \(filename) — \(backup.playlists.count) playlist(s), \(backup.favoriteSongIDs.count) favorite(s)", category: "library")
         return url
     }
 
@@ -32,15 +41,24 @@ enum LibraryBackupService {
     /// importer. Handles the security-scoped resource dance required for
     /// files outside the app's own sandbox (e.g. picked from iCloud Drive).
     static func decodeBackup(from url: URL) throws -> LibraryBackup {
+        appLog("decodeBackup: reading \(url.lastPathComponent)", category: "library")
         let didStartAccessing = url.startAccessingSecurityScopedResource()
         defer { if didStartAccessing { url.stopAccessingSecurityScopedResource() } }
 
-        let data = try Data(contentsOf: url)
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            appError("decodeBackup: couldn't read \(url.lastPathComponent): \(error.localizedDescription)", category: "library")
+            throw error
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let backup = try? decoder.decode(LibraryBackup.self, from: data) else {
+            appError("decodeBackup: JSON decoding failed for \(url.lastPathComponent) — not a Lumisound backup or corrupt", category: "library")
             throw LibraryBackupError.decodingFailed
         }
+        appLog("decodeBackup: parsed \(url.lastPathComponent) — \(backup.playlists.count) playlist(s), exported \(backup.exportedAt) by v\(backup.appVersion)", category: "library")
         return backup
     }
 }

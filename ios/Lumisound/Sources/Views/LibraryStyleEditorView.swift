@@ -33,7 +33,11 @@ struct LibraryStyleEditorView: View {
                 nameSection
                 layoutSection
                 artworkSection
+                backgroundSection
+                typographySection
+                spacingSection
                 contentSection
+                colorsSection
                 accentSection
             }
             .navigationTitle("Custom Row Style")
@@ -174,6 +178,137 @@ struct LibraryStyleEditorView: View {
             Text("Controls how the currently-playing track is highlighted.")
                 .font(.caption)
                 .foregroundStyle(AppTheme.textSecondary)
+        }
+    }
+
+    // MARK: - Background treatment
+
+    @ViewBuilder
+    private var backgroundSection: some View {
+        Section {
+            Picker("Treatment", selection: $draft.backgroundTreatment) {
+                ForEach(CustomLibraryRowStyle.BackgroundTreatment.allCases) { treatment in
+                    Text(treatment.label).tag(treatment)
+                }
+            }
+            VStack(alignment: .leading) {
+                Text("Opacity: \(Int(draft.backgroundOpacity * 100))%")
+                    .font(.caption).foregroundStyle(AppTheme.textSecondary)
+                Slider(value: $draft.backgroundOpacity, in: 0...1, step: 0.05)
+            }
+            if draft.layout == .card {
+                VStack(alignment: .leading) {
+                    Text("Card Corner Radius: \(Int(draft.cardCornerRadius))")
+                        .font(.caption).foregroundStyle(AppTheme.textSecondary)
+                    Slider(value: $draft.cardCornerRadius, in: 0...28, step: 1)
+                }
+            }
+        } header: {
+            Text("Background")
+        } footer: {
+            Text("\"Frosted Glass\" layers a blur under the fill; \"Gradient\" fades the fill toward transparent for subtle depth.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+    }
+
+    // MARK: - Typography
+
+    @ViewBuilder
+    private var typographySection: some View {
+        Section("Typography") {
+            VStack(alignment: .leading) {
+                Text("Title Size: \(Int(draft.titleFontSize)) pt")
+                    .font(.caption).foregroundStyle(AppTheme.textSecondary)
+                Slider(value: $draft.titleFontSize, in: 13...24, step: 1)
+            }
+            VStack(alignment: .leading) {
+                Text("Subtitle Size: \(Int(draft.subtitleFontSize)) pt")
+                    .font(.caption).foregroundStyle(AppTheme.textSecondary)
+                Slider(value: $draft.subtitleFontSize, in: 9...18, step: 1)
+            }
+            VStack(alignment: .leading) {
+                Text("Title Letter Spacing: \(String(format: "%.1f", draft.titleLetterSpacing)) pt")
+                    .font(.caption).foregroundStyle(AppTheme.textSecondary)
+                Slider(value: $draft.titleLetterSpacing, in: -1...4, step: 0.5)
+            }
+        }
+    }
+
+    // MARK: - Spacing
+
+    @ViewBuilder
+    private var spacingSection: some View {
+        Section {
+            VStack(alignment: .leading) {
+                Text("Extra Horizontal Inset: \(Int(draft.horizontalInset)) pt")
+                    .font(.caption).foregroundStyle(AppTheme.textSecondary)
+                Slider(value: $draft.horizontalInset, in: 0...24, step: 1)
+            }
+        } header: {
+            Text("Spacing")
+        } footer: {
+            Text("Layered on top of \"Density\" above — lets rows/cards float inward from the screen edges.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+    }
+
+    // MARK: - Colors
+
+    @ViewBuilder
+    private var colorsSection: some View {
+        Section {
+            customColorRow(
+                label: "Accent Color",
+                isCustom: draft.hasCustomAccentColor,
+                color: Binding(get: { draft.accentColor }, set: { draft.accentColor = $0 }),
+                onToggle: { on in draft.customAccentColorData = on ? CustomLibraryRowStyle.encodeColor(draft.accentColor) : nil }
+            )
+            customColorRow(
+                label: "Title Color",
+                isCustom: draft.hasCustomTitleColor,
+                color: Binding(get: { draft.titleColor }, set: { draft.titleColor = $0 }),
+                onToggle: { on in draft.customTitleColorData = on ? CustomLibraryRowStyle.encodeColor(draft.titleColor) : nil }
+            )
+            customColorRow(
+                label: "Subtitle Color",
+                isCustom: draft.hasCustomSubtitleColor,
+                color: Binding(get: { draft.subtitleColor }, set: { draft.subtitleColor = $0 }),
+                onToggle: { on in draft.customSubtitleColorData = on ? CustomLibraryRowStyle.encodeColor(draft.subtitleColor) : nil }
+            )
+            if draft.layout == .card {
+                customColorRow(
+                    label: "Card Background Color",
+                    isCustom: draft.hasCustomBackgroundColor,
+                    color: Binding(get: { draft.backgroundColor }, set: { draft.backgroundColor = $0 }),
+                    onToggle: { on in draft.customBackgroundColorData = on ? CustomLibraryRowStyle.encodeColor(draft.backgroundColor) : nil }
+                )
+            }
+        } header: {
+            Text("Colors")
+        } footer: {
+            Text("Off uses the app's current theme color and follows it automatically if you change themes later. On locks this style to the color you pick.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+    }
+
+    private func customColorRow(
+        label: String,
+        isCustom: Bool,
+        color: Binding<Color>,
+        onToggle: @escaping (Bool) -> Void
+    ) -> some View {
+        HStack {
+            Toggle(isOn: Binding(get: { isCustom }, set: onToggle)) {
+                Text(label).foregroundStyle(AppTheme.textPrimary)
+            }
+            if isCustom {
+                ColorPicker("", selection: color, supportsOpacity: true)
+                    .labelsHidden()
+                    .fixedSize()
+            }
         }
     }
 }

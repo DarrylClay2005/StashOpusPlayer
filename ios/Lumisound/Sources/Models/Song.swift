@@ -38,6 +38,22 @@ struct Song: Identifiable, Hashable, Codable {
     /// re-read from the source each time rather than persisted separately.
     var dateAdded: Date?
 
+    /// `true` when `album` was not read from real embedded metadata but
+    /// inferred from the file's immediate parent folder name (see
+    /// `DocumentImportService.makeSong`'s "Artist/Album/track.mp3" heuristic).
+    /// Optional (rather than defaulting to `false`) so old cached/persisted
+    /// `Song` JSON without this key still decodes via Swift's synthesized
+    /// `Decodable` (which uses `decodeIfPresent` for `Optional` properties) —
+    /// a non-optional `Bool` here would throw on every snapshot saved before
+    /// this field existed. `nil` and `false` both mean "not folder-inferred".
+    ///
+    /// Exists so the Albums tab can stay strictly metadata-derived: a user's
+    /// own organisational folder (see `FoldersTab`/`MusicFolderService`) is a
+    /// different concept from an album and must not show up as one just
+    /// because an untagged file happened to sit inside it. See
+    /// `groupableAlbumName` and `LibraryManager.rebuildAllSongs()`.
+    var albumInferredFromFolder: Bool?
+
     init(
         id: String = UUID().uuidString,
         title: String,
@@ -88,6 +104,19 @@ struct Song: Identifiable, Hashable, Codable {
 
     var albumName: String {
         album.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Unknown Album" : album
+    }
+
+    /// The album name to use when *grouping/listing distinct albums* (the
+    /// Albums tab grid, `LibraryManager.albums`, `songsByAlbum`) — as opposed
+    /// to `albumName`, which is fine for a per-song subtitle. This bucket
+    /// intentionally treats a folder-name-inferred `album` (see
+    /// `albumInferredFromFolder`) the same as no album at all, so a user's own
+    /// organisational folder (already a first-class concept — see
+    /// `FoldersTab`/`MusicFolderService`) never shows up disguised as an
+    /// album in a view that's supposed to be strictly metadata-derived.
+    /// Real, tag-derived albums (the overwhelming common case) are unaffected.
+    var groupableAlbumName: String {
+        albumInferredFromFolder == true ? "Unknown Album" : albumName
     }
 
     var durationText: String {

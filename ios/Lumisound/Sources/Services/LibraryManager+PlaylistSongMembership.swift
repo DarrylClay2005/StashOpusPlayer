@@ -12,6 +12,7 @@ extension LibraryManager {
         }
         playlists[index].songIDs.append(songID)
         persistence.savePlaylists(playlists)
+        appLog("addSong: \(songID) -> \"\(playlists[index].name)\" (id: \(playlistID))", category: "library")
         ToastCenter.shared.show("Added to \"\(playlists[index].name)\"", category: .success, icon: "text.badge.plus")
     }
 
@@ -28,6 +29,7 @@ extension LibraryManager {
         }
         playlists[index].songIDs.append(contentsOf: toAdd)
         persistence.savePlaylists(playlists)
+        appLog("addSongs: \(toAdd.count) song(s) -> \"\(playlists[index].name)\" (id: \(playlistID))", category: "library")
         ToastCenter.shared.show(
             "Added \(toAdd.count) song\(toAdd.count == 1 ? "" : "s") to \"\(playlists[index].name)\"",
             category: .success, icon: "text.badge.plus"
@@ -38,6 +40,7 @@ extension LibraryManager {
         guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
         playlists[index].songIDs.removeAll { $0 == songID }
         persistence.savePlaylists(playlists)
+        appLog("removeSong: \(songID) <- \"\(playlists[index].name)\" (id: \(playlistID))", category: "library")
         ToastCenter.shared.show("Removed from \"\(playlists[index].name)\"", category: .info, icon: "text.badge.minus")
     }
 
@@ -45,5 +48,6 @@ extension LibraryManager {
         guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
         playlists[index].songIDs = newIDs
         persistence.savePlaylists(playlists)
+        appLog("reorderSongs: \"\(playlists[index].name)\" (id: \(playlistID)) — \(newIDs.count) song(s) reordered", category: "library")
     }
 }

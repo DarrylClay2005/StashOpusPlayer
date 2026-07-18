@@ -27,7 +27,7 @@ struct CustomLibraryRowView: View {
     }
 
     private var titleColor: Color {
-        isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary
+        isCurrent ? config.accentColor : config.titleColor
     }
 
     private var artworkShape: AnyLibraryShape {
@@ -66,6 +66,7 @@ struct CustomLibraryRowView: View {
         VStack(spacing: 0) {
             mainRow
                 .padding(.vertical, config.density.verticalPadding)
+                .padding(.horizontal, config.horizontalInset)
             if config.showDivider {
                 Divider().opacity(0.3)
             }
@@ -78,16 +79,24 @@ struct CustomLibraryRowView: View {
         mainRow
             .padding(12)
             .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(cardBackgroundFill)
+                cardShape.fill(cardBackgroundFill)
+                    .overlay {
+                        if config.backgroundTreatment == .frostedGlass {
+                            cardShape.fill(.ultraThinMaterial)
+                        }
+                    }
             }
             .overlay {
                 if isCurrent && config.accentUsage == .border {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(AppTheme.dynamicAccent.opacity(0.5), lineWidth: 1.5)
+                    cardShape.strokeBorder(config.accentColor.opacity(0.5), lineWidth: 1.5)
                 }
             }
             .padding(.vertical, 4)
+            .padding(.horizontal, config.horizontalInset)
+    }
+
+    private var cardShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: config.cardCornerRadius, style: .continuous)
     }
 
     private var mainRow: some View {
@@ -109,13 +118,14 @@ struct CustomLibraryRowView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(song.displayName)
                 .foregroundStyle(titleColor)
-                .font(.body)
+                .font(.system(size: CGFloat(config.titleFontSize)))
                 .fontWeight(config.titleWeight.fontWeight)
+                .kerning(CGFloat(config.titleLetterSpacing))
                 .lineLimit(1)
             if config.showSubtitle {
                 Text(resolvedSubtitle)
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
+                    .font(.system(size: CGFloat(config.subtitleFontSize)))
+                    .foregroundStyle(config.subtitleColor)
                     .lineLimit(1)
             }
         }
@@ -123,29 +133,45 @@ struct CustomLibraryRowView: View {
 
     private var durationLabel: some View {
         Text(song.durationText)
-            .font(.caption)
-            .foregroundStyle(AppTheme.textSecondary)
+            .font(.system(size: CGFloat(config.subtitleFontSize)))
+            .foregroundStyle(config.subtitleColor)
             .monospacedDigit()
     }
 
     @ViewBuilder
     private var backgroundTint: some View {
         if isCurrent && config.accentUsage == .backgroundTint {
-            AppTheme.dynamicAccent.opacity(0.12)
+            config.accentColor.opacity(0.12)
         }
     }
 
     @ViewBuilder
     private var borderAccent: some View {
         if isCurrent && config.accentUsage == .border {
-            Rectangle().fill(AppTheme.dynamicAccent).frame(width: 3)
+            Rectangle().fill(config.accentColor).frame(width: 3)
         }
     }
 
-    private var cardBackgroundFill: Color {
-        isCurrent && config.accentUsage == .backgroundTint
-            ? AppTheme.dynamicAccent.opacity(0.16)
-            : AppTheme.elevatedSurface.opacity(0.6)
+    /// Base card fill: the now-playing accent tint when active, otherwise
+    /// the style's configured background color — both scaled by
+    /// `backgroundOpacity` so a style can blend into the gallery background
+    /// behind it instead of always reading as a fully opaque card. A
+    /// `.gradient` treatment layers a second, softer stop of the same color
+    /// on top for a subtle depth effect rather than a flat fill.
+    private var cardBackgroundFill: AnyShapeStyle {
+        let base = isCurrent && config.accentUsage == .backgroundTint
+            ? config.accentColor.opacity(0.16)
+            : config.backgroundColor.opacity(0.6)
+        let opacity = config.backgroundOpacity
+        if config.backgroundTreatment == .gradient {
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [base.opacity(opacity), base.opacity(opacity * 0.55)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+            )
+        }
+        return AnyShapeStyle(base.opacity(opacity))
     }
 }
 
@@ -175,10 +201,24 @@ struct CustomLibraryGridCellView: View {
         }
     }
 
-    private var cellBackgroundFill: Color {
-        isCurrent && config.accentUsage == .backgroundTint
-            ? AppTheme.dynamicAccent.opacity(0.16)
-            : AppTheme.surface.opacity(0.5)
+    private var cellBackgroundFill: AnyShapeStyle {
+        let base = isCurrent && config.accentUsage == .backgroundTint
+            ? config.accentColor.opacity(0.16)
+            : config.backgroundColor.opacity(0.5)
+        let opacity = config.backgroundOpacity
+        if config.backgroundTreatment == .gradient {
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [base.opacity(opacity), base.opacity(opacity * 0.55)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+            )
+        }
+        return AnyShapeStyle(base.opacity(opacity))
+    }
+
+    private var cellCardShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: config.cardCornerRadius, style: .continuous)
     }
 
     var body: some View {
@@ -193,14 +233,15 @@ struct CustomLibraryGridCellView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.displayName)
-                    .font(.caption)
+                    .font(.system(size: CGFloat(max(11, config.titleFontSize - 4))))
                     .fontWeight(config.titleWeight.fontWeight)
-                    .foregroundStyle(isCurrent ? AppTheme.dynamicAccent : AppTheme.textPrimary)
+                    .kerning(CGFloat(config.titleLetterSpacing))
+                    .foregroundStyle(isCurrent ? config.accentColor : config.titleColor)
                     .lineLimit(2)
                 if config.showSubtitle {
                     Text(resolvedSubtitle)
-                        .font(.caption2)
-                        .foregroundStyle(AppTheme.textSecondary)
+                        .font(.system(size: CGFloat(max(9, config.subtitleFontSize - 2))))
+                        .foregroundStyle(config.subtitleColor)
                         .lineLimit(1)
                 }
             }
@@ -208,15 +249,19 @@ struct CustomLibraryGridCellView: View {
         }
         .padding(6)
         .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(cellBackgroundFill)
+            cellCardShape.fill(cellBackgroundFill)
+                .overlay {
+                    if config.backgroundTreatment == .frostedGlass {
+                        cellCardShape.fill(.ultraThinMaterial)
+                    }
+                }
         }
         .overlay {
             if isCurrent && config.accentUsage == .border {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(AppTheme.dynamicAccent.opacity(0.5), lineWidth: 1.5)
+                cellCardShape.strokeBorder(config.accentColor.opacity(0.5), lineWidth: 1.5)
             }
         }
+        .padding(.horizontal, config.horizontalInset)
         .animation(.easeInOut(duration: 0.25), value: isCurrent)
         .contextMenu {
             SongContextMenuContent(song: song)
@@ -232,7 +277,7 @@ struct CustomLibraryGridCellView: View {
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(4)
-                .background(AppTheme.dynamicAccent, in: Circle())
+                .background(config.accentColor, in: Circle())
                 .padding(4)
         }
     }
