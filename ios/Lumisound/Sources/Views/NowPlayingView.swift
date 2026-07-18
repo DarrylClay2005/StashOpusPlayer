@@ -15,6 +15,30 @@ enum NowPlayingPanel: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// The big central card's display mode — a reinterpretation of the
+/// "headphones / video" toggle from the YouTube-Music-style reference:
+/// this app has no video track, so the toggle instead switches the hero
+/// card between the artwork display (all 19 built-in styles + custom
+/// styles) and a full-size synced lyrics view, surfacing the lyrics
+/// feature much more prominently than the old "scroll down to a
+/// disclosure panel" placement (which still exists, for the sync editor).
+enum NowPlayingDisplayMode: String, CaseIterable, Identifiable {
+    case artwork, lyrics
+    var id: String { rawValue }
+    var iconName: String {
+        switch self {
+        case .artwork: return "photo.fill"
+        case .lyrics:  return "quote.bubble.fill"
+        }
+    }
+    var label: String {
+        switch self {
+        case .artwork: return "Artwork"
+        case .lyrics:  return "Lyrics"
+        }
+    }
+}
+
 // MARK: - Vertical Slider
 
 /// A vertical slider built by rotating a standard SwiftUI Slider -90 degrees.
@@ -98,6 +122,12 @@ struct NowPlayingView: View {
     @State var editingCustomStyle: CustomNowPlayingStyle?
     @State var showStyleManager = false
 
+    // 2026-07 redesign — hero card display mode (artwork vs. full lyrics),
+    // live artwork-derived palette (only sampled when the selected custom
+    // style opts into `dynamicColorExtraction`), and overflow-menu sheets.
+    @State var displayMode: NowPlayingDisplayMode = .artwork
+    @State var extractedPalette: ArtworkPalette?
+
     var selectedBuiltinStyle: NowPlayingArtworkStyle? {
         NowPlayingArtworkStyle(rawValue: artworkStyleSelection)
     }
@@ -108,6 +138,33 @@ struct NowPlayingView: View {
 
     var visibleBuiltinStyles: [NowPlayingArtworkStyle] {
         NowPlayingArtworkStyle.allCases.filter { !hiddenStylesStore.isHidden($0.rawValue) }
+    }
+
+    /// The resolved whole-screen style (typography/layout/spacing/colors) —
+    /// see `NowPlayingStyle.swift`'s `NowPlayingScreenStyle`. Reproduces
+    /// today's hardcoded look exactly unless a Custom Style is selected.
+    var screenStyle: NowPlayingScreenStyle {
+        NowPlayingScreenStyle.resolve(from: selectedCustomStyle, extractedPalette: extractedPalette)
+    }
+
+    /// Key used to re-run the palette-extraction task below only when it
+    /// could actually change something — either the track changes, or the
+    /// user switches to/from a style with `dynamicColorExtraction` on.
+    var paletteTaskKey: String {
+        "\(player.currentSong?.id ?? "-")|\(selectedCustomStyle?.dynamicColorExtraction ?? false)"
+    }
+
+    /// "Playing from" label for the pill row above the panel picker —
+    /// resolves `player.currentPlaylistID` to its playlist name, falling
+    /// back to a generic label when playing from the library at large
+    /// (there's no broader "source" tracking elsewhere in the app to draw
+    /// on, e.g. distinguishing search results from radio).
+    var playingFromLabel: String {
+        if let playlistID = player.currentPlaylistID,
+           let playlist = library.playlists.first(where: { $0.id == playlistID }) {
+            return playlist.name
+        }
+        return "Your Library"
     }
 
     /// Applies a style selection and persists it — shared by the picker
@@ -170,7 +227,7 @@ struct NowPlayingView: View {
         NavigationStack {
             scrollContent
                 .appScreenBackground()
-                .background(GalleryBackgroundView().ignoresSafeArea())
+                .background(nowPlayingScreenBackground.ignoresSafeArea())
         }
         .toolbarBackground(.hidden, for: .navigationBar)
         .sheet(isPresented: $showSleepTimerSheet) {
@@ -180,6 +237,11 @@ struct NowPlayingView: View {
         .sheet(isPresented: $showFormatInfoSheet) {
             FormatInfoSheet(song: player.currentSong, isUsingFallback: player.isUsingOpusPlayer)
                 .environmentObject(library)
+        }
+        .sheet(isPresented: $showLyricsSyncEditor) {
+            LyricsSyncEditorView(initialLines: lyricsLines)
+                .environmentObject(player)
+                .environmentObject(player.progress)
         }
         .onChange(of: player.currentSong?.id) { newID in
             guard newID != nil else { return }
@@ -194,6 +256,13 @@ struct NowPlayingView: View {
             else { return }
             artworkStyleSelection = raw
         }
+        .task(id: paletteTaskKey) {
+            guard selectedCustomStyle?.dynamicColorExtraction == true else {
+                extractedPalette = nil
+                return
+            }
+            extractedPalette = await ArtworkPaletteLoader.palette(for: player.currentSong)
+        }
         .onAppear {
             seekHaptic.prepare()
             playHaptic.prepare()
@@ -204,7 +273,30 @@ struct NowPlayingView: View {
         }
     }
 
-
+    /// Whole-screen background, layered behind `GalleryBackgroundView`'s
+    /// existing app-wide background: a selected custom style's own blur/
+    /// dimming/mesh-gradient/custom-image-or-video treatment, all opt-in
+    /// and additive (see `CustomNowPlayingStyle`'s 2026-07 fields). Built-in
+    /// artwork styles (or no selection at all) leave this identical to the
+    /// pre-redesign behavior — just `GalleryBackgroundView()`.
+    @ViewBuilder
+    var nowPlayingScreenBackground: some View {
+        if let custom = selectedCustomStyle {
+            ZStack {
+                GalleryBackgroundView()
+                if custom.useMeshGradient {
+                    NowPlayingMeshGradientBackground(style: custom, extractedPalette: extractedPalette)
+                }
+                if custom.customBackgroundMedia != .none {
+                    NowPlayingCustomBackgroundMediaView(style: custom)
+                }
+                Color.black.opacity(custom.backgroundDimming)
+            }
+            .blur(radius: screenStyle.backgroundBlurRadius)
+        } else {
+            GalleryBackgroundView()
+        }
+    }
 }
 
 // MARK: - Pulse Modifier

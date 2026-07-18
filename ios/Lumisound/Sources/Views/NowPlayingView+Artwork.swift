@@ -90,8 +90,8 @@ extension NowPlayingView {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(
-                isSelected ? AppTheme.dynamicAccent : AppTheme.surface,
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                isSelected ? screenStyle.accentColor : AppTheme.surface,
+                in: RoundedRectangle(cornerRadius: screenStyle.elementCornerRadius, style: .continuous)
             )
         }
         .buttonStyle(.plain)
@@ -108,13 +108,13 @@ extension NowPlayingView {
                 Text("New Style")
                     .font(.system(size: 11, weight: .medium))
             }
-            .foregroundStyle(AppTheme.dynamicAccent)
+            .foregroundStyle(screenStyle.accentColor)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: screenStyle.elementCornerRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(AppTheme.dynamicAccent.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                RoundedRectangle(cornerRadius: screenStyle.elementCornerRadius, style: .continuous)
+                    .strokeBorder(screenStyle.accentColor.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
             )
         }
         .buttonStyle(.plain)
