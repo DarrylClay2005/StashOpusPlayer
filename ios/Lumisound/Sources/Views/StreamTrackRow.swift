@@ -24,7 +24,12 @@ struct StreamTrackRow: View {
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                    case .failure, .empty:
+                    case .empty:
+                        Image(systemName: sourceIcon)
+                            .font(.system(size: 22))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .overlay(ShimmerOverlay())
+                    case .failure:
                         Image(systemName: sourceIcon)
                             .font(.system(size: 22))
                             .foregroundStyle(AppTheme.textSecondary)
@@ -34,7 +39,7 @@ struct StreamTrackRow: View {
                 }
                 .frame(width: 56, height: 56)
                 .background(AppTheme.elevatedSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .clipped()
 
                 Image(systemName: sourceIcon)
@@ -78,29 +83,33 @@ struct StreamTrackRow: View {
                         .foregroundStyle(AppTheme.dynamicAccent)
                         .frame(width: 32, height: 32)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressableButtonStyle())
             }
 
-            // Download button
+            // Download button — the checkmark pops in with a little spring
+            // when a download completes instead of silently swapping icons,
+            // so "it worked" reads as an event rather than a static state.
             Button(action: onDownload) {
-                if isDownloading {
-                    ProgressView()
-                        .tint(AppTheme.dynamicAccent)
-                        .frame(width: 32, height: 32)
-                } else if isDownloaded {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(AppTheme.success)
-                        .frame(width: 32, height: 32)
-                } else {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.title2)
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .frame(width: 32, height: 32)
+                Group {
+                    if isDownloading {
+                        ProgressView()
+                            .tint(AppTheme.dynamicAccent)
+                    } else if isDownloaded {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(AppTheme.success)
+                            .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    } else {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.title2)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
                 }
+                .frame(width: 32, height: 32)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableButtonStyle())
             .disabled(isDownloading || isDownloaded)
+            .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isDownloaded)
 
             // Queue button
             Button(action: onAddToQueue) {
@@ -109,10 +118,16 @@ struct StreamTrackRow: View {
                     .foregroundStyle(AppTheme.textSecondary)
                     .frame(width: 28, height: 28)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableButtonStyle())
             .disabled(isLoading)
         }
-        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .adaptiveGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous), fallback: .ultraThinMaterial)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.white.opacity(0.05), lineWidth: 1)
+        )
         .contentShape(Rectangle())
         .onTapGesture(perform: onPlay)
     }

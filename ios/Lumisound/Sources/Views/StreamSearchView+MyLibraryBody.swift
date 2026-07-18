@@ -8,32 +8,33 @@ extension StreamSearchView {
     var userLibraryBody: some View {
         Group {
             if !account.isLoggedIn {
-                VStack {
+                VStack(spacing: 0) {
                     Spacer()
-                    VStack(spacing: 12) {
-                        Image(systemName: "person.crop.circle.badge.questionmark")
-                            .font(.system(size: 44))
-                            .foregroundStyle(AppTheme.textSecondary)
-                        Text("Log in to access your personal library")
-                            .font(AppTheme.bodyFont(size: 15))
-                            .foregroundStyle(AppTheme.textSecondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                    }
+                    CloudEmptyStateView(
+                        icon: "person.crop.circle.badge.questionmark",
+                        title: "Log In Required",
+                        message: "Log in to access your personal cloud library — upload tracks and stream them on any device."
+                    )
                     Spacer()
                 }
             } else if streaming.isLoadingUserMusic {
-                VStack {
-                    Spacer()
-                    ProgressView("Loading your library…")
-                        .tint(AppTheme.dynamicAccent)
-                        .foregroundStyle(AppTheme.textSecondary)
-                    Spacer()
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .tint(AppTheme.dynamicAccent)
+                            .scaleEffect(0.8)
+                        Text("Loading your library…")
+                            .font(AppTheme.bodyFont(size: 13).weight(.semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    SkeletonList()
                 }
             } else {
                 List {
                     if !searchText.isEmpty && !matchingLocalSongs.isEmpty {
-                        Section("On This Device") {
+                        Section {
                             ForEach(matchingLocalSongs) { song in
                                 SongRow(song: song, isCurrent: player.currentSong?.id == song.id)
                                     .listRowBackground(AppTheme.surface)
@@ -43,13 +44,15 @@ extension StreamSearchView {
                                         player.play(song: song, in: matchingLocalSongs)
                                     }
                             }
+                        } header: {
+                            CloudSectionHeader(icon: "iphone", text: "On This Device")
                         }
                     }
 
                     if !searchText.isEmpty && !matchingDownloadHistory.isEmpty {
-                        Section("Previously Downloaded") {
+                        Section {
                             ForEach(matchingDownloadHistory) { item in
-                                HStack {
+                                HStack(spacing: 12) {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(item.title)
                                             .font(AppTheme.bodyFont(size: 15))
@@ -65,20 +68,26 @@ extension StreamSearchView {
                                         ProgressView().tint(AppTheme.dynamicAccent)
                                     } else if downloadedTrackIDs.contains(item.id) {
                                         Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(.green)
+                                            .foregroundStyle(AppTheme.success)
+                                            .transition(.scale.combined(with: .opacity))
                                     } else {
                                         Button {
                                             handleDownload(track: item.asStreamTrack)
                                         } label: {
                                             Image(systemName: "arrow.down.circle")
+                                                .font(.system(size: 20))
                                                 .foregroundStyle(AppTheme.dynamicAccent)
                                         }
-                                        .buttonStyle(.plain)
+                                        .buttonStyle(PressableButtonStyle())
                                     }
                                 }
+                                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: downloadedTrackIDs.contains(item.id))
+                                .padding(.vertical, 4)
                                 .listRowBackground(AppTheme.surface)
                                 .listRowSeparatorTint(AppTheme.background)
                             }
+                        } header: {
+                            CloudSectionHeader(icon: "clock.arrow.circlepath", text: "Previously Downloaded")
                         }
                     }
 
@@ -90,8 +99,10 @@ extension StreamSearchView {
                     if let usage = streaming.storageUsage {
                         Section {
                             StorageUsageRow(usage: usage)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .adaptiveGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous), fallback: .ultraThinMaterial)
                         }
-                        .listRowBackground(AppTheme.surface)
                     }
 
                     // Upload button header
@@ -101,6 +112,7 @@ extension StreamSearchView {
                         } label: {
                             HStack {
                                 Label("Upload Music to Server", systemImage: "icloud.and.arrow.up")
+                                    .font(AppTheme.bodyFont(size: 14).weight(.semibold))
                                     .foregroundStyle(AppTheme.dynamicAccent)
                                 Spacer()
                                 if streaming.isUploadingUserMusic {
@@ -108,42 +120,44 @@ extension StreamSearchView {
                                         .tint(AppTheme.dynamicAccent)
                                 }
                             }
+                            .padding(.vertical, 2)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableButtonStyle())
                         .disabled(streaming.isUploadingUserMusic)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .adaptiveGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous), fallback: .ultraThinMaterial)
                     }
-                    .listRowBackground(AppTheme.surface)
 
                     if streaming.userMusicTracks.isEmpty {
                         Section {
-                            VStack(spacing: 12) {
-                                Image(systemName: "folder.badge.plus")
-                                    .font(.system(size: 40))
-                                    .foregroundStyle(AppTheme.textSecondary)
-                                Text("Your library is empty")
-                                    .font(AppTheme.headlineFont(size: 16))
-                                    .foregroundStyle(AppTheme.textPrimary)
-                                Text("Upload music files to your personal server folder to play them anywhere.")
-                                    .font(AppTheme.bodyFont(size: 14))
-                                    .foregroundStyle(AppTheme.textSecondary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 20)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 30)
+                            CloudEmptyStateView(
+                                icon: "folder.badge.plus",
+                                title: "Your Library Is Empty",
+                                message: "Upload music files to your personal server folder to play them anywhere.",
+                                actionTitle: "Upload Music",
+                                action: { showUploadPicker = true }
+                            )
                             .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                         }
                     } else {
-                        ForEach(streaming.userMusicTracks) { track in
-                            UserMusicTrackRow(
-                                track: track,
-                                artworkURL: streaming.userMusicArtworkURL(for: track),
-                                onPlay: { handleUserLibraryPlay(track: track) },
-                                onInfo: { selectedInfoTrack = track },
-                                onDelete: { handleUserLibraryDelete(track: track) }
-                            )
-                            .listRowBackground(AppTheme.surface)
-                            .listRowSeparatorTint(AppTheme.background)
+                        Section {
+                            ForEach(streaming.userMusicTracks) { track in
+                                UserMusicTrackRow(
+                                    track: track,
+                                    artworkURL: streaming.userMusicArtworkURL(for: track),
+                                    isDeleting: deletingUserTrackPath == track.serverPath,
+                                    onPlay: { handleUserLibraryPlay(track: track) },
+                                    onInfo: { selectedInfoTrack = track },
+                                    onDelete: { handleUserLibraryDelete(track: track) }
+                                )
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                            }
+                        } header: {
+                            CloudSectionHeader(icon: "icloud.fill", text: "My Cloud Library")
                         }
                     }
                 }
@@ -174,6 +188,7 @@ private struct StorageUsageRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Storage", systemImage: "internaldrive")
+                    .font(AppTheme.bodyFont(size: 14).weight(.semibold))
                     .foregroundStyle(AppTheme.textPrimary)
                 Spacer()
                 Text(usage.isUnlimited ? usedText : "\(usedText) of \(quotaText)")
@@ -196,6 +211,6 @@ private struct StorageUsageRow: View {
                     .foregroundStyle(AppTheme.error)
             }
         }
-        .padding(.vertical, 4)
+        .padding(14)
     }
 }

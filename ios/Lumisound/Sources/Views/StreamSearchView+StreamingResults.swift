@@ -8,11 +8,19 @@ extension StreamSearchView {
     var streamResultsBody: some View {
         Group {
             if streaming.isSearching || streaming.isResolvingPlaylist {
-                Spacer()
-                ProgressView(streaming.isResolvingPlaylist ? "Loading playlist…" : "Searching…")
-                    .tint(AppTheme.dynamicAccent)
-                    .foregroundStyle(AppTheme.textSecondary)
-                Spacer()
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .tint(AppTheme.dynamicAccent)
+                            .scaleEffect(0.8)
+                        Text(streaming.isResolvingPlaylist ? "Loading playlist…" : "Searching…")
+                            .font(AppTheme.bodyFont(size: 13).weight(.semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    SkeletonList()
+                }
             } else if searchText.isEmpty {
                 trendingSearchesBody
             } else if streaming.searchResults.isEmpty {
@@ -21,9 +29,11 @@ extension StreamSearchView {
                         suggestionsBody
                     }
                     Spacer()
-                    Text("No results for \"\(searchText)\"")
-                        .font(AppTheme.bodyFont(size: 15))
-                        .foregroundStyle(AppTheme.textSecondary)
+                    CloudEmptyStateView(
+                        icon: "magnifyingglass",
+                        title: "No Results",
+                        message: "Nothing matched \"\(searchText)\" on \(sourceLabel(selectedSource)). Try a different search term or source."
+                    )
                     Spacer()
                 }
             } else {
@@ -91,8 +101,9 @@ extension StreamSearchView {
                             }
                         }
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(AppTheme.surface)
+                        .padding(.vertical, 12)
+                        .adaptiveGlass(in: Rectangle(), fallback: .ultraThinMaterial)
+                        .overlay(Divider().opacity(0.3), alignment: .bottom)
                     }
 
                     List {
@@ -116,8 +127,12 @@ extension StreamSearchView {
                                         onAddToQueue: { handleAddToQueue(track: track) },
                                         onDownload: { handleDownload(track: track) }
                                     )
-                                    .listRowBackground(AppTheme.surface)
-                                    .listRowSeparatorTint(AppTheme.background)
+                                    // The row now supplies its own floating glass-card
+                                    // background, so the list row itself stays transparent
+                                    // with no separator line between cards.
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                                     // Staggered fade-in when results first appear
                                     .modifier(StaggeredFadeInModifier(index: globalIndex, token: resultsAnimationToken))
                                     .contextMenu {
@@ -150,10 +165,8 @@ extension StreamSearchView {
                                     }
                                 }
                             } header: {
-                                Text(sourceLabel(group.source))
-                                    .font(AppTheme.bodyFont(size: 12).weight(.semibold))
-                                    .foregroundStyle(AppTheme.textSecondary)
-                                    .kerning(0.8)
+                                CloudSectionHeader(icon: sourceIcon(group.source), text: sourceLabel(group.source))
+                                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
                             }
                         }
                     }

@@ -40,6 +40,19 @@ struct StreamSearchView: View {
     @State var trendingQueries: [SearchQueryCount] = []
     @State var suggestions: [SearchQueryCount] = []
 
+    // Trending mechanics: which time window is active (in days — 1/7/30 map
+    // to Today/This Week/This Month, all backed by the existing
+    // `searchTrending(days:)` bridge parameter), whether a fetch is in
+    // flight, and when the list was last refreshed so the UI can show a
+    // "how stale is this" indicator instead of presenting counts that might
+    // be minutes or hours old as if they were live.
+    @State var trendingWindowDays: Int = 7
+    @State var isLoadingTrending = false
+    @State var trendingLastUpdated: Date? = nil
+
+    // Namespace for the source-picker pill's sliding selection indicator.
+    @Namespace var sourcePillNamespace
+
     let sources = ["youtube", "soundcloud", "server", "my"]
 
     var body: some View {
