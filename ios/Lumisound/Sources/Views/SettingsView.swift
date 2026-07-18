@@ -17,6 +17,10 @@ struct SettingsView: View {
     @EnvironmentObject var folderService: MusicFolderService
     @EnvironmentObject var appLock: AppLockService
 
+    /// Drives the Notifications entry row's status pill (On/Off/Needs Access)
+    /// and the master toggle inside `NotificationsSettingsView`.
+    @ObservedObject var notificationService = NotificationService.shared
+
     @State var showLogin = false
 
     /// Shared with `ContentView`, which hides the floating Car Mode button and
@@ -114,6 +118,7 @@ struct SettingsView: View {
                     switch selectedTab {
                     case .general:
                         accountSection
+                        notificationsSection
                         appearanceSection
                         sleepTimerSection
                         appLockSection
@@ -131,6 +136,12 @@ struct SettingsView: View {
                         aboutSection
                     }
                 }
+                // Cross-fade + slight vertical shift between tabs, keyed on
+                // the tab itself, so switching feels like a deliberate
+                // transition rather than the section list just snapping to
+                // different content underneath the (already-animated) picker.
+                .id(selectedTab)
+                .transition(.opacity.combined(with: .move(edge: .top)))
                 // Without an explicit style this defaults to a grouped-card
                 // look — every Section (account/appearance/sleep timer/etc.)
                 // floats as its own separate box with the gallery background
