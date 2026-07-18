@@ -7,6 +7,10 @@ extension AccountService {
     // MARK: - Avatar
 
     /// Upload a profile picture as JPEG (max 1 MB enforced server-side).
+    /// Always re-encodes to a static JPEG — used by flows that only ever
+    /// hand this a `UIImage` (e.g. a cropped camera photo). For data that
+    /// might be an animated GIF (e.g. straight from `PhotosPicker`), use
+    /// `uploadAvatarData(_:)` instead so animation isn't lost before upload.
     func uploadAvatar(image: UIImage) async {
         guard isLoggedIn else { return }
         guard let jpeg = image.jpegData(compressionQuality: 0.8) else {
@@ -35,6 +39,55 @@ extension AccountService {
         saveAvatarLocally(image)
     }
 
+    /// Upload avatar image data straight from the picker, preserving
+    /// animation when it's a GIF. `UIImage(data:)` only ever decodes a GIF's
+    /// first frame, so this checks `isGIFData` on the *raw bytes* before any
+    /// UIImage conversion happens — decoding first (like `uploadAvatar(image:)`
+    /// does) would silently flatten the animation before it ever reached this
+    /// method. Non-GIF data falls back to the existing JPEG re-encode path.
+    func uploadAvatarData(_ data: Data) async {
+        guard isLoggedIn else { return }
+        guard isGIFData(data) else {
+            // Not a GIF — decode + re-encode as JPEG, same as before.
+            guard let image = UIImage(data: data) else {
+                appWarn("uploadAvatarData: could not decode image data", category: "account")
+                return
+            }
+            await uploadAvatar(image: image)
+            return
+        }
+
+        guard data.count <= 5_242_880 else {
+            appWarn("uploadAvatarData: GIF exceeds 5MB limit (\(data.count / 1024)KB)", category: "account")
+            errorMessage = "GIF avatars must be under 5MB."
+            return
+        }
+        guard let animated = UIImage.gifImage(data: data) else {
+            appWarn("uploadAvatarData: could not decode GIF data", category: "account")
+            return
+        }
+        guard var req = makeBaseRequest("/user/avatar", method: "POST") else {
+            appWarn("uploadAvatarData: could not build request", category: "account")
+            return
+        }
+        req.setValue("image/gif", forHTTPHeaderField: "Content-Type")
+        req.httpBody = data
+        appLog("uploadAvatarData: uploading GIF \(data.count / 1024)KB", category: "account")
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if (200..<300).contains(status) {
+                appLog("uploadAvatarData: success", category: "account")
+            } else {
+                appWarn("uploadAvatarData: HTTP \(status)", category: "account")
+            }
+        } catch {
+            appError("uploadAvatarData: \(error.localizedDescription)", category: "account")
+        }
+        avatarImage = animated
+        saveGIFAvatarLocally(data)
+    }
+
     /// Load avatar from local cache first, then from server. Updates `avatarImage`.
     func loadAvatar(forceRefresh: Bool = false) async {
         if !forceRefresh, let cached = loadAvatarLocally() {
@@ -47,12 +100,25 @@ extension AccountService {
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            guard (200..<300).contains(status), let img = UIImage(data: data) else {
-                appWarn("loadAvatar: HTTP \(status) or invalid image data", category: "account")
+            guard (200..<300).contains(status) else {
+                appWarn("loadAvatar: HTTP \(status)", category: "account")
                 return
             }
-            avatarImage = img
-            saveAvatarLocally(img)
+            if isGIFData(data) {
+                guard let animated = UIImage.gifImage(data: data) else {
+                    appWarn("loadAvatar: invalid GIF data", category: "account")
+                    return
+                }
+                avatarImage = animated
+                saveGIFAvatarLocally(data)
+            } else {
+                guard let img = UIImage(data: data) else {
+                    appWarn("loadAvatar: invalid image data", category: "account")
+                    return
+                }
+                avatarImage = img
+                saveAvatarLocally(img)
+            }
             appLog("loadAvatar: fetched from server (\(data.count / 1024)KB)", category: "account")
         } catch {
             appWarn("loadAvatar: \(error.localizedDescription)", category: "account")
@@ -70,15 +136,45 @@ extension AccountService {
         return req
     }
 
+    private static var localGIFAvatarURL: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("user_avatar.gif")
+    }
+
+    private static var localJPEGAvatarURL: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("user_avatar.jpg")
+    }
+
     func saveAvatarLocally(_ image: UIImage) {
-        guard let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("user_avatar.jpg") else { return }
+        // Clear any stale GIF cache — otherwise a user who switches from an
+        // animated avatar back to a static one would keep seeing the old
+        // animated file on next launch (loadAvatarLocally prefers .gif).
+        if let gifURL = Self.localGIFAvatarURL {
+            try? FileManager.default.removeItem(at: gifURL)
+        }
+        guard let url = Self.localJPEGAvatarURL else { return }
         image.jpegData(compressionQuality: 0.8).flatMap { try? $0.write(to: url) }
     }
 
+    /// Caches the raw GIF bytes as-is (never re-encoded — re-encoding through
+    /// UIImage/jpegData would collapse it back to a single frame). Clears any
+    /// stale static-JPEG cache for the same reason `saveAvatarLocally` clears
+    /// the GIF one.
+    func saveGIFAvatarLocally(_ data: Data) {
+        if let jpegURL = Self.localJPEGAvatarURL {
+            try? FileManager.default.removeItem(at: jpegURL)
+        }
+        guard let url = Self.localGIFAvatarURL else { return }
+        try? data.write(to: url)
+    }
+
     func loadAvatarLocally() -> UIImage? {
-        guard let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("user_avatar.jpg") else { return nil }
+        if let gifURL = Self.localGIFAvatarURL,
+           let data = try? Data(contentsOf: gifURL) {
+            return UIImage.gifImage(data: data)
+        }
+        guard let url = Self.localJPEGAvatarURL else { return nil }
         return (try? Data(contentsOf: url)).flatMap { UIImage(data: $0) }
     }
 

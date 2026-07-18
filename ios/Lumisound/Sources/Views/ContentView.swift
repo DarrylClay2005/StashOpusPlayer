@@ -54,6 +54,23 @@ struct ContentView: View {
     /// caused the "update install freakout" performance issues fixed elsewhere.
     @State private var profileTabIcon: UIImage? = nil
 
+    /// Whether `account.avatarImage` is a genuinely multi-frame (animated GIF)
+    /// UIImage — recomputed alongside `profileTabIcon` in the same onReceive,
+    /// same "don't redo this on every player publish" reasoning as above.
+    /// Drives the animated tab-icon overlay below; see its doc comment for why
+    /// a real animating view can't just be dropped into `.tabItem{}` directly.
+    @State private var avatarIsAnimatedGIF = false
+
+    /// Self "I'm online" heartbeat for the Social Ecosystem presence feature
+    /// (POST /api/social/presence every ~45s while foregrounded). Owned here
+    /// rather than injected from LumisoundApp — ContentView is the one view
+    /// mounted for the app's entire foreground lifetime, so it's the natural
+    /// place to start/stop it on login/logout and to fire a best-effort
+    /// "going offline" beacon on backgrounding (see the notification
+    /// subscriptions at the bottom of `body`). No other view reads this
+    /// instance's state, so it isn't injected via `.environmentObject`.
+    @StateObject private var presenceService = PresenceService()
+
     init() {
         // Tab bar — transparent with dark blur
         let tabAppearance = UITabBarAppearance()
@@ -209,6 +226,50 @@ struct ContentView: View {
             }
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: toastCenter.current)
             .allowsHitTesting(false)
+
+            // MARK: Animated GIF avatar overlay for the Settings tab icon
+            //
+            // `.tabItem{}` only accepts `Image`/`Text` content, so the real
+            // Settings tabItem above always renders `profileTabIcon` — a
+            // static (first-frame) circular crop, same as before this
+            // feature. There is no supported way to put a genuinely-animating
+            // `UIViewRepresentable` (`AnimatedImageView`) *inside* a native
+            // TabView's tab bar item.
+            //
+            // The fix used here: composite a real `AnimatedImageView` directly
+            // ON TOP of that tab item, in the same screen position, whenever
+            // the signed-in user's avatar is an actual multi-frame GIF (not
+            // just any avatar — a static avatar looks identical either way,
+            // so the overlay only exists when it would visibly differ).
+            // `.allowsHitTesting(false)` means every tap in that spot still
+            // reaches the real TabView underneath untouched — this is purely
+            // a cosmetic replacement layer, not a reimplementation of tab
+            // selection/highlighting/accessibility, so all 5 tabs stay
+            // ordinary, fully-functional SwiftUI TabView items.
+            if avatarIsAnimatedGIF, let avatarImage = account.avatarImage {
+                GeometryReader { geo in
+                    let tabCount: CGFloat = 5
+                    let tabSlotWidth = geo.size.width / tabCount
+                    let iconSize: CGFloat = 28
+                    // Approximates a standard UITabBar icon's vertical center:
+                    // icons sit in the top portion of the 49pt bar, above the
+                    // text label, i.e. roughly 35pt up from the top of the
+                    // home-indicator safe area. Tuned by eye against the
+                    // existing `circularProfileIcon` static rendering — nudge
+                    // this constant if it drifts on a real device (this repo
+                    // has no local Xcode/Simulator to check pixel-for-pixel).
+                    let iconBottomOffset: CGFloat = 35
+                    AnimatedImageView(image: avatarImage, contentMode: .scaleAspectFill)
+                        .frame(width: iconSize, height: iconSize)
+                        .clipShape(Circle())
+                        .position(
+                            x: geo.size.width - tabSlotWidth / 2,
+                            y: geo.size.height - geo.safeAreaInsets.bottom - iconBottomOffset
+                        )
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+            }
         }
         .acoustIDConfirmSheet()
         .clipMakerSheet()
@@ -266,15 +327,56 @@ struct ContentView: View {
         // since `UIImage` isn't `Equatable`.
         .onAppear {
             profileTabIcon = Self.circularProfileIcon(from: account.avatarImage)
+            avatarIsAnimatedGIF = Self.isAnimatedGIF(account.avatarImage)
         }
         .onReceive(account.$avatarImage) { image in
             profileTabIcon = Self.circularProfileIcon(from: image)
+            avatarIsAnimatedGIF = Self.isAnimatedGIF(image)
+        }
+        // MARK: Social Ecosystem — presence heartbeat
+        //
+        // Starts/stops the "I'm online" polling heartbeat (POST
+        // /api/social/presence every ~45s) alongside login state, same
+        // start/stop-on-`$isLoggedIn` shape LumisoundApp already uses for
+        // `account.startAutoPushTimer`/`stopAutoPushTimer`.
+        .onAppear {
+            if account.isLoggedIn {
+                presenceService.startHeartbeat(account: account, player: player)
+            }
+        }
+        .onReceive(account.$isLoggedIn) { loggedIn in
+            if loggedIn {
+                presenceService.startHeartbeat(account: account, player: player)
+            } else {
+                presenceService.stopHeartbeat()
+            }
+        }
+        // Best-effort "going offline" beacon — not guaranteed to land (the
+        // process may suspend mid-request), but the server's own 90s
+        // presence-freshness window already covers the case where it
+        // doesn't (see ios_presence_state's doc comment in schema.sql).
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            if account.isLoggedIn {
+                presenceService.sendGoingOffline(account: account)
+            }
+        }
+        // Resume the heartbeat immediately on return to foreground, rather
+        // than waiting up to ~45s for the next scheduled tick.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            if account.isLoggedIn {
+                presenceService.startHeartbeat(account: account, player: player)
+            }
         }
     }
 
     /// Crops `image` to a circle at tab-bar icon size and marks it `.alwaysOriginal`
     /// so SwiftUI renders the user's actual photo instead of template-tinting it
     /// (which is what plain `Image(uiImage:)` would do with a system-style asset).
+    /// Always produces a static (first-frame) crop even when `image` is an
+    /// animated multi-frame GIF — `UIGraphicsImageRenderer`'s `draw(in:)` only
+    /// ever captures one frame — which is fine, since this is only ever used
+    /// as the underlying native `.tabItem{}` icon; the animated overlay drawn
+    /// on top of it (see `avatarIsAnimatedGIF` in `body`) is what actually plays.
     private static func circularProfileIcon(from image: UIImage?) -> UIImage? {
         guard let image else { return nil }
         let size: CGFloat = 28
@@ -285,5 +387,13 @@ struct ContentView: View {
             image.draw(in: rect)
         }
         return cropped.withRenderingMode(.alwaysOriginal)
+    }
+
+    /// Whether `image` is a genuinely multi-frame `UIImage` — i.e. one
+    /// produced by `UIImage.gifImage(data:)` from an actual animated GIF, as
+    /// opposed to any static image (JPEG, or a single-frame "GIF"). `.images`
+    /// is only ever non-nil on a `UIImage` built via `animatedImage(with:duration:)`.
+    private static func isAnimatedGIF(_ image: UIImage?) -> Bool {
+        (image?.images?.count ?? 0) > 1
     }
 }

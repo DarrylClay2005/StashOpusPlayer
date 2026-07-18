@@ -7,6 +7,13 @@ struct AccountView: View {
     @EnvironmentObject var library: LibraryManager
     @Environment(\.dismiss) var dismiss
 
+    /// Backs the new "Social" section below (My Profile / Friends entry
+    /// points) — a fresh instance here is fine since it's just used to fetch
+    /// the incoming-friend-request badge count; ProfileView/FriendsListView
+    /// receive this same instance via `.environmentObject` so navigating in
+    /// doesn't trigger a redundant re-fetch.
+    @StateObject private var social = SocialService()
+
     @State private var showLogoutConfirm = false
     @State private var isEditingDisplayName = false
     @State private var draftDisplayName = ""
@@ -36,12 +43,13 @@ struct AccountView: View {
                 // MARK: Header — avatar + username
                 Section {
                     HStack(spacing: 16) {
-                        // Avatar circle: photo if available, else gradient + initials
+                        // Avatar circle: photo if available, else gradient + initials.
+                        // AnimatedImageView (not a plain SwiftUI Image) so a GIF avatar
+                        // actually plays here — Image(uiImage:) would only ever show
+                        // its first frame. Static avatars render identically either way.
                         ZStack {
                             if let img = account.avatarImage {
-                                Image(uiImage: img)
-                                    .resizable()
-                                    .scaledToFill()
+                                AnimatedImageView(image: img, contentMode: .scaleAspectFill)
                                     .frame(width: 64, height: 64)
                                     .clipShape(Circle())
                             } else {
@@ -110,9 +118,13 @@ struct AccountView: View {
                         isUploadingAvatar = true
                         Task {
                             defer { isUploadingAvatar = false }
-                            if let data = try? await item.loadTransferable(type: Data.self),
-                               let image = UIImage(data: data) {
-                                await account.uploadAvatar(image: image)
+                            // Route through the raw Data, not a UIImage — `uploadAvatarData`
+                            // needs to sniff the original bytes for a GIF header before any
+                            // conversion happens. Decoding straight to UIImage first (like
+                            // this used to) throws the animation away, since UIImage(data:)
+                            // only ever keeps a GIF's first frame.
+                            if let data = try? await item.loadTransferable(type: Data.self) {
+                                await account.uploadAvatarData(data)
                             }
                             photosPickerItem = nil
                         }
@@ -429,6 +441,45 @@ struct AccountView: View {
                     sectionHeader("Account")
                 }
                 .listRowBackground(AppTheme.surface)
+
+                // MARK: Social Ecosystem Section — profile, friends, presence
+                //
+                // Entry point for the new Social Ecosystem feature (public
+                // profile customization, friends, presence). Added here
+                // rather than in SettingsView+AccountSection.swift, which is
+                // owned by the parallel Settings-redesign workstream.
+                Section {
+                    NavigationLink(destination: ProfileView().environmentObject(social)) {
+                        Label("My Profile", systemImage: "person.crop.circle")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+
+                    NavigationLink(destination: FriendsListView().environmentObject(social)) {
+                        HStack {
+                            Label("Friends", systemImage: "person.2")
+                                .foregroundStyle(AppTheme.textPrimary)
+                            if !social.incomingRequests.isEmpty {
+                                Spacer()
+                                Text("\(social.incomingRequests.count)")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 2)
+                                    .background(AppTheme.dynamicAccent, in: Capsule())
+                            }
+                        }
+                    }
+                } header: {
+                    sectionHeader("Social")
+                } footer: {
+                    Text("Customize your public profile, manage friends and requests, and control whether friends can see what you're currently playing.")
+                        .font(AppTheme.bodyFont(size: 12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .listRowBackground(AppTheme.surface)
+                .task {
+                    await social.fetchFriendRequests()
+                }
 
                 // MARK: Social / Discovery Section
                 Section {

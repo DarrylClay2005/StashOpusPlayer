@@ -4613,14 +4613,31 @@ async def intelligence_feedback(
 # ---------------------------------------------------------------------------
 
 
+def _is_gif_bytes(body: bytes) -> bool:
+    """Sniffs for a GIF87a/GIF89a header — same signature `isGIFData(_:)`
+    checks client-side. Used both to accept GIF uploads (Social Ecosystem:
+    animated avatars) and to pick the right Content-Type when serving one
+    back, without needing a separate "is this a gif" column on ios_users."""
+    return body[:6] in (b"GIF87a", b"GIF89a")
+
+
 @app.post("/user/avatar")
 async def upload_avatar(request: Request, user: dict = Depends(get_current_user)):
-    """Upload profile picture as JPEG bytes (max 1MB)."""
+    """Upload a profile picture as JPEG bytes (max 1MB), or as a GIF (max 5MB —
+    animated avatars run larger than a compressed JPEG still, but this is not
+    the multi-hundred-MB territory the app's other MEDIUMBLOB columns need to
+    guard against). GIF support added for the Social Ecosystem feature's
+    animated-avatar requirement; JPEG behavior/limit is unchanged."""
     body = await request.body()
-    if len(body) > 1_048_576:  # 1MB limit
-        raise HTTPException(status_code=413, detail="Avatar must be under 1MB")
-    if not body.startswith(b"\xff\xd8\xff"):  # JPEG magic bytes (SOI + APPn/marker)
-        raise HTTPException(status_code=400, detail="Avatar must be a JPEG image")
+    is_gif = _is_gif_bytes(body)
+    if is_gif:
+        if len(body) > 5_242_880:  # 5MB limit for animated avatars
+            raise HTTPException(status_code=413, detail="GIF avatar must be under 5MB")
+    else:
+        if len(body) > 1_048_576:  # 1MB limit
+            raise HTTPException(status_code=413, detail="Avatar must be under 1MB")
+        if not body.startswith(b"\xff\xd8\xff"):  # JPEG magic bytes (SOI + APPn/marker)
+            raise HTTPException(status_code=400, detail="Avatar must be a JPEG or GIF image")
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -4633,7 +4650,8 @@ async def upload_avatar(request: Request, user: dict = Depends(get_current_user)
 
 @app.get("/user/avatar/{user_id}")
 async def get_avatar(user_id: str):
-    """Returns raw JPEG bytes or 404."""
+    """Returns raw avatar bytes (JPEG or GIF, sniffed from the stored bytes
+    themselves) or 404."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -4643,8 +4661,9 @@ async def get_avatar(user_id: str):
             row = await cur.fetchone()
     if not row or not row[0]:
         raise HTTPException(status_code=404, detail="No avatar set")
+    data = bytes(row[0])
     from fastapi.responses import Response
-    return Response(content=bytes(row[0]), media_type="image/jpeg")
+    return Response(content=data, media_type="image/gif" if _is_gif_bytes(data) else "image/jpeg")
 
 
 # ---------------------------------------------------------------------------
@@ -12381,6 +12400,779 @@ async def delete_discord_rpc_config(payload: dict = Depends(get_current_user)):
         async with conn.cursor() as cur:
             await cur.execute("DELETE FROM ios_discord_rpc_config WHERE user_id = %s", (user_id,))
     await log_event("settings", "discord_rpc_config_removed", user_id=user_id)
+
+
+# =============================================================================
+# SOCIAL ECOSYSTEM (profiles, friends, presence) — 2026-07-18
+#
+# Greenfield feature: public profiles with two-tone accent customization,
+# pinned favorite tracks, a friends system (request/accept/decline/remove +
+# block), lightweight polling-based online/offline + now-playing presence,
+# a friends-only activity feed, and mutual-friend suggestions.
+#
+# Everything here is deliberately self-contained and namespaced:
+#   - Tables:   ios_social_* / ios_presence_* (schema.sql, additive only)
+#   - Routes:   /api/social/* (distinct from the pre-existing global,
+#               non-friend-scoped /social/* activity+discover feed above)
+#   - Auth:     reuses get_current_user (JWT + session-revocation check)
+#               exactly like every other authenticated endpoint in this file
+#               — no changes to auth.py.
+#
+# This section does not alter or drop any existing table/column; it only
+# adds new ones and, separately, extends the /user/avatar endpoints above
+# in place to also accept GIF bytes (see _is_gif_bytes).
+# =============================================================================
+
+_SOCIAL_PRESENCE_FRESH_SECONDS = 90  # 1.5x the client's slowest poll cadence (60s)
+
+_CURATED_ACCENT_HEXES = {
+    "#F13D7A", "#FF8A5C", "#FFC94D", "#8CE99A", "#4FD1C5",
+    "#4DA3FF", "#7C6CF0", "#C08CFF", "#FF6FB1", "#6EE7DE",
+    "#F76E6E", "#B0B8C4", "#FFFFFF", "#2B2F38",
+}
+
+
+def _valid_accent_hex(value: Optional[str]) -> Optional[str]:
+    """Server-side allowlist check against the curated palette offered by
+    AccentColorPickerView.swift — accepting arbitrary client hex strings
+    would mean a malformed/garbage value could make a profile's own chrome
+    unreadable, so unrecognized values are rejected rather than stored."""
+    if value is None:
+        return None
+    upper = value.upper()
+    if upper not in _CURATED_ACCENT_HEXES:
+        raise HTTPException(status_code=400, detail=f"Unrecognized accent color: {value}")
+    return upper
+
+
+async def _blocked_either_direction(cur, user_a: str, user_b: str) -> bool:
+    await cur.execute(
+        """
+        SELECT 1 FROM ios_social_blocks
+        WHERE (user_id = %s AND blocked_id = %s) OR (user_id = %s AND blocked_id = %s)
+        LIMIT 1
+        """,
+        (user_a, user_b, user_b, user_a),
+    )
+    return (await cur.fetchone()) is not None
+
+
+def _public_user_fields(row) -> dict:
+    """Maps a (id, username, display_name, avatar_url) row tuple."""
+    return {"user_id": row[0], "username": row[1], "display_name": row[2], "avatar_url": row[3]}
+
+
+class SocialProfileUpdate(BaseModel):
+    bio: Optional[str] = None
+    main_accent_hex: Optional[str] = None
+    sub_accent_hex: Optional[str] = None
+    share_now_playing: Optional[bool] = None
+
+
+class PinnedTrackIn(BaseModel):
+    source_track_id: Optional[str] = None
+    track_url: Optional[str] = None
+    title: str
+    artist: Optional[str] = None
+    album: Optional[str] = None
+
+
+class PinnedTracksUpdate(BaseModel):
+    tracks: list[PinnedTrackIn]
+
+
+class FriendRequestCreate(BaseModel):
+    to_user_id: Optional[str] = None
+    to_username: Optional[str] = None
+
+
+class PresenceUpdate(BaseModel):
+    is_playing: bool = False
+    now_playing_title: Optional[str] = None
+    now_playing_artist: Optional[str] = None
+    # Best-effort signal sent from AppDelegate/scene-phase background hooks —
+    # when true, this heartbeat marks the user offline immediately instead of
+    # waiting for last_seen_at to go stale.
+    going_offline: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Profiles
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/social/profile/me")
+async def get_my_social_profile(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT bio, main_accent_hex, sub_accent_hex, share_now_playing "
+                "FROM ios_social_profiles WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+            await cur.execute(
+                "SELECT id, source_track_id, track_url, title, artist, album "
+                "FROM ios_social_pinned_tracks WHERE user_id = %s ORDER BY position ASC",
+                (user_id,),
+            )
+            pinned = await cur.fetchall()
+
+    return {
+        "user_id": user_id,
+        "bio": row[0] if row else None,
+        "main_accent_hex": row[1] if row else None,
+        "sub_accent_hex": row[2] if row else None,
+        "share_now_playing": bool(row[3]) if row else True,
+        "pinned_tracks": [
+            {
+                "id": p[0], "source_track_id": p[1], "track_url": p[2],
+                "title": p[3], "artist": p[4], "album": p[5],
+            }
+            for p in pinned
+        ],
+    }
+
+
+@app.put("/api/social/profile")
+async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    if body.bio is not None and len(body.bio) > 280:
+        raise HTTPException(status_code=400, detail="Bio must be 280 characters or fewer")
+    main_hex = _valid_accent_hex(body.main_accent_hex)
+    sub_hex = _valid_accent_hex(body.sub_accent_hex)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            # Upsert-by-field: only overwrite columns the caller actually sent,
+            # same "partial PATCH via UPDATE ... VALUES()" pattern used by
+            # /user/discord-rpc-config above.
+            #
+            # share_now_playing is NOT NULL DEFAULT TRUE, so it can't just
+            # follow the same COALESCE(VALUES(...), existing) shape as the
+            # nullable columns above it: on a brand-new row (no existing
+            # value to fall back to), inserting a raw NULL when the caller
+            # omits the field would violate the NOT NULL constraint outright
+            # rather than falling back to the column default (DEFAULT only
+            # applies when a column is left out of the INSERT entirely, not
+            # when it's explicitly bound to NULL). The insert-side value uses
+            # COALESCE(%s, TRUE) so a first-ever profile always gets a
+            # concrete TRUE/FALSE; the update-side re-binds the same raw
+            # parameter (not VALUES(), which would already be TRUE-defaulted)
+            # so an omitted field on an existing row still preserves whatever
+            # was there before.
+            await cur.execute(
+                """
+                INSERT INTO ios_social_profiles (user_id, bio, main_accent_hex, sub_accent_hex, share_now_playing)
+                VALUES (%s, %s, %s, %s, COALESCE(%s, TRUE))
+                ON DUPLICATE KEY UPDATE
+                    bio = COALESCE(VALUES(bio), bio),
+                    main_accent_hex = COALESCE(VALUES(main_accent_hex), main_accent_hex),
+                    sub_accent_hex = COALESCE(VALUES(sub_accent_hex), sub_accent_hex),
+                    share_now_playing = COALESCE(%s, share_now_playing)
+                """,
+                (user_id, body.bio, main_hex, sub_hex, body.share_now_playing, body.share_now_playing),
+            )
+    return {"ok": True}
+
+
+@app.put("/api/social/profile/pinned-tracks")
+async def set_pinned_tracks(body: PinnedTracksUpdate, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    if len(body.tracks) > 5:
+        raise HTTPException(status_code=400, detail="Up to 5 pinned tracks allowed")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await conn.begin()
+            try:
+                await cur.execute("DELETE FROM ios_social_pinned_tracks WHERE user_id = %s", (user_id,))
+                for i, t in enumerate(body.tracks):
+                    await cur.execute(
+                        """
+                        INSERT INTO ios_social_pinned_tracks
+                            (id, user_id, position, source_track_id, track_url, title, artist, album)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (str(uuid.uuid4()), user_id, i, t.source_track_id, t.track_url, t.title, t.artist, t.album),
+                    )
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
+    return {"ok": True}
+
+
+@app.get("/api/social/profile/{user_id}")
+async def get_public_social_profile(user_id: str, payload: dict = Depends(get_current_user)):
+    """Public profile view of another user. 404s (not 403, to avoid confirming
+    a block exists) when blocked in either direction, the target doesn't
+    exist, or the target account is deactivated."""
+    caller_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if caller_id != user_id and await _blocked_either_direction(cur, caller_id, user_id):
+                raise HTTPException(status_code=404, detail="User not found")
+
+            await cur.execute(
+                "SELECT id, username, display_name, avatar_url FROM ios_users "
+                "WHERE id = %s AND is_active = TRUE",
+                (user_id,),
+            )
+            user_row = await cur.fetchone()
+            if not user_row:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            await cur.execute(
+                "SELECT bio, main_accent_hex, sub_accent_hex FROM ios_social_profiles WHERE user_id = %s",
+                (user_id,),
+            )
+            profile_row = await cur.fetchone()
+
+            await cur.execute(
+                "SELECT source_track_id, track_url, title, artist, album "
+                "FROM ios_social_pinned_tracks WHERE user_id = %s ORDER BY position ASC",
+                (user_id,),
+            )
+            pinned = await cur.fetchall()
+
+            await cur.execute(
+                "SELECT 1 FROM ios_social_friends WHERE user_id = %s AND friend_id = %s",
+                (caller_id, user_id),
+            )
+            is_friend = (await cur.fetchone()) is not None
+
+    return {
+        **_public_user_fields(user_row),
+        "bio": profile_row[0] if profile_row else None,
+        "main_accent_hex": profile_row[1] if profile_row else None,
+        "sub_accent_hex": profile_row[2] if profile_row else None,
+        "is_friend": is_friend,
+        "pinned_tracks": [
+            {"source_track_id": p[0], "track_url": p[1], "title": p[2], "artist": p[3], "album": p[4]}
+            for p in pinned
+        ],
+    }
+
+
+@app.get("/api/social/users/search")
+async def search_social_users(
+    q: str = Query(..., min_length=1, max_length=64),
+    limit: int = Query(20, ge=1, le=50),
+    payload: dict = Depends(get_current_user),
+):
+    """Username search for the "add friend" flow. Excludes the caller and
+    anyone blocked in either direction."""
+    caller_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT u.id, u.username, u.display_name, u.avatar_url
+                FROM ios_users u
+                WHERE u.is_active = TRUE
+                  AND u.id != %s
+                  AND u.username LIKE %s
+                  AND NOT EXISTS (
+                      SELECT 1 FROM ios_social_blocks b
+                      WHERE (b.user_id = %s AND b.blocked_id = u.id)
+                         OR (b.user_id = u.id AND b.blocked_id = %s)
+                  )
+                ORDER BY u.username ASC
+                LIMIT %s
+                """,
+                (caller_id, f"%{q}%", caller_id, caller_id, limit),
+            )
+            rows = await cur.fetchall()
+    return {"users": [_public_user_fields(r) for r in rows]}
+
+
+# ---------------------------------------------------------------------------
+# Friends: requests, list, remove, block
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/social/friends/request")
+async def send_friend_request(body: FriendRequestCreate, payload: dict = Depends(get_current_user)):
+    from_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            to_id = body.to_user_id
+            if not to_id and body.to_username:
+                await cur.execute("SELECT id FROM ios_users WHERE username = %s AND is_active = TRUE", (body.to_username,))
+                row = await cur.fetchone()
+                to_id = row[0] if row else None
+            if not to_id:
+                raise HTTPException(status_code=404, detail="User not found")
+            if to_id == from_id:
+                raise HTTPException(status_code=400, detail="Cannot friend yourself")
+
+            if await _blocked_either_direction(cur, from_id, to_id):
+                raise HTTPException(status_code=404, detail="User not found")
+
+            await cur.execute(
+                "SELECT 1 FROM ios_social_friends WHERE user_id = %s AND friend_id = %s", (from_id, to_id)
+            )
+            if await cur.fetchone():
+                raise HTTPException(status_code=409, detail="Already friends")
+
+            await cur.execute(
+                """
+                SELECT id FROM ios_social_friend_requests
+                WHERE status = 'pending'
+                  AND ((from_user_id = %s AND to_user_id = %s) OR (from_user_id = %s AND to_user_id = %s))
+                """,
+                (from_id, to_id, to_id, from_id),
+            )
+            if await cur.fetchone():
+                raise HTTPException(status_code=409, detail="A pending request already exists")
+
+            request_id = str(uuid.uuid4())
+            await cur.execute(
+                "INSERT INTO ios_social_friend_requests (id, from_user_id, to_user_id) VALUES (%s, %s, %s)",
+                (request_id, from_id, to_id),
+            )
+    return {"ok": True, "request_id": request_id}
+
+
+async def _respond_to_request(request_id: str, caller_id: str, new_status: str) -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT from_user_id, to_user_id, status FROM ios_social_friend_requests WHERE id = %s",
+                (request_id,),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Request not found")
+            from_id, to_id, status = row
+            if status != "pending":
+                raise HTTPException(status_code=409, detail="Request already resolved")
+
+            if new_status == "cancelled":
+                if caller_id != from_id:
+                    raise HTTPException(status_code=403, detail="Only the sender can cancel a request")
+            else:
+                if caller_id != to_id:
+                    raise HTTPException(status_code=403, detail="Only the recipient can respond to this request")
+
+            await conn.begin()
+            try:
+                await cur.execute(
+                    "UPDATE ios_social_friend_requests SET status = %s, responded_at = NOW() WHERE id = %s",
+                    (new_status, request_id),
+                )
+                if new_status == "accepted":
+                    await cur.execute(
+                        "INSERT IGNORE INTO ios_social_friends (user_id, friend_id) VALUES (%s, %s), (%s, %s)",
+                        (from_id, to_id, to_id, from_id),
+                    )
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
+
+
+@app.post("/api/social/friends/request/{request_id}/accept")
+async def accept_friend_request(request_id: str, payload: dict = Depends(get_current_user)):
+    await _respond_to_request(request_id, payload["sub"], "accepted")
+    return {"ok": True}
+
+
+@app.post("/api/social/friends/request/{request_id}/decline")
+async def decline_friend_request(request_id: str, payload: dict = Depends(get_current_user)):
+    await _respond_to_request(request_id, payload["sub"], "declined")
+    return {"ok": True}
+
+
+@app.post("/api/social/friends/request/{request_id}/cancel")
+async def cancel_friend_request(request_id: str, payload: dict = Depends(get_current_user)):
+    await _respond_to_request(request_id, payload["sub"], "cancelled")
+    return {"ok": True}
+
+
+@app.get("/api/social/friends/requests")
+async def list_friend_requests(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT r.id, u.id, u.username, u.display_name, u.avatar_url, r.created_at
+                FROM ios_social_friend_requests r
+                JOIN ios_users u ON u.id = r.from_user_id
+                WHERE r.to_user_id = %s AND r.status = 'pending'
+                ORDER BY r.created_at DESC
+                """,
+                (user_id,),
+            )
+            incoming = await cur.fetchall()
+            await cur.execute(
+                """
+                SELECT r.id, u.id, u.username, u.display_name, u.avatar_url, r.created_at
+                FROM ios_social_friend_requests r
+                JOIN ios_users u ON u.id = r.to_user_id
+                WHERE r.from_user_id = %s AND r.status = 'pending'
+                ORDER BY r.created_at DESC
+                """,
+                (user_id,),
+            )
+            outgoing = await cur.fetchall()
+
+    def _fmt(rows):
+        return [
+            {
+                "request_id": r[0], **_public_user_fields((r[1], r[2], r[3], r[4])),
+                "created_at": r[5].isoformat() if r[5] else None,
+            }
+            for r in rows
+        ]
+
+    return {"incoming": _fmt(incoming), "outgoing": _fmt(outgoing)}
+
+
+@app.get("/api/social/friends")
+async def list_friends(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT u.id, u.username, u.display_name, u.avatar_url, f.created_at
+                FROM ios_social_friends f
+                JOIN ios_users u ON u.id = f.friend_id
+                WHERE f.user_id = %s AND u.is_active = TRUE
+                ORDER BY u.username ASC
+                """,
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+    return {
+        "friends": [
+            {**_public_user_fields((r[0], r[1], r[2], r[3])), "friends_since": r[4].isoformat() if r[4] else None}
+            for r in rows
+        ]
+    }
+
+
+@app.delete("/api/social/friends/{friend_id}")
+async def remove_friend(friend_id: str, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM ios_social_friends WHERE (user_id = %s AND friend_id = %s) OR (user_id = %s AND friend_id = %s)",
+                (user_id, friend_id, friend_id, user_id),
+            )
+    return {"ok": True}
+
+
+@app.post("/api/social/block/{user_id}")
+async def block_user(user_id: str, payload: dict = Depends(get_current_user)):
+    caller_id = payload["sub"]
+    if caller_id == user_id:
+        raise HTTPException(status_code=400, detail="Cannot block yourself")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await conn.begin()
+            try:
+                await cur.execute(
+                    "INSERT IGNORE INTO ios_social_blocks (user_id, blocked_id) VALUES (%s, %s)",
+                    (caller_id, user_id),
+                )
+                # Blocking tears down any existing friendship/pending request
+                # between the two, in both directions.
+                await cur.execute(
+                    "DELETE FROM ios_social_friends WHERE (user_id = %s AND friend_id = %s) OR (user_id = %s AND friend_id = %s)",
+                    (caller_id, user_id, user_id, caller_id),
+                )
+                await cur.execute(
+                    """
+                    UPDATE ios_social_friend_requests SET status = 'cancelled', responded_at = NOW()
+                    WHERE status = 'pending'
+                      AND ((from_user_id = %s AND to_user_id = %s) OR (from_user_id = %s AND to_user_id = %s))
+                    """,
+                    (caller_id, user_id, user_id, caller_id),
+                )
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
+    return {"ok": True}
+
+
+@app.delete("/api/social/block/{user_id}")
+async def unblock_user(user_id: str, payload: dict = Depends(get_current_user)):
+    caller_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM ios_social_blocks WHERE user_id = %s AND blocked_id = %s", (caller_id, user_id)
+            )
+    return {"ok": True}
+
+
+@app.get("/api/social/block")
+async def list_blocked_users(payload: dict = Depends(get_current_user)):
+    caller_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT u.id, u.username, u.display_name, u.avatar_url
+                FROM ios_social_blocks b
+                JOIN ios_users u ON u.id = b.blocked_id
+                WHERE b.user_id = %s
+                ORDER BY u.username ASC
+                """,
+                (caller_id,),
+            )
+            rows = await cur.fetchall()
+    return {"blocked": [_public_user_fields(r) for r in rows]}
+
+
+@app.get("/api/social/friends/suggestions")
+async def friend_suggestions(limit: int = Query(10, ge=1, le=30), payload: dict = Depends(get_current_user)):
+    """Extra feature #2: mutual-friend suggestions — other users who share at
+    least one friend with the caller, aren't already a friend/pending/blocked,
+    ranked by number of mutual friends."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT f2.friend_id, COUNT(*) AS mutual_count
+                FROM ios_social_friends f1
+                JOIN ios_social_friends f2 ON f2.user_id = f1.friend_id
+                WHERE f1.user_id = %s
+                  AND f2.friend_id != %s
+                  AND f2.friend_id NOT IN (
+                      SELECT friend_id FROM ios_social_friends WHERE user_id = %s
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM ios_social_friend_requests r
+                      WHERE r.status = 'pending'
+                        AND ((r.from_user_id = %s AND r.to_user_id = f2.friend_id)
+                          OR (r.from_user_id = f2.friend_id AND r.to_user_id = %s))
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM ios_social_blocks b
+                      WHERE (b.user_id = %s AND b.blocked_id = f2.friend_id)
+                         OR (b.user_id = f2.friend_id AND b.blocked_id = %s)
+                  )
+                GROUP BY f2.friend_id
+                ORDER BY mutual_count DESC
+                LIMIT %s
+                """,
+                (user_id, user_id, user_id, user_id, user_id, user_id, user_id, limit),
+            )
+            rows = await cur.fetchall()
+            if not rows:
+                return {"suggestions": []}
+
+            ids = [r[0] for r in rows]
+            mutual_by_id = {r[0]: r[1] for r in rows}
+            placeholders = ",".join(["%s"] * len(ids))
+            await cur.execute(
+                f"SELECT id, username, display_name, avatar_url FROM ios_users "
+                f"WHERE id IN ({placeholders}) AND is_active = TRUE",
+                tuple(ids),
+            )
+            user_rows = await cur.fetchall()
+
+    return {
+        "suggestions": sorted(
+            (
+                {**_public_user_fields(r), "mutual_friend_count": mutual_by_id.get(r[0], 0)}
+                for r in user_rows
+            ),
+            key=lambda s: s["mutual_friend_count"],
+            reverse=True,
+        )
+    }
+
+
+# ---------------------------------------------------------------------------
+# Presence — lightweight polling, batched friend lookups
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/social/presence")
+async def update_presence(body: PresenceUpdate, payload: dict = Depends(get_current_user)):
+    """Heartbeat the client calls every 30-60s while foregrounded (plus a
+    best-effort call with going_offline=True on background/terminate — see
+    ContentView's scenePhase handling). Upserts a single row per user, so
+    this is always a cheap point write regardless of poll frequency."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_presence_state
+                    (user_id, is_online, is_playing, now_playing_title, now_playing_artist, last_seen_at)
+                VALUES (%s, %s, %s, %s, %s, NOW())
+                ON DUPLICATE KEY UPDATE
+                    is_online = VALUES(is_online),
+                    is_playing = VALUES(is_playing),
+                    now_playing_title = VALUES(now_playing_title),
+                    now_playing_artist = VALUES(now_playing_artist),
+                    last_seen_at = NOW()
+                """,
+                (
+                    user_id, not body.going_offline, body.is_playing and not body.going_offline,
+                    body.now_playing_title, body.now_playing_artist,
+                ),
+            )
+    return {"ok": True}
+
+
+async def _fetch_presence_rows(cur, user_ids: list[str]) -> dict:
+    if not user_ids:
+        return {}
+    placeholders = ",".join(["%s"] * len(user_ids))
+    await cur.execute(
+        f"""
+        SELECT p.user_id, p.is_online, p.is_playing, p.now_playing_title, p.now_playing_artist,
+               p.last_seen_at, COALESCE(sp.share_now_playing, TRUE)
+        FROM ios_presence_state p
+        LEFT JOIN ios_social_profiles sp ON sp.user_id = p.user_id
+        WHERE p.user_id IN ({placeholders})
+        """,
+        tuple(user_ids),
+    )
+    rows = await cur.fetchall()
+    now = datetime.now(timezone.utc)
+    result = {}
+    for r in rows:
+        uid, is_online, is_playing, title, artist, last_seen, share_now_playing = r
+        last_seen_utc = last_seen.replace(tzinfo=timezone.utc) if last_seen and last_seen.tzinfo is None else last_seen
+        fresh = bool(last_seen_utc) and (now - last_seen_utc).total_seconds() <= _SOCIAL_PRESENCE_FRESH_SECONDS
+        online = bool(is_online) and fresh
+        result[uid] = {
+            "user_id": uid,
+            "online": online,
+            "is_playing": bool(is_playing) and online and bool(share_now_playing),
+            "now_playing_title": title if (online and share_now_playing) else None,
+            "now_playing_artist": artist if (online and share_now_playing) else None,
+            "last_seen_at": last_seen.isoformat() if last_seen else None,
+        }
+    return result
+
+
+@app.get("/api/social/presence/friends")
+async def get_friends_presence(payload: dict = Depends(get_current_user)):
+    """Batched presence lookup for every one of the caller's friends in a
+    single round trip — the client must call this instead of looping a
+    per-friend request (see the main-thread-hang bug history this codebase
+    already has for exactly that anti-pattern elsewhere)."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT friend_id FROM ios_social_friends WHERE user_id = %s", (user_id,))
+            friend_ids = [r[0] for r in await cur.fetchall()]
+            presence_by_id = await _fetch_presence_rows(cur, friend_ids)
+
+    # Friends with no presence row yet (never opened the app since this
+    # feature shipped) are simply offline.
+    return {
+        "presence": [
+            presence_by_id.get(fid, {
+                "user_id": fid, "online": False, "is_playing": False,
+                "now_playing_title": None, "now_playing_artist": None, "last_seen_at": None,
+            })
+            for fid in friend_ids
+        ]
+    }
+
+
+@app.get("/api/social/presence/{user_id}")
+async def get_user_presence(user_id: str, payload: dict = Depends(get_current_user)):
+    caller_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if caller_id != user_id and await _blocked_either_direction(cur, caller_id, user_id):
+                raise HTTPException(status_code=404, detail="User not found")
+            presence_by_id = await _fetch_presence_rows(cur, [user_id])
+    return presence_by_id.get(user_id, {
+        "user_id": user_id, "online": False, "is_playing": False,
+        "now_playing_title": None, "now_playing_artist": None, "last_seen_at": None,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Extra feature #1: friends-only activity feed (recently played / favorited)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/social/activity/friends")
+async def friends_activity_feed(limit: int = Query(30, ge=1, le=100), payload: dict = Depends(get_current_user)):
+    """Merges recent plays (ios_play_history) and recent favorites
+    (ios_user_favorites) from the caller's friends into one feed, newest
+    first. Gated by the same share_now_playing profile toggle used for
+    presence — a friend who turns that off disappears from this feed too,
+    not just from the now-playing line."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT friend_id FROM ios_social_friends WHERE user_id = %s", (user_id,))
+            friend_ids = [r[0] for r in await cur.fetchall()]
+            if not friend_ids:
+                return {"activity": []}
+
+            placeholders = ",".join(["%s"] * len(friend_ids))
+            await cur.execute(
+                f"""
+                (SELECT u.id, u.username, u.display_name, u.avatar_url,
+                        'played' AS kind, h.title, h.artist, h.played_at AS at
+                 FROM ios_play_history h
+                 JOIN ios_users u ON u.id = h.user_id
+                 LEFT JOIN ios_social_profiles sp ON sp.user_id = u.id
+                 WHERE h.user_id IN ({placeholders}) AND u.is_active = TRUE
+                   AND COALESCE(sp.share_now_playing, TRUE) = TRUE)
+                UNION ALL
+                (SELECT u.id, u.username, u.display_name, u.avatar_url,
+                        'favorited' AS kind, f.title, f.artist, f.added_at AS at
+                 FROM ios_user_favorites f
+                 JOIN ios_users u ON u.id = f.user_id
+                 LEFT JOIN ios_social_profiles sp ON sp.user_id = u.id
+                 WHERE f.user_id IN ({placeholders}) AND u.is_active = TRUE
+                   AND COALESCE(sp.share_now_playing, TRUE) = TRUE)
+                ORDER BY at DESC
+                LIMIT %s
+                """,
+                (*friend_ids, *friend_ids, limit),
+            )
+            rows = await cur.fetchall()
+
+    return {
+        "activity": [
+            {
+                **_public_user_fields((r[0], r[1], r[2], r[3])),
+                "kind": r[4], "title": r[5], "artist": r[6],
+                "at": r[7].isoformat() if r[7] else None,
+            }
+            for r in rows
+        ]
+    }
 
 
 # ---------------------------------------------------------------------------
