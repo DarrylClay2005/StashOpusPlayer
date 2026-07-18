@@ -285,7 +285,10 @@ struct LumisoundApp: App {
                         }
                         for track in tracks {
                             guard let url = try? await streaming.streamURL(for: track) else { continue }
-                            player.appendToQueue(song: streaming.toSong(track: track, streamURL: url))
+                            // Tagged `.autoContinuation` (not the default `.manual`) so these
+                            // land in the Queue UI's "Up Next" section, not "Manually Queued" —
+                            // see QueueSource / AudioPlayerManager+Queue.appendToQueue.
+                            player.appendToQueue(song: streaming.toSong(track: track, streamURL: url), source: .autoContinuation)
                         }
                         if !player.isPlaying { player.skipToNext() }
                         appLog("Auto-radio: appended \(tracks.count) track(s)", category: "audio")
