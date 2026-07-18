@@ -19,6 +19,18 @@ extension AccountService {
             let artist: String?
             let album: String?
             let duration_seconds: Int
+            /// Forward-compatible only: the `/user/queue` bridge endpoint's
+            /// schema (`QueueTrackRequest` / `ios_user_queue` table in
+            /// ios-bridge's main.py) has no column for this yet, so FastAPI's
+            /// default `extra="ignore"` request-model behavior silently drops
+            /// it on write, and GET /user/queue never returns it — meaning a
+            /// queue restored via `fetchQueue` below always comes back with
+            /// `queueSource == nil` (read as `.autoContinuation`) regardless
+            /// of what was pushed. Sending it now costs nothing and means a
+            /// future backend migration to persist it doesn't require another
+            /// app release. See QueueSource for the manual/auto-continuation
+            /// distinction this mirrors.
+            let queue_source: String
         }
         struct Body: Encodable { let tracks: [TrackBody] }
         let tracks = songs.map { song in
@@ -28,7 +40,8 @@ extension AccountService {
                 title: song.title,
                 artist: song.artist.isEmpty ? nil : song.artist,
                 album: song.album.isEmpty ? nil : song.album,
-                duration_seconds: Int(song.duration)
+                duration_seconds: Int(song.duration),
+                queue_source: song.resolvedQueueSource.rawValue
             )
         }
         do {
@@ -40,7 +53,12 @@ extension AccountService {
 
     /// Fetches the server's "up next" queue (GET /user/queue), resolving each
     /// entry against the local library (by ID) or as a streaming track (by URL).
-    /// Entries that can't be resolved either way are skipped.
+    /// Entries that can't be resolved either way are skipped. Every resolved
+    /// `Song` comes back with `queueSource == nil` (i.e. `.autoContinuation`) —
+    /// the bridge doesn't persist that distinction yet (see the comment on
+    /// `queue_source` in `pushQueue` above), so a queue restored from another
+    /// device currently loses the manual/auto-continuation split even though
+    /// track identity and order survive intact.
     func fetchQueue(library: LibraryManager) async -> [Song] {
         guard isLoggedIn else { return [] }
         do {

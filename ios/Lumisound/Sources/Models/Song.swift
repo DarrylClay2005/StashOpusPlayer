@@ -54,6 +54,19 @@ struct Song: Identifiable, Hashable, Codable {
     /// `groupableAlbumName` and `LibraryManager.rebuildAllSongs()`.
     var albumInferredFromFolder: Bool?
 
+    /// How this instance ended up in the playback queue — see `QueueSource`.
+    /// Only meaningful for `Song`s living in `AudioPlayerManager.queue`; a
+    /// plain library/search-result `Song` just carries `nil`. Optional (rather
+    /// than a non-optional property with a default) so decoding a `Song` saved
+    /// before this field existed — e.g. an older `PlaybackSnapshot` blob in
+    /// `AudioPlayerManager+Persistence` — never fails on a missing key:
+    /// Swift's synthesized `Decodable` only defaults missing keys
+    /// automatically for `Optional` properties, not ones with a plain default
+    /// value (same reasoning as `AudioSettings.spatialAudioEnabled`). Read via
+    /// `resolvedQueueSource` (`AudioPlayerManager+Queue.swift`), which treats
+    /// `nil` as `.autoContinuation`.
+    var queueSource: QueueSource?
+
     init(
         id: String = UUID().uuidString,
         title: String,
@@ -71,7 +84,8 @@ struct Song: Identifiable, Hashable, Codable {
         sourceTrackID: String? = nil,
         httpHeaders: [String: String]? = nil,
         bpm: Double? = nil,
-        dateAdded: Date? = nil
+        dateAdded: Date? = nil,
+        queueSource: QueueSource? = nil
     ) {
         self.id = id
         self.title = title
@@ -90,6 +104,7 @@ struct Song: Identifiable, Hashable, Codable {
         self.httpHeaders = httpHeaders
         self.bpm = bpm
         self.dateAdded = dateAdded
+        self.queueSource = queueSource
     }
 
     var displayName: String {
