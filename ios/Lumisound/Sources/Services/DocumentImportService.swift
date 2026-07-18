@@ -179,6 +179,11 @@ struct DocumentImportService {
         var trackNumber = 0
         var year = ""
         var sourceTrackID: String?
+        // Set true only by the parent-folder-name fallback below — never by
+        // an actual embedded/enriched tag — so the Albums tab can tell a real
+        // album apart from a folder name standing in for one. See
+        // `Song.albumInferredFromFolder`.
+        var albumInferredFromFolder = false
 
         for item in commonMetadata {
             switch item.commonKey?.rawValue {
@@ -306,11 +311,17 @@ struct DocumentImportService {
 
         // When no album tag is present, use the immediate parent folder name as album
         // so music organised in Artist/Album/track.mp3 structures is grouped correctly.
+        // This is a display/local-grouping convenience only — `albumInferredFromFolder`
+        // marks it as such so the Albums tab (which must stay strictly metadata-derived,
+        // per FoldersTab already being the real "browse by folder" feature) can exclude
+        // it from the albums grid instead of showing the user's own folder name
+        // disguised as an album.
         if album.isEmpty {
             let parentName = url.deletingLastPathComponent().lastPathComponent
             let skipFolders: Set<String> = ["Imported Music", "Documents", ""]
             if !skipFolders.contains(parentName) {
                 album = parentName
+                albumInferredFromFolder = true
             }
         }
 
@@ -339,8 +350,9 @@ struct DocumentImportService {
             sourceTrackID: sourceTrackID,
             dateAdded: dateAdded
         )
+        song.albumInferredFromFolder = albumInferredFromFolder
 
-        appLog("Metadata: \"\(song.title)\" by \(song.artist.isEmpty ? "unknown" : song.artist) [\(fileExt), \(String(format: "%.0f", song.duration))s]", category: "library")
+        appLog("Metadata: \"\(song.title)\" by \(song.artist.isEmpty ? "unknown" : song.artist) [\(fileExt), \(String(format: "%.0f", song.duration))s]\(albumInferredFromFolder ? " (album inferred from folder name)" : "")", category: "library")
 
         // Enrich sparse metadata via iTunes Search API. Only fires when artist or
         // genre is missing — common for YouTube downloads where yt-dlp fills in
@@ -442,11 +454,13 @@ struct DocumentImportService {
             }
         }
 
+        var albumInferredFromFolder = false
         if album.isEmpty {
             let parentName = url.deletingLastPathComponent().lastPathComponent
             let skipFolders: Set<String> = ["Imported Music", "Documents", ""]
             if !skipFolders.contains(parentName) {
                 album = parentName
+                albumInferredFromFolder = true
             }
         }
 
@@ -465,6 +479,16 @@ struct DocumentImportService {
         refreshed.year = year
         refreshed.trackNumber = trackNumber
         refreshed.sourceTrackID = sourceTrackID
+        // Only touch the "is this album name real metadata or a folder-name
+        // stand-in" flag when `album` actually changed this pass — otherwise
+        // carry forward whatever `current` already had (copied in via
+        // `var refreshed = current` above). If it changed via the fallback
+        // above, mark it inferred; if it changed any other way, a real tag
+        // read produced it, so it's no longer folder-inferred even if it was
+        // before (e.g. the file was retagged since the last scan).
+        if album != current.album {
+            refreshed.albumInferredFromFolder = albumInferredFromFolder
+        }
         return refreshed
     }
 

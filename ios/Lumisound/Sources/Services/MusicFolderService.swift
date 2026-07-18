@@ -17,6 +17,51 @@ final class MusicFolderService: ObservableObject {
 
     init() { loadBookmarks() }
 
+    // MARK: - Local "Imported Music" subfolder grouping
+    //
+    // Shared by `FoldersTab` (the traditional Folders browsing tab) and
+    // `LibraryHubView`'s speed-dial tiles, so both present the exact same
+    // set of folders instead of two independently-written groupings quietly
+    // drifting apart. Groups `songs` by their top-level subdirectory under
+    // "Imported Music" — unlike the Albums tab, this is purely path-based:
+    // every song physically inside a folder shows up here regardless of its
+    // album metadata tag (or lack of one).
+    struct LocalFolderGroup: Identifiable {
+        let id: String   // folder name, unique within Imported Music
+        let dirURL: URL
+        let songs: [Song]
+    }
+
+    /// Computed off the render path by callers (e.g. via `.task(id:)`) —
+    /// O(n) over `songs`, not something to run on every SwiftUI body pass
+    /// for a large library.
+    static func localFolderGroups(from songs: [Song]) -> [LocalFolderGroup] {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return []
+        }
+        let importDir = docs.appendingPathComponent("Imported Music").standardizedFileURL
+        let importPath = importDir.path
+
+        var groups: [String: (url: URL, songs: [Song])] = [:]
+        for song in songs {
+            guard let url = song.url else { continue }
+            let songPath = url.standardizedFileURL.path
+            guard songPath.hasPrefix(importPath + "/") else { continue }
+            let remainder = String(songPath.dropFirst(importPath.count + 1))
+            let parts = remainder.split(separator: "/", maxSplits: 1)
+            guard parts.count >= 2 else { continue }   // skip root-level files
+            let name = String(parts[0])
+            if groups[name] == nil {
+                groups[name] = (importDir.appendingPathComponent(name), [])
+            }
+            groups[name]!.songs.append(song)
+        }
+
+        return groups
+            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+            .map { LocalFolderGroup(id: $0.key, dirURL: $0.value.url, songs: $0.value.songs) }
+    }
+
     // MARK: - Public API
 
     /// Add a folder from a URL obtained via .fileImporter / UIDocumentPickerViewController.

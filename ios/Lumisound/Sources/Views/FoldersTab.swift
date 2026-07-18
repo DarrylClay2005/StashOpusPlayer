@@ -6,12 +6,10 @@ import MediaPlayer
 // Groups imported songs by the first subdirectory of "Imported Music" that
 // contains them. Unlike the Albums tab, grouping is done by filesystem path —
 // every song inside a folder shows up here regardless of its album metadata tag.
+// The actual grouping logic lives in `MusicFolderService.localFolderGroups(from:)`
+// so `LibraryHubView`'s speed-dial folder tiles use the exact same folder set.
 
-private struct FolderEntry: Identifiable {
-    let id: String        // folder name (unique within Imported Music)
-    let dirURL: URL
-    let songs: [Song]
-}
+private typealias FolderEntry = MusicFolderService.LocalFolderGroup
 
 struct FoldersTab: View {
     @EnvironmentObject private var library: LibraryManager
@@ -21,37 +19,6 @@ struct FoldersTab: View {
 
     private var gridColumns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: 12), count: columns)
-    }
-
-    /// Groups allSongs by their top-level subdirectory under "Imported Music".
-    /// Computed off the render path (see `.task(id:)` below) so large libraries
-    /// don't re-run this O(n) grouping/sort on every body evaluation.
-    private func computeFolders() -> [FolderEntry] {
-        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return []
-        }
-        let importDir = docs.appendingPathComponent("Imported Music").standardizedFileURL
-        let importPath = importDir.path
-
-        var groups: [String: (url: URL, songs: [Song])] = [:]
-        for song in library.allSongs {
-            guard let url = song.url else { continue }
-            let songPath = url.standardizedFileURL.path
-            guard songPath.hasPrefix(importPath + "/") else { continue }
-            // Path after "Imported Music/"
-            let remainder = String(songPath.dropFirst(importPath.count + 1))
-            let parts = remainder.split(separator: "/", maxSplits: 1)
-            guard parts.count >= 2 else { continue }   // skip root-level files
-            let name = String(parts[0])
-            if groups[name] == nil {
-                groups[name] = (importDir.appendingPathComponent(name), [])
-            }
-            groups[name]!.songs.append(song)
-        }
-
-        return groups
-            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
-            .map { FolderEntry(id: $0.key, dirURL: $0.value.url, songs: $0.value.songs) }
     }
 
     var body: some View {
@@ -83,7 +50,7 @@ struct FoldersTab: View {
         }
         .background(Color.clear.ignoresSafeArea())
         .task(id: library.allSongs.count) {
-            folders = computeFolders()
+            folders = MusicFolderService.localFolderGroups(from: library.allSongs)
         }
         .toolbar {
             // Mirrors SongsTab's column-toggle buttons (rather than a Menu) so

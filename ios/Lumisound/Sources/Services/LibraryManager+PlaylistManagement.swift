@@ -8,6 +8,7 @@ extension LibraryManager {
         let playlist = Playlist(id: UUID(), name: name, songIDs: [], createdAt: Date())
         playlists.append(playlist)
         persistence.savePlaylists(playlists)
+        appLog("createPlaylist: \"\(name)\" (id: \(playlist.id))", category: "library")
         ToastCenter.shared.show("Created playlist \"\(name)\"", category: .success, icon: "music.note.list")
     }
 
@@ -21,6 +22,7 @@ extension LibraryManager {
         let playlist = Playlist(id: UUID(), name: name, songIDs: songIDs, createdAt: Date())
         playlists.append(playlist)
         persistence.savePlaylists(playlists)
+        appLog("createPlaylist: \"\(name)\" (id: \(playlist.id), \(songIDs.count) song(s), pre-populated)", category: "library")
         return playlist
     }
 
@@ -32,6 +34,7 @@ extension LibraryManager {
     /// song that only existed on the other device) are dropped rather than
     /// failing the whole import. Returns a summary for the caller to report.
     func importBackup(_ backup: LibraryBackup) -> (playlistsImported: Int, songsSkipped: Int) {
+        appLog("importBackup: starting — \(backup.playlists.count) playlist(s), \(backup.favoriteSongIDs.count) favorite(s), exported \(backup.exportedAt) by v\(backup.appVersion)", category: "library")
         let knownIDs = Set(allSongs.map(\.id))
         var songsSkipped = 0
 
@@ -59,17 +62,20 @@ extension LibraryManager {
         favoriteSongIDs.formUnion(matchedFavorites)
         persistence.saveFavorites(favoriteSongIDs)
 
+        appLog("importBackup: complete — \(importedPlaylists.count) playlist(s) imported, \(songsSkipped) song reference(s) skipped (not present locally)", category: "library")
         return (importedPlaylists.count, songsSkipped)
     }
 
     func deletePlaylist(_ playlist: Playlist) {
         playlists.removeAll { $0.id == playlist.id }
         persistence.savePlaylists(playlists)
+        appLog("deletePlaylist: \"\(playlist.name)\" (id: \(playlist.id), \(playlist.songIDs.count) song(s))", category: "library")
         ToastCenter.shared.show("Deleted playlist \"\(playlist.name)\"", category: .info, icon: "trash")
     }
 
     func renamePlaylist(_ playlist: Playlist, to newName: String) {
         guard let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
+        appLog("renamePlaylist: \"\(playlist.name)\" -> \"\(newName)\" (id: \(playlist.id))", category: "library")
         playlists[index].name = newName
         persistence.savePlaylists(playlists)
     }
@@ -77,14 +83,17 @@ extension LibraryManager {
     func setFolder(_ folder: String?, forPlaylistID playlistID: UUID) {
         guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
         let trimmed = folder?.trimmingCharacters(in: .whitespacesAndNewlines)
-        playlists[index].folder = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        let resolved = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        playlists[index].folder = resolved
         persistence.savePlaylists(playlists)
+        appLog("setFolder: playlist \(playlistID) -> \(resolved ?? "(none)")", category: "library")
     }
 
     func setTags(_ tags: [String], forPlaylistID playlistID: UUID) {
         guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return }
         playlists[index].tags = tags
         persistence.savePlaylists(playlists)
+        appLog("setTags: playlist \(playlistID) -> [\(tags.joined(separator: ", "))]", category: "library")
     }
 
     /// Remembers the Now Playing artwork style last used while this playlist

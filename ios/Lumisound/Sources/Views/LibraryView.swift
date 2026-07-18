@@ -4,6 +4,12 @@ import MediaPlayer
 // MARK: - Tab enum
 
 enum LibraryTab: String, CaseIterable {
+    // The hub is the new default landing tab — a dashboard of shortcuts to
+    // real playlists/folders/favorites plus a few auto-generated groupings
+    // (see `LibraryHubView`). It sits *alongside* the traditional browsing
+    // tabs below, elevating access to them rather than replacing anything —
+    // every tab that existed before this redesign is still here, unchanged.
+    case hub       = "Home"
     case songs     = "Songs"
     case artists   = "Artists"
     case albums    = "Albums"
@@ -15,6 +21,7 @@ enum LibraryTab: String, CaseIterable {
 
     var icon: String {
         switch self {
+        case .hub:       return "square.grid.2x2.fill"
         case .songs:     return "music.note"
         case .artists:   return "music.mic"
         case .albums:    return "square.stack"
@@ -120,7 +127,7 @@ struct LibraryView: View {
     // toolbar's Select entry point is gated on it too.
     @AppStorage("library_songs_columns") private var songColumns: Int = 1
 
-    @State private var selectedTab: LibraryTab = .songs
+    @State private var selectedTab: LibraryTab = .hub
     @State private var searchText: String = ""
     @State private var debouncedSearch: String = ""
     @State private var showAddMusic = false
@@ -297,6 +304,8 @@ struct LibraryView: View {
     @ViewBuilder
     private var tabContent: some View {
         switch selectedTab {
+        case .hub:
+            LibraryHubView(selectedTab: $selectedTab)
         case .songs:
             SongsTab(
                 songs: filteredSongs,

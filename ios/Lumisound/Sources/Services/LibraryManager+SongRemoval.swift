@@ -190,7 +190,12 @@ extension LibraryManager {
                     $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
                 }
                 let artists = Array(Set(combined.map(\.artistName))).sorted()
-                let albums  = Array(Set(combined.map(\.albumName))).sorted()
+                // `groupableAlbumName` (not `albumName`) so folder-name-inferred
+                // pseudo-albums collapse into the same "Unknown Album" bucket as
+                // genuinely untagged tracks, instead of each user folder showing
+                // up as its own distinct entry in the Albums tab — see
+                // `Song.groupableAlbumName` for the full rationale.
+                let albums  = Array(Set(combined.map(\.groupableAlbumName))).sorted()
                 let genres  = Array(Set(combined.compactMap { $0.genre.isEmpty ? nil : $0.genre })).sorted()
                 // Built alongside the sort/group work above so `songs(byArtist:)` /
                 // `songs(inAlbum:)` / `songs(inGenre:)` / `songs(for playlist:)`
@@ -198,7 +203,7 @@ extension LibraryManager {
                 // `songsBy*` property doc comments in LibraryManager.swift.
                 let byID = Dictionary(uniqueKeysWithValues: combined.map { ($0.id, $0) })
                 let byArtist = Dictionary(grouping: combined, by: \.artistName)
-                let byAlbum  = Dictionary(grouping: combined, by: \.albumName)
+                let byAlbum  = Dictionary(grouping: combined, by: \.groupableAlbumName)
                 let byGenre  = Dictionary(grouping: combined.filter { !$0.genre.isEmpty }, by: \.genre)
                 return (combined, artists, albums, genres, byID, byArtist, byAlbum, byGenre)
             }.value
