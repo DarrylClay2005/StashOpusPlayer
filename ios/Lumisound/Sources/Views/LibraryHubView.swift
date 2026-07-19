@@ -43,12 +43,15 @@ struct LibraryHubView: View {
     @State private var recentlyAdded: [Song] = []
     @State private var mostPlayed: [Song] = []
     @State private var forgottenFavorites: [Song] = []
+    @State private var recentlyPlayed: [Song] = []
+    @State private var genreGroups: [(genre: String, songs: [Song])] = []
     @State private var hasLoadedOnce = false
 
     // Server-backed extras — independent of the on-device reload() above,
     // since these come from the network rather than LibraryManager.
     @State private var weeklyMixSongs: [Song] = []
     @State private var similarListenerSearchQuery: String? = nil
+    @State private var onThisDayGroups: [OnThisDayGroup] = []
 
     var body: some View {
         ScrollView {
@@ -89,7 +92,17 @@ struct LibraryHubView: View {
 
     @ViewBuilder
     private var hubContent: some View {
+        HubGreetingHeader(
+            displayName: account.currentUser?.displayName ?? account.currentUser?.username,
+            songsPlayedToday: library.songsPlayedTodayCount()
+        )
+        .padding(.horizontal, 16)
+
         HubQuickActionsRow(hasLibrary: !library.allSongs.isEmpty, onShuffleAll: shuffleAll)
+
+        if !onThisDayGroups.isEmpty {
+            HubOnThisDayTeaser(groups: onThisDayGroups)
+        }
 
         if !shortcuts.isEmpty {
             HubSpeedDialSection(shortcuts: shortcuts)
@@ -119,6 +132,17 @@ struct LibraryHubView: View {
                 title: "On Repeat", icon: "flame.fill",
                 songs: mostPlayed, seeAllTab: .songs, selectedTab: $selectedTab
             )
+        }
+
+        if !recentlyPlayed.isEmpty {
+            HubSongCarousel(
+                title: "Recently Played", icon: "clock.arrow.circlepath",
+                songs: recentlyPlayed, seeAllTab: .songs, selectedTab: $selectedTab
+            )
+        }
+
+        if !genreGroups.isEmpty {
+            HubGenresCarousel(groups: genreGroups)
         }
 
         if !forgottenFavorites.isEmpty {
@@ -157,7 +181,7 @@ struct LibraryHubView: View {
         player.play(song: random, in: library.allSongs)
     }
 
-    /// Fetches the three network-backed hub extras once — independent of
+    /// Fetches the network-backed hub extras once — independent of
     /// `reload()`'s on-device `library.allSongs.count` trigger, since these
     /// don't change just because the local library was rescanned.
     private func loadServerExtras() async {
@@ -168,7 +192,11 @@ struct LibraryHubView: View {
         }()
         async let similarListeners: Void = account.fetchSimilarListeners()
         async let friendsActivity: Void = social.fetchFriendsActivity()
-        _ = await (weeklyMix, similarListeners, friendsActivity)
+        async let onThisDay: Void = {
+            guard account.isLoggedIn else { return }
+            onThisDayGroups = await account.fetchOnThisDay()
+        }()
+        _ = await (weeklyMix, similarListeners, friendsActivity, onThisDay)
     }
 
     // MARK: Mixes carousel
@@ -251,6 +279,8 @@ struct LibraryHubView: View {
         recentlyAdded = library.recentlyAddedSongs(limit: 20)
         mostPlayed = library.mostPlayedSongs(limit: 20)
         forgottenFavorites = library.forgottenFavoriteSongs(limit: 20)
+        recentlyPlayed = library.recentlyPlayedSongs(limit: 20)
+        genreGroups = library.genreGroups(limit: 12)
         if !hasLoadedOnce {
             withAnimation(.easeInOut(duration: 0.35)) { hasLoadedOnce = true }
         }
@@ -638,6 +668,162 @@ private struct HubQuickActionsRow: View {
             )
         }
         .buttonStyle(PressableButtonStyle())
+    }
+}
+
+// MARK: - Greeting header
+//
+// A time-of-day-aware personalization touch (2026's music-app home screens
+// lean hard on "this looks like it was built for you right now" — see e.g.
+// Spotify's session-adaptive home) — pinned above even the quick actions
+// row. The subtitle is a genuinely computed stat (distinct songs last played
+// today), not decorative copy, falling back to a plain invitation when
+// nothing's played yet today.
+private struct HubGreetingHeader: View {
+    let displayName: String?
+    let songsPlayedToday: Int
+
+    private var greeting: String {
+        switch Calendar.current.component(.hour, from: Date()) {
+        case 5..<12:  return "Good morning"
+        case 12..<17: return "Good afternoon"
+        case 17..<22: return "Good evening"
+        default:      return "Good night"
+        }
+    }
+
+    private var subtitle: String {
+        guard songsPlayedToday > 0 else { return "Ready to listen?" }
+        return "You've played \(songsPlayedToday) song\(songsPlayedToday == 1 ? "" : "s") today"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(displayName.map { "\(greeting), \($0)" } ?? greeting)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(AppTheme.textPrimary)
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - On This Day teaser
+//
+// A single compact card surfacing the server's `/user/on-this-day` feature
+// (previously only reachable by already knowing it exists somewhere in
+// Settings) right on the hub, with a real preview of today's top match
+// rather than a blind "Open On This Day" button — tapping pushes the full
+// `OnThisDayView` for every year/track it found.
+private struct HubOnThisDayTeaser: View {
+    let groups: [OnThisDayGroup]
+
+    private var topGroup: OnThisDayGroup? { groups.first }
+    private var topTrack: StreamTrack? { topGroup?.tracks.first }
+
+    var body: some View {
+        NavigationLink {
+            OnThisDayView()
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(AppTheme.dynamicAccent.opacity(0.16))
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                }
+                .frame(width: 44, height: 44)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("On This Day")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    if let topTrack, let year = topGroup?.year {
+                        Text("\(topTrack.title) — played in \(String(year))")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .lineLimit(1)
+                    } else {
+                        Text("See what you were listening to on this date")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .padding(12)
+            .adaptiveGlass(
+                tint: AppTheme.dynamicAccent.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous),
+                fallback: AppTheme.surface
+            )
+            .padding(.horizontal, 16)
+        }
+        .buttonStyle(PressableButtonStyle())
+    }
+}
+
+// MARK: - Genres carousel
+//
+// Groups the on-device library by its own embedded genre tags — real
+// metadata already sitting unused on every `Song`, not a fetched/curated
+// list. Tapping a tile shuffle-plays everything in that genre, matching the
+// "one tap to just start listening" spirit of the rest of the hub rather
+// than pushing into a browsing screen for a single genre.
+private struct HubGenresCarousel: View {
+    let groups: [(genre: String, songs: [Song])]
+    @EnvironmentObject private var player: AudioPlayerManager
+
+    private let tileSize: CGFloat = 132
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HubSectionHeader(title: "Genres", icon: "guitars.fill")
+                .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 14) {
+                    ForEach(groups, id: \.genre) { group in
+                        HubParallaxCard {
+                            Button {
+                                player.shuffleEnabled = true
+                                if let first = group.songs.randomElement() {
+                                    player.play(song: first, in: group.songs)
+                                }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HubArtworkCollage(
+                                        songs: Array(group.songs.prefix(4)),
+                                        size: tileSize,
+                                        placeholderIcon: "guitars.fill"
+                                    )
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(group.genre)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(AppTheme.textPrimary)
+                                            .lineLimit(1)
+                                        Text("\(group.songs.count) \(group.songs.count == 1 ? "song" : "songs")")
+                                            .font(.caption2)
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+                                }
+                                .frame(width: tileSize, alignment: .leading)
+                            }
+                            .buttonStyle(PressableButtonStyle())
+                        }
+                        .frame(width: tileSize, height: tileSize + 40)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            }
+        }
     }
 }
 
