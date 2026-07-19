@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - GifSearchResult
 
-/// One Tenor result, as simplified by the bridge's `/api/gif-search*`
+/// One GIPHY result, as simplified by the bridge's `/api/gif-search*`
 /// endpoints — a small preview for the picker grid plus the full-resolution
 /// GIF URL that actually gets downloaded and uploaded if picked.
 struct GifSearchResult: Decodable, Identifiable, Equatable {
@@ -27,9 +27,9 @@ private struct GifSearchResponse: Decodable {
 
 // MARK: - GifSearchService
 //
-// Client for the bridge's Tenor GIF-search proxy — an alternative to picking
+// Client for the bridge's GIPHY GIF-search proxy — an alternative to picking
 // an image from the photo library for avatar/banner uploads. The bridge
-// holds the actual Tenor API key server-side (see `TENOR_API_KEY` in
+// holds the actual GIPHY API key server-side (see `GIPHY_API_KEY` in
 // main.py); if it's unset there, search/trending calls 501 and this just
 // returns an empty list, which the picker UI treats as "not available"
 // rather than surfacing a scary error for what's an optional feature.

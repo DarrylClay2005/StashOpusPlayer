@@ -131,7 +131,7 @@ struct AccountView: View {
                         }
                     }
 
-                    // Alternative to picking from the gallery — search Tenor
+                    // Alternative to picking from the gallery — search GIPHY
                     // for an animated GIF instead, same as ProfileView's
                     // avatar/banner pickers.
                     Button {

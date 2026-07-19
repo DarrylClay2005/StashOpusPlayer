@@ -13252,43 +13252,62 @@ async def friends_activity_feed(limit: int = Query(30, ge=1, le=100), payload: d
 
 
 # ---------------------------------------------------------------------------
-# GIF search (Tenor) — an alternative to the photo library for avatar/banner
+# GIF search (GIPHY) — an alternative to the photo library for avatar/banner
 # uploads (2026-07-19): lets a user who doesn't want to use a picture from
-# their own gallery pick an animated GIF from Tenor's catalog instead. Server-
-# side proxy rather than a client-embedded key so the key never ships inside
-# the app bundle and stays revocable/rotatable independent of a release.
+# their own gallery pick an animated GIF instead. Server-side proxy rather
+# than a client-embedded key so the key never ships inside the app bundle and
+# stays revocable/rotatable independent of a release.
+#
+# GIPHY, not Tenor: Tenor (the Google-hosted v2 API) stopped accepting new
+# API clients as of Jan 2026, so a fresh key isn't obtainable there anymore.
+# GIPHY's developer signup is still open (a "Beta key" is issued immediately,
+# no approval wait). The response shape below is GIPHY's own — everything
+# downstream of this section (GifSearchResult, GifPickerSheet, etc. on the
+# Swift side) only ever sees *this* endpoint's own {id, description,
+# preview_url, gif_url, width, height} shape, so swapping providers again in
+# the future only touches this file, not the client.
 # ---------------------------------------------------------------------------
 
-TENOR_API_KEY: str = os.getenv("TENOR_API_KEY", "")
-_TENOR_BASE = "https://tenor.googleapis.com/v2"
+GIPHY_API_KEY: str = os.getenv("GIPHY_API_KEY", "")
+_GIPHY_BASE = "https://api.giphy.com/v1/gifs"
 
 
-def _tenor_result_from_item(item: dict) -> Optional[dict]:
-    """Extracts just what the client needs from one Tenor v2 result: a small
-    preview for the picker grid (tinygif, falling back to nanogif/the full
-    gif if neither exists) and the full-resolution gif URL that actually gets
-    downloaded and uploaded as the avatar/banner if the user picks it."""
-    formats = item.get("media_formats") or {}
-    full = formats.get("gif") or {}
+def _giphy_result_from_item(item: dict) -> Optional[dict]:
+    """Extracts just what the client needs from one GIPHY GIF Object: a small
+    preview for the picker grid and a "full" GIF URL sized to stay well under
+    the bridge's 5MB GIF upload cap (see POST /api/social/profile/banner /
+    POST /user/avatar) — `original` can be tens of MB for a long/high-res
+    GIF, so this prefers GIPHY's own `downsized` rendition (capped ~2MB by
+    GIPHY itself) and only falls back to `original` if that's missing.
+    GIPHY returns width/height/size as JSON *strings*, not numbers — a
+    documented quirk of their API — hence the defensive int() parsing."""
+    images = item.get("images") or {}
+    full = images.get("downsized") or images.get("fixed_height") or images.get("original") or {}
     if not full.get("url"):
         return None
-    preview = formats.get("tinygif") or formats.get("nanogif") or full
-    dims = full.get("dims") or [None, None]
+    preview = images.get("fixed_height_small") or images.get("fixed_width_small") or full
+
+    def _int(value) -> Optional[int]:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
     return {
         "id": item.get("id", ""),
-        "description": item.get("content_description", ""),
+        "description": item.get("title", ""),
         "preview_url": preview.get("url"),
         "gif_url": full.get("url"),
-        "width": dims[0] if len(dims) > 0 else None,
-        "height": dims[1] if len(dims) > 1 else None,
+        "width": _int(full.get("width")),
+        "height": _int(full.get("height")),
     }
 
 
-async def _tenor_request(path: str, params: dict) -> list:
-    if not TENOR_API_KEY:
+async def _giphy_request(path: str, params: dict) -> list:
+    if not GIPHY_API_KEY:
         raise HTTPException(status_code=501, detail="GIF search isn't configured on this server.")
-    query = urlencode({**params, "key": TENOR_API_KEY, "media_filter": "gif", "contentfilter": "medium"})
-    url = f"{_TENOR_BASE}/{path}?{query}"
+    query = urlencode({**params, "api_key": GIPHY_API_KEY, "rating": "pg-13"})
+    url = f"{_GIPHY_BASE}/{path}?{query}"
     loop = asyncio.get_running_loop()
 
     def _fetch():
@@ -13299,10 +13318,10 @@ async def _tenor_request(path: str, params: dict) -> list:
     try:
         data = await loop.run_in_executor(None, _fetch)
     except Exception as exc:
-        logger.warning("Tenor GIF request failed (%s): %s", path, exc)
+        logger.warning("GIPHY GIF request failed (%s): %s", path, exc)
         raise HTTPException(status_code=502, detail="GIF search is temporarily unavailable.")
 
-    return [r for r in (_tenor_result_from_item(item) for item in data.get("results", [])) if r]
+    return [r for r in (_giphy_result_from_item(item) for item in data.get("data", [])) if r]
 
 
 @app.get("/api/gif-search")
@@ -13311,7 +13330,7 @@ async def gif_search(
     limit: int = Query(30, ge=1, le=50),
     payload: dict = Depends(get_current_user),
 ):
-    return {"results": await _tenor_request("search", {"q": q, "limit": limit})}
+    return {"results": await _giphy_request("search", {"q": q, "limit": limit})}
 
 
 @app.get("/api/gif-search/trending")
@@ -13319,9 +13338,9 @@ async def gif_trending(
     limit: int = Query(30, ge=1, le=50),
     payload: dict = Depends(get_current_user),
 ):
-    """Featured/trending GIFs — shown before the user types a search query,
-    same "browse before you search" UX Tenor's own picker uses."""
-    return {"results": await _tenor_request("featured", {"limit": limit})}
+    """Trending GIFs — shown before the user types a search query, same
+    "browse before you search" UX GIPHY's own picker uses."""
+    return {"results": await _giphy_request("trending", {"limit": limit})}
 
 
 # ---------------------------------------------------------------------------

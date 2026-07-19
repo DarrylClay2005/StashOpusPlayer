@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - GifPickerSheet
 //
-// Alternative to `PhotosPicker` for avatar/banner uploads — searches Tenor
+// Alternative to `PhotosPicker` for avatar/banner uploads — searches GIPHY
 // (via the bridge's `/api/gif-search*` proxy) for a user who'd rather pick an
 // animated GIF than a photo from their own gallery. Grid previews are shown
 // through `AsyncImage`, which only ever renders a static frame — deliberately
@@ -58,7 +58,7 @@ struct GifPickerSheet: View {
             .background(Color.clear.ignoresSafeArea())
             .navigationTitle("Choose a GIF")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, prompt: "Search Tenor")
+            .searchable(text: $query, prompt: "Search GIFs")
             .onChange(of: query) { _ in
                 searchTask?.cancel()
                 searchTask = Task {
