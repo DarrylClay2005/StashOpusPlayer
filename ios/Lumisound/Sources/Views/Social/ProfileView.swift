@@ -358,7 +358,12 @@ struct ProfileView: View {
             }
         }
         .sheet(isPresented: $showBannerGifPicker) {
-            GifPickerSheet { data in
+            // Matches ProfileHeaderCard's banner aspect closely enough for a
+            // crop guide — it doesn't need to be pixel-exact to the current
+            // device width, since the banner is still `.scaleAspectFill`ed
+            // at display time either way; this just gives the user a
+            // reasonable frame to compose within instead of none at all.
+            GifPickerSheet(cropAspect: 2.8, isCircularGuide: false) { data in
                 Task {
                     await social.uploadBannerData(data)
                     bannerImage = await UIImage.gifImageAsync(data: data)

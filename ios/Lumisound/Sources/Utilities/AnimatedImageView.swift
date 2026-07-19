@@ -1,6 +1,7 @@
 import ImageIO
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 // MARK: - Animated GIF decoding
 
@@ -43,6 +44,67 @@ extension UIImage {
     static func gifImageAsync(data: Data) async -> UIImage? {
         await Task.detached(priority: .userInitiated) {
             gifImage(data: data)
+        }.value
+    }
+
+    /// One decoded GIF frame, kept as a raw `CGImage` (not yet wrapped in a
+    /// `UIImage`) plus its own display duration — the intermediate form
+    /// `croppedGifData(from:cropRect:)` needs, since re-encoding requires
+    /// per-frame pixel data, not the single composed animated `UIImage`
+    /// `gifImage(data:)` produces.
+    struct GifFrame {
+        let cgImage: CGImage
+        let duration: Double
+    }
+
+    /// Decodes every frame of GIF `data` individually, preserving each
+    /// frame's own delay — used by `croppedGifData(from:cropRect:)` to crop
+    /// and re-encode. Unlike `gifImage(data:)`, this doesn't compose the
+    /// frames into a single `UIImage` and doesn't fall back to treating a
+    /// single-frame file as "just a static image" — callers that need to
+    /// re-export always want the raw frame sequence, even a sequence of one.
+    static func decodeGifFrames(data: Data) -> [GifFrame]? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let count = CGImageSourceGetCount(source)
+        guard count > 0 else { return nil }
+        var frames: [GifFrame] = []
+        for index in 0..<count {
+            guard let cgImage = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+            frames.append(GifFrame(cgImage: cgImage, duration: gifFrameDuration(source: source, index: index)))
+        }
+        return frames.isEmpty ? nil : frames
+    }
+
+    /// Crops every frame of GIF `data` to `cropRect` (in the *source* image's
+    /// own pixel coordinate space — i.e. `CGImage`-native units, which for
+    /// every `UIImage` this app decodes from raw GIF bytes are the same as
+    /// `UIImage.size` points, since none of them carry a non-1.0 `scale`) and
+    /// re-encodes as a new, independently loopable GIF. Used by
+    /// `GifCropView` so a user can reposition/zoom a picked GIF before it
+    /// becomes their avatar/banner, rather than always getting whatever
+    /// `.scaleAspectFill`'s automatic center-crop happens to keep.
+    static func croppedGifData(from data: Data, cropRect: CGRect) async -> Data? {
+        await Task.detached(priority: .userInitiated) {
+            guard let frames = decodeGifFrames(data: data) else { return nil }
+            let destData = NSMutableData()
+            guard let destination = CGImageDestinationCreateWithData(
+                destData, UTType.gif.identifier as CFString, frames.count, nil
+            ) else { return nil }
+
+            let fileProps: [CFString: Any] = [
+                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]
+            ]
+            CGImageDestinationSetProperties(destination, fileProps as CFDictionary)
+
+            for frame in frames {
+                guard let cropped = frame.cgImage.cropping(to: cropRect) else { continue }
+                let frameProps: [CFString: Any] = [
+                    kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFUnclampedDelayTime: frame.duration]
+                ]
+                CGImageDestinationAddImage(destination, cropped, frameProps as CFDictionary)
+            }
+            guard CGImageDestinationFinalize(destination) else { return nil }
+            return destData as Data
         }.value
     }
 
@@ -125,8 +187,7 @@ struct AnimatedImageView: UIViewRepresentable {
     /// of respecting the `.frame(width:height:)` already applied at each call
     /// site — this is exactly what caused a giant near-empty area above the
     /// account row in Settings → Account once a user had a real (non-tiny)
-    /// avatar image set. Returning `nil` tells SwiftUI "no opinion, use your
-    /// own proposed size" — i.e. respect the outer `.frame()` constraint.
+    /// avatar image set.
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIImageView, context: Context) -> CGSize? {
         // IMPORTANT: `nil` here does NOT mean "no opinion, use the proposed
         // size" — it means the exact opposite: "size based on content",

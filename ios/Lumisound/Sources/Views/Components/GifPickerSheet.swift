@@ -4,17 +4,21 @@ import SwiftUI
 //
 // Alternative to `PhotosPicker` for avatar/banner uploads — searches GIPHY
 // (via the bridge's `/api/gif-search*` proxy) for a user who'd rather pick an
-// animated GIF than a photo from their own gallery. Grid previews are shown
-// through `AsyncImage`, which only ever renders a static frame — deliberately
-// NOT decoded as animated here (unlike the actual uploaded result, which
-// does animate via `AnimatedImageView` once applied): a grid of a few dozen
-// simultaneously-animating GIFs would be exactly the kind of avoidable
-// per-cell cost this app's redesign already had to fix elsewhere.
+// animated GIF than a photo from their own gallery. Grid previews actually
+// animate (via `AnimatedGifPreviewCell` below), and picking one hands off to
+// `GifCropView` so the user can reposition/zoom before it's applied, rather
+// than always getting whatever `.scaleAspectFill`'s automatic center-crop
+// happens to keep.
 struct GifPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    /// Raw GIF bytes for whatever the user picked — ready to hand straight
-    /// to `uploadAvatarData(_:)`/`uploadBannerData(_:)`.
+    /// Width ÷ height of the crop window shown after picking — 1.0 (the
+    /// default) for an avatar, something wide for a banner.
+    var cropAspect: CGFloat = 1.0
+    /// Circular crop guide (avatar) vs. rounded-rectangle (banner).
+    var isCircularGuide: Bool = true
+    /// Cropped GIF bytes, ready to hand straight to
+    /// `uploadAvatarData(_:)`/`uploadBannerData(_:)`.
     let onPick: (Data) -> Void
 
     @State private var query = ""
@@ -32,6 +36,15 @@ struct GifPickerSheet: View {
     /// captures its own generation and only applies its results if nothing
     /// newer has started since.
     @State private var searchGeneration = 0
+    /// Set once the user picks a result and its full-resolution bytes have
+    /// downloaded — presenting this (as a `.sheet(item:)`) is what hands off
+    /// to `GifCropView`.
+    @State private var pendingCrop: PendingCrop? = nil
+
+    private struct PendingCrop: Identifiable {
+        let id = UUID()
+        let data: Data
+    }
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
 
@@ -83,33 +96,30 @@ struct GifPickerSheet: View {
                 }
             }
         }
+        .sheet(item: $pendingCrop) { crop in
+            GifCropView(
+                sourceData: crop.data,
+                cropAspect: cropAspect,
+                isCircularGuide: isCircularGuide
+            ) { cropped in
+                onPick(cropped)
+                dismiss()
+            }
+        }
     }
 
     private func gifCell(_ result: GifSearchResult) -> some View {
         Button {
             pick(result)
         } label: {
-            AsyncImage(url: URL(string: result.previewURL ?? result.gifURL)) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .failure:
-                    Rectangle().fill(AppTheme.surface).overlay(
-                        Image(systemName: "photo").foregroundStyle(AppTheme.textSecondary)
-                    )
-                default:
-                    Rectangle().fill(AppTheme.surface).overlay(ProgressView())
-                }
-            }
-            // Square, matching the final circular crop an avatar/banner pick
-            // actually gets (`.scaleAspectFill` in a 1:1 frame) — most GIFs
-            // are landscape, so a non-square preview cell was showing more
-            // of the image than what would actually end up visible once
-            // applied, which read as "the real result is zoomed in
-            // compared to what I picked."
-            .aspectRatio(1, contentMode: .fill)
-            .frame(maxWidth: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            AnimatedGifPreviewCell(urlString: result.previewURL ?? result.gifURL)
+                // Square, matching the crop guide's default avatar aspect —
+                // most GIFs are landscape, so a non-square preview cell was
+                // showing more of the image than what actually ends up
+                // visible once cropped/applied.
+                .aspectRatio(1, contentMode: .fill)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(isDownloading)
@@ -150,9 +160,62 @@ struct GifPickerSheet: View {
         Task {
             defer { isDownloading = false }
             if let data = await GifSearchService.downloadData(for: result) {
-                onPick(data)
-                dismiss()
+                pendingCrop = PendingCrop(data: data)
             }
+        }
+    }
+}
+
+// MARK: - AnimatedGifPreviewCell
+
+/// A grid preview cell that actually plays its GIF — downloads the preview
+/// rendition, decodes it off the main thread, and caches the decoded result
+/// by URL so scrolling the grid (which recreates cells via `LazyVGrid`/List
+/// recycling) doesn't re-download-and-redecode a GIF it already showed this
+/// session. Deliberately fetches only the *preview* URL (a small, GIPHY-
+/// picked-small rendition), not the full-resolution one, to keep decoding
+/// dozens of simultaneously-visible cells reasonable.
+private struct AnimatedGifPreviewCell: View {
+    let urlString: String?
+
+    @State private var image: UIImage? = nil
+    @State private var failed = false
+
+    @MainActor
+    private static var cache: [String: UIImage] = [:]
+
+    var body: some View {
+        Group {
+            if let image {
+                AnimatedImageView(image: image, contentMode: .scaleAspectFill)
+            } else if failed {
+                Rectangle().fill(AppTheme.surface).overlay(
+                    Image(systemName: "photo").foregroundStyle(AppTheme.textSecondary)
+                )
+            } else {
+                Rectangle().fill(AppTheme.surface).overlay(ProgressView())
+            }
+        }
+        .task(id: urlString) {
+            guard let urlString else { failed = true; return }
+            if let cached = Self.cache[urlString] {
+                image = cached
+                return
+            }
+            guard let url = URL(string: urlString),
+                  let (data, resp) = try? await URLSession.shared.data(from: url),
+                  let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode)
+            else {
+                failed = true
+                return
+            }
+            let decoded = isGIFData(data) ? await UIImage.gifImageAsync(data: data) : UIImage(data: data)
+            guard let decoded else {
+                failed = true
+                return
+            }
+            Self.cache[urlString] = decoded
+            image = decoded
         }
     }
 }
