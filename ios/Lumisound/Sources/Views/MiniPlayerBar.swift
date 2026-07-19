@@ -73,6 +73,16 @@ struct MiniPlayerBar: View {
             .frame(height: 80)
         }
         .adaptiveGlass(in: Rectangle())
+        // Reserves room for `CustomTabBar` below — every screen that hosts
+        // this via `.safeAreaInset(edge: .bottom) { MiniPlayerBar() }` sits
+        // inside a tab, and that tab bar is a separate custom view (not the
+        // native UITabBar), positioned via its own `.safeAreaInset` on the
+        // TabView itself. That doesn't propagate into each tab's own
+        // content (SwiftUI hosts each `.tabItem{}` page separately), so
+        // without this, this bar would sit flush against the real bottom
+        // safe area — exactly where the tab bar also renders — instead of
+        // stacking above it like a normal mini player does.
+        .padding(.bottom, CustomTabBar.totalHeight)
     }
 
     private var artworkThumbnail: some View {

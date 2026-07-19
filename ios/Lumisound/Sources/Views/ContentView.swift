@@ -56,19 +56,6 @@ struct ContentView: View {
     /// instance's state, so it isn't injected via `.environmentObject`.
     @StateObject private var presenceService = PresenceService()
 
-    /// Extra bottom clearance for `CustomTabBar` so it stacks above (rather
-    /// than overlaps) the MiniPlayerBar that the currently selected tab's
-    /// OWN content shows via its own `.safeAreaInset(edge: .bottom)` — see
-    /// the long comment where this is used for why the two can't be
-    /// composed through safe-area propagation alone. Tabs 1 (Playing) and 6
-    /// (Settings) don't show a MiniPlayerBar at all, so this only applies
-    /// on the other 5; `80` matches `MiniPlayerBar.barContent`'s own
-    /// `.frame(height: 80)`.
-    private var extraBottomInsetForMiniPlayer: CGFloat {
-        guard player.currentSong != nil, ![1, 6].contains(selectedTab) else { return 0 }
-        return 80
-    }
-
     init() {
         // The native UITabBar itself is hidden (see `.toolbar(.hidden, for:
         // .tabBar)` in `body`) in favor of `CustomTabBar` below, which is
@@ -187,24 +174,26 @@ struct ContentView: View {
             // automatic "More" overflow for tabs 5-7) still fully visible
             // underneath the new custom one.
             //
-            // Attached directly to the TabView via `.safeAreaInset` so it's
-            // positioned correctly relative to the real system safe area
-            // (home indicator). NOTE: a `.safeAreaInset` applied here does
+            // Attached directly to the TabView via `.safeAreaInset` so it
+            // sits flush against the real system safe area (home
+            // indicator) — the bottommost element on screen, same as any
+            // normal tab bar. NOTE: a `.safeAreaInset` applied here does
             // NOT propagate down into each tab's own content — SwiftUI/
             // UIKit hosts each `.tabItem{}` page in its own separate
             // hierarchy, and safe-area/environment propagation doesn't
             // cross that boundary. That means each tab's own
             // `.safeAreaInset(edge: .bottom) { MiniPlayerBar() }` has no
             // idea this bar exists and, left alone, places MiniPlayerBar
-            // flush against the same real bottom safe area this bar also
-            // targets — the two end up stacked in the exact same place
-            // instead of on top of one another, which is what let song
-            // artwork/text show through behind this translucent bar.
-            // Fixed by having *this* bar shift itself up out of the way
-            // (see `extraBottomInsetForMiniPlayer`) whenever the currently
-            // selected tab is one that shows a MiniPlayerBar and a song is
-            // actually playing, rather than trying to make the cross-tab
-            // safe-area propagation work (it structurally can't).
+            // flush against that same real bottom safe area — the two end
+            // up stacked in the exact same place instead of MiniPlayerBar
+            // sitting above this bar (the correct order — a first attempt
+            // at fixing their overlap had this backwards, shifting the tab
+            // bar itself up instead of the mini player). Fixed properly in
+            // `MiniPlayerBar` itself (see its own doc comment), which now
+            // reserves `CustomTabBar.totalHeight` of extra bottom padding
+            // so it always renders above this bar rather than trying to
+            // make the cross-tab safe-area propagation work (it
+            // structurally can't).
             .safeAreaInset(edge: .bottom) {
                 CustomTabBar(
                     selectedTab: $selectedTab,
@@ -212,7 +201,6 @@ struct ContentView: View {
                     avatarImage: account.avatarImage,
                     incomingFriendRequestCount: social.incomingRequests.count
                 )
-                .padding(.bottom, extraBottomInsetForMiniPlayer)
             }
             .tint(AppTheme.dynamicAccent)
             // Subtle cross-fade + "pop" scale-in between tabs. iOS 16 doesn't expose
@@ -392,11 +380,18 @@ struct ContentView: View {
 /// clipping when it doesn't (smaller phones, larger Dynamic Type sizes) —
 /// rather than ever silently hiding a tab the way the native "More"
 /// collapsing would have.
-private struct CustomTabBar: View {
+struct CustomTabBar: View {
     @Binding var selectedTab: Int
     let hasCurrentSong: Bool
     let avatarImage: UIImage?
     let incomingFriendRequestCount: Int
+
+    /// The bar's total footprint from the true bottom safe-area edge
+    /// (`.frame(height:)` + its own bottom `.padding`) — `MiniPlayerBar`
+    /// reserves this much extra bottom padding so it always renders above
+    /// this bar rather than the two overlapping. Not `private` for exactly
+    /// that cross-file reference; internal (module-wide) is intentional.
+    static let totalHeight: CGFloat = 60
 
     /// Drives the sliding selection pill below via `matchedGeometryEffect` —
     /// shared across every tab button so SwiftUI animates the *same* pill
