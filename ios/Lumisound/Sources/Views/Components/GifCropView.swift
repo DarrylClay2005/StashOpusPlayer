@@ -184,20 +184,24 @@ private struct CropGuideOverlay: View {
             ZStack {
                 DimmedHoleShape(cropSize: cropSize, isCircular: isCircular)
                     .fill(Color.black.opacity(0.55), style: FillStyle(eoFill: true))
-                guideShape
-                    .stroke(.white, lineWidth: 2)
+                strokedGuide
                     .frame(width: cropSize.width, height: cropSize.height)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 
+    // `.stroke(...)` is a `Shape`-only method — it has to be applied to the
+    // concrete `Circle`/`RoundedRectangle` *before* the `if`/`else` branches
+    // erase to `some View`, not after (that's a real compile error: "some
+    // View has no member 'stroke'"), hence doing it per-branch here instead
+    // of on a separately-erased `guideShape` property.
     @ViewBuilder
-    private var guideShape: some View {
+    private var strokedGuide: some View {
         if isCircular {
-            Circle()
+            Circle().stroke(.white, lineWidth: 2)
         } else {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white, lineWidth: 2)
         }
     }
 }
