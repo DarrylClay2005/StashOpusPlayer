@@ -179,7 +179,7 @@ struct GifPickerSheet: View {
         // flip these flags itself) — discard this now-stale answer instead
         // of overwriting whatever it already showed.
         guard generation == searchGeneration else { return }
-        results = fetched
+        results = dedupedByID(fetched)
         currentOffset = fetched.count
         canLoadMore = fetched.count == pageSize
         isLoading = false
@@ -214,9 +214,32 @@ struct GifPickerSheet: View {
         // query, so appending this now-stale page would splice unrelated
         // GIFs onto the wrong result set.
         guard generation == searchGeneration else { return }
-        results.append(contentsOf: fetched)
+        // GIPHY's own result set can shift slightly between calls at
+        // different offsets for the same query — confirmed empirically:
+        // two consecutive pages 30 apart came back with a couple of
+        // overlapping GIF IDs. `GifSearchResult` is `Identifiable` by that
+        // ID, so appending a page with an ID already in `results` gave
+        // `ForEach` two rows claiming the same identity — this is what
+        // made GIFs "no longer selectable" (SwiftUI routes taps/recycles
+        // cell views by identity, so duplicate IDs produce exactly that
+        // kind of misrouted/unresponsive behavior) and made the grid
+        // appear to show far fewer distinct GIFs than were actually
+        // fetched. Dedup by ID against what's already showing before
+        // appending, keeping the existing entry over the new duplicate.
+        let existingIDs = Set(results.map(\.id))
+        results.append(contentsOf: fetched.filter { !existingIDs.contains($0.id) })
         currentOffset += fetched.count
         canLoadMore = fetched.count == pageSize
+    }
+
+    /// De-duplicates by `id`, keeping the first occurrence — same
+    /// reasoning as the cross-page dedup in `loadNextPage()`, applied here
+    /// too in case GIPHY ever returns a within-page duplicate for a fresh
+    /// search/trending fetch (not observed empirically, but cheap to guard
+    /// against given `ForEach` requires unique IDs to behave correctly).
+    private func dedupedByID(_ items: [GifSearchResult]) -> [GifSearchResult] {
+        var seen = Set<String>()
+        return items.filter { seen.insert($0.id).inserted }
     }
 
     private func pick(_ result: GifSearchResult) {
