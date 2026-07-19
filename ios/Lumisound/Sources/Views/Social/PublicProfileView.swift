@@ -44,6 +44,9 @@ struct PublicProfileView: View {
     var body: some View {
         ZStack {
             Color.clear.ignoresSafeArea()
+            if profile != nil {
+                ProfileAccentBackgroundGlow(mainAccent: mainAccentColor, subAccent: subAccentColor)
+            }
 
             if isLoading {
                 ProgressView().tint(AppTheme.dynamicAccent)

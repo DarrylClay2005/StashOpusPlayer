@@ -47,6 +47,7 @@ struct ProfileView: View {
     var body: some View {
         ZStack {
             Color.clear.ignoresSafeArea()
+            ProfileAccentBackgroundGlow(mainAccent: mainAccentColor, subAccent: subAccentColor)
 
             ScrollView {
                 VStack(spacing: 16) {

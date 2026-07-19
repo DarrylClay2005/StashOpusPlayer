@@ -131,6 +131,43 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
     }
 }
 
+// MARK: - ProfileAccentBackgroundGlow
+
+/// A soft ambient wash of the profile's own main/sub accent colors bleeding
+/// down from the banner into the rest of the screen — Discord-style "your
+/// profile theme color tints the whole page," rather than the screen just
+/// staying plain black below the banner regardless of what accent colors
+/// were actually chosen. Meant to sit as the base layer of the screen's
+/// `ZStack`, behind the scrollable content, on both `ProfileView` (own,
+/// editable) and `PublicProfileView` (another user's) so the effect is
+/// consistent everywhere a profile is shown.
+struct ProfileAccentBackgroundGlow: View {
+    let mainAccent: Color
+    let subAccent: Color
+
+    var body: some View {
+        LinearGradient(
+            colors: [
+                mainAccent.opacity(0.5),
+                subAccent.opacity(0.28),
+                subAccent.opacity(0.08),
+                .clear,
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .frame(maxWidth: .infinity)
+        .frame(height: 480)
+        // Heavily blurred so this reads as an ambient color wash rather
+        // than a hard-edged colored rectangle sitting behind the content —
+        // the same "glow" treatment already used for the mini-player's
+        // play button shadow and similar accent-colored chrome elsewhere.
+        .blur(radius: 60)
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
+    }
+}
+
 // MARK: - ProfileInfoCard
 
 /// A single titled "section card" — Bio, Now Playing, Member Since, Pinned
