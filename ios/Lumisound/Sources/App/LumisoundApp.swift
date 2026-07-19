@@ -18,6 +18,15 @@ struct LumisoundApp: App {
     @StateObject private var sharePlay = SharePlayCoordinator()
     @StateObject private var appLock = AppLockService()
     @StateObject private var recentlyDeleted = RecentlyDeletedService()
+    /// Shared app-wide instance so the Profile/Friends tabs, the Library
+    /// hub's friends-activity carousel, and Account settings all see the
+    /// same friends list / profile / incoming-requests state instead of
+    /// each maintaining its own independent copy (which is what happened
+    /// when `AccountView` and `LibraryHubView` each constructed their own
+    /// `SocialService()` — fine when only one of those screens existed at
+    /// a time, but no longer once Profile/Friends became their own tabs
+    /// living alongside the Library hub).
+    @StateObject private var social = SocialService()
 
     @State private var showLaunch = true
     @Environment(\.scenePhase) private var scenePhase
@@ -48,6 +57,7 @@ struct LumisoundApp: App {
                     .environmentObject(sharePlay)
                     .environmentObject(appLock)
                     .environmentObject(recentlyDeleted)
+                    .environmentObject(social)
                     .opacity(showLaunch ? 0 : 1)
                     .animation(.easeInOut(duration: 0.4), value: showLaunch)
 

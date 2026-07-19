@@ -26,6 +26,7 @@ struct ContentView: View {
     @EnvironmentObject private var streaming: StreamingService
     @EnvironmentObject private var account: AccountService
     @EnvironmentObject private var bridgeHealth: BridgeHealthService
+    @EnvironmentObject private var social: SocialService
     @ObservedObject private var toastCenter = ToastCenter.shared
 
     /// Persists the last-selected tab across launches.
@@ -45,31 +46,6 @@ struct ContentView: View {
     /// hidden and connecting to a car stereo no longer auto-presents it.
     @AppStorage("carModeEnabled") private var carModeEnabled: Bool = false
 
-    /// Circular-cropped tab-bar-sized rendering of the user's avatar, shown in place
-    /// of the gearshape Settings icon when logged in. Cached in @State (recomputed only
-    /// when the avatar actually changes via onReceive below) rather than rendered inline
-    /// in `body` — `ContentView` re-evaluates on every `player` publish (including
-    /// position updates ~4×/sec during playback), and redrawing a UIGraphicsImageRenderer
-    /// pass on each of those would be exactly the kind of needless per-frame work that
-    /// caused the "update install freakout" performance issues fixed elsewhere.
-    @State private var profileTabIcon: UIImage? = nil
-
-    /// Whether `account.avatarImage` is a genuinely multi-frame (animated GIF)
-    /// UIImage — recomputed alongside `profileTabIcon` in the same onReceive,
-    /// same "don't redo this on every player publish" reasoning as above.
-    /// Drives the animated tab-icon overlay below; see its doc comment for why
-    /// a real animating view can't just be dropped into `.tabItem{}` directly.
-    @State private var avatarIsAnimatedGIF = false
-
-    /// The real on-screen frame of the native `UITabBar`, in `ContentView`'s
-    /// own coordinate space. Populated by `TabBarFrameReader` below and used
-    /// to position the animated-avatar overlay — reading the actual frame
-    /// (rather than assuming the bar spans edge-to-edge and dividing the
-    /// full screen width by 5) is what makes the overlay track correctly on
-    /// the floating/inset tab bar style, where the bar has margins on both
-    /// sides and is narrower than the screen.
-    @State private var tabBarFrame: CGRect = .zero
-
     /// Self "I'm online" heartbeat for the Social Ecosystem presence feature
     /// (POST /api/social/presence every ~45s while foregrounded). Owned here
     /// rather than injected from LumisoundApp — ContentView is the one view
@@ -81,12 +57,13 @@ struct ContentView: View {
     @StateObject private var presenceService = PresenceService()
 
     init() {
-        // Tab bar — transparent with dark blur
-        let tabAppearance = UITabBarAppearance()
-        tabAppearance.configureWithTransparentBackground()
-        tabAppearance.backgroundEffect = UIBlurEffect(style: .systemThinMaterialDark)
-        UITabBar.appearance().standardAppearance = tabAppearance
-        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+        // The native UITabBar itself is hidden (see `.toolbar(.hidden, for:
+        // .tabBar)` in `body`) in favor of `CustomTabBar` below, which is
+        // what makes a 7th/8th tab a horizontal-scroll rather than getting
+        // silently collapsed into iOS's automatic "More" tab (the native
+        // UITabBarController does that itself past 5 items on iPhone, with
+        // no supported way to opt out short of replacing the bar entirely).
+        // No UITabBarAppearance configuration needed here as a result.
 
         // Navigation bar — fully transparent so gallery background shows through.
         // Each NavigationStack also adds .toolbarBackground(.hidden) for the scroll-edge state.
@@ -113,6 +90,13 @@ struct ContentView: View {
             // prompts to redownload tracks back into their original folders.
             RestoreFoldersPromptView()
 
+            // `.tabItem{}` below is vestigial — it's what a *visible* native
+            // UITabBar would render, but that bar is hidden (see
+            // `.toolbar(.hidden, for: .tabBar)`) in favor of `CustomTabBar`.
+            // It's left in place anyway because `.tag()` is what `TabView`
+            // uses to route `selection:`, and each `.tabItem{}` still gives
+            // VoiceOver a label for the (invisible) native item — harmless
+            // either way, just unused visually.
             TabView(selection: $selectedTab) {
 
                 // MARK: Tab 1 — Library
@@ -123,15 +107,9 @@ struct ContentView: View {
                     .tag(0)
 
                 // MARK: Tab 2 — Now Playing
-                // Icon fills when a song is active to give a quick visual cue.
                 NowPlayingView()
                     .tabItem {
-                        Label(
-                            "Playing",
-                            systemImage: player.currentSong != nil
-                                ? "play.circle.fill"
-                                : "play.circle"
-                        )
+                        Label("Playing", systemImage: "play.circle")
                     }
                     .tag(1)
 
@@ -145,28 +123,54 @@ struct ContentView: View {
                 // MARK: Tab 4 — Search Streaming
                 StreamSearchView()
                     .tabItem {
-                        // Cloud-with-download-arrow better signals this tab's purpose
-                        // (downloading from YouTube/SoundCloud/server) than a generic
-                        // magnifying glass.
                         Label("Cloud Services", systemImage: "icloud.and.arrow.down")
                     }
                     .tag(3)
 
-                // MARK: Tab 5 — Settings
-                // Shows the user's profile photo instead of a generic gearshape once
-                // they've uploaded one — gives a quick "is this me?" glance and matches
-                // the profile-as-settings-entry convention used by most social/media apps.
-                // Falls back to gearshape for logged-out users / no avatar uploaded.
-                SettingsView()
+                // MARK: Tab 5 — Friends
+                // Its own NavigationStack since FriendsListView (like
+                // ProfileView below) is normally pushed from AccountView's
+                // Social section rather than hosted as a tab root.
+                NavigationStack {
+                    FriendsListView()
+                        .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
+                }
                     .tabItem {
-                        if let icon = profileTabIcon {
-                            Image(uiImage: icon)
-                            Text("Settings")
-                        } else {
-                            Label("Settings", systemImage: "gearshape")
-                        }
+                        Label("Friends", systemImage: "person.2.fill")
                     }
                     .tag(4)
+
+                // MARK: Tab 6 — Profile
+                NavigationStack {
+                    ProfileView()
+                        .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
+                }
+                    .tabItem {
+                        Label("Profile", systemImage: "person.crop.circle")
+                    }
+                    .tag(5)
+
+                // MARK: Tab 7 — Settings
+                SettingsView()
+                    .tabItem {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .tag(6)
+            }
+            .toolbar(.hidden, for: .tabBar)
+            // Attached directly to the TabView (rather than floated as a
+            // separate ZStack overlay) so it contributes to the bottom safe
+            // area exactly like the real UITabBar it replaces — every tab's
+            // own `.safeAreaInset(edge: .bottom) { MiniPlayerBar() }` then
+            // keeps stacking neatly above it, instead of the two floating
+            // views overlapping now that nothing reserves that space.
+            .safeAreaInset(edge: .bottom) {
+                CustomTabBar(
+                    selectedTab: $selectedTab,
+                    hasCurrentSong: player.currentSong != nil,
+                    avatarImage: account.avatarImage,
+                    incomingFriendRequestCount: social.incomingRequests.count
+                )
             }
             .tint(AppTheme.dynamicAccent)
             // Subtle cross-fade + "pop" scale-in between tabs. iOS 16 doesn't expose
@@ -184,7 +188,7 @@ struct ContentView: View {
             // the crash" is the single most useful fact for diagnosing reports
             // like "it just freezes/crashes sometimes". See AppLogger.breadcrumb.
             .onChange(of: selectedTab) { newValue in
-                let names = ["Library", "Playing", "Queue", "Cloud Services", "Settings"]
+                let names = ["Library", "Playing", "Queue", "Cloud Services", "Friends", "Profile", "Settings"]
                 appBreadcrumb("Switched to \(names.indices.contains(newValue) ? names[newValue] : "tab \(newValue)") tab")
 
                 // Settle-in transition on the newly-selected tab's content —
@@ -235,55 +239,6 @@ struct ContentView: View {
             }
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: toastCenter.current)
             .allowsHitTesting(false)
-
-            // MARK: Animated GIF avatar overlay for the Settings tab icon
-            //
-            // `.tabItem{}` only accepts `Image`/`Text` content, so the real
-            // Settings tabItem above always renders `profileTabIcon` — a
-            // static (first-frame) circular crop, same as before this
-            // feature. There is no supported way to put a genuinely-animating
-            // `UIViewRepresentable` (`AnimatedImageView`) *inside* a native
-            // TabView's tab bar item.
-            //
-            // The fix used here: composite a real `AnimatedImageView` directly
-            // ON TOP of that tab item, in the same screen position, whenever
-            // the signed-in user's avatar is an actual multi-frame GIF (not
-            // just any avatar — a static avatar looks identical either way,
-            // so the overlay only exists when it would visibly differ).
-            // `.allowsHitTesting(false)` means every tap in that spot still
-            // reaches the real TabView underneath untouched — this is purely
-            // a cosmetic replacement layer, not a reimplementation of tab
-            // selection/highlighting/accessibility, so all 5 tabs stay
-            // ordinary, fully-functional SwiftUI TabView items.
-            // Invisible probe that keeps `tabBarFrame` synced to the real
-            // native UITabBar's on-screen frame every layout pass — see its
-            // own doc comment for why this replaced a screen-width guess.
-            TabBarFrameReader(frame: $tabBarFrame)
-                .frame(width: 0, height: 0)
-                .allowsHitTesting(false)
-
-            if avatarIsAnimatedGIF, let avatarImage = account.avatarImage, tabBarFrame != .zero {
-                let tabCount: CGFloat = 5
-                let tabSlotWidth = tabBarFrame.width / tabCount
-                let iconSize: CGFloat = 28
-                // Vertical center of a UITabBar icon sits in the upper portion
-                // of the bar, above the text label — tuned by eye against the
-                // existing `circularProfileIcon` static rendering (this repo
-                // has no local Xcode/Simulator to check pixel-for-pixel), but
-                // now expressed as a fraction of the *real* bar height instead
-                // of an absolute offset from the screen edge, so it still
-                // lands correctly whether the bar is edge-to-edge or a
-                // floating inset pill.
-                let iconVerticalFraction: CGFloat = 0.36
-                AnimatedImageView(image: avatarImage, contentMode: .scaleAspectFill)
-                    .frame(width: iconSize, height: iconSize)
-                    .clipShape(Circle())
-                    .position(
-                        x: tabBarFrame.minX + tabBarFrame.width - tabSlotWidth / 2,
-                        y: tabBarFrame.minY + tabBarFrame.height * iconVerticalFraction
-                    )
-                    .allowsHitTesting(false)
-            }
         }
         .acoustIDConfirmSheet()
         .clipMakerSheet()
@@ -335,17 +290,16 @@ struct ContentView: View {
                 if isCarAudio { showCarMode = true }
             }
         }
-        // Render the tab-bar profile icon once up front and again whenever the
-        // avatar changes (login, upload, logout). `account.$avatarImage` is used
-        // (Combine subscription) rather than `.onChange(of: account.avatarImage)`
-        // since `UIImage` isn't `Equatable`.
+        // Keeps the Friends tab's request-count badge (in CustomTabBar) fresh
+        // without requiring a visit to the Friends tab first — same
+        // "refresh on appear + on login" shape as the presence heartbeat below.
         .onAppear {
-            profileTabIcon = Self.circularProfileIcon(from: account.avatarImage)
-            avatarIsAnimatedGIF = Self.isAnimatedGIF(account.avatarImage)
+            Task { await social.fetchFriendRequests() }
         }
-        .onReceive(account.$avatarImage) { image in
-            profileTabIcon = Self.circularProfileIcon(from: image)
-            avatarIsAnimatedGIF = Self.isAnimatedGIF(image)
+        .onReceive(account.$isLoggedIn) { loggedIn in
+            if loggedIn {
+                Task { await social.fetchFriendRequests() }
+            }
         }
         // MARK: Social Ecosystem — presence heartbeat
         //
@@ -382,76 +336,127 @@ struct ContentView: View {
             }
         }
     }
-
-    /// Crops `image` to a circle at tab-bar icon size and marks it `.alwaysOriginal`
-    /// so SwiftUI renders the user's actual photo instead of template-tinting it
-    /// (which is what plain `Image(uiImage:)` would do with a system-style asset).
-    /// Always produces a static (first-frame) crop even when `image` is an
-    /// animated multi-frame GIF — `UIGraphicsImageRenderer`'s `draw(in:)` only
-    /// ever captures one frame — which is fine, since this is only ever used
-    /// as the underlying native `.tabItem{}` icon; the animated overlay drawn
-    /// on top of it (see `avatarIsAnimatedGIF` in `body`) is what actually plays.
-    private static func circularProfileIcon(from image: UIImage?) -> UIImage? {
-        guard let image else { return nil }
-        let size: CGFloat = 28
-        let rect = CGRect(x: 0, y: 0, width: size, height: size)
-        let renderer = UIGraphicsImageRenderer(size: rect.size)
-        let cropped = renderer.image { _ in
-            UIBezierPath(ovalIn: rect).addClip()
-            image.draw(in: rect)
-        }
-        return cropped.withRenderingMode(.alwaysOriginal)
-    }
-
-    /// Whether `image` is a genuinely multi-frame `UIImage` — i.e. one
-    /// produced by `UIImage.gifImage(data:)` from an actual animated GIF, as
-    /// opposed to any static image (JPEG, or a single-frame "GIF"). `.images`
-    /// is only ever non-nil on a `UIImage` built via `animatedImage(with:duration:)`.
-    private static func isAnimatedGIF(_ image: UIImage?) -> Bool {
-        (image?.images?.count ?? 0) > 1
-    }
 }
 
-// MARK: - TabBarFrameReader
+// MARK: - CustomTabBar
 
-/// Invisible probe view that walks up to the window and back down through
-/// its entire view hierarchy to find the real, live `UITabBar` and reports
-/// its frame (converted into this view's own coordinate space) via
-/// `frame`. Exists because the animated-avatar tab-icon overlay used to
-/// assume the tab bar spans the full screen width edge-to-edge — true on
-/// older edge-to-edge `UITabBar` styling, but not on the floating/inset
-/// pill style (margins on both sides, narrower than the screen), where
-/// that assumption placed the overlay to the right of the actual icon.
-/// Reading the real frame keeps this correct regardless of tab bar style,
-/// device size, or any future Apple redesign, without hardcoding margins.
-private struct TabBarFrameReader: UIViewRepresentable {
-    @Binding var frame: CGRect
+/// A fully custom bottom tab bar, replacing the native (hidden) `UITabBar`.
+/// Needed once the app grew to 7 tabs — iOS's native `UITabBarController`
+/// automatically collapses anything past the 5th item into an unstyled
+/// "More" list on iPhone, with no supported way to opt out short of
+/// replacing the bar's chrome entirely. Wrapping the row in a horizontal
+/// `ScrollView` means it degrades gracefully — spreads evenly across the
+/// screen when everything fits (the common case), scrolls instead of
+/// clipping when it doesn't (smaller phones, larger Dynamic Type sizes) —
+/// rather than ever silently hiding a tab the way the native "More"
+/// collapsing would have.
+private struct CustomTabBar: View {
+    @Binding var selectedTab: Int
+    let hasCurrentSong: Bool
+    let avatarImage: UIImage?
+    let incomingFriendRequestCount: Int
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        view.isUserInteractionEnabled = false
-        view.backgroundColor = .clear
-        DispatchQueue.main.async { Self.updateFrame(from: view, frame: $frame) }
-        return view
+    private struct TabSpec {
+        let tag: Int
+        let title: String
+        let systemImage: String
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
-        DispatchQueue.main.async { Self.updateFrame(from: uiView, frame: $frame) }
+    private var specs: [TabSpec] {
+        [
+            TabSpec(tag: 0, title: "Library", systemImage: "music.note.list"),
+            TabSpec(tag: 1, title: "Playing", systemImage: hasCurrentSong ? "play.circle.fill" : "play.circle"),
+            TabSpec(tag: 2, title: "Queue", systemImage: "list.number"),
+            TabSpec(tag: 3, title: "Cloud Services", systemImage: "icloud.and.arrow.down"),
+            TabSpec(tag: 4, title: "Friends", systemImage: "person.2.fill"),
+            TabSpec(tag: 5, title: "Profile", systemImage: "person.crop.circle"),
+            TabSpec(tag: 6, title: "Settings", systemImage: "gearshape"),
+        ]
     }
 
-    private static func updateFrame(from view: UIView, frame: Binding<CGRect>) {
-        guard let window = view.window, let tabBar = findTabBar(in: window) else { return }
-        let converted = tabBar.convert(tabBar.bounds, to: view)
-        if converted != frame.wrappedValue {
-            frame.wrappedValue = converted
+    var body: some View {
+        GeometryReader { outerGeo in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(specs, id: \.tag) { spec in
+                        tabButton(spec)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                // Forces the row to spread evenly across the bar's real
+                // available width when everything fits (a plain HStack in a
+                // ScrollView would otherwise hug the leading edge instead of
+                // filling the bar like a normal tab bar), while still
+                // letting it grow past that width — and scroll — if the
+                // content needs more room than the screen has.
+                .frame(minWidth: max(outerGeo.size.width - 12, 0))
+                .padding(.horizontal, 6)
+            }
         }
+        .frame(height: 62)
+        .adaptiveGlass(in: Capsule(), fallback: AppTheme.surface)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 6)
     }
 
-    private static func findTabBar(in view: UIView) -> UITabBar? {
-        if let tabBar = view as? UITabBar { return tabBar }
-        for subview in view.subviews {
-            if let found = findTabBar(in: subview) { return found }
+    @ViewBuilder
+    private func tabButton(_ spec: TabSpec) -> some View {
+        Button {
+            selectedTab = spec.tag
+        } label: {
+            VStack(spacing: 3) {
+                ZStack(alignment: .topTrailing) {
+                    iconView(for: spec)
+                    if spec.tag == 4, incomingFriendRequestCount > 0 {
+                        Text("\(min(incomingFriendRequestCount, 99))")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(3)
+                            .background(AppTheme.error, in: Circle())
+                            .offset(x: 9, y: -6)
+                    }
+                }
+                Text(spec.title)
+                    .font(.system(size: 10, weight: selectedTab == spec.tag ? .semibold : .regular))
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .foregroundStyle(selectedTab == spec.tag ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+            .padding(.vertical, 6)
+            .frame(minWidth: 58)
+            .contentShape(Rectangle())
         }
-        return nil
+        .buttonStyle(.plain)
+    }
+
+    /// The Profile tab (tag 5) shows the user's real avatar instead of a
+    /// system symbol — animated live via `AnimatedImageView` when it's a
+    /// genuine multi-frame GIF, which is the entire point of this custom
+    /// bar existing: a native `.tabItem{}` only ever accepts `Image`/`Text`
+    /// content, so there was previously no supported way to make a tab
+    /// icon actually animate without compositing a second view on top of
+    /// the real (hidden) tab bar at a guessed screen position.
+    @ViewBuilder
+    private func iconView(for spec: TabSpec) -> some View {
+        if spec.tag == 5, let avatarImage {
+            Group {
+                if (avatarImage.images?.count ?? 0) > 1 {
+                    AnimatedImageView(image: avatarImage, contentMode: .scaleAspectFill)
+                } else {
+                    Image(uiImage: avatarImage)
+                        .resizable()
+                        .scaledToFill()
+                }
+            }
+            .frame(width: 24, height: 24)
+            .clipShape(Circle())
+            .overlay(
+                Circle().stroke(selectedTab == spec.tag ? AppTheme.dynamicAccent : Color.clear, lineWidth: 1.5)
+            )
+        } else {
+            Image(systemName: spec.systemImage)
+                .font(.system(size: 20))
+                .frame(height: 24)
+        }
     }
 }

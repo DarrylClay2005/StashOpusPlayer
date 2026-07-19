@@ -7,12 +7,13 @@ struct AccountView: View {
     @EnvironmentObject var library: LibraryManager
     @Environment(\.dismiss) var dismiss
 
-    /// Backs the new "Social" section below (My Profile / Friends entry
-    /// points) — a fresh instance here is fine since it's just used to fetch
-    /// the incoming-friend-request badge count; ProfileView/FriendsListView
-    /// receive this same instance via `.environmentObject` so navigating in
-    /// doesn't trigger a redundant re-fetch.
-    @StateObject private var social = SocialService()
+    /// Backs the "Social" section below (My Profile / Friends entry points
+    /// here still exist alongside the dedicated Profile/Friends tabs, e.g.
+    /// for logged-out/onboarding contexts). Shared app-wide instance (see
+    /// `LumisoundApp`) rather than a private one — the Profile/Friends tabs
+    /// need to see the same friends list / incoming-requests state this
+    /// screen's badge counts against.
+    @EnvironmentObject private var social: SocialService
 
     @State private var showLogoutConfirm = false
     @State private var isEditingDisplayName = false
@@ -460,12 +461,12 @@ struct AccountView: View {
                 // rather than in SettingsView+AccountSection.swift, which is
                 // owned by the parallel Settings-redesign workstream.
                 Section {
-                    NavigationLink(destination: ProfileView().environmentObject(social)) {
+                    NavigationLink(destination: ProfileView()) {
                         Label("My Profile", systemImage: "person.crop.circle")
                             .foregroundStyle(AppTheme.textPrimary)
                     }
 
-                    NavigationLink(destination: FriendsListView().environmentObject(social)) {
+                    NavigationLink(destination: FriendsListView()) {
                         HStack {
                             Label("Friends", systemImage: "person.2")
                                 .foregroundStyle(AppTheme.textPrimary)

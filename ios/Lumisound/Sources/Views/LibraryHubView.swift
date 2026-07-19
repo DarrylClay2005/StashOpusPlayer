@@ -28,11 +28,11 @@ struct LibraryHubView: View {
     @EnvironmentObject private var streaming: StreamingService
     @EnvironmentObject private var account: AccountService
     @ObservedObject private var smartPlaylistStore = SmartPlaylistStore.shared
-    /// A fresh instance here is fine, same reasoning `AccountView`/
-    /// `ProfileView` already use it for — this is just read-only fetching
-    /// for the Friends Activity card, not a standing service the rest of
-    /// the app needs to share.
-    @StateObject private var social = SocialService()
+    /// Shared app-wide instance (see `LumisoundApp`) — the dedicated
+    /// Friends tab reads/mutates this same friends list, so this hub's
+    /// Friends Activity card needs to reflect that shared state rather than
+    /// a private copy that could show stale data right after visiting Friends.
+    @EnvironmentObject private var social: SocialService
 
     /// Lets a carousel's "See All" chip (or a Moods tile) jump straight to
     /// the matching traditional browsing tab instead of the hub needing its
