@@ -9,6 +9,13 @@ import UIKit
 // / remove / block) based on the current relationship.
 struct PublicProfileView: View {
     let userId: String
+    /// Set when this screen is reached via ProfileView's "View as Public"
+    /// button — the owner previewing their own public page, not a genuine
+    /// visitor. Defaults to `false` so every existing call site
+    /// (`PublicProfileView(userId:)`) is unaffected. Suppresses the
+    /// friend-request/block controls, which would otherwise render
+    /// nonsensically self-referential ("Add Friend" pointed at yourself).
+    var isSelfPreview: Bool = false
 
     @EnvironmentObject private var social: SocialService
     @EnvironmentObject private var account: AccountService
@@ -43,6 +50,13 @@ struct PublicProfileView: View {
             } else if let profile {
                 ScrollView {
                     VStack(spacing: 16) {
+                        if isSelfPreview {
+                            Label("This is how your profile looks to others", systemImage: "eye")
+                                .font(AppTheme.bodyFont(size: 12))
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
                         ProfileHeaderCard(
                             mainAccent: mainAccentColor,
                             subAccent: subAccentColor,
@@ -53,7 +67,9 @@ struct PublicProfileView: View {
                         ) {
                             SocialAvatarView(userId: userId, size: 84, fallbackFill: .clear)
                         } action: {
-                            friendActionControl
+                            if !isSelfPreview {
+                                friendActionControl
+                            }
                         }
 
                         if presence?.online == true, presence?.isPlaying == true,
@@ -88,7 +104,7 @@ struct PublicProfileView: View {
                             }
                         }
 
-                        if profile.isFriend {
+                        if profile.isFriend, !isSelfPreview {
                             ProfileInfoCard(tint: AppTheme.error) {
                                 Button(role: .destructive) { showBlockConfirm = true } label: {
                                     Label("Block User", systemImage: "hand.raised.fill")

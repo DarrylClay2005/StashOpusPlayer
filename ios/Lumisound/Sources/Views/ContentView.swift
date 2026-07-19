@@ -101,6 +101,7 @@ struct ContentView: View {
 
                 // MARK: Tab 1 — Library
                 LibraryView()
+                    .toolbar(.hidden, for: .tabBar)
                     .tabItem {
                         Label("Library", systemImage: "music.note.list")
                     }
@@ -108,6 +109,7 @@ struct ContentView: View {
 
                 // MARK: Tab 2 — Now Playing
                 NowPlayingView()
+                    .toolbar(.hidden, for: .tabBar)
                     .tabItem {
                         Label("Playing", systemImage: "play.circle")
                     }
@@ -115,6 +117,7 @@ struct ContentView: View {
 
                 // MARK: Tab 3 — Queue
                 QueueView()
+                    .toolbar(.hidden, for: .tabBar)
                     .tabItem {
                         Label("Queue", systemImage: "list.number")
                     }
@@ -122,6 +125,7 @@ struct ContentView: View {
 
                 // MARK: Tab 4 — Search Streaming
                 StreamSearchView()
+                    .toolbar(.hidden, for: .tabBar)
                     .tabItem {
                         Label("Cloud Services", systemImage: "icloud.and.arrow.down")
                     }
@@ -135,6 +139,7 @@ struct ContentView: View {
                     FriendsListView()
                         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
                 }
+                    .toolbar(.hidden, for: .tabBar)
                     .tabItem {
                         Label("Friends", systemImage: "person.2.fill")
                     }
@@ -145,6 +150,7 @@ struct ContentView: View {
                     ProfileView()
                         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
                 }
+                    .toolbar(.hidden, for: .tabBar)
                     .tabItem {
                         Label("Profile", systemImage: "person.crop.circle")
                     }
@@ -152,12 +158,22 @@ struct ContentView: View {
 
                 // MARK: Tab 7 — Settings
                 SettingsView()
+                    .toolbar(.hidden, for: .tabBar)
                     .tabItem {
                         Label("Settings", systemImage: "gearshape")
                     }
                     .tag(6)
             }
-            .toolbar(.hidden, for: .tabBar)
+            // `.toolbar(.hidden, for: .tabBar)` has to be applied to each
+            // tab's OWN content (above), not to the TabView itself — it
+            // reads as a preference that bubbles up from whichever content
+            // is currently on screen, and applying it directly to the
+            // TabView container is a no-op the native UITabBar silently
+            // ignores. Discovered because doing exactly that in the first
+            // pass at this custom bar shipped with the native bar (and its
+            // automatic "More" overflow for tabs 5-7) still fully visible
+            // underneath the new custom one.
+            //
             // Attached directly to the TabView (rather than floated as a
             // separate ZStack overlay) so it contributes to the bottom safe
             // area exactly like the real UITabBar it replaces — every tab's
@@ -356,6 +372,12 @@ private struct CustomTabBar: View {
     let avatarImage: UIImage?
     let incomingFriendRequestCount: Int
 
+    /// Drives the sliding selection pill below via `matchedGeometryEffect` —
+    /// shared across every tab button so SwiftUI animates the *same* pill
+    /// moving from the old selected button's frame to the new one, instead
+    /// of one pill fading out while a separate one fades in at the new spot.
+    @Namespace private var selectionNamespace
+
     private struct TabSpec {
         let tag: Int
         let title: String
@@ -393,16 +415,18 @@ private struct CustomTabBar: View {
                 .padding(.horizontal, 6)
             }
         }
-        .frame(height: 62)
+        .frame(height: 58)
         .adaptiveGlass(in: Capsule(), fallback: AppTheme.surface)
-        .padding(.horizontal, 12)
-        .padding(.bottom, 6)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 2)
     }
 
     @ViewBuilder
     private func tabButton(_ spec: TabSpec) -> some View {
         Button {
-            selectedTab = spec.tag
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                selectedTab = spec.tag
+            }
         } label: {
             VStack(spacing: 3) {
                 ZStack(alignment: .topTrailing) {
@@ -425,6 +449,18 @@ private struct CustomTabBar: View {
             .padding(.vertical, 6)
             .frame(minWidth: 58)
             .contentShape(Rectangle())
+            .background {
+                // The sliding Liquid-Glass selection pill — only the
+                // currently selected tab renders one, and because every
+                // tab button shares the same `selectionNamespace`, SwiftUI
+                // animates it moving from the previous tab's position to
+                // this one instead of crossfading two separate pills.
+                if selectedTab == spec.tag {
+                    Color.clear
+                        .adaptiveGlass(tint: AppTheme.dynamicAccent, in: Capsule(), fallback: AppTheme.dynamicAccent.opacity(0.16))
+                        .matchedGeometryEffect(id: "selectedTabPill", in: selectionNamespace)
+                }
+            }
         }
         .buttonStyle(.plain)
     }

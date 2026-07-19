@@ -30,6 +30,7 @@ struct ProfileView: View {
     @State private var isUploadingBanner = false
     @State private var showAvatarGifPicker = false
     @State private var showBannerGifPicker = false
+    @State private var showPublicPreview = false
 
     private var mainAccentColor: Color { SocialAccentPalette.color(for: mainAccentHex) ?? AppTheme.dynamicAccent }
     private var subAccentColor: Color { SocialAccentPalette.color(for: subAccentHex) ?? AppTheme.accentSoft }
@@ -335,6 +336,14 @@ struct ProfileView: View {
         .navigationTitle("My Profile")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showPublicPreview = true
+                } label: {
+                    Label("View as Public", systemImage: "eye")
+                }
+                .disabled(account.currentUser?.id == nil)
+            }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
                     saveProfile()
@@ -348,13 +357,37 @@ struct ProfileView: View {
                 .disabled(isSaving)
             }
         }
-        .task {
-            await social.fetchMyProfile()
-            applyLoadedProfile()
+        .sheet(isPresented: $showPublicPreview) {
+            if let userId = account.currentUser?.id {
+                NavigationStack {
+                    PublicProfileView(userId: userId, isSelfPreview: true)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") { showPublicPreview = false }
+                            }
+                        }
+                }
+            }
         }
-        .task {
-            guard let userId = account.currentUser?.id else { return }
-            bannerImage = await SocialService.loadBanner(userId: userId)
+        // `.onAppear` (not `.task`, which only ever runs once for this
+        // view's lifetime) — Profile is now a persistent tab rather than a
+        // freshly-pushed NavigationLink destination, so its view identity
+        // survives switching away and back. A one-shot `.task` meant this
+        // screen only ever fetched once near app launch and never again,
+        // which is what made profile data "sometimes not load" — if that
+        // first fetch was slow, failed, or ran before login finished, there
+        // was no retry short of force-quitting the app. Re-firing on every
+        // appearance matches the same fix already used for the Friends
+        // tab and AccountView's request-count badge.
+        .onAppear {
+            Task {
+                await social.fetchMyProfile()
+                applyLoadedProfile()
+            }
+            Task {
+                guard let userId = account.currentUser?.id else { return }
+                bannerImage = await SocialService.loadBanner(userId: userId)
+            }
         }
         .sheet(item: Binding(
             get: { editingSlot.map { PinnedSlot(index: $0) } },

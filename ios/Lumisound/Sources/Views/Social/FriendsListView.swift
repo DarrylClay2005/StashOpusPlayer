@@ -189,17 +189,24 @@ struct FriendsListView: View {
         .scrollContentBackground(.hidden)
         .navigationTitle("Friends")
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await social.fetchFriends()
-            await social.fetchFriendRequests()
-            await social.fetchSuggestions()
-        }
         .refreshable {
             await social.fetchFriends()
             await social.fetchFriendRequests()
         }
+        // `.onAppear` (not `.task`, which only ever runs once for this
+        // view's lifetime) — Friends is now a persistent tab rather than a
+        // freshly-pushed NavigationLink destination, so re-fetching only
+        // on first-ever appearance meant the list could go stale (or never
+        // load at all if that one fetch was slow/failed) for the rest of
+        // the session. Re-firing on every appearance matches the same fix
+        // applied to ProfileView and the existing AccountView badge count.
         .onAppear {
             presenceService.startFriendsPolling(account: account)
+            Task {
+                await social.fetchFriends()
+                await social.fetchFriendRequests()
+                await social.fetchSuggestions()
+            }
         }
         .onDisappear {
             presenceService.stopFriendsPolling()
