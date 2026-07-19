@@ -146,7 +146,26 @@ struct ProfileView: View {
                                 .onChange(of: bannerPickerItem) { item in
                                     guard let item else { return }
                                     isUploadingBanner = true
-                                    Task {
+                                    // `@MainActor in` is load-bearing, not
+                                    // decoration: this closure isn't itself
+                                    // actor-isolated, so a plain `Task { }`
+                                    // here has no guaranteed home thread —
+                                    // after awaiting `uploadBannerData`/the
+                                    // detached GIF decode below, it can
+                                    // resume on a background thread and
+                                    // mutate `@State bannerImage` from off
+                                    // the main thread. SwiftUI's view-graph
+                                    // isn't thread-safe against that: it
+                                    // doesn't crash, it silently corrupts
+                                    // the *whole* screen's layout (every
+                                    // card rendering as a huge blank
+                                    // rounded rect) — this is what caused
+                                    // the "profile stretches out" bug after
+                                    // setting a banner. Same idiom this
+                                    // codebase already uses everywhere else
+                                    // a Task needs to safely touch UI state
+                                    // from a non-isolated context.
+                                    Task { @MainActor in
                                         defer { isUploadingBanner = false }
                                         if let data = try? await item.loadTransferable(type: Data.self) {
                                             await social.uploadBannerData(data)
@@ -364,7 +383,14 @@ struct ProfileView: View {
             // at display time either way; this just gives the user a
             // reasonable frame to compose within instead of none at all.
             GifPickerSheet(cropAspect: 2.8, isCircularGuide: false) { data in
-                Task {
+                // Same off-main-thread `@State` mutation hazard as the
+                // PhotosPicker banner path above — this closure isn't
+                // actor-isolated either, so the plain `Task { }` this
+                // replaced could resume on a background thread after
+                // `UIImage.gifImageAsync`'s internal detached decode and
+                // corrupt SwiftUI's view graph when it assigned
+                // `bannerImage` from there.
+                Task { @MainActor in
                     await social.uploadBannerData(data)
                     bannerImage = await UIImage.gifImageAsync(data: data)
                 }

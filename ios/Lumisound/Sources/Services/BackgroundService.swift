@@ -475,7 +475,12 @@ final class BackgroundService: ObservableObject {
                 appWarn("loadImagesFromDisk: failed to load \(name)", category: "background")
                 continue
             }
-            if (name as NSString).pathExtension.lowercased() == "gif", let animated = UIImage.gifImage(data: data) {
+            // Cap each decoded GIF frame to 1280px, same as static photos —
+            // GIF bytes saved to disk before this cap existed can still be
+            // full photo-library resolution across every frame, and decoding
+            // those at full size on every launch is what let a large gallery
+            // balloon into hundreds of MB of in-memory bitmaps.
+            if (name as NSString).pathExtension.lowercased() == "gif", let animated = UIImage.gifImage(data: data, maxDimension: 1280) {
                 loaded.append(animated)
                 loadedGIFData.append(data)
             } else if let img = UIImage(data: data) {
@@ -520,7 +525,7 @@ final class BackgroundService: ObservableObject {
         for name in imageFiles {
             let path = imageStorageDir.appendingPathComponent(name)
             guard let data = try? Data(contentsOf: path) else { continue }
-            if (name as NSString).pathExtension.lowercased() == "gif", let animated = UIImage.gifImage(data: data) {
+            if (name as NSString).pathExtension.lowercased() == "gif", let animated = UIImage.gifImage(data: data, maxDimension: 1280) {
                 loaded.append(animated)
                 loadedGIFData.append(data)
             } else if let img = UIImage(data: data) {

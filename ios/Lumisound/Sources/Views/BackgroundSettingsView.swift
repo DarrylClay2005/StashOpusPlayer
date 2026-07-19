@@ -106,10 +106,19 @@ struct BackgroundSettingsView: View {
                                 continue
                             }
                             guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-                            if isGIFData(data), let animated = UIImage.gifImage(data: data) {
-                                // Keep GIFs at full resolution/animated — the
-                                // downsample path below would flatten them to
-                                // a single static frame.
+                            if isGIFData(data), let animated = UIImage.gifImage(data: data, maxDimension: 1280) {
+                                // Keep GIFs animated (unlike the downsample
+                                // path below, which flattens to a single
+                                // static frame) but still cap each frame to
+                                // the same 1280px used for static photos —
+                                // an un-downsampled multi-frame GIF from the
+                                // real Photos library can be many MB of fully
+                                // decoded bitmaps per image, and with a
+                                // gallery holding 100+ of these the continuous
+                                // animate+blur compositing of even just the
+                                // one currently-displayed image was enough to
+                                // saturate the main thread and make the rest
+                                // of this screen appear to never render.
                                 loadedImages.append(animated)
                                 loadedIDs.append(item.itemIdentifier)
                                 loadedGIFData.append(data)

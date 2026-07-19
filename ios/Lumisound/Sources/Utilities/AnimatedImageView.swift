@@ -11,7 +11,22 @@ extension UIImage {
     /// automatically when assigned to its `.image` property — unlike
     /// `UIImage(data:)`, which only ever decodes a GIF's first frame. Returns
     /// `nil` if `data` isn't decodable as an image sequence at all.
-    static func gifImage(data: Data) -> UIImage? {
+    ///
+    /// - Parameter maxDimension: when non-nil, every frame is decoded via
+    ///   ImageIO's thumbnail path capped to this many pixels on its long edge
+    ///   (same idea as `ImageDownsampler`, just per-frame) instead of being
+    ///   decoded at full source resolution. A multi-frame `UIImage` holds
+    ///   every one of its frames fully decoded in memory simultaneously for
+    ///   as long as it's kept around and *continues paying full-resolution
+    ///   blur/composite cost on every frame while animating* — for a gallery
+    ///   that retains dozens of these at once (e.g. `BackgroundService`'s
+    ///   326-image library), leaving this `nil` for a real photo-library GIF
+    ///   is what caused main-thread saturation from `.blur()`-ing an
+    ///   animating multi-hundred-MB image and made the whole Gallery
+    ///   Background screen appear to render as an empty blank space below
+    ///   the status row. `nil` (full resolution) is still the right default
+    ///   for one-off, already-small assets (e.g. avatar/banner GIFs).
+    static func gifImage(data: Data, maxDimension: CGFloat? = nil) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         let count = CGImageSourceGetCount(source)
         guard count > 1 else {
@@ -20,10 +35,21 @@ extension UIImage {
             return UIImage(data: data)
         }
 
+        let thumbOpts: [CFString: Any]? = maxDimension.map { cap in
+            [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: cap,
+            ]
+        }
+
         var frames: [UIImage] = []
         var totalDuration: Double = 0
         for index in 0..<count {
-            guard let cgImage = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+            let cgImage: CGImage? = thumbOpts != nil
+                ? CGImageSourceCreateThumbnailAtIndex(source, index, thumbOpts as CFDictionary?)
+                : CGImageSourceCreateImageAtIndex(source, index, nil)
+            guard let cgImage else { continue }
             frames.append(UIImage(cgImage: cgImage))
             totalDuration += Self.gifFrameDuration(source: source, index: index)
         }

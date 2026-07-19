@@ -61,6 +61,15 @@ struct ContentView: View {
     /// a real animating view can't just be dropped into `.tabItem{}` directly.
     @State private var avatarIsAnimatedGIF = false
 
+    /// The real on-screen frame of the native `UITabBar`, in `ContentView`'s
+    /// own coordinate space. Populated by `TabBarFrameReader` below and used
+    /// to position the animated-avatar overlay — reading the actual frame
+    /// (rather than assuming the bar spans edge-to-edge and dividing the
+    /// full screen width by 5) is what makes the overlay track correctly on
+    /// the floating/inset tab bar style, where the bar has margins on both
+    /// sides and is narrower than the screen.
+    @State private var tabBarFrame: CGRect = .zero
+
     /// Self "I'm online" heartbeat for the Social Ecosystem presence feature
     /// (POST /api/social/presence every ~45s while foregrounded). Owned here
     /// rather than injected from LumisoundApp — ContentView is the one view
@@ -246,29 +255,34 @@ struct ContentView: View {
             // a cosmetic replacement layer, not a reimplementation of tab
             // selection/highlighting/accessibility, so all 5 tabs stay
             // ordinary, fully-functional SwiftUI TabView items.
-            if avatarIsAnimatedGIF, let avatarImage = account.avatarImage {
-                GeometryReader { geo in
-                    let tabCount: CGFloat = 5
-                    let tabSlotWidth = geo.size.width / tabCount
-                    let iconSize: CGFloat = 28
-                    // Approximates a standard UITabBar icon's vertical center:
-                    // icons sit in the top portion of the 49pt bar, above the
-                    // text label, i.e. roughly 35pt up from the top of the
-                    // home-indicator safe area. Tuned by eye against the
-                    // existing `circularProfileIcon` static rendering — nudge
-                    // this constant if it drifts on a real device (this repo
-                    // has no local Xcode/Simulator to check pixel-for-pixel).
-                    let iconBottomOffset: CGFloat = 35
-                    AnimatedImageView(image: avatarImage, contentMode: .scaleAspectFill)
-                        .frame(width: iconSize, height: iconSize)
-                        .clipShape(Circle())
-                        .position(
-                            x: geo.size.width - tabSlotWidth / 2,
-                            y: geo.size.height - geo.safeAreaInsets.bottom - iconBottomOffset
-                        )
-                }
-                .ignoresSafeArea()
+            // Invisible probe that keeps `tabBarFrame` synced to the real
+            // native UITabBar's on-screen frame every layout pass — see its
+            // own doc comment for why this replaced a screen-width guess.
+            TabBarFrameReader(frame: $tabBarFrame)
+                .frame(width: 0, height: 0)
                 .allowsHitTesting(false)
+
+            if avatarIsAnimatedGIF, let avatarImage = account.avatarImage, tabBarFrame != .zero {
+                let tabCount: CGFloat = 5
+                let tabSlotWidth = tabBarFrame.width / tabCount
+                let iconSize: CGFloat = 28
+                // Vertical center of a UITabBar icon sits in the upper portion
+                // of the bar, above the text label — tuned by eye against the
+                // existing `circularProfileIcon` static rendering (this repo
+                // has no local Xcode/Simulator to check pixel-for-pixel), but
+                // now expressed as a fraction of the *real* bar height instead
+                // of an absolute offset from the screen edge, so it still
+                // lands correctly whether the bar is edge-to-edge or a
+                // floating inset pill.
+                let iconVerticalFraction: CGFloat = 0.36
+                AnimatedImageView(image: avatarImage, contentMode: .scaleAspectFill)
+                    .frame(width: iconSize, height: iconSize)
+                    .clipShape(Circle())
+                    .position(
+                        x: tabBarFrame.minX + tabBarFrame.width - tabSlotWidth / 2,
+                        y: tabBarFrame.minY + tabBarFrame.height * iconVerticalFraction
+                    )
+                    .allowsHitTesting(false)
             }
         }
         .acoustIDConfirmSheet()
@@ -395,5 +409,49 @@ struct ContentView: View {
     /// is only ever non-nil on a `UIImage` built via `animatedImage(with:duration:)`.
     private static func isAnimatedGIF(_ image: UIImage?) -> Bool {
         (image?.images?.count ?? 0) > 1
+    }
+}
+
+// MARK: - TabBarFrameReader
+
+/// Invisible probe view that walks up to the window and back down through
+/// its entire view hierarchy to find the real, live `UITabBar` and reports
+/// its frame (converted into this view's own coordinate space) via
+/// `frame`. Exists because the animated-avatar tab-icon overlay used to
+/// assume the tab bar spans the full screen width edge-to-edge — true on
+/// older edge-to-edge `UITabBar` styling, but not on the floating/inset
+/// pill style (margins on both sides, narrower than the screen), where
+/// that assumption placed the overlay to the right of the actual icon.
+/// Reading the real frame keeps this correct regardless of tab bar style,
+/// device size, or any future Apple redesign, without hardcoding margins.
+private struct TabBarFrameReader: UIViewRepresentable {
+    @Binding var frame: CGRect
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        DispatchQueue.main.async { Self.updateFrame(from: view, frame: $frame) }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        DispatchQueue.main.async { Self.updateFrame(from: uiView, frame: $frame) }
+    }
+
+    private static func updateFrame(from view: UIView, frame: Binding<CGRect>) {
+        guard let window = view.window, let tabBar = findTabBar(in: window) else { return }
+        let converted = tabBar.convert(tabBar.bounds, to: view)
+        if converted != frame.wrappedValue {
+            frame.wrappedValue = converted
+        }
+    }
+
+    private static func findTabBar(in view: UIView) -> UITabBar? {
+        if let tabBar = view as? UITabBar { return tabBar }
+        for subview in view.subviews {
+            if let found = findTabBar(in: subview) { return found }
+        }
+        return nil
     }
 }
