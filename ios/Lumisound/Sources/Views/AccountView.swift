@@ -7,14 +7,6 @@ struct AccountView: View {
     @EnvironmentObject var library: LibraryManager
     @Environment(\.dismiss) var dismiss
 
-    /// Backs the "Social" section below (My Profile / Friends entry points
-    /// here still exist alongside the dedicated Profile/Friends tabs, e.g.
-    /// for logged-out/onboarding contexts). Shared app-wide instance (see
-    /// `LumisoundApp`) rather than a private one — the Profile/Friends tabs
-    /// need to see the same friends list / incoming-requests state this
-    /// screen's badge counts against.
-    @EnvironmentObject private var social: SocialService
-
     @State private var showLogoutConfirm = false
     @State private var isEditingDisplayName = false
     @State private var draftDisplayName = ""
@@ -453,50 +445,6 @@ struct AccountView: View {
                     sectionHeader("Account")
                 }
                 .listRowBackground(AppTheme.surface)
-
-                // MARK: Social Ecosystem Section — profile, friends, presence
-                //
-                // Entry point for the new Social Ecosystem feature (public
-                // profile customization, friends, presence). Added here
-                // rather than in SettingsView+AccountSection.swift, which is
-                // owned by the parallel Settings-redesign workstream.
-                Section {
-                    NavigationLink(destination: ProfileView()) {
-                        Label("My Profile", systemImage: "person.crop.circle")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-
-                    NavigationLink(destination: FriendsListView()) {
-                        HStack {
-                            Label("Friends", systemImage: "person.2")
-                                .foregroundStyle(AppTheme.textPrimary)
-                            if !social.incomingRequests.isEmpty {
-                                Spacer()
-                                Text("\(social.incomingRequests.count)")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 2)
-                                    .background(AppTheme.dynamicAccent, in: Capsule())
-                            }
-                        }
-                    }
-                } header: {
-                    sectionHeader("Social")
-                } footer: {
-                    Text("Customize your public profile, manage friends and requests, and control whether friends can see what you're currently playing.")
-                        .font(AppTheme.bodyFont(size: 12))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .listRowBackground(AppTheme.surface)
-                .onAppear {
-                    // `.onAppear` (not `.task`, which only runs once for this
-                    // view instance's lifetime) so the badge count doesn't go
-                    // stale just from popping back to this screen after
-                    // visiting Friends/Requests — it refires every time this
-                    // screen becomes visible again, including the first time.
-                    Task { await social.fetchFriendRequests() }
-                }
 
                 // MARK: Social / Discovery Section
                 Section {
