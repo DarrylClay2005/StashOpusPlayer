@@ -25,7 +25,14 @@ struct LibraryHubView: View {
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var folderService: MusicFolderService
     @EnvironmentObject private var moodService: MoodPlaylistService
+    @EnvironmentObject private var streaming: StreamingService
+    @EnvironmentObject private var account: AccountService
     @ObservedObject private var smartPlaylistStore = SmartPlaylistStore.shared
+    /// A fresh instance here is fine, same reasoning `AccountView`/
+    /// `ProfileView` already use it for — this is just read-only fetching
+    /// for the Friends Activity card, not a standing service the rest of
+    /// the app needs to share.
+    @StateObject private var social = SocialService()
 
     /// Lets a carousel's "See All" chip (or a Moods tile) jump straight to
     /// the matching traditional browsing tab instead of the hub needing its
@@ -37,6 +44,11 @@ struct LibraryHubView: View {
     @State private var mostPlayed: [Song] = []
     @State private var forgottenFavorites: [Song] = []
     @State private var hasLoadedOnce = false
+
+    // Server-backed extras — independent of the on-device reload() above,
+    // since these come from the network rather than LibraryManager.
+    @State private var weeklyMixSongs: [Song] = []
+    @State private var similarListenerSearchQuery: String? = nil
 
     var body: some View {
         ScrollView {
@@ -62,13 +74,33 @@ struct LibraryHubView: View {
         .task(id: library.allSongs.count) {
             reload()
         }
+        .task {
+            await loadServerExtras()
+        }
+        .sheet(item: Binding(
+            get: { similarListenerSearchQuery.map { IdentifiableQuery(text: $0) } },
+            set: { similarListenerSearchQuery = $0?.text }
+        )) { query in
+            StreamSearchView(initialSearchText: query.text)
+        }
     }
+
+    private struct IdentifiableQuery: Identifiable { let text: String; var id: String { text } }
 
     @ViewBuilder
     private var hubContent: some View {
+        HubQuickActionsRow(hasLibrary: !library.allSongs.isEmpty, onShuffleAll: shuffleAll)
+
         if !shortcuts.isEmpty {
             HubSpeedDialSection(shortcuts: shortcuts)
                 .transition(.move(edge: .top).combined(with: .opacity))
+        }
+
+        if !weeklyMixSongs.isEmpty {
+            HubSongCarousel(
+                title: "Weekly Mix", icon: "sparkles.tv",
+                songs: weeklyMixSongs, seeAllTab: nil, selectedTab: $selectedTab
+            )
         }
 
         if !smartPlaylistStore.playlists.isEmpty {
@@ -99,6 +131,44 @@ struct LibraryHubView: View {
         if !moodBucketsWithSongs.isEmpty {
             moodsCarousel
         }
+
+        if !social.friendsActivity.isEmpty {
+            HubFriendsActivityCarousel(entries: social.friendsActivity)
+        }
+
+        if !account.similarListenerTracks.isEmpty {
+            HubSimilarListenersCarousel(
+                tracks: account.similarListenerTracks,
+                listenerCount: account.similarListenerCount,
+                onSelect: { track in
+                    similarListenerSearchQuery = [track.title, track.artist].compactMap { $0 }.joined(separator: " ")
+                }
+            )
+        }
+    }
+
+    /// Plays a random song from the whole on-device library with shuffle
+    /// enabled — `setQueue` (called by `play(song:in:)`) shuffles the queue
+    /// itself whenever `shuffleEnabled` is already true by the time it runs,
+    /// so setting it first is all this needs.
+    private func shuffleAll() {
+        guard let random = library.allSongs.randomElement() else { return }
+        player.shuffleEnabled = true
+        player.play(song: random, in: library.allSongs)
+    }
+
+    /// Fetches the three network-backed hub extras once — independent of
+    /// `reload()`'s on-device `library.allSongs.count` trigger, since these
+    /// don't change just because the local library was rescanned.
+    private func loadServerExtras() async {
+        async let weeklyMix: Void = {
+            guard let token = account.token else { return }
+            await streaming.fetchWeeklyMix(token: token)
+            weeklyMixSongs = streaming.weeklyMix.map { streaming.toSong(weeklyMixTrack: $0, token: token) }
+        }()
+        async let similarListeners: Void = account.fetchSimilarListeners()
+        async let friendsActivity: Void = social.fetchFriendsActivity()
+        _ = await (weeklyMix, similarListeners, friendsActivity)
     }
 
     // MARK: Mixes carousel
@@ -526,6 +596,175 @@ private struct HubSongCarousel: View {
                 .padding(5)
                 .background(AppTheme.dynamicAccent, in: Circle())
                 .padding(6)
+        }
+    }
+}
+
+// MARK: - Quick Actions row
+
+/// One-tap shortcuts pinned to the very top of the hub, above even the speed
+/// dial — the hub is a "what do I want to do right now" landing screen, and
+/// "just start playing something" is the single most common answer to that,
+/// so it shouldn't need a scroll + a tap-into-a-tile to get there.
+private struct HubQuickActionsRow: View {
+    let hasLibrary: Bool
+    let onShuffleAll: () -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                actionChip(title: "Shuffle All", icon: "shuffle", action: onShuffleAll)
+                    .disabled(!hasLibrary)
+                    .opacity(hasLibrary ? 1 : 0.4)
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    private func actionChip(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                Text(title)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(AppTheme.textPrimary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .adaptiveGlass(
+                tint: AppTheme.dynamicAccent.opacity(0.16),
+                in: Capsule(),
+                fallback: AppTheme.surface
+            )
+        }
+        .buttonStyle(PressableButtonStyle())
+    }
+}
+
+// MARK: - Friends Activity carousel
+
+/// "What friends are playing" — surfaces the Social Ecosystem's friends-only
+/// activity feed (recent plays/favorites, already gated server-side by each
+/// friend's own `share_now_playing` privacy toggle) right on the hub instead
+/// of it only living inside the Friends screen, so the two big features this
+/// app shipped in the same window — the library hub and the social system —
+/// actually feel like one app rather than two bolted together.
+private struct HubFriendsActivityCarousel: View {
+    let entries: [SocialActivityEntry]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HubSectionHeader(title: "Friends Activity", icon: "person.2.wave.2.fill")
+                .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 14) {
+                    ForEach(entries.prefix(20)) { entry in
+                        HubParallaxCard {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 8) {
+                                    SocialAvatarView(userId: entry.userId, size: 28)
+                                    Text(entry.displayName ?? entry.username)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(AppTheme.textPrimary)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 0)
+                                    Image(systemName: entry.isPlayed ? "play.fill" : "heart.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(AppTheme.dynamicAccent)
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.title ?? "Unknown Title")
+                                        .font(.caption)
+                                        .foregroundStyle(AppTheme.textPrimary)
+                                        .lineLimit(1)
+                                    if let artist = entry.artist, !artist.isEmpty {
+                                        Text(artist)
+                                            .font(.caption2)
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(10)
+                            .frame(width: 168, height: 100, alignment: .topLeading)
+                            .adaptiveGlass(
+                                tint: AppTheme.dynamicAccent.opacity(0.1),
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous),
+                                fallback: AppTheme.surface
+                            )
+                        }
+                        .frame(width: 168, height: 100)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            }
+        }
+    }
+}
+
+// MARK: - Similar Listeners carousel
+
+/// "Because listeners like you also play..." — real collaborative-filtering
+/// recommendations from `/social/similar-listeners` (other opted-in users
+/// whose top artists overlap with the caller's own). These are plain
+/// title/artist suggestions, not something already in this user's library or
+/// server storage, so tapping one opens the Cloud Services search pre-filled
+/// with that title/artist rather than trying to play it directly.
+private struct HubSimilarListenersCarousel: View {
+    let tracks: [TrendingTrack]
+    let listenerCount: Int
+    let onSelect: (TrendingTrack) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HubSectionHeader(title: "Similar Listeners", icon: "person.3.sequence.fill")
+                .padding(.horizontal, 16)
+            Text("Based on \(listenerCount) listener\(listenerCount == 1 ? "" : "s") with taste like yours")
+                .font(.caption2)
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 14) {
+                    ForEach(tracks.prefix(20)) { track in
+                        HubParallaxCard {
+                            Button { onSelect(track) } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .fill(AppTheme.dynamicAccent.opacity(0.16))
+                                        Image(systemName: "waveform.badge.magnifyingglass")
+                                            .font(.title3)
+                                            .foregroundStyle(AppTheme.dynamicAccent)
+                                    }
+                                    .frame(width: 132, height: 132)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(track.title)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(AppTheme.textPrimary)
+                                            .lineLimit(1)
+                                        if let artist = track.artist, !artist.isEmpty {
+                                            Text(artist)
+                                                .font(.caption2)
+                                                .foregroundStyle(AppTheme.textSecondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                }
+                                .frame(width: 132, alignment: .leading)
+                            }
+                            .buttonStyle(PressableButtonStyle())
+                        }
+                        .frame(width: 132, height: 178)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            }
         }
     }
 }

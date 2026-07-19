@@ -20,6 +20,12 @@ struct FriendsListView: View {
     @State private var isSearching = false
     @State private var showBlockedUsers = false
     @State private var sendingRequestTo: Set<String> = []
+    /// Debounces so every keystroke doesn't fire its own network request —
+    /// `SocialService.searchUsers` itself now guards against the resulting
+    /// out-of-order completions (see its own doc comment), but there's no
+    /// reason to actually make a dozen requests while someone is still
+    /// typing a username.
+    @State private var searchTask: Task<Void, Never>? = nil
 
     var body: some View {
         List {
@@ -33,7 +39,10 @@ struct FriendsListView: View {
                         .textInputAutocapitalization(.never)
                         .foregroundStyle(AppTheme.textPrimary)
                         .onChange(of: searchQuery) { newValue in
-                            Task {
+                            searchTask?.cancel()
+                            searchTask = Task {
+                                try? await Task.sleep(nanoseconds: 350_000_000)
+                                guard !Task.isCancelled else { return }
                                 isSearching = true
                                 await social.searchUsers(query: newValue)
                                 isSearching = false
@@ -164,7 +173,7 @@ struct FriendsListView: View {
                                     Text(friend.displayName ?? friend.username)
                                         .foregroundStyle(AppTheme.textPrimary)
                                     PresenceIndicatorView(
-                                        presence: presenceService.friendsPresence.first { $0.userId == friend.userId },
+                                        presence: presenceByUserId[friend.userId],
                                         dotSize: 8
                                     )
                                 }
@@ -198,6 +207,13 @@ struct FriendsListView: View {
         .sheet(isPresented: $showBlockedUsers) {
             NavigationStack { BlockedUsersView() }
         }
+    }
+
+    /// Precomputed once per render instead of an O(n) `.first { }` scan per
+    /// friend row — turns the whole list's presence lookup from O(n²) into
+    /// O(n), which matters once a friends list grows past a couple dozen.
+    private var presenceByUserId: [String: SocialPresence] {
+        Dictionary(presenceService.friendsPresence.map { ($0.userId, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     private func userRow(_ user: SocialUserRef) -> some View {

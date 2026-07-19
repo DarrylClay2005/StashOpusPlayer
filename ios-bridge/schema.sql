@@ -153,6 +153,16 @@ CREATE TABLE IF NOT EXISTS ios_user_music_metadata (
   INDEX idx_user_id (user_id)
 );
 
+-- `filename` above is only ever the bare basename (see upload_user_music's
+-- `safe_name`), but the actual on-disk location used by GET /user/music/stream
+-- can include a subfolder (`folder` param at upload time) — the two only
+-- coincide for root-level uploads. Any feature that needs to turn a
+-- ios_user_music_metadata row back into a playable stream URL (e.g. the
+-- weekly mix, 2026-07-19) needs the real relative path, not just the
+-- filename. NULL for rows uploaded before this column existed; backfilled
+-- automatically the next time that same file is (re-)uploaded.
+ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS relative_path VARCHAR(500) NULL;
+
 -- Per-user gallery images (cloud-synced)
 CREATE TABLE IF NOT EXISTS ios_user_gallery_images (
   id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),

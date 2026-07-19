@@ -81,6 +81,34 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - WeeklyMixTrack  (GET /user/music/weekly-mix)
+
+/// One track from the user's personalized weekly mix — server-generated
+/// (see `_generate_weekly_mix_core`/`_weekly_mix_loop` in main.py) from the
+/// user's own uploaded personal library (`ios_user_music_metadata`), biased
+/// toward artists they've actually played recently. `relativePath` is what
+/// `weeklyMixStreamURL(for:)` needs to actually play it — the bridge only
+/// ever returns rows where that's non-null, so every track this decodes to
+/// is guaranteed playable.
+struct WeeklyMixTrack: Identifiable, Codable, Hashable {
+    let id: String
+    let title: String
+    let artist: String
+    let album: String
+    let bpm: Double?
+    let musicalKey: String?
+    let relativePath: String
+    let hasArtwork: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id           = "metadata_id"
+        case title, artist, album, bpm
+        case musicalKey   = "musical_key"
+        case relativePath = "relative_path"
+        case hasArtwork   = "has_artwork"
+    }
+}
+
 // MARK: - StorageUsage  (personal cloud library storage/quota, GET /user/storage/usage)
 
 /// Cloud storage usage/quota for the logged-in user's Personal Cloud Library

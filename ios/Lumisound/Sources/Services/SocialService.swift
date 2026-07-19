@@ -158,7 +158,16 @@ final class SocialService: ObservableObject {
 
     // MARK: - User search (add-friend flow)
 
+    /// Guards against out-of-order completions — a caller firing this once
+    /// per keystroke (even debounced) can still have a slower response for
+    /// an *earlier* query land after a faster one for a *later* query, which
+    /// would otherwise silently overwrite `searchResults` with results that
+    /// don't match what's currently typed.
+    private var searchGeneration = 0
+
     func searchUsers(query: String) async {
+        searchGeneration += 1
+        let generation = searchGeneration
         guard let account, account.isLoggedIn, !query.trimmingCharacters(in: .whitespaces).isEmpty else {
             searchResults = []
             return
@@ -167,8 +176,11 @@ final class SocialService: ObservableObject {
             let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
             let data = try await account.makeRequest("/api/social/users/search?q=\(encoded)")
             struct Response: Decodable { let users: [SocialUserRef] }
-            searchResults = try JSONDecoder().decode(Response.self, from: data).users
+            let users = try JSONDecoder().decode(Response.self, from: data).users
+            guard generation == searchGeneration else { return }
+            searchResults = users
         } catch {
+            guard generation == searchGeneration else { return }
             handle(error)
         }
     }

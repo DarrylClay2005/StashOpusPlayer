@@ -42,6 +42,68 @@ extension StreamingService {
         )
     }
 
+    /// Returns the stream URL for a weekly-mix track (requires JWT token) —
+    /// same construction as `userMusicStreamURL(for:)`, just keyed off
+    /// `relativePath` instead of `UserMusicTrack.serverPath` (the bridge's
+    /// `/user/music/stream` endpoint takes the same kind of relative path
+    /// either way, it just comes from a different source table).
+    func weeklyMixStreamURL(for track: WeeklyMixTrack, token: String) -> URL? {
+        guard let encoded = track.relativePath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
+        let base = bridgeURL.trimmingCharacters(in: .init(charactersIn: "/"))
+        return URL(string: "\(base)/user/music/stream?path=\(encoded)")
+    }
+
+    /// Returns the artwork URL for a weekly-mix track (requires JWT token).
+    func weeklyMixArtworkURL(for track: WeeklyMixTrack) -> URL? {
+        guard track.hasArtwork,
+              let encoded = track.relativePath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
+        let base = bridgeURL.trimmingCharacters(in: .init(charactersIn: "/"))
+        return URL(string: "\(base)/user/music/artwork?path=\(encoded)")
+    }
+
+    /// Wraps a `WeeklyMixTrack` in a `Song` for playback.
+    func toSong(weeklyMixTrack track: WeeklyMixTrack, token: String) -> Song {
+        Song(
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            duration: 0,
+            url: weeklyMixStreamURL(for: track, token: token),
+            persistentID: nil,
+            artworkCacheKey: weeklyMixArtworkURL(for: track)?.absoluteString,
+            trackNumber: 0,
+            year: "",
+            genre: "",
+            bitrate: 0,
+            sampleRate: 0,
+            bpm: track.bpm,
+            httpHeaders: ["Authorization": "Bearer \(token)"]
+        )
+    }
+
+    /// Fetches this user's personalized weekly mix from
+    /// `GET /user/music/weekly-mix`, publishing it on `weeklyMix`. Silent
+    /// no-op on failure, same "nice to have, not worth an error banner"
+    /// reasoning as `fetchStorageUsage(token:)` — the Home hub just omits
+    /// the Weekly Mix card entirely when this hasn't populated anything.
+    func fetchWeeklyMix(token: String) async {
+        guard var request = makeRequest("/user/music/weekly-mix") else { return }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
+                appWarn("fetchWeeklyMix: HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)", category: "network")
+                return
+            }
+            struct Response: Decodable { let tracks: [WeeklyMixTrack] }
+            weeklyMix = try JSONDecoder().decode(Response.self, from: data).tracks
+        } catch {
+            appWarn("fetchWeeklyMix: \(error.localizedDescription)", category: "network")
+        }
+    }
+
     /// Fetches this account's Personal Cloud Library storage usage/quota from
     /// `GET /user/storage/usage`, publishing it on `storageUsage`. Silent no-op
     /// on failure (leaves whatever was previously loaded, if anything) — this

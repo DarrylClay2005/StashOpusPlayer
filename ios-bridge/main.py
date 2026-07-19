@@ -7800,10 +7800,11 @@ async def upload_user_music(
                         (id, user_id, filename, original_filename, title, artist, album,
                          genre, year, duration_seconds, file_size_bytes, bitrate,
                          sample_rate, mime_type, has_artwork, loudness_lufs, bpm, musical_key,
-                         waveform_json)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         waveform_json, relative_path)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         filename = VALUES(filename),
+                        relative_path = VALUES(relative_path),
                         title = IF(VALUES(title) IS NULL, title, VALUES(title)),
                         artist = IF(VALUES(artist) IS NULL, artist, VALUES(artist)),
                         album = IF(VALUES(album) IS NULL, album, VALUES(album)),
@@ -7839,6 +7840,7 @@ async def upload_user_music(
                         bpm,
                         musical_key,
                         waveform_json,
+                        rel,
                     ),
                 )
     except Exception as exc:
@@ -8394,13 +8396,18 @@ async def _generate_weekly_mix_core(user_id: str) -> list[dict]:
             )
             top_artists = [r[0] for r in await cur.fetchall()]
 
+            # `relative_path IS NOT NULL` restricts this to rows that can
+            # actually be resolved back to a stream URL (see relative_path's
+            # own doc comment in schema.sql) — a row from before that column
+            # existed, never re-uploaded since, would otherwise show up in
+            # the mix as a track that silently can't be played.
             if top_artists:
                 placeholders = ",".join(["%s"] * len(top_artists))
                 await cur.execute(
                     f"""
-                    SELECT id, title, artist, album, bpm, musical_key
+                    SELECT id, title, artist, album, bpm, musical_key, relative_path, has_artwork
                     FROM ios_user_music_metadata
-                    WHERE user_id = %s AND artist IN ({placeholders})
+                    WHERE user_id = %s AND artist IN ({placeholders}) AND relative_path IS NOT NULL
                     ORDER BY RAND()
                     LIMIT %s
                     """,
@@ -8415,8 +8422,9 @@ async def _generate_weekly_mix_core(user_id: str) -> list[dict]:
             if len(rows) < _WEEKLY_MIX_SIZE:
                 seen_ids = {r[0] for r in rows}
                 await cur.execute(
-                    "SELECT id, title, artist, album, bpm, musical_key FROM ios_user_music_metadata "
-                    "WHERE user_id = %s ORDER BY RAND() LIMIT %s",
+                    "SELECT id, title, artist, album, bpm, musical_key, relative_path, has_artwork "
+                    "FROM ios_user_music_metadata "
+                    "WHERE user_id = %s AND relative_path IS NOT NULL ORDER BY RAND() LIMIT %s",
                     (user_id, _WEEKLY_MIX_SIZE),
                 )
                 for r in await cur.fetchall():
@@ -8425,7 +8433,10 @@ async def _generate_weekly_mix_core(user_id: str) -> list[dict]:
                         seen_ids.add(r[0])
 
     return [
-        {"metadata_id": r[0], "title": r[1], "artist": r[2], "album": r[3], "bpm": r[4], "musical_key": r[5]}
+        {
+            "metadata_id": r[0], "title": r[1], "artist": r[2], "album": r[3],
+            "bpm": r[4], "musical_key": r[5], "relative_path": r[6], "has_artwork": bool(r[7]),
+        }
         for r in rows
     ]
 

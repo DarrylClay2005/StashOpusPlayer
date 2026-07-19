@@ -77,4 +77,30 @@ extension AccountService {
             errorMessage = error.localizedDescription
         }
     }
+
+    /// Fetches "people who listen to what you listen to also play..."
+    /// recommendations from real collaborative filtering over other opted-in
+    /// users' play history — see `/social/similar-listeners` in main.py.
+    /// Silent no-op on failure/empty (no history yet, no similar listeners
+    /// found yet): this powers an optional Home-hub card, not worth an
+    /// error banner over either way.
+    func fetchSimilarListeners() async {
+        guard isLoggedIn else { return }
+        do {
+            let data = try await makeRequest("/social/similar-listeners")
+            struct Response: Decodable {
+                let tracks: [TrendingTrack]
+                let similarListenerCount: Int
+                enum CodingKeys: String, CodingKey {
+                    case tracks
+                    case similarListenerCount = "similar_listener_count"
+                }
+            }
+            let response = try JSONDecoder().decode(Response.self, from: data)
+            similarListenerTracks = response.tracks
+            similarListenerCount = response.similarListenerCount
+        } catch {
+            appWarn("fetchSimilarListeners: \(error.localizedDescription)", category: "network")
+        }
+    }
 }

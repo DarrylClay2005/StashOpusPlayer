@@ -55,6 +55,14 @@ struct StreamSearchView: View {
 
     let sources = ["youtube", "soundcloud", "server", "my"]
 
+    /// Defaulted so the existing `StreamSearchView()` call site (the Cloud
+    /// Services tab itself) is unaffected — only callers that want to deep
+    /// link in with a query pre-filled (e.g. tapping a Home hub "Similar
+    /// Listeners" suggestion) need to pass this.
+    init(initialSearchText: String = "") {
+        _searchText = State(initialValue: initialSearchText)
+    }
+
     var body: some View {
         NavigationStack {
             Group {

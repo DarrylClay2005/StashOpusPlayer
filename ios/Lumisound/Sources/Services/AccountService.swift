@@ -28,6 +28,8 @@ final class AccountService: ObservableObject {
     @Published var backups: [SyncBackup] = []
     @Published var socialActivity: [ActivityEntry] = []
     @Published var trendingTracks: [TrendingTrack] = []
+    @Published var similarListenerTracks: [TrendingTrack] = []
+    @Published var similarListenerCount: Int = 0
     @Published var sessions: [AccountSession] = []
     @Published var stats: AccountStats? = nil
     @Published var achievements: AchievementsData? = nil

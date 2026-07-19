@@ -131,6 +131,8 @@ final class StreamingService: ObservableObject {
     /// Cloud storage usage/quota for the logged-in user — see `fetchStorageUsage(token:)`.
     /// `nil` until the first successful fetch.
     @Published var storageUsage: StorageUsage? = nil
+    /// This user's personalized weekly mix — see `fetchWeeklyMix(token:)`.
+    @Published var weeklyMix: [WeeklyMixTrack] = []
 
     // MARK: User Music Metadata state (rich metadata from /user/music/metadata)
 
