@@ -33,6 +33,7 @@ private struct GifSearchResponse: Decodable {
 // main.py); if it's unset there, search/trending calls 501 and this just
 // returns an empty list, which the picker UI treats as "not available"
 // rather than surfacing a scary error for what's an optional feature.
+@MainActor
 enum GifSearchService {
 
     static func search(query: String, limit: Int = 30) async -> [GifSearchResult] {
