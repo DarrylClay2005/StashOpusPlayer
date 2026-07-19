@@ -43,11 +43,15 @@ struct GifPickerSheet: View {
     // Both `/api/gif-search` and `/api/gif-search/trending` only ever
     // returned a single flat page (default 30, capped 50) with no way to
     // ask for more — scrolling to the end of the grid just showed nothing
-    // further, no matter how many more GIPHY actually had. `currentOffset`/
-    // `canLoadMore` below, plus `loadMoreIfNeeded(currentItem:)` triggered
-    // from each cell's `.onAppear`, page through the rest server-side now
-    // supports (`offset` forwarded straight to GIPHY's own `search`/
-    // `trending` endpoints, which support it natively).
+    // further, no matter how many more GIPHY actually had.
+    // `currentOffset`/`canLoadMore` below page through the rest, server-side
+    // support for which already exists (`offset` forwarded straight to
+    // GIPHY's own `search`/`trending` endpoints). Triggered by an explicit
+    // "Load More" button (see `body`) rather than automatic
+    // scroll-position detection — an earlier version fired this from each
+    // grid cell's `.onAppear`, which was one of the changes present when
+    // GIF cells stopped responding to taps at all; removed to eliminate it
+    // as a variable rather than confirmed as the actual cause.
     private let pageSize = 30
     @State private var currentOffset = 0
     @State private var canLoadMore = true
@@ -74,15 +78,31 @@ struct GifPickerSheet: View {
                         LazyVGrid(columns: columns, spacing: 8) {
                             ForEach(results) { result in
                                 gifCell(result)
-                                    .onAppear { loadMoreIfNeeded(currentItem: result) }
                             }
                         }
                         .padding(8)
 
-                        if isLoadingMore {
-                            ProgressView()
-                                .tint(AppTheme.dynamicAccent)
-                                .padding(.bottom, 16)
+                        // A manual button rather than automatic
+                        // scroll-triggered pagination (a per-cell
+                        // `.onAppear` firing during grid layout/scroll) —
+                        // decoupling pagination from anything that runs
+                        // during the grid's own layout means it can't be
+                        // the reason cell taps stop registering, whatever
+                        // the actual cause of that turns out to be.
+                        if canLoadMore, !results.isEmpty {
+                            Button {
+                                Task { await loadNextPage() }
+                            } label: {
+                                if isLoadingMore {
+                                    ProgressView().tint(AppTheme.dynamicAccent)
+                                } else {
+                                    Text("Load More")
+                                        .font(AppTheme.bodyFont(size: 14))
+                                        .foregroundStyle(AppTheme.dynamicAccent)
+                                }
+                            }
+                            .disabled(isLoadingMore)
+                            .padding(.vertical, 16)
                         }
                     }
                 }
@@ -184,19 +204,6 @@ struct GifPickerSheet: View {
         canLoadMore = fetched.count == pageSize
         isLoading = false
         hasSearchedOnce = true
-    }
-
-    /// Triggered from each grid cell's `.onAppear` — once one of the last
-    /// few items in the currently-loaded page scrolls into view, fetches
-    /// the next page and appends it, giving the classic "infinite scroll"
-    /// feel instead of the grid just dead-ending after the first 30 GIFs.
-    private func loadMoreIfNeeded(currentItem: GifSearchResult) {
-        guard canLoadMore, !isLoading, !isLoadingMore else { return }
-        let thresholdIndex = results.index(results.endIndex, offsetBy: -6, limitedBy: results.startIndex) ?? results.startIndex
-        guard let currentIndex = results.firstIndex(where: { $0.id == currentItem.id }),
-              currentIndex >= thresholdIndex
-        else { return }
-        Task { await loadNextPage() }
     }
 
     private func loadNextPage() async {
