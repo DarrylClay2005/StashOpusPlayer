@@ -32,10 +32,26 @@ struct GifPickerSheet: View {
     /// stopped the *slower* of the two from overwriting `results` with its
     /// (now stale) answer after a faster, more recent call already applied
     /// its own — visibly "search shows results that don't match what I
-    /// typed" when trending happened to finish last. Each `runSearch()` call
-    /// captures its own generation and only applies its results if nothing
-    /// newer has started since.
+    /// typed" when trending happened to finish last. Each `runSearch()`/
+    /// `loadNextPage()` call captures its own generation and only applies
+    /// its results if nothing newer (a new search, or a fresher page load)
+    /// has started since.
     @State private var searchGeneration = 0
+
+    // MARK: Pagination
+    //
+    // Both `/api/gif-search` and `/api/gif-search/trending` only ever
+    // returned a single flat page (default 30, capped 50) with no way to
+    // ask for more — scrolling to the end of the grid just showed nothing
+    // further, no matter how many more GIPHY actually had. `currentOffset`/
+    // `canLoadMore` below, plus `loadMoreIfNeeded(currentItem:)` triggered
+    // from each cell's `.onAppear`, page through the rest server-side now
+    // supports (`offset` forwarded straight to GIPHY's own `search`/
+    // `trending` endpoints, which support it natively).
+    private let pageSize = 30
+    @State private var currentOffset = 0
+    @State private var canLoadMore = true
+    @State private var isLoadingMore = false
     /// Set once the user picks a result and its full-resolution bytes have
     /// downloaded — presenting this (as a `.sheet(item:)`) is what hands off
     /// to `GifCropView`.
@@ -58,9 +74,16 @@ struct GifPickerSheet: View {
                         LazyVGrid(columns: columns, spacing: 8) {
                             ForEach(results) { result in
                                 gifCell(result)
+                                    .onAppear { loadMoreIfNeeded(currentItem: result) }
                             }
                         }
                         .padding(8)
+
+                        if isLoadingMore {
+                            ProgressView()
+                                .tint(AppTheme.dynamicAccent)
+                                .padding(.bottom, 16)
+                        }
                     }
                 }
             }
@@ -139,19 +162,61 @@ struct GifPickerSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// Fresh search/trending fetch — always page 0, always REPLACES
+    /// `results` (as opposed to `loadNextPage()`, which appends). Resets
+    /// the pagination state so a new query starts paging from scratch.
     private func runSearch() async {
         searchGeneration += 1
         let generation = searchGeneration
         isLoading = true
+        currentOffset = 0
+        canLoadMore = true
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        let fetched = trimmed.isEmpty ? await GifSearchService.trending() : await GifSearchService.search(query: trimmed)
+        let fetched = trimmed.isEmpty
+            ? await GifSearchService.trending(limit: pageSize, offset: 0)
+            : await GifSearchService.search(query: trimmed, limit: pageSize, offset: 0)
         // A newer call already started (and will apply its own results and
         // flip these flags itself) — discard this now-stale answer instead
         // of overwriting whatever it already showed.
         guard generation == searchGeneration else { return }
         results = fetched
+        currentOffset = fetched.count
+        canLoadMore = fetched.count == pageSize
         isLoading = false
         hasSearchedOnce = true
+    }
+
+    /// Triggered from each grid cell's `.onAppear` — once one of the last
+    /// few items in the currently-loaded page scrolls into view, fetches
+    /// the next page and appends it, giving the classic "infinite scroll"
+    /// feel instead of the grid just dead-ending after the first 30 GIFs.
+    private func loadMoreIfNeeded(currentItem: GifSearchResult) {
+        guard canLoadMore, !isLoading, !isLoadingMore else { return }
+        let thresholdIndex = results.index(results.endIndex, offsetBy: -6, limitedBy: results.startIndex) ?? results.startIndex
+        guard let currentIndex = results.firstIndex(where: { $0.id == currentItem.id }),
+              currentIndex >= thresholdIndex
+        else { return }
+        Task { await loadNextPage() }
+    }
+
+    private func loadNextPage() async {
+        guard canLoadMore, !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        let generation = searchGeneration
+        let offset = currentOffset
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        let fetched = trimmed.isEmpty
+            ? await GifSearchService.trending(limit: pageSize, offset: offset)
+            : await GifSearchService.search(query: trimmed, limit: pageSize, offset: offset)
+        // A new search started while this page was in flight — its own
+        // `runSearch()` already reset `results`/`currentOffset` for the new
+        // query, so appending this now-stale page would splice unrelated
+        // GIFs onto the wrong result set.
+        guard generation == searchGeneration else { return }
+        results.append(contentsOf: fetched)
+        currentOffset += fetched.count
+        canLoadMore = fetched.count == pageSize
     }
 
     private func pick(_ result: GifSearchResult) {

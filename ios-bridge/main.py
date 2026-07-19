@@ -13339,19 +13339,21 @@ async def _giphy_request(path: str, params: dict) -> list:
 async def gif_search(
     q: str = Query(..., min_length=1, max_length=100),
     limit: int = Query(30, ge=1, le=50),
+    offset: int = Query(0, ge=0, le=4975),
     payload: dict = Depends(get_current_user),
 ):
-    return {"results": await _giphy_request("search", {"q": q, "limit": limit})}
+    return {"results": await _giphy_request("search", {"q": q, "limit": limit, "offset": offset})}
 
 
 @app.get("/api/gif-search/trending")
 async def gif_trending(
     limit: int = Query(30, ge=1, le=50),
+    offset: int = Query(0, ge=0, le=4975),
     payload: dict = Depends(get_current_user),
 ):
     """Trending GIFs — shown before the user types a search query, same
     "browse before you search" UX GIPHY's own picker uses."""
-    return {"results": await _giphy_request("trending", {"limit": limit})}
+    return {"results": await _giphy_request("trending", {"limit": limit, "offset": offset})}
 
 
 # ---------------------------------------------------------------------------

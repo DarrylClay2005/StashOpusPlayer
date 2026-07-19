@@ -36,16 +36,16 @@ private struct GifSearchResponse: Decodable {
 @MainActor
 enum GifSearchService {
 
-    static func search(query: String, limit: Int = 30) async -> [GifSearchResult] {
+    static func search(query: String, limit: Int = 30, offset: Int = 0) async -> [GifSearchResult] {
         guard let account = AccountService.shared,
               let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
         else { return [] }
-        return await fetch(path: "/api/gif-search?q=\(encoded)&limit=\(limit)", account: account)
+        return await fetch(path: "/api/gif-search?q=\(encoded)&limit=\(limit)&offset=\(offset)", account: account)
     }
 
-    static func trending(limit: Int = 30) async -> [GifSearchResult] {
+    static func trending(limit: Int = 30, offset: Int = 0) async -> [GifSearchResult] {
         guard let account = AccountService.shared else { return [] }
-        return await fetch(path: "/api/gif-search/trending?limit=\(limit)", account: account)
+        return await fetch(path: "/api/gif-search/trending?limit=\(limit)&offset=\(offset)", account: account)
     }
 
     /// Downloads the actual GIF bytes for a picked result, ready to hand
