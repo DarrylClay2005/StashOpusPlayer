@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UIKit
 
 // MARK: - ProfileView
 //
@@ -24,6 +25,9 @@ struct ProfileView: View {
     @State private var editingSlot: Int? = nil // which pinned-track slot the picker sheet is editing
     @State private var photosPickerItem: PhotosPickerItem? = nil
     @State private var isUploadingAvatar = false
+    @State private var bannerImage: UIImage? = nil
+    @State private var bannerPickerItem: PhotosPickerItem? = nil
+    @State private var isUploadingBanner = false
 
     private var mainAccentColor: Color { SocialAccentPalette.color(for: mainAccentHex) ?? AppTheme.dynamicAccent }
     private var subAccentColor: Color { SocialAccentPalette.color(for: subAccentHex) ?? AppTheme.accentSoft }
@@ -42,7 +46,8 @@ struct ProfileView: View {
                         subAccent: subAccentColor,
                         displayName: account.currentUser?.displayName ?? account.currentUser?.username ?? "",
                         username: account.currentUser?.username ?? "",
-                        isOnline: true
+                        isOnline: true,
+                        bannerImage: bannerImage
                     ) {
                         ZStack {
                             if let img = account.avatarImage {
@@ -67,30 +72,91 @@ struct ProfileView: View {
                             }
                         }
                     } action: {
-                        PhotosPicker(selection: $photosPickerItem, matching: .images, photoLibrary: .shared()) {
-                            HStack {
-                                Image(systemName: "photo.badge.plus")
-                                Text("Change Avatar (GIF supported)")
-                                    .font(AppTheme.bodyFont(size: 13))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .foregroundStyle(mainAccentColor)
-                            .adaptiveGlass(
-                                tint: mainAccentColor.opacity(0.14),
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous),
-                                fallback: AppTheme.surface
-                            )
-                        }
-                        .onChange(of: photosPickerItem) { item in
-                            guard let item else { return }
-                            isUploadingAvatar = true
-                            Task {
-                                defer { isUploadingAvatar = false }
-                                if let data = try? await item.loadTransferable(type: Data.self) {
-                                    await account.uploadAvatarData(data)
+                        VStack(spacing: 8) {
+                            PhotosPicker(selection: $photosPickerItem, matching: .images, photoLibrary: .shared()) {
+                                HStack {
+                                    Image(systemName: "photo.badge.plus")
+                                    Text("Change Avatar (GIF supported)")
+                                        .font(AppTheme.bodyFont(size: 13))
                                 }
-                                photosPickerItem = nil
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .foregroundStyle(mainAccentColor)
+                                .adaptiveGlass(
+                                    tint: mainAccentColor.opacity(0.14),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous),
+                                    fallback: AppTheme.surface
+                                )
+                            }
+                            .onChange(of: photosPickerItem) { item in
+                                guard let item else { return }
+                                isUploadingAvatar = true
+                                Task {
+                                    defer { isUploadingAvatar = false }
+                                    if let data = try? await item.loadTransferable(type: Data.self) {
+                                        await account.uploadAvatarData(data)
+                                    }
+                                    photosPickerItem = nil
+                                }
+                            }
+
+                            HStack(spacing: 8) {
+                                PhotosPicker(selection: $bannerPickerItem, matching: .images, photoLibrary: .shared()) {
+                                    HStack {
+                                        if isUploadingBanner {
+                                            ProgressView().tint(subAccentColor)
+                                        } else {
+                                            Image(systemName: "photo.on.rectangle.angled")
+                                        }
+                                        Text("Change Banner")
+                                            .font(AppTheme.bodyFont(size: 13))
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .foregroundStyle(subAccentColor)
+                                    .adaptiveGlass(
+                                        tint: subAccentColor.opacity(0.14),
+                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous),
+                                        fallback: AppTheme.surface
+                                    )
+                                }
+                                .disabled(isUploadingBanner)
+                                .onChange(of: bannerPickerItem) { item in
+                                    guard let item else { return }
+                                    isUploadingBanner = true
+                                    Task {
+                                        defer { isUploadingBanner = false }
+                                        if let data = try? await item.loadTransferable(type: Data.self) {
+                                            await social.uploadBannerData(data)
+                                            // Optimistic local update, same
+                                            // reasoning as avatar upload —
+                                            // don't make the user wait on a
+                                            // round-trip fetch to see their
+                                            // own change take effect.
+                                            if data.isEmpty == false {
+                                                bannerImage = isGIFData(data) ? UIImage.gifImage(data: data) : UIImage(data: data)
+                                            }
+                                        }
+                                        bannerPickerItem = nil
+                                    }
+                                }
+
+                                if bannerImage != nil {
+                                    Button {
+                                        Task {
+                                            await social.removeBanner()
+                                            bannerImage = nil
+                                        }
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                            .padding(10)
+                                            .adaptiveGlass(
+                                                in: RoundedRectangle(cornerRadius: 12, style: .continuous),
+                                                fallback: AppTheme.surface
+                                            )
+                                    }
+                                }
                             }
                         }
                     }
@@ -101,7 +167,7 @@ struct ProfileView: View {
                         ProfileInfoCard(title: "Listening To", icon: "waveform", tint: mainAccentColor) {
                             NowPlayingActivityRow(
                                 title: song.title, artist: song.artist.isEmpty ? nil : song.artist,
-                                tint: mainAccentColor
+                                tint: mainAccentColor, song: song
                             )
                         }
                     }
@@ -225,6 +291,10 @@ struct ProfileView: View {
         .task {
             await social.fetchMyProfile()
             applyLoadedProfile()
+        }
+        .task {
+            guard let userId = account.currentUser?.id else { return }
+            bannerImage = await SocialService.loadBanner(userId: userId)
         }
         .sheet(item: Binding(
             get: { editingSlot.map { PinnedSlot(index: $0) } },

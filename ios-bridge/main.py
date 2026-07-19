@@ -12586,6 +12586,74 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
     return {"ok": True}
 
 
+@app.post("/api/social/profile/banner")
+async def upload_profile_banner(request: Request, payload: dict = Depends(get_current_user)):
+    """Upload a profile banner image — same JPEG/GIF-sniffed-bytes pattern as
+    POST /user/avatar, just written to ios_social_profiles.banner_data
+    instead of ios_users.avatar_data. A banner is wider/more detailed than an
+    avatar so gets a somewhat larger JPEG ceiling (2MB vs 1MB); the GIF limit
+    stays the same 5MB. Upserts the profile row (a user may not have one yet
+    if this is the first thing they ever customize)."""
+    user_id = payload["sub"]
+    body = await request.body()
+    is_gif = _is_gif_bytes(body)
+    if is_gif:
+        if len(body) > 5_242_880:
+            raise HTTPException(status_code=413, detail="GIF banner must be under 5MB")
+    else:
+        if len(body) > 2_097_152:
+            raise HTTPException(status_code=413, detail="Banner must be under 2MB")
+        if not body.startswith(b"\xff\xd8\xff"):
+            raise HTTPException(status_code=400, detail="Banner must be a JPEG or GIF image")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_social_profiles (user_id, banner_data)
+                VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE banner_data = VALUES(banner_data)
+                """,
+                (user_id, body),
+            )
+    return {"ok": True}
+
+
+@app.delete("/api/social/profile/banner")
+async def remove_profile_banner(payload: dict = Depends(get_current_user)):
+    """Clears a previously-set banner, reverting the profile header to the
+    plain main/sub accent gradient."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_social_profiles SET banner_data = NULL WHERE user_id = %s",
+                (user_id,),
+            )
+    return {"ok": True}
+
+
+@app.get("/api/social/profile/banner/{user_id}")
+async def get_profile_banner(user_id: str):
+    """Returns raw banner bytes (JPEG or GIF) or 404 — public, no auth
+    required, matching GET /user/avatar/{user_id}'s existing security model
+    (a profile banner is exactly as public as the profile itself)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT banner_data FROM ios_social_profiles WHERE user_id = %s", (user_id,)
+            )
+            row = await cur.fetchone()
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="No banner set")
+    data = bytes(row[0])
+    from fastapi.responses import Response
+    return Response(content=data, media_type="image/gif" if _is_gif_bytes(data) else "image/jpeg")
+
+
 @app.put("/api/social/profile/pinned-tracks")
 async def set_pinned_tracks(body: PinnedTracksUpdate, payload: dict = Depends(get_current_user)):
     user_id = payload["sub"]

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - PublicProfileView
 //
@@ -15,6 +16,7 @@ struct PublicProfileView: View {
 
     @State private var profile: PublicSocialProfile? = nil
     @State private var presence: SocialPresence? = nil
+    @State private var bannerImage: UIImage? = nil
     @State private var isLoading = true
     @State private var isActing = false
     @State private var showBlockConfirm = false
@@ -46,7 +48,8 @@ struct PublicProfileView: View {
                             subAccent: subAccentColor,
                             displayName: profile.displayName ?? profile.username,
                             username: profile.username,
-                            isOnline: presence?.online ?? false
+                            isOnline: presence?.online ?? false,
+                            bannerImage: bannerImage
                         ) {
                             SocialAvatarView(userId: userId, size: 84, fallbackFill: .clear)
                         } action: {
@@ -194,5 +197,6 @@ struct PublicProfileView: View {
         isLoading = true
         defer { isLoading = false }
         profile = await social.fetchPublicProfile(userId: userId)
+        bannerImage = await SocialService.loadBanner(userId: userId)
     }
 }

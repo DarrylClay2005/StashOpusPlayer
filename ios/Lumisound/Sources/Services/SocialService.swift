@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 // MARK: - SocialService
 //
@@ -81,6 +82,78 @@ final class SocialService: ObservableObject {
         } catch {
             handle(error)
         }
+    }
+
+    // MARK: - Banner
+
+    /// Uploads raw picker data (straight from `PhotosPicker`) as the profile
+    /// banner, preserving animation if it's a GIF — same "sniff raw bytes
+    /// before any UIImage conversion" reasoning as
+    /// `AccountService.uploadAvatarData(_:)`, since decoding first would
+    /// silently flatten a GIF to its first frame. Non-GIF data (HEIC/PNG/
+    /// whatever the picker handed back) gets decoded and re-encoded as JPEG,
+    /// same as the avatar path, since the bridge only accepts GIF or JPEG
+    /// bytes.
+    func uploadBannerData(_ data: Data) async {
+        guard let account, account.isLoggedIn else { return }
+        if isGIFData(data) {
+            guard data.count <= 5_242_880 else {
+                errorMessage = "GIF banners must be under 5MB."
+                return
+            }
+            await sendBanner(data, contentType: "image/gif", account: account)
+            return
+        }
+        guard let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.8) else {
+            appWarn("uploadBannerData: could not decode/encode image data", category: "social")
+            return
+        }
+        guard jpeg.count <= 2_097_152 else {
+            errorMessage = "Banner must be under 2MB."
+            return
+        }
+        await sendBanner(jpeg, contentType: "image/jpeg", account: account)
+    }
+
+    private func sendBanner(_ data: Data, contentType: String, account: AccountService) async {
+        guard var req = account.makeBaseRequest("/api/social/profile/banner", method: "POST") else { return }
+        req.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        req.httpBody = data
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(status) else {
+                appWarn("uploadBannerData: HTTP \(status)", category: "social")
+                errorMessage = "Couldn't upload banner (HTTP \(status))."
+                return
+            }
+            appLog("uploadBannerData: uploaded \(data.count / 1024)KB (\(contentType))", category: "social")
+        } catch {
+            handle(error)
+        }
+    }
+
+    func removeBanner() async {
+        guard let account, account.isLoggedIn else { return }
+        do {
+            _ = try await account.makeRequest("/api/social/profile/banner", method: "DELETE")
+        } catch {
+            handle(error)
+        }
+    }
+
+    /// Fetches another (or this) user's banner image, or `nil` if they
+    /// haven't set one (a 404 is the normal "no banner" case, not an error —
+    /// callers fall back to the plain accent-gradient banner).
+    static func loadBanner(userId: String) async -> UIImage? {
+        guard let account = AccountService.shared,
+              let req = account.makeBaseRequest("/api/social/profile/banner/\(userId)", method: "GET")
+        else { return nil }
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode)
+        else { return nil }
+        if isGIFData(data) { return UIImage.gifImage(data: data) }
+        return UIImage(data: data)
     }
 
     // MARK: - User search (add-friend flow)

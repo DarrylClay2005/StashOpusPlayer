@@ -919,6 +919,12 @@ CREATE TABLE IF NOT EXISTS ios_social_profiles (
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
+-- Profile banner image (2026-07-19) — same JPEG/GIF-sniffed-bytes pattern
+-- as ios_users.avatar_data (see POST/GET /user/avatar), just scoped to the
+-- social profile instead of the core account. NULL means "no banner set";
+-- the profile header falls back to a plain main/sub accent gradient.
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS banner_data MEDIUMBLOB NULL;
+
 -- Up to 5 user-pinned "favorite songs" shown on the profile, ordered by
 -- `position` (0-4). Saved as a full replace (delete-then-insert in one
 -- transaction) from PUT /api/social/profile/pinned-tracks rather than

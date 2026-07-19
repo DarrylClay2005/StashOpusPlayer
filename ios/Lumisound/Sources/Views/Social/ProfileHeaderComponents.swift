@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Profile header components
 //
@@ -25,6 +26,10 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
     /// `nil` hides the status dot entirely (own-profile editor doesn't need
     /// to tell you whether you're online).
     let isOnline: Bool?
+    /// A user-uploaded banner image, or `nil` to fall back to the plain
+    /// main/sub accent gradient. Rendered through `AnimatedImageView` (not a
+    /// plain SwiftUI `Image`) so a GIF banner actually plays.
+    var bannerImage: UIImage? = nil
 
     private let avatar: Avatar
     private let action: Action
@@ -35,6 +40,7 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
         displayName: String,
         username: String,
         isOnline: Bool?,
+        bannerImage: UIImage? = nil,
         @ViewBuilder avatar: () -> Avatar,
         @ViewBuilder action: () -> Action
     ) {
@@ -43,20 +49,32 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
         self.displayName = displayName
         self.username = username
         self.isOnline = isOnline
+        self.bannerImage = bannerImage
         self.avatar = avatar()
         self.action = action()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            LinearGradient(
-                colors: [mainAccent, subAccent],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            )
+            Group {
+                if let bannerImage {
+                    AnimatedImageView(image: bannerImage, contentMode: .scaleAspectFill)
+                } else {
+                    LinearGradient(
+                        colors: [mainAccent, subAccent],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                }
+            }
+            // `AnimatedImageView` (a `UIViewRepresentable`) has no shape-like
+            // "expand to fill proposed space" behavior the way `LinearGradient`
+            // does — without this it would size to the banner image's own
+            // intrinsic pixel dimensions instead of stretching edge-to-edge.
+            .frame(maxWidth: .infinity)
             .overlay(
                 // A soft bottom fade so a light avatar-ring stroke and the
                 // name text underneath both stay legible against any accent
-                // pair, including light ones like White/Amber.
+                // pair or banner image, including busy/light ones.
                 LinearGradient(colors: [.clear, .black.opacity(0.32)], startPoint: .top, endPoint: .bottom)
             )
             .frame(height: 108)
@@ -163,16 +181,28 @@ struct NowPlayingActivityRow: View {
     let title: String
     let artist: String?
     let tint: Color
+    /// The actual `Song` being played, when known — lets this row show real
+    /// artwork via `ArtworkThumbnail` instead of a generic note icon. Only
+    /// available on the owner's own profile (`player.currentSong`); a
+    /// friend's presence is fetched from the bridge as plain title/artist
+    /// strings with no artwork reference, so their card still falls back to
+    /// the icon.
+    var song: Song? = nil
 
     var body: some View {
         HStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(tint.opacity(0.2))
-                Image(systemName: "music.note")
-                    .foregroundStyle(tint)
+            if let song {
+                ArtworkThumbnail(song: song, size: 40)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(tint.opacity(0.2))
+                    Image(systemName: "music.note")
+                        .foregroundStyle(tint)
+                }
+                .frame(width: 40, height: 40)
             }
-            .frame(width: 40, height: 40)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
