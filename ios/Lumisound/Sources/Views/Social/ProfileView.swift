@@ -31,6 +31,15 @@ struct ProfileView: View {
     @State private var showAvatarGifPicker = false
     @State private var showBannerGifPicker = false
     @State private var showPublicPreview = false
+    /// Guards the initial profile/banner load so it retries on every
+    /// appearance until it *succeeds* (fixing data that "sometimes doesn't
+    /// load" for a persistent tab), without re-firing — and clobbering
+    /// unsaved edits with stale server data — every time this screen
+    /// reappears after a sheet dismisses (GIF picker, banner picker, the
+    /// "View as Public" preview), which is what silently discarded edits
+    /// right before Save, making Save look like it did nothing.
+    @State private var hasLoadedProfile = false
+    @State private var hasLoadedBanner = false
 
     private var mainAccentColor: Color { SocialAccentPalette.color(for: mainAccentHex) ?? AppTheme.dynamicAccent }
     private var subAccentColor: Color { SocialAccentPalette.color(for: subAccentHex) ?? AppTheme.accentSoft }
@@ -372,21 +381,29 @@ struct ProfileView: View {
         // `.onAppear` (not `.task`, which only ever runs once for this
         // view's lifetime) — Profile is now a persistent tab rather than a
         // freshly-pushed NavigationLink destination, so its view identity
-        // survives switching away and back. A one-shot `.task` meant this
-        // screen only ever fetched once near app launch and never again,
-        // which is what made profile data "sometimes not load" — if that
-        // first fetch was slow, failed, or ran before login finished, there
-        // was no retry short of force-quitting the app. Re-firing on every
-        // appearance matches the same fix already used for the Friends
-        // tab and AccountView's request-count badge.
+        // survives switching away and back, AND survives every sheet this
+        // screen presents dismissing (GIF pickers, the "View as Public"
+        // preview) — `.onAppear` fires again each time. The `hasLoaded*`
+        // guards mean a failed/slow first load still retries on the next
+        // appearance (fixing profile data that "sometimes doesn't load"),
+        // but a load that already succeeded once never re-fires and
+        // clobbers `draftBio`/accent colors/etc. with stale server data —
+        // which is what silently discarded in-progress edits right before
+        // the user hit Save, making Save look like it did nothing.
         .onAppear {
-            Task {
-                await social.fetchMyProfile()
-                applyLoadedProfile()
+            if !hasLoadedProfile {
+                Task {
+                    await social.fetchMyProfile()
+                    applyLoadedProfile()
+                    if social.myProfile != nil { hasLoadedProfile = true }
+                }
             }
-            Task {
-                guard let userId = account.currentUser?.id else { return }
-                bannerImage = await SocialService.loadBanner(userId: userId)
+            if !hasLoadedBanner {
+                Task {
+                    guard let userId = account.currentUser?.id else { return }
+                    bannerImage = await SocialService.loadBanner(userId: userId)
+                    hasLoadedBanner = true
+                }
             }
         }
         .sheet(item: Binding(
@@ -465,7 +482,7 @@ struct ProfileView: View {
     private func saveProfile() {
         guard !isSaving else { return }
         isSaving = true
-        Task {
+        Task { @MainActor in
             defer { isSaving = false }
             let trimmed = draftBio.trimmingCharacters(in: .whitespacesAndNewlines)
             await social.updateProfile(

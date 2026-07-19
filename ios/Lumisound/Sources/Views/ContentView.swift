@@ -56,6 +56,19 @@ struct ContentView: View {
     /// instance's state, so it isn't injected via `.environmentObject`.
     @StateObject private var presenceService = PresenceService()
 
+    /// Extra bottom clearance for `CustomTabBar` so it stacks above (rather
+    /// than overlaps) the MiniPlayerBar that the currently selected tab's
+    /// OWN content shows via its own `.safeAreaInset(edge: .bottom)` — see
+    /// the long comment where this is used for why the two can't be
+    /// composed through safe-area propagation alone. Tabs 1 (Playing) and 6
+    /// (Settings) don't show a MiniPlayerBar at all, so this only applies
+    /// on the other 5; `80` matches `MiniPlayerBar.barContent`'s own
+    /// `.frame(height: 80)`.
+    private var extraBottomInsetForMiniPlayer: CGFloat {
+        guard player.currentSong != nil, ![1, 6].contains(selectedTab) else { return 0 }
+        return 80
+    }
+
     init() {
         // The native UITabBar itself is hidden (see `.toolbar(.hidden, for:
         // .tabBar)` in `body`) in favor of `CustomTabBar` below, which is
@@ -174,12 +187,24 @@ struct ContentView: View {
             // automatic "More" overflow for tabs 5-7) still fully visible
             // underneath the new custom one.
             //
-            // Attached directly to the TabView (rather than floated as a
-            // separate ZStack overlay) so it contributes to the bottom safe
-            // area exactly like the real UITabBar it replaces — every tab's
-            // own `.safeAreaInset(edge: .bottom) { MiniPlayerBar() }` then
-            // keeps stacking neatly above it, instead of the two floating
-            // views overlapping now that nothing reserves that space.
+            // Attached directly to the TabView via `.safeAreaInset` so it's
+            // positioned correctly relative to the real system safe area
+            // (home indicator). NOTE: a `.safeAreaInset` applied here does
+            // NOT propagate down into each tab's own content — SwiftUI/
+            // UIKit hosts each `.tabItem{}` page in its own separate
+            // hierarchy, and safe-area/environment propagation doesn't
+            // cross that boundary. That means each tab's own
+            // `.safeAreaInset(edge: .bottom) { MiniPlayerBar() }` has no
+            // idea this bar exists and, left alone, places MiniPlayerBar
+            // flush against the same real bottom safe area this bar also
+            // targets — the two end up stacked in the exact same place
+            // instead of on top of one another, which is what let song
+            // artwork/text show through behind this translucent bar.
+            // Fixed by having *this* bar shift itself up out of the way
+            // (see `extraBottomInsetForMiniPlayer`) whenever the currently
+            // selected tab is one that shows a MiniPlayerBar and a song is
+            // actually playing, rather than trying to make the cross-tab
+            // safe-area propagation work (it structurally can't).
             .safeAreaInset(edge: .bottom) {
                 CustomTabBar(
                     selectedTab: $selectedTab,
@@ -187,6 +212,7 @@ struct ContentView: View {
                     avatarImage: account.avatarImage,
                     incomingFriendRequestCount: social.incomingRequests.count
                 )
+                .padding(.bottom, extraBottomInsetForMiniPlayer)
             }
             .tint(AppTheme.dynamicAccent)
             // Subtle cross-fade + "pop" scale-in between tabs. iOS 16 doesn't expose
@@ -445,22 +471,14 @@ private struct CustomTabBar: View {
                     .lineLimit(1)
                     .fixedSize()
             }
+            // Only the text/icon *color* changes for the selected tab —
+            // matching the plain native tab bar's look — the sliding glass
+            // highlight below is scoped to just the icon (see `iconView`),
+            // not this whole button, so it never covers the label.
             .foregroundStyle(selectedTab == spec.tag ? AppTheme.dynamicAccent : AppTheme.textSecondary)
             .padding(.vertical, 6)
             .frame(minWidth: 58)
             .contentShape(Rectangle())
-            .background {
-                // The sliding Liquid-Glass selection pill — only the
-                // currently selected tab renders one, and because every
-                // tab button shares the same `selectionNamespace`, SwiftUI
-                // animates it moving from the previous tab's position to
-                // this one instead of crossfading two separate pills.
-                if selectedTab == spec.tag {
-                    Color.clear
-                        .adaptiveGlass(tint: AppTheme.dynamicAccent, in: Capsule(), fallback: AppTheme.dynamicAccent.opacity(0.16))
-                        .matchedGeometryEffect(id: "selectedTabPill", in: selectionNamespace)
-                }
-            }
         }
         .buttonStyle(.plain)
     }
@@ -474,25 +492,47 @@ private struct CustomTabBar: View {
     /// the real (hidden) tab bar at a guessed screen position.
     @ViewBuilder
     private func iconView(for spec: TabSpec) -> some View {
-        if spec.tag == 5, let avatarImage {
-            Group {
-                if (avatarImage.images?.count ?? 0) > 1 {
-                    AnimatedImageView(image: avatarImage, contentMode: .scaleAspectFill)
-                } else {
-                    Image(uiImage: avatarImage)
-                        .resizable()
-                        .scaledToFill()
+        let isSelected = selectedTab == spec.tag
+        Group {
+            if spec.tag == 5, let avatarImage {
+                Group {
+                    if (avatarImage.images?.count ?? 0) > 1 {
+                        AnimatedImageView(image: avatarImage, contentMode: .scaleAspectFill)
+                    } else {
+                        Image(uiImage: avatarImage)
+                            .resizable()
+                            .scaledToFill()
+                    }
                 }
+                .frame(width: 22, height: 22)
+                .clipShape(Circle())
+            } else {
+                Image(systemName: spec.systemImage)
+                    .font(.system(size: 19))
+                    .frame(width: 22, height: 22)
             }
-            .frame(width: 24, height: 24)
-            .clipShape(Circle())
-            .overlay(
-                Circle().stroke(selectedTab == spec.tag ? AppTheme.dynamicAccent : Color.clear, lineWidth: 1.5)
-            )
-        } else {
-            Image(systemName: spec.systemImage)
-                .font(.system(size: 20))
-                .frame(height: 24)
+        }
+        // Fixed, modest 34×34 tap/highlight target around JUST the icon —
+        // explicitly sized (not inherited from the button's full frame) so
+        // the sliding selection pill is a small "bubble" behind the icon
+        // like a native Liquid Glass tab bar, not a shape that can inherit
+        // some other ambient/ideal size. A first pass at this let the pill
+        // balloon into a giant circle that covered the icon AND the label
+        // text underneath it — this fixed frame is what prevents that.
+        .frame(width: 34, height: 34)
+        .background {
+            if isSelected {
+                Color.clear
+                    .adaptiveGlass(tint: AppTheme.dynamicAccent.opacity(0.5), in: Circle(), fallback: AppTheme.dynamicAccent.opacity(0.18))
+                    .matchedGeometryEffect(id: "selectedTabPill", in: selectionNamespace)
+                    // Explicit animation tied directly to the same state
+                    // this pill's presence depends on — a defensive backstop
+                    // in case the transaction from `withAnimation` in the
+                    // button's action doesn't carry through cleanly (e.g. if
+                    // `selectedTab` changes from somewhere else, like
+                    // MiniPlayerBar jumping to the Playing tab).
+                    .animation(.spring(response: 0.32, dampingFraction: 0.78), value: selectedTab)
+            }
         }
     }
 }
