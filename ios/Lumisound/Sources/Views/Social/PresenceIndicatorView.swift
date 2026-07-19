@@ -116,7 +116,7 @@ struct SocialAvatarView: View {
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode)
         else { return nil }
-        if isGIFData(data) { return UIImage.gifImage(data: data) }
+        if isGIFData(data) { return await UIImage.gifImageAsync(data: data) }
         return UIImage(data: data)
     }
 }

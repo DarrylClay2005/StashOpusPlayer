@@ -23,6 +23,15 @@ struct GifPickerSheet: View {
     @State private var isDownloading = false
     @State private var hasSearchedOnce = false
     @State private var searchTask: Task<Void, Never>? = nil
+    /// Guards against out-of-order completions: the initial `.task` (loading
+    /// trending) and a debounced search both call `runSearch()`, and nothing
+    /// stopped the *slower* of the two from overwriting `results` with its
+    /// (now stale) answer after a faster, more recent call already applied
+    /// its own — visibly "search shows results that don't match what I
+    /// typed" when trending happened to finish last. Each `runSearch()` call
+    /// captures its own generation and only applies its results if nothing
+    /// newer has started since.
+    @State private var searchGeneration = 0
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
 
@@ -115,13 +124,18 @@ struct GifPickerSheet: View {
     }
 
     private func runSearch() async {
+        searchGeneration += 1
+        let generation = searchGeneration
         isLoading = true
-        defer {
-            isLoading = false
-            hasSearchedOnce = true
-        }
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        results = trimmed.isEmpty ? await GifSearchService.trending() : await GifSearchService.search(query: trimmed)
+        let fetched = trimmed.isEmpty ? await GifSearchService.trending() : await GifSearchService.search(query: trimmed)
+        // A newer call already started (and will apply its own results and
+        // flip these flags itself) — discard this now-stale answer instead
+        // of overwriting whatever it already showed.
+        guard generation == searchGeneration else { return }
+        results = fetched
+        isLoading = false
+        hasSearchedOnce = true
     }
 
     private func pick(_ result: GifSearchResult) {

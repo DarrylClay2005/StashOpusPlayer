@@ -156,7 +156,7 @@ struct ProfileView: View {
                                             // round-trip fetch to see their
                                             // own change take effect.
                                             if data.isEmpty == false {
-                                                bannerImage = isGIFData(data) ? UIImage.gifImage(data: data) : UIImage(data: data)
+                                                bannerImage = isGIFData(data) ? await UIImage.gifImageAsync(data: data) : UIImage(data: data)
                                             }
                                         }
                                         bannerPickerItem = nil
@@ -361,7 +361,7 @@ struct ProfileView: View {
             GifPickerSheet { data in
                 Task {
                     await social.uploadBannerData(data)
-                    bannerImage = UIImage.gifImage(data: data)
+                    bannerImage = await UIImage.gifImageAsync(data: data)
                 }
             }
         }

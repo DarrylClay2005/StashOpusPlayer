@@ -30,6 +30,22 @@ extension UIImage {
         return UIImage.animatedImage(with: frames, duration: totalDuration > 0 ? totalDuration : Double(frames.count) * 0.1)
     }
 
+    /// Off-main-thread wrapper around `gifImage(data:)` — decoding isn't
+    /// free: it decompresses *every* frame into its own full-resolution
+    /// `UIImage` up front, so a real-world GIF (a multi-hundred-KB/few-MB
+    /// download with dozens of frames, e.g. from a GIF-search picker rather
+    /// than a small hand-picked test file) can take long enough to visibly
+    /// stall the UI when called directly from a `@MainActor`-isolated
+    /// context — which is exactly how every call site in this codebase
+    /// (AccountService, SocialService) invokes it today. Prefer this over
+    /// the sync version anywhere the data didn't come from a tiny/trusted
+    /// local source.
+    static func gifImageAsync(data: Data) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) {
+            gifImage(data: data)
+        }.value
+    }
+
     private static func gifFrameDuration(source: CGImageSource, index: Int) -> Double {
         guard
             let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
@@ -83,5 +99,22 @@ struct AnimatedImageView: UIViewRepresentable {
     func updateUIView(_ uiView: UIImageView, context: Context) {
         guard uiView.image !== image else { return }
         uiView.image = image
+    }
+
+    /// Without this, `UIViewRepresentable`'s default behavior lets SwiftUI
+    /// query the wrapped `UIImageView`'s own `sizeThatFits`/intrinsic content
+    /// size for layout purposes in some container contexts — notably inside
+    /// `List`/`Form`, which use self-sizing table view cells that measure
+    /// their content. A `UIImageView`'s intrinsic size is always based on its
+    /// `.image`'s native pixel dimensions regardless of `contentMode`, so an
+    /// avatar/banner picked from a real photo or a GIPHY GIF (often several
+    /// hundred pixels per side) could blow a List row up to that size instead
+    /// of respecting the `.frame(width:height:)` already applied at each call
+    /// site — this is exactly what caused a giant near-empty area above the
+    /// account row in Settings → Account once a user had a real (non-tiny)
+    /// avatar image set. Returning `nil` tells SwiftUI "no opinion, use your
+    /// own proposed size" — i.e. respect the outer `.frame()` constraint.
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIImageView, context: Context) -> CGSize? {
+        nil
     }
 }

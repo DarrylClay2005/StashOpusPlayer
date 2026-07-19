@@ -62,7 +62,7 @@ extension AccountService {
             errorMessage = "GIF avatars must be under 5MB."
             return
         }
-        guard let animated = UIImage.gifImage(data: data) else {
+        guard let animated = await UIImage.gifImageAsync(data: data) else {
             appWarn("uploadAvatarData: could not decode GIF data", category: "account")
             return
         }
@@ -105,7 +105,7 @@ extension AccountService {
                 return
             }
             if isGIFData(data) {
-                guard let animated = UIImage.gifImage(data: data) else {
+                guard let animated = await UIImage.gifImageAsync(data: data) else {
                     appWarn("loadAvatar: invalid GIF data", category: "account")
                     return
                 }
