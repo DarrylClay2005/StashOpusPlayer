@@ -99,6 +99,19 @@ struct AnimatedImageView: UIViewRepresentable {
     func updateUIView(_ uiView: UIImageView, context: Context) {
         guard uiView.image !== image else { return }
         uiView.image = image
+        // Setting `.image` to a multi-frame `UIImage` (from
+        // `animatedImage(with:duration:)`) is documented to auto-loop
+        // without needing an explicit start — but that's the normal
+        // storyboard/UIKit-native case. A `UIImageView` hosted through
+        // `UIViewRepresentable` doesn't always get the same view-lifecycle
+        // signals (e.g. `didMoveToWindow`) at the same time UIKit expects
+        // them, which can leave the implicit auto-play never actually
+        // kicking in. Calling this explicitly costs nothing when the image
+        // is static (`.startAnimating()` on a single-frame `UIImage` is a
+        // no-op) and removes any dependence on that timing working out.
+        if image.images != nil {
+            uiView.startAnimating()
+        }
     }
 
     /// Without this, `UIViewRepresentable`'s default behavior lets SwiftUI
@@ -115,6 +128,14 @@ struct AnimatedImageView: UIViewRepresentable {
     /// avatar image set. Returning `nil` tells SwiftUI "no opinion, use your
     /// own proposed size" — i.e. respect the outer `.frame()` constraint.
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIImageView, context: Context) -> CGSize? {
-        nil
+        // IMPORTANT: `nil` here does NOT mean "no opinion, use the proposed
+        // size" — it means the exact opposite: "size based on content",
+        // i.e. defer to the UIImageView's own intrinsic size, identical to
+        // not implementing this method at all. (Confirmed the hard way: an
+        // earlier version of this file returned `nil` intending the former
+        // and the giant-row bug it was meant to fix was still there.) To
+        // actually honor whatever `.frame()` was applied on the SwiftUI
+        // side, resolve and return the proposal itself.
+        proposal.replacingUnspecifiedDimensions()
     }
 }

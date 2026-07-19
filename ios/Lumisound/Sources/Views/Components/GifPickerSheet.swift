@@ -101,7 +101,13 @@ struct GifPickerSheet: View {
                     Rectangle().fill(AppTheme.surface).overlay(ProgressView())
                 }
             }
-            .frame(height: 100)
+            // Square, matching the final circular crop an avatar/banner pick
+            // actually gets (`.scaleAspectFill` in a 1:1 frame) — most GIFs
+            // are landscape, so a non-square preview cell was showing more
+            // of the image than what would actually end up visible once
+            // applied, which read as "the real result is zoomed in
+            // compared to what I picked."
+            .aspectRatio(1, contentMode: .fill)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
