@@ -22,6 +22,13 @@ struct StreamSearchView: View {
     @State var downloadedServerTrackIDs: Set<String> = []
 
     @AppStorage("autoCloudBackup") var autoCloudBackup: Bool = false
+    /// Same key ContentView's TabView selection and MiniPlayerBar's
+    /// "jump to Playing" already use — lets `notConfiguredView` (see
+    /// StreamSearchView+NotConfigured.swift) switch straight to the
+    /// Settings tab instead of pushing a second, separate SettingsView via
+    /// NavigationLink, which would show a back button that the tab's own
+    /// SettingsView instance (a NavigationStack root) never does.
+    @AppStorage("selected_tab") var selectedTab = 0
 
     // My Library upload
     @State var showUploadPicker = false

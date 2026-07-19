@@ -28,7 +28,9 @@ extension StreamSearchView {
                     .padding(.horizontal, 32)
             }
 
-            NavigationLink(destination: SettingsView()) {
+            Button {
+                selectedTab = 6
+            } label: {
                 Label("Open Settings", systemImage: "gearshape")
                     .font(AppTheme.bodyFont(size: 14).weight(.semibold))
                     .foregroundStyle(.white)
