@@ -202,7 +202,7 @@ struct SocialActivityEntry: Decodable, Identifiable {
 
     var date: Date? {
         guard let at else { return nil }
-        return sharedISO8601Formatter.date(from: at)
+        return parseServerDate(at)
     }
 
     enum CodingKeys: String, CodingKey {

@@ -88,7 +88,15 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
                     avatar
                         .frame(width: 84, height: 84)
                         .clipShape(Circle())
-                        .overlay(Circle().stroke(AppTheme.background, lineWidth: 4))
+                        // Was a plain `AppTheme.background`-colored ring —
+                        // purely a cutout border with zero connection to the
+                        // profile's own chosen accent. Whenever a banner
+                        // image is set (the common case, and this user's
+                        // case specifically), the banner covers the
+                        // main/sub gradient below entirely, so this ring
+                        // was the *only* place `mainAccent` could show up
+                        // in the header at all — and it wasn't using it.
+                        .overlay(Circle().stroke(mainAccent, lineWidth: 4))
                         .shadow(color: .black.opacity(0.28), radius: 6, x: 0, y: 3)
                     if let isOnline {
                         Circle()
@@ -233,7 +241,7 @@ struct MemberSinceRow: View {
     let memberSince: String?
 
     private var formatted: String {
-        guard let memberSince, let date = sharedISO8601Formatter.date(from: memberSince) else {
+        guard let memberSince, let date = parseServerDate(memberSince) else {
             return "Unknown"
         }
         let formatter = DateFormatter()

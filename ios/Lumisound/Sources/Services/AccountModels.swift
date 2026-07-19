@@ -6,6 +6,42 @@ import Foundation
 /// many items (e.g. Backup History). One shared instance removes that cost.
 let sharedISO8601Formatter = ISO8601DateFormatter()
 
+/// Fallback formatters for timestamps the bridge serializes via Python's
+/// `datetime.isoformat()` on a *naive* (timezone-unaware) value read back
+/// from a MariaDB `TIMESTAMP` column — e.g. `"2026-06-03T20:26:35"`, with no
+/// trailing `Z`/offset. `ISO8601DateFormatter`'s default options require one
+/// (`.withInternetDateTime`), so it returns `nil` for these — confirmed
+/// directly against the live bridge: `member_since` came back exactly this
+/// shape, which is why "Member Since" always showed "Unknown" regardless of
+/// what the server actually had stored. Two variants since Python's
+/// `isoformat()` includes microseconds only when they're non-zero.
+private let fallbackDateFormatterWithFraction: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+    formatter.timeZone = TimeZone(identifier: "UTC")
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    return formatter
+}()
+private let fallbackDateFormatterNoFraction: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+    formatter.timeZone = TimeZone(identifier: "UTC")
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    return formatter
+}()
+
+/// Parses a bridge-supplied timestamp string, tolerating both a proper
+/// timezone-suffixed ISO8601 string (the format `sharedISO8601Formatter`
+/// alone already handles) and a bare, timezone-less one (see the fallback
+/// formatters' doc comment above for why the bridge sometimes sends this
+/// shape). Every call site that used to call `sharedISO8601Formatter.date(from:)`
+/// directly on a bridge timestamp should go through this instead.
+func parseServerDate(_ string: String) -> Date? {
+    sharedISO8601Formatter.date(from: string)
+        ?? fallbackDateFormatterWithFraction.date(from: string)
+        ?? fallbackDateFormatterNoFraction.date(from: string)
+}
+
 // MARK: - Models
 
 struct AppUser: Codable, Equatable {
@@ -255,7 +291,7 @@ struct SyncBackup: Codable, Identifiable {
 
     /// `created_at` parsed as a `Date`, for display with relative formatting.
     var date: Date? {
-        sharedISO8601Formatter.date(from: createdAt)
+        parseServerDate(createdAt)
     }
 
     var reasonDisplayName: String {
@@ -291,7 +327,7 @@ struct ActivityEntry: Codable, Identifiable {
 
     var date: Date? {
         guard let playedAt else { return nil }
-        return sharedISO8601Formatter.date(from: playedAt)
+        return parseServerDate(playedAt)
     }
 }
 
@@ -332,7 +368,7 @@ struct AccountSession: Codable, Identifiable {
     }
 
     var createdDate: Date? {
-        sharedISO8601Formatter.date(from: createdAt)
+        parseServerDate(createdAt)
     }
 }
 
