@@ -13252,6 +13252,79 @@ async def friends_activity_feed(limit: int = Query(30, ge=1, le=100), payload: d
 
 
 # ---------------------------------------------------------------------------
+# GIF search (Tenor) — an alternative to the photo library for avatar/banner
+# uploads (2026-07-19): lets a user who doesn't want to use a picture from
+# their own gallery pick an animated GIF from Tenor's catalog instead. Server-
+# side proxy rather than a client-embedded key so the key never ships inside
+# the app bundle and stays revocable/rotatable independent of a release.
+# ---------------------------------------------------------------------------
+
+TENOR_API_KEY: str = os.getenv("TENOR_API_KEY", "")
+_TENOR_BASE = "https://tenor.googleapis.com/v2"
+
+
+def _tenor_result_from_item(item: dict) -> Optional[dict]:
+    """Extracts just what the client needs from one Tenor v2 result: a small
+    preview for the picker grid (tinygif, falling back to nanogif/the full
+    gif if neither exists) and the full-resolution gif URL that actually gets
+    downloaded and uploaded as the avatar/banner if the user picks it."""
+    formats = item.get("media_formats") or {}
+    full = formats.get("gif") or {}
+    if not full.get("url"):
+        return None
+    preview = formats.get("tinygif") or formats.get("nanogif") or full
+    dims = full.get("dims") or [None, None]
+    return {
+        "id": item.get("id", ""),
+        "description": item.get("content_description", ""),
+        "preview_url": preview.get("url"),
+        "gif_url": full.get("url"),
+        "width": dims[0] if len(dims) > 0 else None,
+        "height": dims[1] if len(dims) > 1 else None,
+    }
+
+
+async def _tenor_request(path: str, params: dict) -> list:
+    if not TENOR_API_KEY:
+        raise HTTPException(status_code=501, detail="GIF search isn't configured on this server.")
+    query = urlencode({**params, "key": TENOR_API_KEY, "media_filter": "gif", "contentfilter": "medium"})
+    url = f"{_TENOR_BASE}/{path}?{query}"
+    loop = asyncio.get_running_loop()
+
+    def _fetch():
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+
+    try:
+        data = await loop.run_in_executor(None, _fetch)
+    except Exception as exc:
+        logger.warning("Tenor GIF request failed (%s): %s", path, exc)
+        raise HTTPException(status_code=502, detail="GIF search is temporarily unavailable.")
+
+    return [r for r in (_tenor_result_from_item(item) for item in data.get("results", [])) if r]
+
+
+@app.get("/api/gif-search")
+async def gif_search(
+    q: str = Query(..., min_length=1, max_length=100),
+    limit: int = Query(30, ge=1, le=50),
+    payload: dict = Depends(get_current_user),
+):
+    return {"results": await _tenor_request("search", {"q": q, "limit": limit})}
+
+
+@app.get("/api/gif-search/trending")
+async def gif_trending(
+    limit: int = Query(30, ge=1, le=50),
+    payload: dict = Depends(get_current_user),
+):
+    """Featured/trending GIFs — shown before the user types a search query,
+    same "browse before you search" UX Tenor's own picker uses."""
+    return {"results": await _tenor_request("featured", {"limit": limit})}
+
+
+# ---------------------------------------------------------------------------
 # Entry point (for local dev without Docker)
 # ---------------------------------------------------------------------------
 

@@ -22,6 +22,7 @@ struct AccountView: View {
     // Avatar
     @State private var photosPickerItem: PhotosPickerItem? = nil
     @State private var isUploadingAvatar = false
+    @State private var showAvatarGifPicker = false
 
     // DOB
     @State private var isPickingDOB = false
@@ -128,6 +129,16 @@ struct AccountView: View {
                             }
                             photosPickerItem = nil
                         }
+                    }
+
+                    // Alternative to picking from the gallery — search Tenor
+                    // for an animated GIF instead, same as ProfileView's
+                    // avatar/banner pickers.
+                    Button {
+                        showAvatarGifPicker = true
+                    } label: {
+                        Label("Search GIFs", systemImage: "party.popper")
+                            .foregroundStyle(AppTheme.dynamicAccent)
                     }
                 }
                 .listRowBackground(AppTheme.surface)
@@ -639,6 +650,11 @@ struct AccountView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("You will be signed out on this device. Your data stays on the server.")
+        }
+        .sheet(isPresented: $showAvatarGifPicker) {
+            GifPickerSheet { data in
+                Task { await account.uploadAvatarData(data) }
+            }
         }
     }
 

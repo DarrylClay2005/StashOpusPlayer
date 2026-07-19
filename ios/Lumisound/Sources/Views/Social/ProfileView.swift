@@ -28,6 +28,8 @@ struct ProfileView: View {
     @State private var bannerImage: UIImage? = nil
     @State private var bannerPickerItem: PhotosPickerItem? = nil
     @State private var isUploadingBanner = false
+    @State private var showAvatarGifPicker = false
+    @State private var showBannerGifPicker = false
 
     private var mainAccentColor: Color { SocialAccentPalette.color(for: mainAccentHex) ?? AppTheme.dynamicAccent }
     private var subAccentColor: Color { SocialAccentPalette.color(for: subAccentHex) ?? AppTheme.accentSoft }
@@ -73,30 +75,50 @@ struct ProfileView: View {
                         }
                     } action: {
                         VStack(spacing: 8) {
-                            PhotosPicker(selection: $photosPickerItem, matching: .images, photoLibrary: .shared()) {
-                                HStack {
-                                    Image(systemName: "photo.badge.plus")
-                                    Text("Change Avatar (GIF supported)")
-                                        .font(AppTheme.bodyFont(size: 13))
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .foregroundStyle(mainAccentColor)
-                                .adaptiveGlass(
-                                    tint: mainAccentColor.opacity(0.14),
-                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous),
-                                    fallback: AppTheme.surface
-                                )
-                            }
-                            .onChange(of: photosPickerItem) { item in
-                                guard let item else { return }
-                                isUploadingAvatar = true
-                                Task {
-                                    defer { isUploadingAvatar = false }
-                                    if let data = try? await item.loadTransferable(type: Data.self) {
-                                        await account.uploadAvatarData(data)
+                            HStack(spacing: 8) {
+                                PhotosPicker(selection: $photosPickerItem, matching: .images, photoLibrary: .shared()) {
+                                    HStack {
+                                        Image(systemName: "photo.badge.plus")
+                                        Text("Gallery")
+                                            .font(AppTheme.bodyFont(size: 13))
                                     }
-                                    photosPickerItem = nil
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .foregroundStyle(mainAccentColor)
+                                    .adaptiveGlass(
+                                        tint: mainAccentColor.opacity(0.14),
+                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous),
+                                        fallback: AppTheme.surface
+                                    )
+                                }
+                                .onChange(of: photosPickerItem) { item in
+                                    guard let item else { return }
+                                    isUploadingAvatar = true
+                                    Task {
+                                        defer { isUploadingAvatar = false }
+                                        if let data = try? await item.loadTransferable(type: Data.self) {
+                                            await account.uploadAvatarData(data)
+                                        }
+                                        photosPickerItem = nil
+                                    }
+                                }
+
+                                Button {
+                                    showAvatarGifPicker = true
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "party.popper")
+                                        Text("Search GIFs")
+                                            .font(AppTheme.bodyFont(size: 13))
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .foregroundStyle(mainAccentColor)
+                                    .adaptiveGlass(
+                                        tint: mainAccentColor.opacity(0.14),
+                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous),
+                                        fallback: AppTheme.surface
+                                    )
                                 }
                             }
 
@@ -108,7 +130,7 @@ struct ProfileView: View {
                                         } else {
                                             Image(systemName: "photo.on.rectangle.angled")
                                         }
-                                        Text("Change Banner")
+                                        Text("Banner")
                                             .font(AppTheme.bodyFont(size: 13))
                                     }
                                     .frame(maxWidth: .infinity)
@@ -140,6 +162,25 @@ struct ProfileView: View {
                                         bannerPickerItem = nil
                                     }
                                 }
+
+                                Button {
+                                    showBannerGifPicker = true
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "party.popper")
+                                        Text("Search GIFs")
+                                            .font(AppTheme.bodyFont(size: 13))
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .foregroundStyle(subAccentColor)
+                                    .adaptiveGlass(
+                                        tint: subAccentColor.opacity(0.14),
+                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous),
+                                        fallback: AppTheme.surface
+                                    )
+                                }
+                                .disabled(isUploadingBanner)
 
                                 if bannerImage != nil {
                                     Button {
@@ -310,6 +351,19 @@ struct ProfileView: View {
                 } : nil
             )
             .environmentObject(library)
+        }
+        .sheet(isPresented: $showAvatarGifPicker) {
+            GifPickerSheet { data in
+                Task { await account.uploadAvatarData(data) }
+            }
+        }
+        .sheet(isPresented: $showBannerGifPicker) {
+            GifPickerSheet { data in
+                Task {
+                    await social.uploadBannerData(data)
+                    bannerImage = UIImage.gifImage(data: data)
+                }
+            }
         }
     }
 
