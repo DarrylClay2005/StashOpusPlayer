@@ -191,6 +191,19 @@ extension AccountService {
             appError("Push sync failed [\(err.statusCode)]: \(err.message)", category: "account")
             errorMessage = err.message
         } catch {
+            // `schedulePush` cancels the *previous* debounce task whenever
+            // called again before it fires — a URLSession request already
+            // in flight from that superseded call surfaces here as
+            // `URLError.cancelled`, not a real failure (the next debounced
+            // call already covers it). Logging that as an error and
+            // surfacing "cancelled" as errorMessage was pure noise: this one
+            // pattern alone produced 500+ false-positive error-log entries
+            // in a single day with nothing actually wrong. Log it quietly
+            // and leave errorMessage untouched instead.
+            if (error as? URLError)?.code == .cancelled {
+                appLog("Push sync superseded by a newer sync (expected)", category: "account")
+                return
+            }
             appError("Push sync error: \(error.localizedDescription)", category: "account")
             errorMessage = error.localizedDescription
         }

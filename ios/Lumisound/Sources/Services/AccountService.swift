@@ -102,6 +102,14 @@ final class AccountService: ObservableObject {
             // One event per debounced push, not per source id.
             RemoteLogger.log(category: "sync", event: "library_inventory_synced", detail: ["count": ids.count])
         } catch {
+            // Same "superseded by a newer debounced call" cancellation as
+            // pushSync's identical guard — an expected, routine condition,
+            // not a real failure. See AccountService+Sync.swift's pushSync
+            // for the full reasoning.
+            if (error as? URLError)?.code == .cancelled {
+                appLog("syncLibraryInventory superseded by a newer sync (expected)", category: "account")
+                return
+            }
             appWarn("syncLibraryInventory failed: \(error.localizedDescription)", category: "account")
             RemoteLogger.logError(category: "sync", event: "library_inventory_sync_failed",
                                    message: error.localizedDescription)

@@ -33,6 +33,26 @@ extension AudioPlayerManager {
         skipToNext()
     }
 
+    /// `error?.localizedDescription` alone is frequently a useless generic
+    /// string ("The operation could not be completed") that doesn't say
+    /// *why* — the actually-informative reason usually sits one level down
+    /// in `NSUnderlyingErrorKey` (e.g. a specific `NSURLErrorDomain` code
+    /// like -1100 "resource unavailable" for an expired stream URL, or
+    /// -1009 "offline"). Walking that chain is what made this class of
+    /// failure undiagnosable from the DB event log alone up to now — every
+    /// occurrence just said the same unhelpful generic sentence.
+    static func describeLoadError(_ error: Error?) -> String {
+        guard let error else { return "unknown error" }
+        let nsError = error as NSError
+        var parts = ["\(nsError.domain) \(nsError.code): \(nsError.localizedDescription)"]
+        var underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+        while let inner = underlying {
+            parts.append("\(inner.domain) \(inner.code): \(inner.localizedDescription)")
+            underlying = inner.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return parts.joined(separator: " ← ")
+    }
+
     /// Used when AVAssetReader/AVAssetExportSession cannot decode the file (e.g. Ogg/Opus container).
     /// AVPlayer has access to iOS's full codec pipeline and can always play .opus files.
     /// Basic play/pause/seek/volume/speed work (speed via `.rate` + `.spectral`
@@ -102,7 +122,7 @@ extension AudioPlayerManager {
             if item.status == .failed {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    let detail = item.error?.localizedDescription ?? "unknown error"
+                    let detail = Self.describeLoadError(item.error)
                     self.handleLoadFailure(
                         message: "AVPlayer failed to load track — skipping. \(detail)",
                         userFacingMessage: "Could not play this track."
@@ -125,7 +145,7 @@ extension AudioPlayerManager {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.handleLoadFailure(
-                    message: "AVPlayer playback failed — skipping. \(err?.localizedDescription ?? "unknown")",
+                    message: "AVPlayer playback failed — skipping. \(Self.describeLoadError(err))",
                     userFacingMessage: "Playback error."
                 )
             }
