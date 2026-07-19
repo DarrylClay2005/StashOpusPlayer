@@ -77,8 +77,8 @@ extension StreamingService {
             genre: "",
             bitrate: 0,
             sampleRate: 0,
-            bpm: track.bpm,
-            httpHeaders: ["Authorization": "Bearer \(token)"]
+            httpHeaders: ["Authorization": "Bearer \(token)"],
+            bpm: track.bpm
         )
     }
 
