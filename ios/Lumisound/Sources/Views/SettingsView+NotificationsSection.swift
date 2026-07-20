@@ -77,7 +77,6 @@ struct NotificationsSettingsView: View {
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(.hidden, for: .navigationBar)
         .task {
             // Re-checks (never re-prompts once determined) so the status
             // card is accurate the moment this screen opens, even if the

@@ -141,7 +141,6 @@ struct BugReportView: View {
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle("Report a Bug")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
         .alert("Thanks for the report!", isPresented: $didSubmit) {
             Button("OK") { dismiss() }
         } message: {

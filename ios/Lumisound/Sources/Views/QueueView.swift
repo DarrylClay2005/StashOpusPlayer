@@ -48,7 +48,6 @@ struct QueueView: View {
                 queueList
             }
             .navigationTitle("Queue")
-            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarLeading) {
                     // Shuffle toggle

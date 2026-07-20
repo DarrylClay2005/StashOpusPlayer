@@ -51,7 +51,6 @@ struct SettingsHelpView: View {
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle("Help & Feature Guide")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(.hidden, for: .navigationBar)
     }
 
     private func sectionHeader(_ text: String) -> some View {
@@ -450,7 +449,6 @@ private struct SettingsHelpDetailView: View {
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle(category.title)
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(.hidden, for: .navigationBar)
     }
 
     private func helpRow(icon: String, title: String, body: String) -> some View {

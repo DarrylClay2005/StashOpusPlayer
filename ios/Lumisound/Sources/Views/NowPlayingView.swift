@@ -229,7 +229,6 @@ struct NowPlayingView: View {
                 .appScreenBackground()
                 .background(nowPlayingScreenBackground.ignoresSafeArea())
         }
-        .toolbarBackground(.hidden, for: .navigationBar)
         .sheet(isPresented: $showSleepTimerSheet) {
             SleepTimerSheet()
                 .environmentObject(sleepTimer)

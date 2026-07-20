@@ -132,7 +132,6 @@ struct CorruptFilesView: View {
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle("Corrupt File Finder")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(.hidden, for: .navigationBar)
         .confirmationDialog(
             "Delete All Corrupt Files?",
             isPresented: $showDeleteConfirmation,

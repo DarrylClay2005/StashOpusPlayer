@@ -155,7 +155,6 @@ struct SettingsView: View {
             .background(GalleryBackgroundView().ignoresSafeArea())
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(.hidden, for: .navigationBar)
             .sheet(isPresented: $showLogin) {
                 LoginView()
                     .environmentObject(account)

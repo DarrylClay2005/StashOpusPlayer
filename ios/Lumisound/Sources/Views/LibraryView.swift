@@ -200,7 +200,6 @@ struct LibraryView: View {
             .background(GalleryBackgroundView().ignoresSafeArea())
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar { toolbarItems }
             .safeAreaInset(edge: .bottom) {
                 if isSelecting {

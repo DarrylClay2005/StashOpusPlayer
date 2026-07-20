@@ -52,7 +52,6 @@ struct UploadMusicView: View {
             .navigationTitle("Cloud Backup")
             .navigationBarTitleDisplayMode(.large)
             .background(GalleryBackgroundView().ignoresSafeArea())
-            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 if account.isLoggedIn {
                     ToolbarItem(placement: .navigationBarTrailing) {

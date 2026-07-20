@@ -65,8 +65,21 @@ struct ContentView: View {
         // no supported way to opt out short of replacing the bar entirely).
         // No UITabBarAppearance configuration needed here as a result.
 
-        // Navigation bar — fully transparent so gallery background shows through.
-        // Each NavigationStack also adds .toolbarBackground(.hidden) for the scroll-edge state.
+        // Navigation bar — fully transparent so gallery background shows
+        // through, for EVERY UINavigationBar in the app (this is the sole
+        // source of that transparency — nothing else needs to touch nav bar
+        // appearance). A handful of individual screens used to ALSO call
+        // the modern SwiftUI `.toolbarBackground(.hidden, for:
+        // .navigationBar)` on top of this, redundantly re-requesting the
+        // same transparent background this proxy already guarantees
+        // app-wide. Under iOS 26's Liquid Glass, that double-application
+        // left two independent back-button layers rendered on those
+        // specific screens (a legacy UIKit one underneath the new floating
+        // glass one) — visible as two stacked circular back buttons. Fixed
+        // by removing those redundant per-screen calls (see e.g.
+        // SettingsView.swift, LibraryView.swift) rather than touching this
+        // proxy, since every other screen in the app relies on this being
+        // the ONLY thing making its nav bar transparent.
         let navAppearance = UINavigationBarAppearance()
         navAppearance.configureWithTransparentBackground()
         navAppearance.backgroundColor = .clear

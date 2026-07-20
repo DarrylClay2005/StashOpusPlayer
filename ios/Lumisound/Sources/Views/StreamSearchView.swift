@@ -82,7 +82,6 @@ struct StreamSearchView: View {
             .navigationTitle("Cloud Services")
             .navigationBarTitleDisplayMode(.large)
             .background(GalleryBackgroundView().ignoresSafeArea())
-            .toolbarBackground(.hidden, for: .navigationBar)
             // Consolidates the server-side features here (the "Cloud Services" hub)
             // so everything that talks to the bridge/account lives in one tab.
             .toolbar {

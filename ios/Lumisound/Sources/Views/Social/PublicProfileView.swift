@@ -39,6 +39,24 @@ struct PublicProfileView: View {
     private var mainAccentColor: Color { SocialAccentPalette.color(for: profile?.mainAccentHex) ?? AppTheme.dynamicAccent }
     private var subAccentColor: Color { SocialAccentPalette.color(for: profile?.subAccentHex) ?? AppTheme.accentSoft }
 
+    /// For the self-preview case, "online" is answered locally (are you
+    /// logged in and is the app actually in the foreground right now?)
+    /// rather than by round-tripping through the same `/api/social/presence`
+    /// GET a genuine visitor's client uses. That GET fires the instant this
+    /// view appears, racing the heartbeat POST that reports you online in
+    /// the first place (PresenceService.startHeartbeat, owned separately by
+    /// ContentView) — on a fresh app-open -> Profile tab tap, or after any
+    /// single transient network hiccup, the fetch can land before the
+    /// server has a fresh row and this screen would show YOU as offline
+    /// despite the app being open right in front of you. There's no such
+    /// race for the local answer: it's already known without asking anyone.
+    private var isOnline: Bool {
+        if isSelfPreview {
+            return account.isLoggedIn && UIApplication.shared.applicationState == .active
+        }
+        return presence?.online ?? false
+    }
+
     /// An incoming pending request FROM this user, if any.
     private var incomingRequest: SocialFriendRequest? {
         social.incomingRequests.first { $0.userId == userId }
@@ -72,7 +90,7 @@ struct PublicProfileView: View {
                             subAccent: subAccentColor,
                             displayName: profile.displayName ?? profile.username,
                             username: profile.username,
-                            isOnline: presence?.online ?? false,
+                            isOnline: isOnline,
                             bannerImage: bannerImage
                         ) {
                             SocialAvatarView(userId: userId, size: 84, fallbackFill: .clear)
