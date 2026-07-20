@@ -63,6 +63,18 @@ struct SettingsHelpView: View {
     // MARK: — Category Data
 
     private static let categories: [HelpCategory] = [
+        HelpCategory(icon: "house.fill", title: "Home", topics: [
+            HelpTopic(
+                icon: "square.grid.2x2.fill",
+                title: "The Home Dashboard",
+                body: "The Home tab (first tab in Library) is a dashboard of shortcuts and auto-generated shelves rather than a plain file browser: Quick Access shortcuts to your real playlists/folders/favorites, a Weekly Mix, your Mixes (rule-based smart playlists), Recently Added, On Repeat, Recently Played, Genres, Forgotten Favorites, Moods, On This Day throwbacks, Friends Activity, and Similar Listeners. Each shelf only appears once it actually has something to show — an empty library shows a simplified welcome view instead."
+            ),
+            HelpTopic(
+                icon: "slider.horizontal.3",
+                title: "Customize Home",
+                body: "Tap the slider icon in the Home tab's toolbar to open Customize Home: drag to reorder any shelf, or toggle one off entirely if you don't want to see it (the Greeting header and Quick Actions row always stay pinned at the top). The same sheet also lets you set a custom greeting message that replaces the automatic \"Good morning/afternoon/evening\" line, and pick a Home-only accent color — separate from your profile's accent — that tints this screen's section headers and greeting text. All three are saved on this device only, not synced to your account."
+            ),
+        ]),
         HelpCategory(icon: "play.circle", title: "Playback", topics: [
             HelpTopic(
                 icon: "waveform.path.ecg",
@@ -204,9 +216,24 @@ struct SettingsHelpView: View {
                 body: "Once a download starts, the actual conversion happens on the server — it keeps running even if you close the app or lose signal partway through. When it finishes, Lumisound is notified and quietly fetches the finished track into your library on its own, whether that happens seconds later or the next time you open the app. If a download seems to have vanished, it hasn't — just reopen the app and it'll be picked up automatically."
             ),
             HelpTopic(
+                icon: "tray.and.arrow.down",
+                title: "Pending Imports",
+                body: "Cloud Services → menu (top-right) → Pending Imports shows exactly what Background Downloads is doing behind the scenes: any finished download still waiting to be pulled into your library, with the folder it's headed for (a tracked playlist's own folder, or Imported Music by default) — pick a different folder before it lands if you want, or tap Import Now to pull a track in immediately instead of waiting. A Recently Imported feed below it shows what just came in this session and where it went, so background imports aren't a black box."
+            ),
+            HelpTopic(
                 icon: "trash.slash",
                 title: "Recently Deleted",
                 body: "Deleting a downloaded track (from the Downloads Manager or the general Library view) doesn't remove it immediately — it moves to Recently Deleted (accessible from the Downloads Manager) for 30 days, where you can restore it or delete it permanently right away. This is a safety net for an accidental bulk delete; after 30 days it's purged automatically."
+            ),
+            HelpTopic(
+                icon: "doc.on.doc",
+                title: "Duplicate Finder",
+                body: "Settings → Library → Duplicate Finder scans your downloaded tracks for likely duplicates — first by an exact shared source (the same track downloaded more than once), then, for everything else, by comparing how tracks of a similar length actually sound throughout the track (not just a same-title guess), which catches a duplicate that was re-titled or re-tagged differently across sources. Review each group and delete the copy you don't want, or use Delete All Duplicates to automatically keep the longest/most complete copy in every group at once."
+            ),
+            HelpTopic(
+                icon: "exclamationmark.triangle",
+                title: "Corrupt File Finder",
+                body: "Settings → Library → Corrupt File Finder checks every downloaded track for playability — catching a truncated or failed download before you hit it mid-playback — and lists anything that fails, so you can delete and re-download just those instead of guessing which file is the problem."
             ),
             HelpTopic(
                 icon: "square.and.arrow.down",
@@ -255,7 +282,7 @@ struct SettingsHelpView: View {
             HelpTopic(
                 icon: "magnifyingglass",
                 title: "YouTube & SoundCloud Search",
-                body: "The Search tab lets you search YouTube and SoundCloud by title, artist, or paste a full playlist URL. Search results show thumbnail, title, artist, and duration. Tap the play button to stream a track immediately or the download button to save it to your local library. Pasting a YouTube playlist URL fetches the full track list so you can download the entire playlist at once."
+                body: "The Cloud Services tab lets you search YouTube and SoundCloud by title, artist, or paste a full playlist URL. Search results show thumbnail, title, artist, and duration. Tap the play button to stream a track immediately or the download button to save it to your local library. Pasting a YouTube playlist URL fetches the full track list so you can download the entire playlist at once."
             ),
             HelpTopic(
                 icon: "waveform",
@@ -318,6 +345,23 @@ struct SettingsHelpView: View {
                 icon: "message",
                 title: "Discord Webhook (Now Playing posts)",
                 body: "Account → \"Now Playing Webhook\" is separate from Rich Presence: it posts a one-time message to a Discord channel via an incoming webhook whenever you start a new track, so a server can have a shared \"now playing\" feed. Create an incoming webhook in your Discord server under Channel Settings → Integrations → Webhooks, paste the URL in, and toggle it on or off at any time."
+            ),
+        ]),
+        HelpCategory(icon: "person.2.wave.2.fill", title: "Friends & Profile", topics: [
+            HelpTopic(
+                icon: "person.2.fill",
+                title: "Friends",
+                body: "The Friends tab lists your current friends and any pending requests — accept or decline an incoming request, cancel one you sent, or remove/block an existing friend from their profile. Tap a friend to see their public profile, including whether they're online and what they're listening to right now, if they've chosen to share it."
+            ),
+            HelpTopic(
+                icon: "person.crop.circle",
+                title: "Your Profile",
+                body: "The Profile tab shows your profile exactly as friends see it — banner, avatar, bio, pinned tracks, and what you're currently listening to. Tap Edit Profile to change any of that: avatar and banner images (including animated GIFs), accent colors, up to 5 pinned favorite tracks, and whether your \"now playing\" status is shared with friends at all."
+            ),
+            HelpTopic(
+                icon: "dot.radiowaves.left.and.right",
+                title: "Online Status & Presence",
+                body: "While the app is open, Lumisound reports you as online (and what you're playing, if sharing is on) to friends viewing your profile. This updates automatically in the background and clears itself shortly after you close the app or the app goes idle — there's nothing to manually turn on or off beyond the now-playing sharing toggle in Edit Profile."
             ),
         ]),
         HelpCategory(icon: "person.2.fill", title: "Playlists & Sharing", topics: [
@@ -385,7 +429,12 @@ struct SettingsHelpView: View {
             HelpTopic(
                 icon: "circle.fill",
                 title: "Artwork Styles",
-                body: "The artwork style picker at the top of the Now Playing screen lets you switch between 12 visual presets for the album art: Vinyl Disc (spinning record with the artwork printed in the centre, stops when paused), Album Art (a reflective, flipped-mirror card beneath the artwork), Polaroid (instant-photo frame with film grain and a curled corner), Floating Cards (palette-derived glow blobs drifting behind layered cards), Minimalist (trimmed reflection with a clean typography block), Glassmorphism (frosted glass panel), Retro CRT (scanlines and a CRT glow), Spectrum (animated bars with a colour-matched reflection), Cassette (spinning tape reels with a sepia, grainy texture), Neon Glow (layered neon tube outline that pulses with playback), Aura Glow (a slowly rotating colour aura pulled from the artwork), and Tilt Card (drag the artwork for a 3D tilt with a synced reflection). Your choice is saved and persists between sessions."
+                body: "Settings → Appearance lets you switch the whole Now Playing screen's visual treatment for the album art between 25 presets — everything from a spinning Vinyl Groove Spiral or Cassette Reel Spin, to particle/geometric effects like Kaleidoscope Bloom, Mosaic Shatter, and Confetti Burst, to atmospheric looks like Aurora Veil, Bioluminescent Tide, and Frosted Ice Crystal, to retro/glitch treatments like VHS Scan Glitch, Neon Sign Flicker, and Disco Mirror Ball, plus a Live Spectrum analyzer view. Your choice is saved and persists between sessions."
+            ),
+            HelpTopic(
+                icon: "paintbrush.pointed",
+                title: "Custom Styles & Hiding Presets",
+                body: "Beyond the built-in presets, Settings → Appearance also lets you build your own Now Playing style from scratch — pick colors, layout, and effects — and save it alongside the built-in ones in the picker. If you'd rather trim the picker down to just your favorites, you can hide any built-in preset you don't want to see without deleting it; hidden presets can be brought back the same way at any time."
             ),
             HelpTopic(
                 icon: "waveform.badge.clock",

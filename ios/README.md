@@ -8,13 +8,15 @@ A full-featured, privacy-respecting iOS music player built with SwiftUI and AVFo
 
 | Category | Details |
 |---|---|
+| **Home** | A customizable dashboard tab — reorderable/hideable shelves (Recently Added, Mixes, Genres, Friends Activity, and more), a custom greeting, and a dashboard-only accent color |
 | **Playback** | Gapless, crossfade, AB repeat, sleep timer, variable speed & pitch |
 | **Audio FX** | 10-band EQ, 23 audio effects (8D spatial audio with speed control, nightcore, vaporwave, karaoke…) |
-| **Library** | Local files, Apple Music library, folder/album organisation by directory name |
-| **Streaming** | YouTube & SoundCloud search, stream, download — via bridge server |
+| **Library** | Local files, Apple Music library, folder/album organisation by directory name, duplicate & corrupt file finders |
+| **Streaming** | YouTube & SoundCloud search, stream, download, Pending Imports visibility — via bridge server |
 | **Personal Cloud Library** | Upload your own audio files to your personal server folder; play & manage from anywhere |
 | **Account** | Free accounts on the shared server — sync playlists, settings, play history, and favourites |
-| **Visuals** | Gallery background (slideshow with transitions), vinyl disc artwork, lyric display |
+| **Friends & Profiles** | Add friends, see live online/now-playing status, and a public profile page with banner, avatar, bio, and pinned tracks |
+| **Visuals** | Gallery background (slideshow with transitions), 25 Now Playing artwork styles plus a custom style editor, lyric display |
 | **Now Playing** | Full transport controls, Up Next queue, lock-screen & headphone controls |
 
 ---
