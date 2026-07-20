@@ -392,7 +392,7 @@ extension StreamingService {
             (downloadedURL, response) = try await BackgroundDownloadManager.run(
                 named: "lumisound.download.\(safeName)"
             ) {
-                try await URLSession.shared.download(for: resultRequest)
+                try await StreamingService.bulkTransferSession.download(for: resultRequest)
             }
         } catch {
             // Same as the start/poll requests: a raw URLError here would otherwise
@@ -545,7 +545,7 @@ extension StreamingService {
         let (rawFileURL, fetchResponse) = try await BackgroundDownloadManager.run(
             named: "lumisound.download.direct.\(safeName)"
         ) {
-            try await URLSession.shared.download(for: fetchRequest)
+            try await StreamingService.bulkTransferSession.download(for: fetchRequest)
         }
         guard let fetchHTTP = fetchResponse as? HTTPURLResponse, (200..<300).contains(fetchHTTP.statusCode) else {
             try? FileManager.default.removeItem(at: rawFileURL)
@@ -597,7 +597,7 @@ extension StreamingService {
         let (rawFileURL, response) = try await BackgroundDownloadManager.run(
             named: "lumisound.download.relay.\(safeName)"
         ) {
-            try await URLSession.shared.download(for: request)
+            try await StreamingService.bulkTransferSession.download(for: request)
         }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             try? FileManager.default.removeItem(at: rawFileURL)

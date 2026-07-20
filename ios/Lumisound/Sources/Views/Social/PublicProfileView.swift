@@ -158,13 +158,21 @@ struct PublicProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await loadProfile()
-            await social.fetchFriendRequests()
+            // Friend-request state only feeds `friendActionControl`, which is
+            // never rendered in self-preview (see its `!isSelfPreview` guard
+            // above) — fetching it there is a pure wasted round trip on the
+            // single most-hit screen in the app (the Profile tab).
+            if !isSelfPreview {
+                await social.fetchFriendRequests()
+            }
         }
         // Lightweight self-cancelling poll for this one profile's presence —
         // stops automatically when the view disappears, unlike the standing
         // friends-list timer in PresenceService (which only runs while
-        // FriendsListView itself is on screen).
+        // FriendsListView itself is on screen). Skipped for self-preview:
+        // `isOnline` above answers itself locally and never reads `presence`.
         .task {
+            guard !isSelfPreview else { return }
             while !Task.isCancelled {
                 presence = await presenceService.fetchPresence(userId: userId, account: account)
                 try? await Task.sleep(nanoseconds: UInt64(PresenceService.friendsPollInterval * 1_000_000_000))
@@ -244,8 +252,14 @@ struct PublicProfileView: View {
 
     private func loadProfile() async {
         isLoading = true
-        defer { isLoading = false }
+        // Both are independent GETs — fire them concurrently instead of back
+        // to back. Gate the screen only on the profile fetch (the essential
+        // data); the banner is decorative and pops in via `bannerImage`'s
+        // own `@State` update whenever it lands, same as any other async
+        // image in this app.
+        async let bannerTask = SocialService.loadBanner(userId: userId)
         profile = await social.fetchPublicProfile(userId: userId)
-        bannerImage = await SocialService.loadBanner(userId: userId)
+        isLoading = false
+        bannerImage = await bannerTask
     }
 }
