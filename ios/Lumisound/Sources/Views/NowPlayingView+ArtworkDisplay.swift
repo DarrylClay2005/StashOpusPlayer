@@ -96,6 +96,30 @@ extension NowPlayingView {
         case .liveSpectrum:
             LiveSpectrumArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
+
+        case .vinylGrooveSpiral:
+            VinylGrooveSpiralArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .cassetteReelSpin:
+            CassetteReelSpinArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .auroraVeil:
+            AuroraVeilArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .rippleReflection:
+            RippleReflectionArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .neonSignFlicker:
+            NeonSignFlickerArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+
+        case .vhsScanGlitch:
+            VHSScanGlitchArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
         }
     }
 }

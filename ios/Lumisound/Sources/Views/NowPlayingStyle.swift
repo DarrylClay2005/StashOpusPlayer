@@ -53,6 +53,16 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
     // genuine real-time FFT spectrum reacting to actual playback (not a
     // decorative animation like the other 18), via AudioVisualizerService.
     case liveSpectrum
+    // Batch 4 — 6 additional presets added on top of the existing 19,
+    // rounding out the music-format/retro-media concepts (vinyl, cassette)
+    // and a few visual techniques (aurora curtains, water reflection, neon
+    // flicker, VHS glitch) not yet covered by any prior style.
+    case vinylGrooveSpiral
+    case cassetteReelSpin
+    case auroraVeil
+    case rippleReflection
+    case neonSignFlicker
+    case vhsScanGlitch
 
     var id: String { rawValue }
 
@@ -77,6 +87,12 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .confettiBurstLoop:     return "Confetti Burst"
         case .shadowPuppetSilhouette: return "Shadow Puppet"
         case .liveSpectrum:           return "Live Spectrum"
+        case .vinylGrooveSpiral:      return "Vinyl Groove Spiral"
+        case .cassetteReelSpin:       return "Cassette Reel Spin"
+        case .auroraVeil:             return "Aurora Veil"
+        case .rippleReflection:       return "Ripple Reflection"
+        case .neonSignFlicker:        return "Neon Sign Flicker"
+        case .vhsScanGlitch:          return "VHS Scan Glitch"
         }
     }
 
@@ -101,6 +117,12 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .confettiBurstLoop:     return "party.popper.fill"
         case .shadowPuppetSilhouette: return "theatermasks.fill"
         case .liveSpectrum:           return "waveform"
+        case .vinylGrooveSpiral:      return "circle.circle.fill"
+        case .cassetteReelSpin:       return "recordingtape"
+        case .auroraVeil:             return "moon.stars.fill"
+        case .rippleReflection:       return "target"
+        case .neonSignFlicker:        return "lightbulb.fill"
+        case .vhsScanGlitch:          return "tv.fill"
         }
     }
 }

@@ -53,6 +53,27 @@ struct LibraryHubView: View {
     @State private var similarListenerSearchQuery: String? = nil
     @State private var onThisDayGroups: [OnThisDayGroup] = []
 
+    // MARK: Home hub customization — see `HomeHubCustomizationView`.
+    //
+    // Plain per-device `@AppStorage` (JSON-encoded arrays for the two list
+    // preferences), not server-synced — matches `ContentView`'s
+    // `tab_transition_style` convention for this kind of UI-only setting.
+    @AppStorage(HomeHubLayoutStore.orderKey) private var sectionOrderRaw: String = ""
+    @AppStorage(HomeHubLayoutStore.hiddenKey) private var hiddenSectionsRaw: String = ""
+    @AppStorage("home_hub_custom_greeting") private var customGreeting: String = ""
+    @AppStorage("home_hub_accent_hex") private var hubAccentHex: String?
+    @State private var showCustomizationSheet = false
+
+    /// This screen's own accent override (see `HomeHubCustomizationView`),
+    /// resolved back to a `Color` via the same curated palette the profile
+    /// accent picker uses — entirely separate storage from the profile's own
+    /// `mainAccentHex`/`subAccentHex`. Falls back to the app-wide
+    /// `AppTheme.dynamicAccent` when unset, so every section header/icon
+    /// this feeds looks identical to before until a user actually opts in.
+    private var resolvedAccent: Color {
+        SocialAccentPalette.color(for: hubAccentHex) ?? AppTheme.dynamicAccent
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
@@ -80,6 +101,20 @@ struct LibraryHubView: View {
         .task {
             await loadServerExtras()
         }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showCustomizationSheet = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .tint(resolvedAccent)
+                .accessibilityLabel("Customize Home")
+            }
+        }
+        .sheet(isPresented: $showCustomizationSheet) {
+            HomeHubCustomizationView()
+        }
         .sheet(item: Binding(
             get: { similarListenerSearchQuery.map { IdentifiableQuery(text: $0) } },
             set: { similarListenerSearchQuery = $0?.text }
@@ -92,78 +127,115 @@ struct LibraryHubView: View {
 
     @ViewBuilder
     private var hubContent: some View {
+        // Pinned identity/action anchors — always first, never reorderable
+        // or hideable (see `HubSectionKind`'s doc comment).
         HubGreetingHeader(
             displayName: account.currentUser?.displayName ?? account.currentUser?.username,
-            songsPlayedToday: library.songsPlayedTodayCount()
+            songsPlayedToday: library.songsPlayedTodayCount(),
+            customGreeting: customGreeting,
+            accent: resolvedAccent
         )
         .padding(.horizontal, 16)
 
         HubQuickActionsRow(hasLibrary: !library.allSongs.isEmpty, onShuffleAll: shuffleAll)
 
-        if !onThisDayGroups.isEmpty {
-            HubOnThisDayTeaser(groups: onThisDayGroups)
+        // Everything below is data-driven: the persisted order (see
+        // `HomeHubLayoutStore`) filtered to sections that are both not
+        // user-hidden AND actually have content — each section's own
+        // "only show if non-empty" guard lives in `sectionHasContent`
+        // rather than inline `if`s here, since the sequence itself is no
+        // longer hardcoded.
+        ForEach(visibleSections) { kind in
+            sectionContent(for: kind)
         }
+    }
 
-        if !shortcuts.isEmpty {
-            HubSpeedDialSection(shortcuts: shortcuts)
+    /// The user's chosen order (falling back to `HubSectionKind.defaultOrder`
+    /// — the hub's original hardcoded sequence — on first run), filtered
+    /// down to sections that are both visible and non-empty.
+    private var visibleSections: [HubSectionKind] {
+        let order = HomeHubLayoutStore.decodeOrder(sectionOrderRaw)
+        let hidden = HomeHubLayoutStore.decodeHidden(hiddenSectionsRaw)
+        return order.filter { !hidden.contains($0) && sectionHasContent($0) }
+    }
+
+    /// Mirrors each section's original inline `if !x.isEmpty` guard from
+    /// before this feature existed — a hidden-but-empty section and a
+    /// visible-but-empty section both render nothing, exactly as today.
+    private func sectionHasContent(_ kind: HubSectionKind) -> Bool {
+        switch kind {
+        case .onThisDay:          return !onThisDayGroups.isEmpty
+        case .speedDial:          return !shortcuts.isEmpty
+        case .weeklyMix:          return !weeklyMixSongs.isEmpty
+        case .mixes:              return !smartPlaylistStore.playlists.isEmpty
+        case .recentlyAdded:      return !recentlyAdded.isEmpty
+        case .onRepeat:           return !mostPlayed.isEmpty
+        case .recentlyPlayed:     return !recentlyPlayed.isEmpty
+        case .genres:             return !genreGroups.isEmpty
+        case .forgottenFavorites: return !forgottenFavorites.isEmpty
+        case .moods:              return !moodBucketsWithSongs.isEmpty
+        case .friendsActivity:    return !social.friendsActivity.isEmpty
+        case .similarListeners:   return !account.similarListenerTracks.isEmpty
+        }
+    }
+
+    @ViewBuilder
+    private func sectionContent(for kind: HubSectionKind) -> some View {
+        switch kind {
+        case .onThisDay:
+            HubOnThisDayTeaser(groups: onThisDayGroups, accent: resolvedAccent)
+
+        case .speedDial:
+            HubSpeedDialSection(shortcuts: shortcuts, accent: resolvedAccent)
                 .transition(.move(edge: .top).combined(with: .opacity))
-        }
 
-        if !weeklyMixSongs.isEmpty {
+        case .weeklyMix:
             HubSongCarousel(
                 title: "Weekly Mix", icon: "sparkles.tv",
-                songs: weeklyMixSongs, seeAllTab: nil, selectedTab: $selectedTab
+                songs: weeklyMixSongs, seeAllTab: nil, selectedTab: $selectedTab, accent: resolvedAccent
             )
-        }
 
-        if !smartPlaylistStore.playlists.isEmpty {
+        case .mixes:
             mixesCarousel
-        }
 
-        if !recentlyAdded.isEmpty {
+        case .recentlyAdded:
             HubSongCarousel(
                 title: "Recently Added", icon: "clock.badge.checkmark",
-                songs: recentlyAdded, seeAllTab: .songs, selectedTab: $selectedTab
+                songs: recentlyAdded, seeAllTab: .songs, selectedTab: $selectedTab, accent: resolvedAccent
             )
-        }
 
-        if !mostPlayed.isEmpty {
+        case .onRepeat:
             HubSongCarousel(
                 title: "On Repeat", icon: "flame.fill",
-                songs: mostPlayed, seeAllTab: .songs, selectedTab: $selectedTab
+                songs: mostPlayed, seeAllTab: .songs, selectedTab: $selectedTab, accent: resolvedAccent
             )
-        }
 
-        if !recentlyPlayed.isEmpty {
+        case .recentlyPlayed:
             HubSongCarousel(
                 title: "Recently Played", icon: "clock.arrow.circlepath",
-                songs: recentlyPlayed, seeAllTab: .songs, selectedTab: $selectedTab
+                songs: recentlyPlayed, seeAllTab: .songs, selectedTab: $selectedTab, accent: resolvedAccent
             )
-        }
 
-        if !genreGroups.isEmpty {
-            HubGenresCarousel(groups: genreGroups)
-        }
+        case .genres:
+            HubGenresCarousel(groups: genreGroups, accent: resolvedAccent)
 
-        if !forgottenFavorites.isEmpty {
+        case .forgottenFavorites:
             HubSongCarousel(
                 title: "Forgotten Favorites", icon: "heart.slash",
-                songs: forgottenFavorites, seeAllTab: .favorites, selectedTab: $selectedTab
+                songs: forgottenFavorites, seeAllTab: .favorites, selectedTab: $selectedTab, accent: resolvedAccent
             )
-        }
 
-        if !moodBucketsWithSongs.isEmpty {
+        case .moods:
             moodsCarousel
-        }
 
-        if !social.friendsActivity.isEmpty {
-            HubFriendsActivityCarousel(entries: social.friendsActivity)
-        }
+        case .friendsActivity:
+            HubFriendsActivityCarousel(entries: social.friendsActivity, accent: resolvedAccent)
 
-        if !account.similarListenerTracks.isEmpty {
+        case .similarListeners:
             HubSimilarListenersCarousel(
                 tracks: account.similarListenerTracks,
                 listenerCount: account.similarListenerCount,
+                accent: resolvedAccent,
                 onSelect: { track in
                     similarListenerSearchQuery = [track.title, track.artist].compactMap { $0 }.joined(separator: " ")
                 }
@@ -203,7 +275,7 @@ struct LibraryHubView: View {
 
     private var mixesCarousel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HubSectionHeader(title: "Mixes For You", icon: "wand.and.stars")
+            HubSectionHeader(title: "Mixes For You", icon: "wand.and.stars", accent: resolvedAccent)
                 .padding(.horizontal, 16)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
@@ -244,7 +316,7 @@ struct LibraryHubView: View {
 
     private var moodsCarousel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HubSectionHeader(title: "Moods", icon: "theatermasks.fill", seeAllTab: .moods, selectedTab: $selectedTab)
+            HubSectionHeader(title: "Moods", icon: "theatermasks.fill", seeAllTab: .moods, selectedTab: $selectedTab, accent: resolvedAccent)
                 .padding(.horizontal, 16)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
@@ -343,6 +415,7 @@ struct HubShortcut: Identifiable {
 /// like a fixed "home screen" rather than an endless shelf.
 private struct HubSpeedDialSection: View {
     let shortcuts: [HubShortcut]
+    var accent: Color = AppTheme.dynamicAccent
     @State private var page = 0
 
     private let perPage = 4
@@ -370,7 +443,7 @@ private struct HubSpeedDialSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HubSectionHeader(title: "Quick Access", icon: "square.grid.2x2.fill")
+            HubSectionHeader(title: "Quick Access", icon: "square.grid.2x2.fill", accent: accent)
                 .padding(.horizontal, horizontalPadding)
 
             TabView(selection: $page) {
@@ -394,7 +467,7 @@ private struct HubSpeedDialSection: View {
                 HStack(spacing: 6) {
                     ForEach(pages.indices, id: \.self) { i in
                         Capsule()
-                            .fill(i == page ? AppTheme.dynamicAccent : AppTheme.textSecondary.opacity(0.3))
+                            .fill(i == page ? accent : AppTheme.textSecondary.opacity(0.3))
                             .frame(width: i == page ? 16 : 6, height: 6)
                     }
                 }
@@ -536,12 +609,22 @@ private struct HubSectionHeader: View {
     let icon: String
     var seeAllTab: LibraryTab? = nil
     var selectedTab: Binding<LibraryTab>? = nil
+    /// This screen's resolved accent (custom Home accent if set, else
+    /// `AppTheme.dynamicAccent`) — see `LibraryHubView.resolvedAccent`. Only
+    /// the icon is tinted (title stays `textPrimary`), matching the same
+    /// icon-tinted/text-plain split `ProfileInfoCard` already uses elsewhere
+    /// in the app, so an unusual accent color can't hurt title readability.
+    var accent: Color = AppTheme.dynamicAccent
 
     var body: some View {
         HStack {
-            Label(title, systemImage: icon)
-                .font(.headline)
-                .foregroundStyle(AppTheme.textPrimary)
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .foregroundStyle(accent)
+                Text(title)
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .font(.headline)
             Spacer()
             if let seeAllTab, let selectedTab {
                 Button {
@@ -554,10 +637,10 @@ private struct HubSectionHeader: View {
                         Image(systemName: "chevron.right")
                     }
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppTheme.dynamicAccent)
+                    .foregroundStyle(accent)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background(Capsule().fill(AppTheme.dynamicAccent.opacity(0.12)))
+                    .background(Capsule().fill(accent.opacity(0.12)))
                 }
                 .buttonStyle(.plain)
             }
@@ -573,6 +656,7 @@ private struct HubSongCarousel: View {
     let songs: [Song]
     var seeAllTab: LibraryTab? = nil
     @Binding var selectedTab: LibraryTab
+    var accent: Color = AppTheme.dynamicAccent
 
     @EnvironmentObject private var player: AudioPlayerManager
 
@@ -580,7 +664,7 @@ private struct HubSongCarousel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HubSectionHeader(title: title, icon: icon, seeAllTab: seeAllTab, selectedTab: $selectedTab)
+            HubSectionHeader(title: title, icon: icon, seeAllTab: seeAllTab, selectedTab: $selectedTab, accent: accent)
                 .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -682,6 +766,13 @@ private struct HubQuickActionsRow: View {
 private struct HubGreetingHeader: View {
     let displayName: String?
     let songsPlayedToday: Int
+    /// User-set override from `HomeHubCustomizationView` — when non-empty,
+    /// replaces the computed greeting *and* subtitle below entirely (a
+    /// single custom line rather than a greeting+stat pair), since the whole
+    /// point is "show my own text instead of the automatic one." Clearing it
+    /// back to empty restores the automatic greeting.
+    var customGreeting: String = ""
+    var accent: Color = AppTheme.dynamicAccent
 
     private var greeting: String {
         switch Calendar.current.component(.hour, from: Date()) {
@@ -697,14 +788,24 @@ private struct HubGreetingHeader: View {
         return "You've played \(songsPlayedToday) song\(songsPlayedToday == 1 ? "" : "s") today"
     }
 
+    private var trimmedCustomGreeting: String {
+        customGreeting.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(displayName.map { "\(greeting), \($0)" } ?? greeting)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(AppTheme.textPrimary)
-            Text(subtitle)
-                .font(.subheadline)
-                .foregroundStyle(AppTheme.textSecondary)
+            if !trimmedCustomGreeting.isEmpty {
+                Text(trimmedCustomGreeting)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(accent)
+            } else {
+                Text(displayName.map { "\(greeting), \($0)" } ?? greeting)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(accent)
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -719,6 +820,7 @@ private struct HubGreetingHeader: View {
 // `OnThisDayView` for every year/track it found.
 private struct HubOnThisDayTeaser: View {
     let groups: [OnThisDayGroup]
+    var accent: Color = AppTheme.dynamicAccent
 
     private var topGroup: OnThisDayGroup? { groups.first }
     private var topTrack: StreamTrack? { topGroup?.tracks.first }
@@ -729,10 +831,10 @@ private struct HubOnThisDayTeaser: View {
         } label: {
             HStack(spacing: 12) {
                 ZStack {
-                    Circle().fill(AppTheme.dynamicAccent.opacity(0.16))
+                    Circle().fill(accent.opacity(0.16))
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.title3.weight(.semibold))
-                        .foregroundStyle(AppTheme.dynamicAccent)
+                        .foregroundStyle(accent)
                 }
                 .frame(width: 44, height: 44)
 
@@ -759,7 +861,7 @@ private struct HubOnThisDayTeaser: View {
             }
             .padding(12)
             .adaptiveGlass(
-                tint: AppTheme.dynamicAccent.opacity(0.08),
+                tint: accent.opacity(0.08),
                 in: RoundedRectangle(cornerRadius: 16, style: .continuous),
                 fallback: AppTheme.surface
             )
@@ -778,13 +880,14 @@ private struct HubOnThisDayTeaser: View {
 // than pushing into a browsing screen for a single genre.
 private struct HubGenresCarousel: View {
     let groups: [(genre: String, songs: [Song])]
+    var accent: Color = AppTheme.dynamicAccent
     @EnvironmentObject private var player: AudioPlayerManager
 
     private let tileSize: CGFloat = 132
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HubSectionHeader(title: "Genres", icon: "guitars.fill")
+            HubSectionHeader(title: "Genres", icon: "guitars.fill", accent: accent)
                 .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -837,10 +940,11 @@ private struct HubGenresCarousel: View {
 /// actually feel like one app rather than two bolted together.
 private struct HubFriendsActivityCarousel: View {
     let entries: [SocialActivityEntry]
+    var accent: Color = AppTheme.dynamicAccent
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HubSectionHeader(title: "Friends Activity", icon: "person.2.wave.2.fill")
+            HubSectionHeader(title: "Friends Activity", icon: "person.2.wave.2.fill", accent: accent)
                 .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -902,11 +1006,12 @@ private struct HubFriendsActivityCarousel: View {
 private struct HubSimilarListenersCarousel: View {
     let tracks: [TrendingTrack]
     let listenerCount: Int
+    var accent: Color = AppTheme.dynamicAccent
     let onSelect: (TrendingTrack) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HubSectionHeader(title: "Similar Listeners", icon: "person.3.sequence.fill")
+            HubSectionHeader(title: "Similar Listeners", icon: "person.3.sequence.fill", accent: accent)
                 .padding(.horizontal, 16)
             Text("Based on \(listenerCount) listener\(listenerCount == 1 ? "" : "s") with taste like yours")
                 .font(.caption2)
