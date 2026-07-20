@@ -147,9 +147,19 @@ final class TrackedPlaylistStore: ObservableObject {
     /// resolves it and downloads any tracks the user doesn't already have
     /// (deduped via `LibraryManager.hasLocalCopy`). Safe to call on launch /
     /// foreground; throttled so it doesn't re-resolve constantly.
+    ///
+    /// NOTE: lowering this doesn't buy true "every N minutes in the
+    /// background" behavior on its own — this only controls whether a check
+    /// is SKIPPED once one actually runs. Whether a check runs at all while
+    /// backgrounded is entirely up to `BackgroundRefreshService`/iOS's
+    /// `BGAppRefreshTask` scheduling (see its doc comment), which iOS
+    /// throttles independently of anything here and offers no cadence
+    /// guarantee. This just makes checks that DO happen (foreground, launch,
+    /// or whenever iOS grants a background slot) far less likely to be
+    /// skipped by this throttle.
     func runAutoDownloads(streaming: StreamingService,
                           library: LibraryManager,
-                          minInterval: TimeInterval = 6 * 3600) async {
+                          minInterval: TimeInterval = 5 * 60) async {
         let now = Date()
         let due = playlists.filter { pl in
             guard pl.isAutoDownload else { return false }

@@ -37,10 +37,15 @@ enum BackgroundRefreshService {
     /// fires (or replaced by a newer `submit()` for the same identifier).
     static func scheduleNext() {
         let request = BGAppRefreshTaskRequest(identifier: taskIdentifier)
-        // Not sooner than 4 hours out — in the same spirit as
-        // TrackedPlaylistStore's existing 6h auto-download throttle, without
-        // letting a fast-moving channel's upload sit unnoticed for a full day.
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 4 * 3600)
+        // Requested as soon as 5 minutes out, matching TrackedPlaylistStore's
+        // own 5-minute auto-download throttle — but this is only the
+        // EARLIEST iOS is allowed to run it, not a promise it will. In
+        // practice BGAppRefreshTask is scheduled at the OS's discretion
+        // based on usage patterns/battery/network state and routinely runs
+        // far less often than requested (see this file's top-level doc
+        // comment) — a 5-minute request does not produce 5-minute cadence,
+        // it just removes the 4-hour floor that used to be here.
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 5 * 60)
         do {
             try BGTaskScheduler.shared.submit(request)
         } catch {
