@@ -9,13 +9,20 @@ import UIKit
 // / remove / block) based on the current relationship.
 struct PublicProfileView: View {
     let userId: String
-    /// Set when this screen is reached via ProfileView's "View as Public"
-    /// button — the owner previewing their own public page, not a genuine
-    /// visitor. Defaults to `false` so every existing call site
-    /// (`PublicProfileView(userId:)`) is unaffected. Suppresses the
+    /// Set when this screen is showing the signed-in user's own profile —
+    /// either the Profile tab's default view or ProfileView's "View as
+    /// Public" preview sheet. Defaults to `false` so every existing call
+    /// site (`PublicProfileView(userId:)`) is unaffected. Suppresses the
     /// friend-request/block controls, which would otherwise render
     /// nonsensically self-referential ("Add Friend" pointed at yourself).
     var isSelfPreview: Bool = false
+    /// Non-nil when this view IS the Profile tab's primary destination
+    /// (rather than the "View as Public" preview sheet reached from inside
+    /// the editor): renders an "Edit Profile" button in the header's action
+    /// slot instead of the "this is how you look to others" hint, and is
+    /// called when that button is tapped so the caller can push the editor.
+    /// Only meaningful when `isSelfPreview` is true.
+    var onEditProfile: (() -> Void)? = nil
 
     @EnvironmentObject private var social: SocialService
     @EnvironmentObject private var account: AccountService
@@ -53,7 +60,7 @@ struct PublicProfileView: View {
             } else if let profile {
                 ScrollView {
                     VStack(spacing: 16) {
-                        if isSelfPreview {
+                        if isSelfPreview, onEditProfile == nil {
                             Label("This is how your profile looks to others", systemImage: "eye")
                                 .font(AppTheme.bodyFont(size: 12))
                                 .foregroundStyle(AppTheme.textSecondary)
@@ -72,6 +79,11 @@ struct PublicProfileView: View {
                         } action: {
                             if !isSelfPreview {
                                 friendActionControl
+                            } else if let onEditProfile {
+                                Button(action: onEditProfile) {
+                                    Label("Edit Profile", systemImage: "pencil")
+                                        .foregroundStyle(mainAccentColor)
+                                }
                             }
                         }
 

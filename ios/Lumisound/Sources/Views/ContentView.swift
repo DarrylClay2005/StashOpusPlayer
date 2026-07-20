@@ -147,7 +147,7 @@ struct ContentView: View {
 
                 // MARK: Tab 6 — Profile
                 NavigationStack {
-                    ProfileView()
+                    MyProfileTabView()
                         .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
                 }
                     .toolbar(.hidden, for: .tabBar)
@@ -364,6 +364,36 @@ struct ContentView: View {
             if account.isLoggedIn {
                 presenceService.startHeartbeat(account: account, player: player)
             }
+        }
+    }
+}
+
+// MARK: - MyProfileTabView
+
+/// The Profile tab's actual root content: the signed-in user's own
+/// read-only public profile (`PublicProfileView`, self-preview) with an
+/// "Edit Profile" button, rather than jumping straight into `ProfileView`'s
+/// editor the way this tab used to. The editor is now a pushed destination
+/// reached by tapping that button, on the same `NavigationStack` tab 6
+/// already wraps this in — keeping back-button behavior consistent with
+/// every other tab-root-to-detail push in this app (e.g. Friends ->
+/// FriendsListView).
+struct MyProfileTabView: View {
+    @EnvironmentObject private var account: AccountService
+    @State private var showEditor = false
+
+    var body: some View {
+        Group {
+            if let userId = account.currentUser?.id {
+                PublicProfileView(userId: userId, isSelfPreview: true) {
+                    showEditor = true
+                }
+            } else {
+                ProgressView().tint(AppTheme.dynamicAccent)
+            }
+        }
+        .navigationDestination(isPresented: $showEditor) {
+            ProfileView()
         }
     }
 }

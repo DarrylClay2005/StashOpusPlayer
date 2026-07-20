@@ -204,7 +204,7 @@ struct DuplicateFilesView: View {
         .scrollContentBackground(.hidden)
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle("Duplicate Finder")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         .confirmationDialog(
             "Delete This Copy?",

@@ -343,7 +343,7 @@ struct ProfileView: View {
                 .padding(.bottom, 40)
             }
         }
-        .navigationTitle("My Profile")
+        .navigationTitle("Edit Profile")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {

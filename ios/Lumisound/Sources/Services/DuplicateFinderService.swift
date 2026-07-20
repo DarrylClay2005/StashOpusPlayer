@@ -106,11 +106,13 @@ final class DuplicateFinderService: ObservableObject {
     ///     tag) — the "definite duplicate" case, regardless of duration.
     ///  2. For everything else, candidates are first narrowed by duration
     ///     (`durationTolerance`), then CONFIRMED by actually comparing how
-    ///     the audio sounds — `AudioFingerprintService.matchThreshold`
-    ///     cosine similarity on a coarse spectral profile — for any song
-    ///     whose file is locally readable. This is what catches duplicates
-    ///     re-titled or re-tagged differently across sources, which text
-    ///     matching alone can't.
+    ///     the audio sounds throughout the track — `AudioFingerprintService
+    ///     .sequenceSimilarity` compares per-time-segment spectral profiles,
+    ///     not a single blended average, so two different songs that merely
+    ///     share overall mastering/EQ balance don't get waved through — for
+    ///     any song whose file is locally readable. This is what catches
+    ///     duplicates re-titled or re-tagged differently across sources,
+    ///     which text matching alone can't.
     ///  3. Songs a duration cluster couldn't fingerprint (Apple Music items,
     ///     unreadable files) or that didn't acoustically match anything fall
     ///     back to the old normalized title + artist check within that same
@@ -226,7 +228,7 @@ final class DuplicateFinderService: ObservableObject {
                 return FileManager.default.fileExists(atPath: url.path)
             }
             if fingerprintable.count > 1 && fingerprintable.count <= maxClusterSizeForAcoustic {
-                var vectors: [String: [Float]] = [:]
+                var vectors: [String: [[Float]]] = [:]
                 for song in fingerprintable {
                     guard let url = song.url else { continue }
                     if fingerprintsComputed >= maxFingerprintsPerScan {
@@ -257,7 +259,7 @@ final class DuplicateFinderService: ObservableObject {
                 for i in 0..<ids.count {
                     for j in (i + 1)..<ids.count {
                         guard let va = vectors[ids[i]], let vb = vectors[ids[j]] else { continue }
-                        let similarity = AudioFingerprintService.cosineSimilarity(va, vb)
+                        let similarity = AudioFingerprintService.sequenceSimilarity(va, vb)
                         if similarity >= AudioFingerprintService.matchThreshold {
                             union(ids[i], ids[j])
                         }

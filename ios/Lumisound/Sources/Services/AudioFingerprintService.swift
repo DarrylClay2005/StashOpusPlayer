@@ -22,29 +22,61 @@ import Foundation
 // disk cache keyed by path+mtime+size) for the same reason: both need to
 // read files this app didn't originate straight off disk, cheaply and
 // repeatably.
+//
+// Each track's excerpt is split into `segmentCount` time segments, each
+// reduced to its own band-energy vector, rather than blended into one
+// long-term average. A single averaged vector only captures overall
+// spectral BALANCE, which two different songs can easily share (same
+// genre/mastering/EQ curve) even though their actual moment-to-moment
+// content is nothing alike — that coincidence is exactly what let unrelated
+// same-duration tracks get flagged as "sounds identical." Comparing segment
+// sequences (see `sequenceSimilarity`) requires two tracks to track closely
+// *throughout* the excerpt, not just on average, which a real re-encode of
+// the same source does and an unrelated same-length track usually doesn't.
 actor AudioFingerprintService {
     static let shared = AudioFingerprintService()
 
-    /// Cosine similarity at/above this is treated as "the same recording".
-    /// Empirically: different bitrate/container re-encodes or re-tags of the
-    /// same source consistently land above 0.99 on this metric; genuinely
-    /// different songs (even same genre/tempo/instrumentation) land well
-    /// below 0.9. 0.975 leaves a safety margin on both sides.
-    static let matchThreshold: Float = 0.975
+    /// Mean cosine similarity across all segments at/above this — combined
+    /// with `segmentMatchThreshold`/`minMatchingSegmentFraction` below — is
+    /// treated as "the same recording". Raised slightly from the old
+    /// single-vector threshold (0.975) since segment-level matching is a
+    /// stricter, more discriminating signal on its own; this mean bar mostly
+    /// guards against a track passing the per-segment fraction check while
+    /// still trending weak overall.
+    static let matchThreshold: Float = 0.98
 
-    private var cache: [String: [Float]]
+    /// Cosine similarity an individual segment must clear to count as
+    /// "matching" for the `minMatchingSegmentFraction` check.
+    static let segmentMatchThreshold: Float = 0.97
+
+    /// Fraction of segments that must individually clear
+    /// `segmentMatchThreshold` for two tracks to be considered the same
+    /// recording (with `segmentCount = 6`, this requires 5 of 6). A single
+    /// divergent segment — the moment two otherwise-similar-sounding but
+    /// genuinely different songs actually differ — is enough to reject a
+    /// match, which a single blended average could never catch.
+    static let minMatchingSegmentFraction: Float = 0.8
+
+    private var cache: [String: [[Float]]]
     private let cacheURL: URL
     private let fftSize = 2048
     private let log2n: vDSP_Length = 11 // 2^11 == 2048
     private let bandCount = 32
     private let sampleRate = 11025.0
+    /// Number of equal time segments each excerpt is split into before
+    /// fingerprinting — see the file-header comment for why segments beat a
+    /// single blended average.
+    private let segmentCount = 6
 
     private init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        cacheURL = caches.appendingPathComponent("audio_fingerprint_cache_v1.json")
+        // v2: cache values changed shape from a single [Float] vector to
+        // [[Float]] (one vector per segment) — a new filename keeps an old
+        // v1 cache from being misread as the new format.
+        cacheURL = caches.appendingPathComponent("audio_fingerprint_cache_v2.json")
         if let data = try? Data(contentsOf: cacheURL),
-           let decoded = try? JSONDecoder().decode([String: [Float]].self, from: data) {
+           let decoded = try? JSONDecoder().decode([String: [[Float]]].self, from: data) {
             cache = decoded
             appLog("AudioFingerprintService: loaded \(decoded.count) cached fingerprint(s)", category: "audio")
         } else {
@@ -52,13 +84,14 @@ actor AudioFingerprintService {
         }
     }
 
-    /// Returns a cached or freshly-computed normalized spectral-profile
-    /// vector for `url`, or `nil` if the file can't be decoded (corrupt,
-    /// unsupported format, too short). Unit-length normalized so
+    /// Returns a cached or freshly-computed sequence of `segmentCount`
+    /// unit-length normalized spectral-profile vectors for `url` (one per
+    /// time segment of the excerpt), or `nil` if the file can't be decoded
+    /// (corrupt, unsupported format, too short). Unit-length normalized so
     /// `cosineSimilarity` compares spectral SHAPE only, not overall
     /// loudness — masters/normalization differ even for the identical
     /// recording, and raw energy would make those false negatives.
-    func fingerprint(for url: URL) async -> [Float]? {
+    func fingerprint(for url: URL) async -> [[Float]]? {
         let key = cacheKey(for: url)
         if let cached = cache[key] {
             appLog("AudioFingerprintService: cache hit for \(url.lastPathComponent)", category: "audio")
@@ -69,14 +102,14 @@ actor AudioFingerprintService {
             appWarn("AudioFingerprintService: could not decode \(url.lastPathComponent)", category: "audio")
             return nil
         }
-        guard let vector = computeSpectralProfile(samples: samples) else {
+        guard let vectors = computeSpectralProfile(samples: samples) else {
             appWarn("AudioFingerprintService: too little audio to fingerprint \(url.lastPathComponent) (\(samples.count) samples)", category: "audio")
             return nil
         }
-        cache[key] = vector
+        cache[key] = vectors
         persist()
-        appLog("AudioFingerprintService: fingerprinted \(url.lastPathComponent) from \(samples.count) samples", category: "audio")
-        return vector
+        appLog("AudioFingerprintService: fingerprinted \(url.lastPathComponent) from \(samples.count) samples into \(vectors.count) segment(s)", category: "audio")
+        return vectors
     }
 
     /// Cosine similarity of two equal-length vectors, 0...1 for our
@@ -89,6 +122,34 @@ actor AudioFingerprintService {
         vDSP_svesq(b, 1, &magB, vDSP_Length(b.count))
         guard magA > 0, magB > 0 else { return 0 }
         return dot / (sqrt(magA) * sqrt(magB))
+    }
+
+    /// Combines two tracks' per-segment fingerprint sequences into a single
+    /// match score: requires at least `minMatchingSegmentFraction` of the
+    /// segments to individually clear `segmentMatchThreshold` (aligned by
+    /// segment index — both sequences come from the same excerpt window/skip
+    /// parameters, so segment N of one lines up with segment N of the
+    /// other), then returns the mean similarity across all segments for the
+    /// caller to compare against `matchThreshold`. Returns 0 (never a match)
+    /// if the per-segment requirement isn't met, the segment-count fraction
+    /// check being what actually catches unrelated same-duration tracks that
+    /// merely share overall spectral balance — a case where the mean alone
+    /// could still look deceptively high.
+    static func sequenceSimilarity(_ a: [[Float]], _ b: [[Float]]) -> Float {
+        guard a.count == b.count, !a.isEmpty else { return 0 }
+        var total: Float = 0
+        var matchingSegments = 0
+        for i in 0..<a.count {
+            let similarity = cosineSimilarity(a[i], b[i])
+            total += similarity
+            if similarity >= segmentMatchThreshold {
+                matchingSegments += 1
+            }
+        }
+        let mean = total / Float(a.count)
+        let minMatchingSegments = Int((Float(a.count) * minMatchingSegmentFraction).rounded(.up))
+        guard matchingSegments >= minMatchingSegments else { return 0 }
+        return mean
     }
 
     private func cacheKey(for url: URL) -> String {
@@ -112,23 +173,34 @@ actor AudioFingerprintService {
     //
     // Same log-spaced-band, log-magnitude reduction AudioVisualizerService
     // applies per live buffer (see its `bars` computation) — run here once
-    // per fixed-size window across the decoded excerpt and averaged into a
-    // single long-term profile, since a duplicate check compares two whole
-    // (well, sampled) tracks rather than reacting frame-by-frame.
-    private func computeSpectralProfile(samples: [Int16]) -> [Float]? {
+    // per fixed-size window across the decoded excerpt, but averaged into
+    // `segmentCount` separate per-segment profiles rather than one blended
+    // long-term average (see the file-header comment for why).
+    private func computeSpectralProfile(samples: [Int16]) -> [[Float]]? {
         guard samples.count >= fftSize else { return nil }
         guard let fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return nil }
         defer { vDSP_destroy_fftsetup(fftSetup) }
 
-        var accumulated = [Float](repeating: 0, count: bandCount)
-        var windowCount = 0
-        var offset = 0
         let halfSize = fftSize / 2
+        let totalWindows = samples.count / fftSize
+        // Fewer windows than segments would mean some segments never get a
+        // single window to average — reject rather than return partially
+        // empty/misleading segments (falls back to title+artist matching,
+        // same as any other "too little audio" case).
+        guard totalWindows >= segmentCount else { return nil }
 
-        while offset + fftSize <= samples.count {
+        var accumulated = [[Float]](repeating: [Float](repeating: 0, count: bandCount), count: segmentCount)
+        var windowCounts = [Int](repeating: 0, count: segmentCount)
+
+        for windowIndex in 0..<totalWindows {
+            let offset = windowIndex * fftSize
             var real = [Float](repeating: 0, count: fftSize)
             var imag = [Float](repeating: 0, count: fftSize)
             for i in 0..<fftSize { real[i] = Float(samples[offset + i]) / 32768.0 }
+
+            // Proportionally bucket this window into one of `segmentCount`
+            // equal time slices of the excerpt.
+            let segment = min(segmentCount - 1, windowIndex * segmentCount / totalWindows)
 
             real.withUnsafeMutableBufferPointer { realPtr in
                 imag.withUnsafeMutableBufferPointer { imagPtr in
@@ -150,21 +222,29 @@ actor AudioFingerprintService {
                         guard lowBin < highBin else { continue }
                         let slice = magnitudes[lowBin..<highBin]
                         let avg = slice.reduce(0, +) / Float(slice.count)
-                        accumulated[band] += log10(avg + 1)
+                        accumulated[segment][band] += log10(avg + 1)
                     }
                 }
             }
-            windowCount += 1
-            offset += fftSize
+            windowCounts[segment] += 1
         }
-        guard windowCount > 0 else { return nil }
-        for i in 0..<accumulated.count { accumulated[i] /= Float(windowCount) }
 
-        var normSq: Float = 0
-        vDSP_svesq(accumulated, 1, &normSq, vDSP_Length(accumulated.count))
-        let norm = sqrt(normSq)
-        guard norm > 0 else { return nil }
-        return accumulated.map { $0 / norm }
+        guard windowCounts.allSatisfy({ $0 > 0 }) else { return nil }
+
+        var result: [[Float]] = []
+        result.reserveCapacity(segmentCount)
+        for segment in 0..<segmentCount {
+            var vector = accumulated[segment]
+            let count = Float(windowCounts[segment])
+            for i in 0..<vector.count { vector[i] /= count }
+
+            var normSq: Float = 0
+            vDSP_svesq(vector, 1, &normSq, vDSP_Length(vector.count))
+            let norm = sqrt(normSq)
+            guard norm > 0 else { return nil }
+            result.append(vector.map { $0 / norm })
+        }
+        return result
     }
 
     // MARK: - Decode (same approach as BPMAnalyzerService.decodeMono, + a
