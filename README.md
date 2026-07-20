@@ -50,7 +50,7 @@ bridge, and build-from-source instructions.
 | **M3U import/export** | Bring in a `.m3u`/`.m3u8` playlist from another app (matched by filename, falling back to title/artist), or export any playlist as one |
 | **Downloads manager** | See every downloaded track's on-disk size, sort by size or date, and delete individually or in bulk |
 | **Duplicate & corrupt file finders** | Duplicate Finder groups likely-duplicate downloads by matching how they actually sound, not just title text; Corrupt File Finder flags any download that fails to play so you can re-fetch just that one |
-| **Aria Lumi metadata matching** | Optional (Settings → Account → AI Features, off by default) — when a local file's metadata is ambiguous, Aria Lumi picks the correct match instead of a plain "first result" guess, and learns from any corrections you make |
+| **Aria Lumi metadata matching** | Built-in, always on — when a local file has more than one possible metadata match, Aria Lumi (Lumisound's own music intelligence) reviews the candidates using titles, artists, cover art, and a sense of your own listening habits to pick the right one instead of a plain "first result" guess, and learns from any corrections you make |
 
 ### Streaming (via the bridge server)
 
@@ -93,10 +93,13 @@ bridge, and build-from-source instructions.
 - Account data (playlists, settings, history) lives only on the bridge server you connect to.
 - Apple Music access is optional and read-only.
 - "Share Listening Activity" (for Trending/Discover) is off by default and shares only titles/artists.
-- **AI-Assisted Suggestions** (Settings → Account → AI Features) — off by default. When enabled, track
-  titles/artists/genres for ambiguous local files may be sent to Anthropic's API (powering "Aria Lumi",
-  the bridge's music intelligence) to improve metadata matching, with more suggestions planned. No audio
-  or file contents are ever sent, and the feature never overrides a confident local match.
+- **Aria Lumi** (Settings → Account → AI Features) — built into the app, always on, no opt-in toggle.
+  For local files with more than one possible metadata match, titles/artists/albums/cover art for
+  those candidates, plus a lightweight signal from your own play history and favorites (which artists/
+  albums you actually listen to and how much, not full listening history), are sent to Google's Gemini API
+  to pick the correct match instead of a plain "first result" guess, and she learns from any corrections
+  you make. No audio or file contents are ever sent, and she never overrides an already-exact match by
+  herself without reviewing the alternatives first.
 
 ---
 

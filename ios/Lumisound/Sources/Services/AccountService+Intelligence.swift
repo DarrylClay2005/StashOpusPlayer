@@ -11,17 +11,17 @@ struct MetadataResolution {
 
 extension AccountService {
 
-    // MARK: - Aria Lumi: AI-Assisted Suggestions (opt-in; see ios-bridge/intelligence.py)
+    // MARK: - Aria Lumi (built-in; see ios-bridge/intelligence.py)
 
     /// Asks Aria Lumi (the bridge's AI-assisted metadata resolver) to pick
-    /// the best candidate for an ambiguous local file (multiple
-    /// similarly-named results, no exact title match). Returns `nil`
-    /// whenever the feature is off, the user is logged out, the network
-    /// call fails, or she has no confident pick — in every case the caller
-    /// falls back to its existing exact-match-or-first-result heuristic
-    /// unchanged.
+    /// the best candidate for a local file's metadata. Runs for every
+    /// signed-in user unconditionally — no per-user opt-in anymore (see
+    /// `AccountView`'s "Aria Lumi" section, no longer a toggle). Returns
+    /// `nil` whenever the user is logged out, the network call fails, or she
+    /// has no confident pick — in every case the caller falls back to its
+    /// existing exact-match-or-first-result heuristic unchanged.
     func resolveMetadata(filename: String, candidates: [MetadataCandidate]) async -> MetadataResolution? {
-        guard isLoggedIn, currentUser?.aiAssistedSuggestions == true, !candidates.isEmpty else {
+        guard isLoggedIn, !candidates.isEmpty else {
             return nil
         }
         struct Body: Encodable {
@@ -54,7 +54,7 @@ extension AccountService {
     /// `IntelligenceSuggestionCache`). Fire-and-forget: failures are silent
     /// since this is a learning signal, not a user-facing action.
     func reportMetadataCorrection(memoryID: Int, title: String, artist: String) async {
-        guard isLoggedIn, currentUser?.aiAssistedSuggestions == true else { return }
+        guard isLoggedIn else { return }
         struct Body: Encodable {
             let memory_id: Int
             let correction: [String: String]

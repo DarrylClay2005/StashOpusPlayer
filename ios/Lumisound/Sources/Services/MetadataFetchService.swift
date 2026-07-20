@@ -28,10 +28,9 @@ actor MetadataFetchService {
     private init() {}
 
     /// Looks up metadata using a chain of free APIs. Returns the first successful result.
-    /// *filename*, when provided, lets an ambiguous iTunes result set be
-    /// disambiguated by Aria Lumi (AI-assisted suggestions, opt-in) instead
-    /// of the plain "exact match or first result" heuristic — see
-    /// `fetchFromItunes`.
+    /// *filename*, when provided, lets a multi-candidate iTunes result set be
+    /// reviewed by Aria Lumi (built-in, always on) instead of the plain
+    /// "exact match or first result" heuristic — see `fetchFromItunes`.
     func fetchMetadata(title: String, artist: String, filename: String? = nil) async -> OnlineMetadata? {
         let rawTitle  = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let rawArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -85,20 +84,27 @@ actor MetadataFetchService {
             ($0["trackName"] as? String ?? "").lowercased() == title.lowercased()
         }) ?? results[0]
 
-        // Ambiguous case: no exact title match among multiple candidates.
-        // Ask Aria Lumi (opt-in AI-assisted suggestions) to disambiguate
-        // instead of blindly taking the first result; falls straight through
-        // to the existing `best` above on any failure, disabled toggle, or
-        // low-confidence pick.
-        if results.count > 1, let filename,
-           !results.contains(where: { ($0["trackName"] as? String ?? "").lowercased() == title.lowercased() }) {
-            let candidates = results.map { result in
-                MetadataCandidate(
+        // Whenever there's more than one candidate, let Aria Lumi review the
+        // whole set rather than only stepping in when NONE of them exactly
+        // matches the title — a title that looks exact can still be the
+        // wrong artist/album/version, which the plain heuristic below has no
+        // way to catch since it stops looking the moment a title matches.
+        // Still gated on `results.count > 1`: with a single candidate
+        // there's nothing to disambiguate, so asking would just be a wasted
+        // call. Falls straight through to the existing `best` above on any
+        // failure or low-confidence pick.
+        if results.count > 1, let filename {
+            let candidates = results.map { result -> MetadataCandidate in
+                let art100 = result["artworkUrl100"] as? String ?? ""
+                let art600 = result["artworkUrl600"] as? String
+                    ?? art100.replacingOccurrences(of: "100x100bb", with: "600x600bb")
+                return MetadataCandidate(
                     title: result["trackName"] as? String ?? "",
                     artist: result["artistName"] as? String ?? "",
                     album: result["collectionName"] as? String,
                     year: (result["releaseDate"] as? String).map { String($0.prefix(4)) },
-                    source: "itunes"
+                    source: "itunes",
+                    artwork_url: art600.isEmpty ? nil : art600
                 )
             }
             if let resolution = await AccountService.shared?.resolveMetadata(filename: filename, candidates: candidates) {

@@ -52,9 +52,10 @@ struct AppUser: Codable, Equatable {
     let avatarURL: String?
     let dateOfBirth: String?   // ISO YYYY-MM-DD, nil if not set
     var shareListeningActivity: Bool = false
-    /// Opt-in for AI-assisted suggestions (metadata/EQ/duplicate/mix). Off by
-    /// default — when enabled, track titles/artists/genres may be sent to
-    /// Anthropic's API. See PUT /user/privacy and AccountService+Intelligence.
+    /// Legacy field, kept only for backward-compatible decoding/encoding of
+    /// PUT /user/privacy — no longer read by any endpoint. Aria Lumi (see
+    /// AccountService+Intelligence.swift) now runs unconditionally for every
+    /// signed-in user rather than being gated by this per-user opt-in.
     var aiAssistedSuggestions: Bool = false
 
     enum CodingKeys: String, CodingKey {
@@ -689,6 +690,14 @@ struct MetadataCandidate: Codable {
     let album: String?
     let year: String?
     let source: String
+    /// Thumbnail/cover art URL for this candidate (e.g. iTunes'
+    /// artworkUrl100/artworkUrl600), when known — sent to Aria Lumi as real
+    /// vision input, not just compared as text. Named to match the
+    /// backend's `artwork_url` Pydantic field literally, same convention
+    /// this struct's other fields and `AccountService+Intelligence.swift`'s
+    /// `Response` struct already use (no snake_case<->camelCase coding
+    /// strategy is configured on this encoder).
+    let artwork_url: String?
 }
 
 struct SyncTrack: Codable {

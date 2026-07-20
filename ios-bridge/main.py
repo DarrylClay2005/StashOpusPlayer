@@ -4438,11 +4438,14 @@ class PrivacyRequest(BaseModel):
 async def update_privacy(body: PrivacyRequest, payload: dict = Depends(get_current_user)):
     """Toggles privacy-sensitive opt-ins: whether this user's recent plays
     (title/artist only) are visible to other signed-in users via
-    GET /social/activity and /social/discover (share_listening_activity), and
-    whether track titles/artists/genres may be sent to Anthropic's API to
-    power AI-assisted metadata/EQ/duplicate/mix suggestions
-    (ai_assisted_suggestions). Both default off; either field may be omitted
-    to leave that setting unchanged."""
+    GET /social/activity and /social/discover (share_listening_activity).
+
+    ai_assisted_suggestions is accepted and stored for backward compatibility
+    (older clients still read/write it) but is no longer read by any
+    endpoint — Aria Lumi (see intelligence.py) now runs unconditionally for
+    every signed-in user rather than being gated by a per-user opt-in.
+
+    Either field may be omitted to leave that setting unchanged."""
     user_id = payload["sub"]
     updates: dict = {}
     if body.share_listening_activity is not None:
@@ -4481,18 +4484,29 @@ _METADATA_RESOLVE_SYSTEM_PROMPT = (
     "given 'recent_corrections': real past cases where a user overrode your "
     "prior pick — treat them as evidence of the kinds of mistakes to avoid, "
     "not as literal templates to copy. You may also be given 'user_taste': "
-    "artists this specific user plays or favorites most. A candidate whose "
-    "artist appears there is meaningfully more likely correct than a bare "
-    "string match alone would suggest — but this is a soft tiebreaker, never "
-    "grounds to override a candidate that's a much stronger clean match on "
-    "its own."
+    "artists and albums this specific user plays or favorites most "
+    "(weighted toward recent, fully-listened plays), the genres that make "
+    "up their own library, and their playlist names — all soft, secondary "
+    "signal only. A candidate whose artist appears there, or whose genre "
+    "matches their library, is meaningfully more likely correct than a bare "
+    "string match alone would suggest — but none of this is ever grounds to "
+    "override a candidate that's a much stronger clean match on its own; "
+    "taste only breaks genuine ties between otherwise-plausible candidates."
 )
 
 _METADATA_RESOLVE_SCHEMA = {
     "type": "object",
     "properties": {
+        # Gemini's structured-output schema (unlike Anthropic's/plain JSON
+        # Schema) doesn't accept a `type` array like ["integer", "null"] for
+        # an optional field — confirmed by testing against the real API,
+        # which rejects it at request-validation time. `nullable: True`
+        # alongside a single `type` is the correct way to express "integer
+        # or null" in this schema dialect. Worth remembering for any future
+        # schema added here (EQ suggestion, duplicate resolution, etc.).
         "best_index": {
-            "type": ["integer", "null"],
+            "type": "integer",
+            "nullable": True,
             "description": "0-based index into the candidates array, or null if none match",
         },
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
@@ -4508,6 +4522,11 @@ class MetadataCandidate(BaseModel):
     album: Optional[str] = None
     year: Optional[str] = None
     source: str
+    # Thumbnail/cover art URL for this candidate, when the client has one
+    # (e.g. iTunes' artworkUrl100/artworkUrl600) — sent to Aria as real
+    # vision input (see call_intelligence's image-block handling), not just
+    # compared as text.
+    artwork_url: Optional[str] = None
 
 
 class MetadataResolveRequest(BaseModel):
@@ -4520,9 +4539,10 @@ async def intelligence_metadata_resolve(
     body: MetadataResolveRequest, payload: dict = Depends(get_current_user)
 ):
     """AI-assisted replacement for the client's "exact match or first result"
-    metadata picking logic. Requires the user has opted into
-    ai_assisted_suggestions (see PUT /user/privacy); returns a null pick
-    (never an error) when the feature is off, cooling down, or unavailable,
+    metadata picking logic. Runs for every signed-in user unconditionally —
+    no per-user opt-in gate (removed; Aria Lumi is a built-in part of the
+    metadata pipeline now, not an optional feature). Still returns a null
+    pick (never an error) when intelligence is cooling down or unavailable,
     so the client's existing heuristic is always a safe fallback.
 
     On a fresh (non-cached) resolution, logs the suggestion to
@@ -4534,24 +4554,13 @@ async def intelligence_metadata_resolve(
 
     user_id = payload["sub"]
     pool = await get_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                "SELECT ai_assisted_suggestions FROM ios_users WHERE id = %s AND is_active = TRUE",
-                (user_id,),
-            )
-            row = await cur.fetchone()
-    if not row or not row[0]:
-        return {"best_index": None, "confidence": "low", "memory_id": None}
 
     # Cache key intentionally excludes recent_corrections (below) — those are
     # task-level prompt context that evolves independently of any one input.
     # It DOES include user_taste, though: unlike corrections, taste changes
     # what the actually-correct candidate is for *this specific user*, so a
     # cache shared across users regardless of taste would silently reuse one
-    # user's disambiguation for another. The cost is fewer cross-user cache
-    # hits; acceptable since this endpoint only fires on already-rare
-    # ambiguous cases.
+    # user's disambiguation for another.
     taste_profile = await get_user_taste_profile(user_id)
     cache_input = {
         "filename": body.filename,
@@ -4576,12 +4585,14 @@ async def intelligence_metadata_resolve(
 
     recent_corrections = await get_recent_corrections("metadata_resolve")
     model_input = {**cache_input, "recent_corrections": recent_corrections}
+    artwork_urls = [c.artwork_url for c in body.candidates if c.artwork_url]
 
     result = await call_intelligence(
         "metadata_resolve",
         _METADATA_RESOLVE_SYSTEM_PROMPT,
         model_input,
         _METADATA_RESOLVE_SCHEMA,
+        image_urls=artwork_urls,
     )
     if result is None:
         return {"best_index": None, "confidence": "low", "memory_id": None}
@@ -5717,7 +5728,7 @@ async def get_artist_bio(
 ):
     """Artist bio panel: MusicBrainz for disambiguation/basic facts, Wikipedia
     for the bio text + photo. Neither needs an API key (unlike Spotify/
-    Anthropic elsewhere in this file), so this works out of the box on any
+    Gemini elsewhere in this file), so this works out of the box on any
     deployment. Results are cached 30 days — both APIs are free but
     rate-limit-sensitive (MusicBrainz in particular asks for <=1 req/sec),
     and an artist's bio doesn't change often enough to justify a fresh fetch

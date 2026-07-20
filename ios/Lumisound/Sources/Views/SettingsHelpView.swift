@@ -206,6 +206,11 @@ struct SettingsHelpView: View {
                 body: "Whenever new tracks are scanned in, Lumisound reads the title, artist, album, genre, and year embedded in the file, and fills in anything still missing using online lookups (iTunes, MusicBrainz, and Deezer). Lumisound also periodically re-checks any imported track that's still missing artist, album, genre, or year — for example after deleting and reinstalling the app and copying your music back from a backup folder — so those tracks fill in automatically the next time the app is open, without needing a manual rescan."
             ),
             HelpTopic(
+                icon: "wand.and.stars",
+                title: "Aria Lumi",
+                body: "When a metadata lookup for a local file turns up more than one possible match, Aria Lumi — Lumisound's built-in music intelligence — reviews the candidates for you: comparing titles and artists, looking at each candidate's cover art, and weighing in a lightweight sense of what you actually listen to, rather than just grabbing the first result. She's always on, with nothing to turn on or set up, and she learns from it any time you manually correct a track she got wrong. No audio or file contents are ever sent — only text metadata and cover art for the specific candidates being compared."
+            ),
+            HelpTopic(
                 icon: "internaldrive",
                 title: "Downloads Manager",
                 body: "Settings → Storage & Cache → Downloaded Music opens a dedicated list of every downloaded/imported track with its on-disk size, sortable by size or date. Swipe a track to delete it, or tap Select to remove several at once — useful for finding and clearing out the largest files when you're low on storage."

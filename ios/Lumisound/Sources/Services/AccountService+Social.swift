@@ -27,10 +27,10 @@ extension AccountService {
         }
     }
 
-    /// Toggles whether track titles/artists/genres may be sent to Anthropic's
-    /// API to power AI-assisted metadata/EQ/duplicate/mix suggestions. Off by
-    /// default — this is the first feature in the app that shares track data
-    /// with a third party, so it must be an explicit opt-in.
+    /// Legacy — writes the now-unused `ai_assisted_suggestions` privacy flag
+    /// for backward compatibility. No UI calls this anymore: Aria Lumi runs
+    /// unconditionally for every signed-in user (see `AccountView`'s "Aria
+    /// Lumi" section, no longer a toggle), not gated by a per-user opt-in.
     func setAIAssistedSuggestions(_ enabled: Bool) async {
         guard isLoggedIn else { return }
         struct Body: Encodable { let ai_assisted_suggestions: Bool }

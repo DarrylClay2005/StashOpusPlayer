@@ -470,20 +470,24 @@ struct AccountView: View {
                 }
                 .listRowBackground(AppTheme.surface)
 
-                // MARK: AI-Assisted Suggestions Section
+                // MARK: Aria Lumi Section
+                //
+                // No longer a Toggle — Aria Lumi is a built-in part of the
+                // metadata pipeline now, not an opt-in the user switches on
+                // (see ios-bridge's intelligence.py / main.py's
+                // /user/intelligence/metadata-resolve, which used to gate on
+                // ai_assisted_suggestions and no longer does). Leaving a
+                // toggle bound to a flag the server doesn't check anymore
+                // would look interactive while silently doing nothing — this
+                // row exists so the behavior change is still visible/explained
+                // in Settings, not just documented in the Help guide.
                 Section {
-                    Toggle(isOn: Binding(
-                        get: { account.currentUser?.aiAssistedSuggestions ?? false },
-                        set: { newValue in Task { await account.setAIAssistedSuggestions(newValue) } }
-                    )) {
-                        Label("AI-Assisted Suggestions", systemImage: "wand.and.stars")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-                    .tint(AppTheme.dynamicAccent)
+                    Label("Aria Lumi", systemImage: "wand.and.stars")
+                        .foregroundStyle(AppTheme.textPrimary)
                 } header: {
                     sectionHeader("AI Features")
                 } footer: {
-                    Text("When on, track titles/artists/genres for ambiguous local files may be sent to Anthropic's API to improve metadata matching (and, in future updates, EQ, duplicate detection, and Discover Mix). Off by default. No audio or file contents are ever sent.")
+                    Text("Aria Lumi, Lumisound's built-in music intelligence, automatically helps pick the right metadata match for local files — using titles, artists, thumbnails, and how you actually listen. Always on; see Settings → Help → Library for details. No audio or file contents are ever sent.")
                         .font(AppTheme.bodyFont(size: 12))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
