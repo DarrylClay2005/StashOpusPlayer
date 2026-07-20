@@ -128,6 +128,39 @@ final class StreamingService: ObservableObject {
     @Published var isLoadingDownloadHistory = false
     @Published var isUploadingUserMusic = false
     @Published var uploadProgress: Double = 0
+
+    // MARK: Pending Imports (see StreamingService+PendingDownloads.swift)
+
+    /// One track successfully imported by `reconcilePendingDownloads` this
+    /// app session — feeds the "Pending Imports" screen's "Recently
+    /// Imported" list so the otherwise-silent background reconciliation
+    /// pass (launch/foreground/BGAppRefreshTask/push) is actually visible
+    /// and shows WHERE each track landed. Session-scoped only, no disk
+    /// persistence — this is a status feed, not a durable record (that's
+    /// what the library itself already is).
+    struct RecentImport: Identifiable {
+        let id = UUID()
+        let title: String
+        let artist: String?
+        /// nil/empty means the plain "Imported Music" root, same convention
+        /// `TrackedPlaylist.destinationFolder` uses.
+        let destinationFolder: String?
+        let importedAt: Date
+    }
+    /// Newest first, capped at `recentImportsLimit` — this is a lightweight
+    /// activity feed, not a full history (see `downloadHistory` for that).
+    @Published private(set) var recentImports: [RecentImport] = []
+    private let recentImportsLimit = 20
+
+    func recordRecentImport(title: String, artist: String?, destinationFolder: String?) {
+        recentImports.insert(
+            RecentImport(title: title, artist: artist, destinationFolder: destinationFolder, importedAt: Date()),
+            at: 0
+        )
+        if recentImports.count > recentImportsLimit {
+            recentImports.removeLast(recentImports.count - recentImportsLimit)
+        }
+    }
     /// Cloud storage usage/quota for the logged-in user — see `fetchStorageUsage(token:)`.
     /// `nil` until the first successful fetch.
     @Published var storageUsage: StorageUsage? = nil

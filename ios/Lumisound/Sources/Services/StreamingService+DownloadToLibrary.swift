@@ -19,7 +19,21 @@ extension StreamingService {
     /// entirely and that song's existing file URL is returned. If the matching
     /// local file is missing or corrupt, the download proceeds normally to
     /// replace it. Pass `[]` (the default) to disable this check.
-    func downloadToLibrary(track: StreamTrack, destinationDir: URL? = nil, existingSongs: [Song] = []) async throws -> URL {
+    ///
+    /// `destinationFolderName` (e.g. a `TrackedPlaylist.destinationFolder`)
+    /// is sent to the bridge as the job-based path's `destination_folder`
+    /// param purely so it's recorded on `ios_pending_downloads` — this is
+    /// what lets `reconcilePendingDownloads` put a track back into the
+    /// right folder if this job finishes after the app was closed/crashed,
+    /// rather than always falling back to the default. Independent of
+    /// `destinationDir`, which controls where THIS call writes the file if
+    /// it completes normally in the foreground.
+    func downloadToLibrary(
+        track: StreamTrack,
+        destinationDir: URL? = nil,
+        existingSongs: [Song] = [],
+        destinationFolderName: String? = nil
+    ) async throws -> URL {
         let sourceTrackID = "\(track.source):\(track.id)"
 
         // Pre-download dedupe — skip entirely if we already have a valid copy
@@ -155,6 +169,9 @@ extension StreamingService {
         ]
         if track.source == "soundcloud" || track.source == "bandcamp" {
             queryItems.append(URLQueryItem(name: "url", value: track.youtubeURL))
+        }
+        if let destinationFolderName, !destinationFolderName.isEmpty {
+            queryItems.append(URLQueryItem(name: "destination_folder", value: destinationFolderName))
         }
         // Per-user aria2 preference (Settings → yt-dlp). Off by default — the
         // bridge uses its native downloader unless this is true. Only send when

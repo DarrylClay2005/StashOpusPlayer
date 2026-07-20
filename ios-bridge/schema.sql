@@ -1029,3 +1029,14 @@ CREATE TABLE IF NOT EXISTS ios_presence_state (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+
+-- Feature: pending-download folder routing (2026-07-19). The job that
+-- created a pending download already knows which local folder it's destined
+-- for (e.g. a tracked playlist's own destination folder — see
+-- TrackedPlaylist.destinationFolder client-side), but ios_pending_downloads
+-- had nowhere to remember that once the job outlived the request that
+-- started it. Without this, recovering a download after the app was closed
+-- always fell back to the default folder, silently ignoring the playlist's
+-- chosen destination. NULL means "use the default download folder", same
+-- convention TrackedPlaylist.destinationFolder itself already uses.
+ALTER TABLE ios_pending_downloads ADD COLUMN IF NOT EXISTS destination_folder VARCHAR(255) NULL;

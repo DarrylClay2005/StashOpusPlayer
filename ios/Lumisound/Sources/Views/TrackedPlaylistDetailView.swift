@@ -122,11 +122,19 @@ struct TrackedPlaylistDetailView: View {
         .listRowBackground(AppTheme.surface)
     }
 
+    /// This playlist's own destination-folder override, if set (nil falls
+    /// back to the global Settings → yt-dlp → Download Folder default) —
+    /// also sent to `/api/download` as `destination_folder` so a track that
+    /// finishes after the app closes/crashes mid-download still recovers
+    /// into this same folder (see `reconcilePendingDownloads`).
+    private var destinationFolderName: String? {
+        trackedStore.playlists.first { $0.id == playlist.id }?.destinationFolder
+    }
+
     /// This playlist's resolved destination directory (its own override, or
     /// the global Settings → yt-dlp → Download Folder default).
     private var destinationDir: URL? {
-        let folder = trackedStore.playlists.first { $0.id == playlist.id }?.destinationFolder
-        return StreamingService.downloadDirectory(forFolderName: folder)
+        StreamingService.downloadDirectory(forFolderName: destinationFolderName)
     }
 
     // MARK: Track Row
@@ -265,7 +273,12 @@ struct TrackedPlaylistDetailView: View {
         }
 
         do {
-            let localURL = try await streaming.downloadToLibrary(track: track, destinationDir: destinationDir, existingSongs: library.allSongs)
+            let localURL = try await streaming.downloadToLibrary(
+                track: track,
+                destinationDir: destinationDir,
+                existingSongs: library.allSongs,
+                destinationFolderName: destinationFolderName
+            )
             library.scanLocalDocuments()
             localCopyIDs.insert(track.id)
             await maybeCloudBackup(track: track, localURL: localURL)
@@ -298,6 +311,7 @@ struct TrackedPlaylistDetailView: View {
         // children don't reach back into the @MainActor LibraryManager.
         let existing = library.allSongs
         let dir = destinationDir
+        let folderName = destinationFolderName
 
         // Bounded concurrency matching the bridge's yt-dlp semaphore (4).
         let maxConcurrent = 4
@@ -313,7 +327,12 @@ struct TrackedPlaylistDetailView: View {
                 downloadingIDs.insert(track.id)
                 group.addTask {
                     do {
-                        let url = try await streaming.downloadToLibrary(track: track, destinationDir: dir, existingSongs: existing)
+                        let url = try await streaming.downloadToLibrary(
+                            track: track,
+                            destinationDir: dir,
+                            existingSongs: existing,
+                            destinationFolderName: folderName
+                        )
                         return (track, url, false)
                     } catch StreamingError.serverDetail {
                         // e.g. an auto-generated Topic-channel track blocked from

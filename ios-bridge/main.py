@@ -377,6 +377,7 @@ def _maybe_sweep_stale_pending_downloads() -> None:
 async def _persist_finished_job(
     job_id: str, user_id: str, source_track_id: str, title: str, artist: str,
     output_file: pathlib.Path, media_type: str, filename: str,
+    destination_folder: Optional[str] = None,
 ) -> Optional[pathlib.Path]:
     """Moves a finished job's file out of its ephemeral per-attempt temp dir
     into the durable PENDING_DOWNLOADS_DIR and records it in
@@ -401,10 +402,10 @@ async def _persist_finished_job(
                 await cur.execute(
                     """
                     INSERT INTO ios_pending_downloads
-                        (job_id, user_id, source_track_id, title, artist, file_path, media_type, filename)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        (job_id, user_id, source_track_id, title, artist, file_path, media_type, filename, destination_folder)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (job_id, user_id, source_track_id, title, artist, str(dest_path), media_type, filename),
+                    (job_id, user_id, source_track_id, title, artist, str(dest_path), media_type, filename, destination_folder),
                 )
     except Exception as exc:
         logger.warning("_persist_finished_job: failed to record job %s in DB: %s", job_id, exc)
@@ -2468,6 +2469,14 @@ async def download_track(
     artist: Optional[str] = Query(None, description="Artist name, recorded in download history"),
     thumbnail: Optional[str] = Query(None, description="Thumbnail URL, recorded in download history"),
     duration: Optional[int] = Query(None, description="Duration in seconds, recorded in download history"),
+    destination_folder: Optional[str] = Query(
+        None,
+        description="Local subfolder (under 'Imported Music') this download is destined for on the "
+                     "client — e.g. a tracked playlist's own destination folder. Not used server-side "
+                     "for anything except being carried through to ios_pending_downloads, so a download "
+                     "recovered after the app was closed/crashed can still be imported into the right "
+                     "folder instead of always falling back to the default.",
+    ),
     existing_ids: Optional[str] = Query(
         None,
         description="Comma-separated 'source:id' manifest of tracks the client already "
@@ -2557,6 +2566,7 @@ async def download_track(
         use_aria2=use_aria2,
         throttle_seconds=throttle_seconds,
         concurrent_fragments=concurrent_fragments,
+        destination_folder=destination_folder,
     ))
     return JSONResponse({"job_id": job_id}, status_code=202)
 
@@ -2578,6 +2588,7 @@ async def _run_download_job(
     use_aria2: bool = False,
     throttle_seconds: int = 5,
     concurrent_fragments: int = 4,
+    destination_folder: Optional[str] = None,
 ) -> None:
     """
     Runs yt-dlp (with retries/verification) and the LUMISOUND_ID tagging step
@@ -2606,6 +2617,7 @@ async def _run_download_job(
             title=title, full_title=full_title, artist=artist, thumbnail=thumbnail, duration=duration,
             user_id=user_id, use_aria2=use_aria2,
             throttle_seconds=throttle_seconds, concurrent_fragments=concurrent_fragments,
+            destination_folder=destination_folder,
         )
     except HTTPException as exc:
         job = _DOWNLOAD_JOBS.get(job_id, {})
@@ -2647,6 +2659,7 @@ async def _do_download_job(
     use_aria2: bool = False,
     throttle_seconds: int = 5,
     concurrent_fragments: int = 4,
+    destination_folder: Optional[str] = None,
 ) -> None:
     # Large playlists drive this endpoint hard via the iOS "Download All" pipeline,
     # and yt-dlp occasionally exits 0 while leaving a truncated/corrupt file behind
@@ -2970,6 +2983,7 @@ async def _do_download_job(
                 job_id=job_id, user_id=user_id, source_track_id=f"{source}:{id}",
                 title=display_title, artist=artist or "",
                 output_file=output_file, media_type=media_type, filename=job["filename"],
+                destination_folder=destination_folder,
             )
             if dest is None:
                 return
@@ -3128,7 +3142,7 @@ async def list_pending_downloads(request: Request):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT job_id, source_track_id, title, artist, media_type, filename, created_at "
+                "SELECT job_id, source_track_id, title, artist, media_type, filename, created_at, destination_folder "
                 "FROM ios_pending_downloads WHERE user_id = %s ORDER BY created_at ASC",
                 (user_id,),
             )
@@ -3144,6 +3158,7 @@ async def list_pending_downloads(request: Request):
                 "media_type": r[4],
                 "filename": r[5],
                 "created_at": r[6].isoformat() if r[6] else None,
+                "destination_folder": r[7],
             }
             for r in rows
         ]

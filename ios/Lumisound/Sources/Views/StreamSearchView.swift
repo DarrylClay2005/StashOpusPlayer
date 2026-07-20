@@ -100,6 +100,9 @@ struct StreamSearchView: View {
                             NavigationLink(destination: SharedPlaylistsView()) {
                                 Label("Shared With Me", systemImage: "person.2.fill")
                             }
+                            NavigationLink(destination: PendingImportsView()) {
+                                Label("Pending Imports", systemImage: "tray.and.arrow.down")
+                            }
                         }
                     } label: {
                         Image(systemName: "square.grid.2x2")

@@ -174,7 +174,12 @@ final class TrackedPlaylistStore: ObservableObject {
             var blocked = 0
             for track in toGet {
                 do {
-                    _ = try await streaming.downloadToLibrary(track: track, destinationDir: destinationDir, existingSongs: library.allSongs)
+                    _ = try await streaming.downloadToLibrary(
+                        track: track,
+                        destinationDir: destinationDir,
+                        existingSongs: library.allSongs,
+                        destinationFolderName: pl.destinationFolder
+                    )
                     got += 1
                 } catch StreamingError.serverDetail {
                     // e.g. an auto-generated Topic-channel track blocked from

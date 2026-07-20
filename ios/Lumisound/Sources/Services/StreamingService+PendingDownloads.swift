@@ -52,6 +52,11 @@ extension StreamingService {
         let media_type: String?
         let filename: String
         let created_at: String?
+        /// The local subfolder this job was destined for (e.g. a tracked
+        /// playlist's own destination folder), carried through from the
+        /// original `/api/download` request — see `destination_folder` on
+        /// `downloadToLibrary`. nil/empty means the default folder.
+        let destination_folder: String?
     }
 
     private struct PendingDownloadsResponse: Decodable {
@@ -85,23 +90,20 @@ extension StreamingService {
     /// since each successfully-imported job is deleted server-side as it's
     /// fetched (see /api/download/result's pending-download branch).
     @discardableResult
-    func reconcilePendingDownloads(destinationDir: URL? = nil) async -> Int {
+    func reconcilePendingDownloads() async -> Int {
         await pendingDownloadsReconcileGate.run { [self] in
-            await performReconcilePendingDownloads(destinationDir: destinationDir)
+            await performReconcilePendingDownloads()
         }
     }
 
-    private func performReconcilePendingDownloads(destinationDir: URL?) async -> Int {
+    private func performReconcilePendingDownloads() async -> Int {
         let pending = await fetchPendingDownloads()
         appLog("reconcilePendingDownloads: \(pending.count) pending job(s) found", category: "network")
         guard !pending.isEmpty else { return 0 }
 
-        let importDir = destinationDir ?? downloadDirectory
-        try? FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)
-
         var imported = 0
         for entry in pending {
-            guard await importPendingDownload(entry, importDir: importDir) else { continue }
+            guard await importPendingDownload(entry) else { continue }
             imported += 1
         }
 
@@ -114,7 +116,23 @@ extension StreamingService {
         return imported
     }
 
-    private func importPendingDownload(_ entry: PendingDownloadInfo, importDir: URL) async -> Bool {
+    /// Imports one pending job — used both by the batch `reconcilePendingDownloads`
+    /// pass (no override, uses `entry.destination_folder` as recorded on the
+    /// job) and by `PendingImportsView`'s per-row "Import Now" (passes the
+    /// user's picker choice as `folderOverride` when they changed it from
+    /// the pre-filled default before importing).
+    @discardableResult
+    func importPendingDownload(_ entry: PendingDownloadInfo, folderOverride: String? = nil) async -> Bool {
+        // Resolved per entry (not once for the whole batch) — different
+        // pending jobs can be destined for different tracked playlists'
+        // folders. Previously this was a single `destinationDir` the caller
+        // passed in, which every call site left `nil`, so a track auto-
+        // downloaded from a playlist with its own folder always came back
+        // into the plain default folder after a crash/close recovery.
+        let resolvedFolder = folderOverride ?? entry.destination_folder
+        let importDir = StreamingService.downloadDirectory(forFolderName: resolvedFolder) ?? downloadDirectory
+        try? FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)
+
         guard let base = makeRequest("/api/download"),
               let resultURL = jobPollURL(from: base, path: "/api/download/result", jobID: entry.job_id) else {
             return false
@@ -190,6 +208,7 @@ extension StreamingService {
         }
 
         DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
+        recordRecentImport(title: rawName, artist: entry.artist, destinationFolder: resolvedFolder)
         appLog("reconcilePendingDownloads: imported job \(entry.job_id) -> \(destURL.lastPathComponent)", category: "network")
         return true
     }
