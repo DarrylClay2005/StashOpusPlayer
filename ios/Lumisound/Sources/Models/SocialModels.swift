@@ -135,8 +135,26 @@ struct SocialFriend: Decodable, Identifiable {
     let displayName: String?
     let avatarURL: String?
     let friendsSince: String?
+    /// Extra feature (friends-tab-expansion, 2026-07-21): a private nickname
+    /// only the caller set/sees — never shown on the friend's own profile or
+    /// to anyone else. `nil` when unset.
+    var nickname: String?
+    /// Extra feature: the caller's own custom tags/groups for this friend
+    /// (e.g. "Close Friends", "Music Buddies") — private organizational
+    /// labels, not visible to the friend. Always present (possibly empty)
+    /// since GET /api/social/friends always includes it now.
+    var tags: [String] = []
 
     var id: String { userId }
+
+    /// What to actually display — the nickname when set, else the display
+    /// name, else the raw username. Centralized here so every friend row/
+    /// card automatically respects a nickname the moment one exists, without
+    /// each call site re-implementing the same fallback chain.
+    var effectiveName: String {
+        if let nickname, !nickname.isEmpty { return nickname }
+        return displayName ?? username
+    }
 
     enum CodingKeys: String, CodingKey {
         case userId       = "user_id"
@@ -144,6 +162,48 @@ struct SocialFriend: Decodable, Identifiable {
         case displayName  = "display_name"
         case avatarURL    = "avatar_url"
         case friendsSince = "friends_since"
+        case nickname
+        case tags
+    }
+
+    // Hand-written rather than relying on the synthesized Decodable
+    // conformance: Swift's synthesis ignores a stored property's default
+    // value (`= []`) when deciding whether a JSON key is required, so
+    // `tags` would otherwise throw a `keyNotFound` decoding error against
+    // any past/future response that omits it, instead of quietly falling
+    // back to empty like the default expression implies everywhere else in
+    // this struct's own Swift-side construction.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        userId = try container.decode(String.self, forKey: .userId)
+        username = try container.decode(String.self, forKey: .username)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+        avatarURL = try container.decodeIfPresent(String.self, forKey: .avatarURL)
+        friendsSince = try container.decodeIfPresent(String.self, forKey: .friendsSince)
+        nickname = try container.decodeIfPresent(String.self, forKey: .nickname)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+    }
+}
+
+extension SocialFriend {
+    var friendsSinceDate: Date? {
+        guard let friendsSince else { return nil }
+        return parseServerDate(friendsSince)
+    }
+
+    /// Extra feature: friendiversary callouts — derived entirely client-side
+    /// from `friends_since` (no new backend endpoint needed for this one).
+    /// Returns the number of full years since becoming friends when today is
+    /// the exact month/day anniversary, else `nil`.
+    var friendiversaryYears: Int? {
+        guard let since = friendsSinceDate else { return nil }
+        let cal = Calendar.current
+        let today = Date()
+        guard cal.component(.day, from: since) == cal.component(.day, from: today),
+              cal.component(.month, from: since) == cal.component(.month, from: today)
+        else { return nil }
+        let years = cal.dateComponents([.year], from: since, to: today).year ?? 0
+        return years >= 1 ? years : nil
     }
 }
 
@@ -297,5 +357,53 @@ struct MusicCompatibility: Decodable, Equatable {
         case insufficientData = "insufficient_data"
         case sharedArtists     = "shared_artists"
         case sharedGenres      = "shared_genres"
+    }
+}
+
+// MARK: - Friends tab expansion models (2026-07-21)
+
+/// Response from GET /api/social/friends/tags — the caller's own distinct
+/// tag names across all friends, used to populate the filter-chip row above
+/// the redesigned friends list.
+struct FriendTagNamesResponse: Decodable {
+    let tags: [String]
+}
+
+/// One entry from GET /api/social/friends/leaderboard — extra feature: a
+/// weekly "most active friend" ranking by play count.
+struct FriendLeaderboardEntry: Decodable, Identifiable, Equatable {
+    let userId: String
+    let username: String
+    let displayName: String?
+    let avatarURL: String?
+    let playCount: Int
+
+    var id: String { userId }
+
+    enum CodingKeys: String, CodingKey {
+        case userId      = "user_id"
+        case username
+        case displayName = "display_name"
+        case avatarURL   = "avatar_url"
+        case playCount   = "play_count"
+    }
+}
+
+/// Response from GET /api/social/friends/leaderboard.
+struct FriendLeaderboardResponse: Decodable {
+    let leaderboard: [FriendLeaderboardEntry]
+}
+
+/// Response from GET /api/social/presence/listening-together — extra
+/// feature: which friends are playing the exact same track as the caller
+/// right now.
+struct ListeningTogetherResponse: Decodable {
+    let title: String?
+    let artist: String?
+    let listeningTogether: [SocialUserRef]
+
+    enum CodingKeys: String, CodingKey {
+        case title, artist
+        case listeningTogether = "listening_together"
     }
 }

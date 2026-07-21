@@ -1114,6 +1114,52 @@ CREATE TABLE IF NOT EXISTS ios_social_profile_comments (
     FOREIGN KEY (author_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
+-- ---------------------------------------------------------------------------
+-- Friends tab expansion (Feature: friends-tab-expansion, 2026-07-21) — new
+-- storage for two of the five features woven into the redesigned Friends
+-- tab: private nicknames and custom friend tags/groups. The other three new
+-- features (weekly activity leaderboard, "listening together", friendiversary
+-- callouts) are all derived at read time from tables that already exist
+-- above (ios_play_history, ios_presence_state, ios_social_friends.created_at)
+-- and need no new storage of their own.
+-- ---------------------------------------------------------------------------
+
+-- A friend nickname is private to whoever set it (Discord-style "server
+-- nickname" but scoped to the friendship, not a server) — the friend being
+-- nicknamed never sees it and it never appears on their public profile.
+-- Server-synced (not just UserDefaults) so it follows the user across
+-- devices/reinstalls, same reasoning as every other Social Ecosystem table
+-- being bridge-backed rather than local-only. One row max per (owner,
+-- friend) pair; deleting the nickname is a DELETE, not an empty-string UPDATE
+-- (see set_friend_nickname), so "never customized" and "cleared" both read
+-- back identically as no row.
+CREATE TABLE IF NOT EXISTS ios_social_friend_nicknames (
+    user_id VARCHAR(36) NOT NULL,
+    friend_id VARCHAR(36) NOT NULL,
+    nickname VARCHAR(60) NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, friend_id),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
+    FOREIGN KEY (friend_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Custom friend tags/groups ("Close Friends", "Music Buddies", ...) power
+-- the filter chips above the redesigned friends list. Free-form per-user
+-- strings, not shared/global objects, so one row per (owner, friend, tag)
+-- is enough storage — nothing to normalize into a separate tag-definitions
+-- table. Distinct rows per tag_name let a single friend carry multiple tags.
+CREATE TABLE IF NOT EXISTS ios_social_friend_tags (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    friend_id VARCHAR(36) NOT NULL,
+    tag_name VARCHAR(40) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_friend_tag (user_id, friend_id, tag_name),
+    INDEX idx_friend_tags_user (user_id, tag_name),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
+    FOREIGN KEY (friend_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
 -- Feature: pending-download folder routing (2026-07-19). The job that
 -- created a pending download already knows which local folder it's destined
 -- for (e.g. a tracked playlist's own destination folder — see
