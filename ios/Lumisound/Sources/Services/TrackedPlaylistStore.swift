@@ -143,6 +143,16 @@ final class TrackedPlaylistStore: ObservableObject {
 
     // MARK: Auto-download
 
+    /// Tracks in flight at once during a single playlist's auto-download
+    /// pass (see `runAutoDownloads`). Matches the bridge's own
+    /// `_YTDLP_SEMAPHORE` (main.py) exactly — the bridge already caps
+    /// itself at 4 concurrent yt-dlp processes GLOBALLY, across every user
+    /// and every request path, so anything this client sends beyond 4 just
+    /// queues there harmlessly. Sending 4 at once (instead of 1) is what
+    /// actually lets this client reach that existing server-side capacity
+    /// instead of leaving 3 of the bridge's 4 slots idle the whole time.
+    private static let autoDownloadConcurrency = 4
+
     /// For each auto-download playlist not checked in the last `minInterval`,
     /// resolves it and downloads any tracks the user doesn't already have
     /// (deduped via `LibraryManager.hasLocalCopy`). Safe to call on launch /
@@ -180,26 +190,57 @@ final class TrackedPlaylistStore: ObservableObject {
             let identityIndex = library.importedIdentityIndex()
             let toGet = tracks.filter { !library.hasLocalCopy(of: $0, localSourceIDs: localSourceIDs, identityIndex: identityIndex) }
             let destinationDir = StreamingService.downloadDirectory(forFolderName: pl.destinationFolder)
+            let existingSongsSnapshot = library.allSongs
+            // `got`/`blocked` and the per-track work itself run on
+            // `StreamingService`'s own MainActor isolation regardless of how
+            // many `group.addTask` closures call into it concurrently —
+            // actor isolation only serializes the SYNCHRONOUS stretches
+            // between awaits, not the awaited work itself, so the slow part
+            // of each download (network round-trips, the bridge's own
+            // yt-dlp job) genuinely overlaps across these tasks rather than
+            // queuing behind each other on the client. Was previously a
+            // plain sequential `for track in toGet { await ... }` — one
+            // track at a time — which, at the ~15-30s a job-based download
+            // actually takes end-to-end (see the bridge's own request logs),
+            // turned a several-hundred-track playlist into well over an
+            // hour of serialized waiting even though the bridge itself was
+            // sitting mostly idle the whole time.
             var got = 0
             var blocked = 0
-            for track in toGet {
-                do {
-                    _ = try await streaming.downloadToLibrary(
-                        track: track,
-                        destinationDir: destinationDir,
-                        existingSongs: library.allSongs,
-                        destinationFolderName: pl.destinationFolder
-                    )
-                    got += 1
-                } catch StreamingError.serverDetail {
-                    // e.g. an auto-generated Topic-channel track blocked from
-                    // extraction — tallied so the summary toast can explain why
-                    // some tracks were skipped instead of silently dropping them.
-                    blocked += 1
-                } catch {
-                    // Other failures (network, timeout, etc.) stay silent here —
-                    // this is a background check, and the next scheduled run
-                    // will simply retry them.
+            await withTaskGroup(of: (succeeded: Bool, wasBlocked: Bool).self) { group in
+                var nextIndex = 0
+                func startNext() {
+                    guard nextIndex < toGet.count else { return }
+                    let track = toGet[nextIndex]
+                    nextIndex += 1
+                    group.addTask {
+                        do {
+                            _ = try await streaming.downloadToLibrary(
+                                track: track,
+                                destinationDir: destinationDir,
+                                existingSongs: existingSongsSnapshot,
+                                destinationFolderName: pl.destinationFolder
+                            )
+                            return (true, false)
+                        } catch StreamingError.serverDetail {
+                            // e.g. an auto-generated Topic-channel track
+                            // blocked from extraction — tallied so the
+                            // summary toast can explain why some tracks
+                            // were skipped instead of silently dropping them.
+                            return (false, true)
+                        } catch {
+                            // Other failures (network, timeout, etc.) stay
+                            // silent here — this is a background check, and
+                            // the next scheduled run will simply retry them.
+                            return (false, false)
+                        }
+                    }
+                }
+                for _ in 0..<min(Self.autoDownloadConcurrency, toGet.count) { startNext() }
+                for await result in group {
+                    if result.succeeded { got += 1 }
+                    if result.wasBlocked { blocked += 1 }
+                    startNext()
                 }
             }
             if got > 0 {
