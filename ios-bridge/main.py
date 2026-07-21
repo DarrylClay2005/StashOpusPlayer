@@ -37,6 +37,9 @@ from starlette.background import BackgroundTask
 from starlette.requests import ClientDisconnect
 
 import aioapns
+import firebase_admin
+from firebase_admin import credentials as fcm_credentials
+from firebase_admin import messaging as fcm_messaging
 import pymysql
 import pyotp
 import yt_dlp
@@ -140,6 +143,21 @@ APNS_TOPIC: str = os.getenv("APNS_TOPIC", "com.lumisound.ios")
 # provisioning profile, which only accepts push from Apple's *sandbox* APNs
 # environment. Flip to "0" only once distributing a real App Store build.
 APNS_USE_SANDBOX: bool = os.getenv("APNS_USE_SANDBOX", "1") in ("1", "true", "True", "yes")
+# Optional: Firebase service account key (base64-encoded JSON), for sending
+# real push to Android clients (ios_push_tokens rows with platform='android')
+# via FCM. Same "unset = feature quietly disabled" contract as the APNs vars
+# above — Android tokens still get registered/stored via /user/push-token,
+# they just never get anything sent to them until this is set.
+#
+# This uses the modern FCM HTTP v1 API (via firebase-admin, which also
+# handles the OAuth2 token exchange/refresh for us) rather than the legacy
+# FCM "server key" HTTP API — Google shut the legacy API down in June 2024,
+# so it's no longer a viable option, not just a stylistic choice.
+#
+# To generate: Firebase console -> Project settings -> Service accounts ->
+# Generate new private key, then base64-encode the downloaded JSON file
+# (e.g. `base64 -w0 service-account.json`).
+FCM_SERVICE_ACCOUNT_JSON_BASE64: str = os.getenv("FCM_SERVICE_ACCOUNT_JSON_BASE64", "")
 # Discord webhook URL that new in-app bug reports are posted to, so they're
 # seen immediately instead of sitting unnoticed in ios_bug_reports. This is a
 # standalone admin/developer channel — entirely separate from any per-user
@@ -10200,43 +10218,135 @@ def _get_apns_client() -> Optional[aioapns.APNs]:
     return _apns_client
 
 
+_fcm_app: Optional[firebase_admin.App] = None
+_fcm_app_unavailable = False
+
+
+def _get_fcm_app() -> Optional[firebase_admin.App]:
+    """Lazily builds the singleton Firebase app used to send Android push via
+    FCM. Returns None if push isn't configured (no service account) or failed
+    to initialize once — callers must treat that as "push unavailable" and
+    silently no-op, never raise. Mirrors `_get_apns_client` above."""
+    global _fcm_app, _fcm_app_unavailable
+    if _fcm_app is not None:
+        return _fcm_app
+    if _fcm_app_unavailable or not FCM_SERVICE_ACCOUNT_JSON_BASE64:
+        return None
+    try:
+        service_account_info = json.loads(base64.b64decode(FCM_SERVICE_ACCOUNT_JSON_BASE64).decode("utf-8"))
+        cred = fcm_credentials.Certificate(service_account_info)
+        # Named (rather than default) app so this never collides with any
+        # other firebase_admin app a future feature might initialize.
+        _fcm_app = firebase_admin.initialize_app(cred, name="lumisound-fcm")
+    except Exception as exc:
+        logger.warning("FCM app init failed, Android push notifications disabled: %s", exc)
+        _fcm_app_unavailable = True
+        return None
+    return _fcm_app
+
+
+async def _send_fcm_push(
+    app: firebase_admin.App, token: str, notif_type: str, title: str, body: str,
+    data: Optional[dict], content_available: bool,
+) -> Optional[str]:
+    """Sends a single FCM push to *token*. Returns *token* back to the caller
+    if FCM reports it as invalid/unregistered (so the caller can batch it into
+    the same dead-token cleanup used for APNs), or None otherwise — including
+    on success or on any other error, which is just logged and swallowed, same
+    best-effort posture as the APNs loop.
+
+    `content_available` mirrors the APNs parameter of the same name, but FCM
+    has no single flag for it — instead it's the presence/absence of the
+    top-level `notification` payload that decides whether the OS or the app
+    handles display. When True, this is sent as a *data-only* message (no
+    `notification` block) so it's always delivered to the app's
+    FirebaseMessagingService for background handling, even while backgrounded
+    or killed, the same guarantee `content-available` gives on iOS — unlike a
+    combined notification+data message, which Android only surfaces to the OS
+    tray and does not reliably hand to the app while backgrounded. The
+    download-ready notification relies on this to wake the app and import a
+    finished background download without user interaction."""
+    fcm_data = {"type": notif_type}
+    for key, value in (data or {}).items():
+        fcm_data[str(key)] = value if isinstance(value, str) else json.dumps(value)
+    if content_available:
+        # Data-only: let the app build/show its own notification.
+        fcm_data["title"] = title
+        fcm_data["body"] = body
+        notification = None
+    else:
+        fcm_data["title"] = title
+        fcm_data["body"] = body
+        notification = fcm_messaging.Notification(title=title, body=body)
+    message = fcm_messaging.Message(
+        token=token,
+        data=fcm_data,
+        notification=notification,
+        android=fcm_messaging.AndroidConfig(priority="high"),
+    )
+    try:
+        await asyncio.to_thread(fcm_messaging.send, message, app=app)
+    except fcm_messaging.UnregisteredError:
+        return token
+    except Exception as exc:
+        logger.debug("_send_push_best_effort: FCM send failed: %s", exc)
+    return None
+
+
 async def _send_push_best_effort(
     user_id: str, notif_type: str, title: str, body: str, data: Optional[dict],
     content_available: bool = False,
 ) -> None:
-    """Sends a real APNs push to every device *user_id* has registered.
-    Runs as a detached task (see _create_notification) so it never adds
-    latency to — or can fail — the request that triggered the notification.
-    No-ops silently if APNs isn't configured, so self-hosted deployments
-    without an Apple push key keep working exactly as before (in-app/poll
-    -only notifications).
+    """Sends a real push (APNs for iOS, FCM for Android) to every device
+    *user_id* has registered. Runs as a detached task (see
+    _create_notification) so it never adds latency to — or can fail — the
+    request that triggered the notification. No-ops silently per-platform if
+    that platform's push isn't configured, so self-hosted deployments without
+    push keys keep working exactly as before (in-app/poll-only
+    notifications).
 
     `content_available` additionally sets `aps.content-available = 1`
-    alongside the normal alert — iOS still shows the alert/sound as usual,
-    but ALSO invokes `application(_:didReceiveRemoteNotification:
+    alongside the normal alert on iOS — iOS still shows the alert/sound as
+    usual, but ALSO invokes `application(_:didReceiveRemoteNotification:
     fetchCompletionHandler:)` on the client (if implemented) with a background
-    execution window, even while the app is suspended or not running. Used by
-    the download-ready notification so a finished background download can be
-    fetched and imported into the library immediately instead of waiting for
-    the user to next open the app."""
-    client = _get_apns_client()
-    if client is None:
+    execution window, even while the app is suspended or not running. See
+    `_send_fcm_push` for the Android equivalent. Used by the download-ready
+    notification so a finished background download can be fetched and
+    imported into the library immediately instead of waiting for the user to
+    next open the app."""
+    apns_client = _get_apns_client()
+    fcm_app = _get_fcm_app()
+    if apns_client is None and fcm_app is None:
         return
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT device_token FROM ios_push_tokens WHERE user_id = %s",
+                    "SELECT device_token, platform FROM ios_push_tokens WHERE user_id = %s",
                     (user_id,),
                 )
-                tokens = [row[0] for row in await cur.fetchall()]
+                rows = await cur.fetchall()
     except Exception as exc:
         logger.debug("_send_push_best_effort: token lookup failed: %s", exc)
         return
 
     dead_tokens: list[str] = []
-    for token in tokens:
+    for token, platform in rows:
+        if platform == "android":
+            if fcm_app is None:
+                continue
+            dead_token = await _send_fcm_push(
+                fcm_app, token, notif_type, title, body, data, content_available,
+            )
+            if dead_token:
+                dead_tokens.append(dead_token)
+            continue
+
+        # Anything else ('ios', legacy/unset rows, etc.) goes through APNs,
+        # unchanged from before platform-aware routing existed.
+        if apns_client is None:
+            continue
         aps: dict = {"alert": {"title": title, "body": body}, "sound": "default"}
         if content_available:
             aps["content-available"] = 1
@@ -10250,7 +10360,7 @@ async def _send_push_best_effort(
             push_type=aioapns.PushType.ALERT,
         )
         try:
-            result = await client.send_notification(request)
+            result = await apns_client.send_notification(request)
             if not result.is_successful and result.description in ("Unregistered", "BadDeviceToken"):
                 dead_tokens.append(token)
         except Exception as exc:

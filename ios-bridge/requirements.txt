@@ -9,3 +9,4 @@ mutagen==1.47.0
 google-genai==2.12.1
 pyotp==2.9.0
 aioapns==4.0
+firebase-admin==7.5.0
