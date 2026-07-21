@@ -47,6 +47,13 @@ struct LibraryHubView: View {
     @State private var genreGroups: [(genre: String, songs: [Song])] = []
     @State private var hasLoadedOnce = false
 
+    // 2026-07-20 Home Tab expansion — on-device-only additions, computed by
+    // `reload()` alongside everything above. See `LibraryManager+HubContent.swift`.
+    @State private var topArtistGroups: [(artist: String, songs: [Song], playCount: Int)] = []
+    @State private var decadeGroups: [(decade: String, songs: [Song])] = []
+    @State private var deeperCutsSongs: [Song] = []
+    @State private var weeklyRecap: LibraryManager.HubWeeklyRecap? = nil
+
     // Server-backed extras — independent of the on-device reload() above,
     // since these come from the network rather than LibraryManager.
     @State private var weeklyMixSongs: [Song] = []
@@ -176,6 +183,11 @@ struct LibraryHubView: View {
         case .moods:              return !moodBucketsWithSongs.isEmpty
         case .friendsActivity:    return !social.friendsActivity.isEmpty
         case .similarListeners:   return !account.similarListenerTracks.isEmpty
+        case .achievements:       return (account.achievements?.totalPlays ?? 0) > 0
+        case .weeklyRecap:        return weeklyRecap != nil
+        case .topArtists:         return !topArtistGroups.isEmpty
+        case .decades:            return !decadeGroups.isEmpty
+        case .deeperCuts:         return !deeperCutsSongs.isEmpty
         }
     }
 
@@ -240,6 +252,28 @@ struct LibraryHubView: View {
                     similarListenerSearchQuery = [track.title, track.artist].compactMap { $0 }.joined(separator: " ")
                 }
             )
+
+        case .achievements:
+            if let data = account.achievements {
+                HubAchievementsTeaser(data: data, accent: resolvedAccent)
+            }
+
+        case .weeklyRecap:
+            if let weeklyRecap {
+                HubWeeklyRecapCard(recap: weeklyRecap, accent: resolvedAccent)
+            }
+
+        case .topArtists:
+            HubTopArtistsCarousel(groups: topArtistGroups, accent: resolvedAccent)
+
+        case .decades:
+            HubDecadesCarousel(groups: decadeGroups, accent: resolvedAccent)
+
+        case .deeperCuts:
+            HubSongCarousel(
+                title: "Deeper Cuts", icon: "waveform.badge.magnifyingglass",
+                songs: deeperCutsSongs, seeAllTab: nil, selectedTab: $selectedTab, accent: resolvedAccent
+            )
         }
     }
 
@@ -268,7 +302,15 @@ struct LibraryHubView: View {
             guard account.isLoggedIn else { return }
             onThisDayGroups = await account.fetchOnThisDay()
         }()
-        _ = await (weeklyMix, similarListeners, friendsActivity, onThisDay)
+        // Reuses the existing GET /user/achievements endpoint (already
+        // powering the standalone `AchievementsView` reachable from
+        // Settings) rather than adding new server support — the Home tab
+        // just needed a compact teaser for data that already existed.
+        async let achievements: Void = {
+            guard account.isLoggedIn else { return }
+            await account.fetchAchievements()
+        }()
+        _ = await (weeklyMix, similarListeners, friendsActivity, onThisDay, achievements)
     }
 
     // MARK: Mixes carousel
@@ -353,6 +395,10 @@ struct LibraryHubView: View {
         forgottenFavorites = library.forgottenFavoriteSongs(limit: 20)
         recentlyPlayed = library.recentlyPlayedSongs(limit: 20)
         genreGroups = library.genreGroups(limit: 12)
+        topArtistGroups = library.topArtistGroups(limit: 12)
+        decadeGroups = library.decadeGroups(limit: 10)
+        deeperCutsSongs = library.deeperCutsSongs(limit: 20)
+        weeklyRecap = library.weeklyRecap()
         if !hasLoadedOnce {
             withAnimation(.easeInOut(duration: 0.35)) { hasLoadedOnce = true }
         }
@@ -868,6 +914,229 @@ private struct HubOnThisDayTeaser: View {
             .padding(.horizontal, 16)
         }
         .buttonStyle(PressableButtonStyle())
+    }
+}
+
+// MARK: - Achievements teaser
+//
+// A compact "how am I doing" summary of the existing GET /user/achievements
+// feature (streaks + badge unlocks, already fully explorable via the
+// standalone `AchievementsView` reachable from Settings) — surfaced right on
+// the hub for the same reason `HubOnThisDayTeaser` is: a feature already
+// worth having shouldn't only be discoverable by already knowing it's buried
+// in Settings. Tapping pushes the existing full `AchievementsView` rather
+// than duplicating its badge grid here.
+private struct HubAchievementsTeaser: View {
+    let data: AchievementsData
+    var accent: Color = AppTheme.dynamicAccent
+
+    private var subtitle: String {
+        if data.currentStreakDays > 0 {
+            return "\(data.currentStreakDays)-day streak · \(data.badges.count) badge\(data.badges.count == 1 ? "" : "s") unlocked"
+        }
+        return "\(data.badges.count) badge\(data.badges.count == 1 ? "" : "s") unlocked · \(data.totalPlays) plays"
+    }
+
+    var body: some View {
+        NavigationLink {
+            AchievementsView()
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(accent.opacity(0.16))
+                    Image(systemName: "trophy.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(accent)
+                }
+                .frame(width: 44, height: 44)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Streaks & Achievements")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .padding(12)
+            .adaptiveGlass(
+                tint: accent.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous),
+                fallback: AppTheme.surface
+            )
+            .padding(.horizontal, 16)
+        }
+        .buttonStyle(PressableButtonStyle())
+    }
+}
+
+// MARK: - This Week recap card
+//
+// A non-interactive stat card (no detail screen to push into — unlike every
+// other teaser here, this is entirely derived from on-device
+// `PlayHistoryStore` data, not a server feature) surfacing
+// `LibraryManager.weeklyRecap()`'s three numbers side by side.
+private struct HubWeeklyRecapCard: View {
+    let recap: LibraryManager.HubWeeklyRecap
+    var accent: Color = AppTheme.dynamicAccent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HubSectionHeader(title: "This Week", icon: "chart.bar.fill", accent: accent)
+                .padding(.horizontal, 16)
+
+            HStack(spacing: 10) {
+                statTile(value: "\(recap.songsPlayed)", label: recap.songsPlayed == 1 ? "song played" : "songs played")
+                statTile(value: "\(recap.estimatedMinutes)", label: "est. minutes")
+                if let topArtist = recap.topArtist {
+                    statTile(value: topArtist, label: "top artist", isCompact: true)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    private func statTile(value: String, label: String, isCompact: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(isCompact ? .subheadline.weight(.bold) : .title3.weight(.bold))
+                .foregroundStyle(AppTheme.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(AppTheme.textSecondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .adaptiveGlass(
+            tint: accent.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous),
+            fallback: AppTheme.surface
+        )
+    }
+}
+
+// MARK: - Top Artists carousel
+//
+// Ranks the on-device library's own artist tags by lifetime plays (see
+// `LibraryManager.topArtistGroups`) — real listening behavior, not fetched
+// data. Tapping an artist tile shuffle-plays everything by them, matching
+// `HubGenresCarousel`'s identical "one tap to just start listening" pattern
+// rather than pushing into a browsing screen for a single artist.
+private struct HubTopArtistsCarousel: View {
+    let groups: [(artist: String, songs: [Song], playCount: Int)]
+    var accent: Color = AppTheme.dynamicAccent
+    @EnvironmentObject private var player: AudioPlayerManager
+
+    private let tileSize: CGFloat = 132
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HubSectionHeader(title: "Top Artists", icon: "music.mic", accent: accent)
+                .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 14) {
+                    ForEach(groups, id: \.artist) { group in
+                        HubParallaxCard {
+                            Button {
+                                player.shuffleEnabled = true
+                                if let first = group.songs.randomElement() {
+                                    player.play(song: first, in: group.songs)
+                                }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HubArtworkCollage(
+                                        songs: Array(group.songs.prefix(4)),
+                                        size: tileSize,
+                                        placeholderIcon: "music.mic"
+                                    )
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(group.artist)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(AppTheme.textPrimary)
+                                            .lineLimit(1)
+                                        Text("\(group.playCount) \(group.playCount == 1 ? "play" : "plays")")
+                                            .font(.caption2)
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+                                }
+                                .frame(width: tileSize, alignment: .leading)
+                            }
+                            .buttonStyle(PressableButtonStyle())
+                        }
+                        .frame(width: tileSize, height: tileSize + 40)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            }
+        }
+    }
+}
+
+// MARK: - Decades carousel
+//
+// Groups the on-device library by release decade (parsed from `Song.year`
+// — see `LibraryManager.decadeGroups`), newest first. Tapping a tile
+// shuffle-plays that decade, same one-tap pattern as Genres/Top Artists.
+private struct HubDecadesCarousel: View {
+    let groups: [(decade: String, songs: [Song])]
+    var accent: Color = AppTheme.dynamicAccent
+    @EnvironmentObject private var player: AudioPlayerManager
+
+    private let tileSize: CGFloat = 132
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HubSectionHeader(title: "Decades", icon: "hourglass", accent: accent)
+                .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 14) {
+                    ForEach(groups, id: \.decade) { group in
+                        HubParallaxCard {
+                            Button {
+                                player.shuffleEnabled = true
+                                if let first = group.songs.randomElement() {
+                                    player.play(song: first, in: group.songs)
+                                }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HubArtworkCollage(
+                                        songs: Array(group.songs.prefix(4)),
+                                        size: tileSize,
+                                        placeholderIcon: "hourglass"
+                                    )
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(group.decade)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(AppTheme.textPrimary)
+                                            .lineLimit(1)
+                                        Text("\(group.songs.count) \(group.songs.count == 1 ? "song" : "songs")")
+                                            .font(.caption2)
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+                                }
+                                .frame(width: tileSize, alignment: .leading)
+                            }
+                            .buttonStyle(PressableButtonStyle())
+                        }
+                        .frame(width: tileSize, height: tileSize + 40)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            }
+        }
     }
 }
 

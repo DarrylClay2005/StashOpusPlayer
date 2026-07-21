@@ -30,6 +30,14 @@ enum HubSectionKind: String, CaseIterable, Codable, Identifiable {
     case moods
     case friendsActivity
     case similarListeners
+    // 2026-07-20 Home Tab expansion — see `LibraryHubView`'s corresponding
+    // `sectionContent`/`sectionHasContent` cases and `LibraryManager+HubContent.swift`
+    // for each one's data source.
+    case achievements
+    case weeklyRecap
+    case topArtists
+    case decades
+    case deeperCuts
 
     var id: String { rawValue }
 
@@ -47,6 +55,11 @@ enum HubSectionKind: String, CaseIterable, Codable, Identifiable {
         case .moods:              return "Moods"
         case .friendsActivity:    return "Friends Activity"
         case .similarListeners:   return "Similar Listeners"
+        case .achievements:       return "Streaks & Achievements"
+        case .weeklyRecap:        return "This Week"
+        case .topArtists:         return "Top Artists"
+        case .decades:            return "Decades"
+        case .deeperCuts:         return "Deeper Cuts"
         }
     }
 
@@ -67,15 +80,24 @@ enum HubSectionKind: String, CaseIterable, Codable, Identifiable {
         case .moods:              return "theatermasks.fill"
         case .friendsActivity:    return "person.2.wave.2.fill"
         case .similarListeners:   return "person.3.sequence.fill"
+        case .achievements:       return "trophy.fill"
+        case .weeklyRecap:        return "chart.bar.fill"
+        case .topArtists:         return "music.mic"
+        case .decades:            return "hourglass"
+        case .deeperCuts:         return "waveform.badge.magnifyingglass"
         }
     }
 
     /// The hub's original hardcoded sequence, preserved as the default so a
     /// user who never opens the customization sheet sees exactly the same
-    /// layout as before this feature existed.
+    /// layout as before this feature existed. New 2026-07-20 sections are
+    /// interleaved into sensible spots rather than only appended, so a
+    /// first-run user (no saved order yet) sees them somewhere natural
+    /// rather than all dumped at the very end.
     static let defaultOrder: [HubSectionKind] = [
-        .onThisDay, .speedDial, .weeklyMix, .mixes, .recentlyAdded, .onRepeat,
-        .recentlyPlayed, .genres, .forgottenFavorites, .moods, .friendsActivity, .similarListeners,
+        .onThisDay, .achievements, .weeklyRecap, .speedDial, .weeklyMix, .mixes,
+        .recentlyAdded, .onRepeat, .recentlyPlayed, .topArtists, .genres, .decades,
+        .forgottenFavorites, .deeperCuts, .moods, .friendsActivity, .similarListeners,
     ]
 }
 
