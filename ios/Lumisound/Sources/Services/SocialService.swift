@@ -388,6 +388,102 @@ final class SocialService: ObservableObject {
         }
     }
 
+    // MARK: - Friends tab expansion (2026-07-21)
+    //
+    // Five additions woven into the redesigned FriendsListView: private
+    // nicknames, custom friend tags/groups, a weekly activity leaderboard,
+    // and "listening together". (Friendiversary callouts are computed
+    // entirely client-side from `SocialFriend.friendsSince` — no service
+    // method needed for that one.)
+
+    @Published var friendTagNames: [String] = []
+    @Published var leaderboard: [FriendLeaderboardEntry] = []
+    @Published var listeningTogether: [SocialUserRef] = []
+    @Published var listeningTogetherTrack: (title: String, artist: String?)? = nil
+
+    /// Sets or clears (pass `nil`/empty) a private nickname for a friend.
+    /// Re-fetches the friends list afterward so `SocialFriend.nickname`
+    /// (and thus every row using `effectiveName`) reflects it immediately.
+    func setFriendNickname(_ friendId: String, nickname: String?) async {
+        guard let account, account.isLoggedIn else { return }
+        struct Body: Encodable { let nickname: String? }
+        do {
+            _ = try await account.makeRequest(
+                "/api/social/friends/\(friendId)/nickname", method: "PUT", body: Body(nickname: nickname)
+            )
+            await fetchFriends()
+        } catch {
+            handle(error)
+        }
+    }
+
+    func fetchFriendTagNames() async {
+        guard let account, account.isLoggedIn else { return }
+        do {
+            let data = try await account.makeRequest("/api/social/friends/tags")
+            friendTagNames = try JSONDecoder().decode(FriendTagNamesResponse.self, from: data).tags
+        } catch {
+            handle(error)
+        }
+    }
+
+    func addFriendTag(_ friendId: String, tagName: String) async {
+        guard let account, account.isLoggedIn else { return }
+        struct Body: Encodable { let tag_name: String }
+        do {
+            _ = try await account.makeRequest(
+                "/api/social/friends/\(friendId)/tags", method: "POST", body: Body(tag_name: tagName)
+            )
+            async let friendsList: () = fetchFriends()
+            async let tagNames: () = fetchFriendTagNames()
+            _ = await (friendsList, tagNames)
+        } catch {
+            handle(error)
+        }
+    }
+
+    func removeFriendTag(_ friendId: String, tagName: String) async {
+        guard let account, account.isLoggedIn else { return }
+        // `.urlPathAllowed` alone still permits a literal "/", which would
+        // be misread as an extra path segment rather than part of the tag
+        // name — strip it from the allowed set so a tag containing one gets
+        // correctly percent-encoded instead of corrupting the URL.
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/")
+        let encoded = tagName.addingPercentEncoding(withAllowedCharacters: allowed) ?? tagName
+        do {
+            _ = try await account.makeRequest("/api/social/friends/\(friendId)/tags/\(encoded)", method: "DELETE")
+            await fetchFriends()
+        } catch {
+            handle(error)
+        }
+    }
+
+    /// "Most active friend this week" — ranked by play count.
+    func fetchLeaderboard(days: Int = 7) async {
+        guard let account, account.isLoggedIn else { return }
+        do {
+            let data = try await account.makeRequest("/api/social/friends/leaderboard?days=\(days)")
+            leaderboard = try JSONDecoder().decode(FriendLeaderboardResponse.self, from: data).leaderboard
+        } catch {
+            handle(error)
+        }
+    }
+
+    /// Which friends are playing the exact same track as the caller right
+    /// now (see GET /api/social/presence/listening-together).
+    func fetchListeningTogether() async {
+        guard let account, account.isLoggedIn else { return }
+        do {
+            let data = try await account.makeRequest("/api/social/presence/listening-together")
+            let response = try JSONDecoder().decode(ListeningTogetherResponse.self, from: data)
+            listeningTogether = response.listeningTogether
+            listeningTogetherTrack = response.title.map { ($0, response.artist) }
+        } catch {
+            handle(error)
+        }
+    }
+
     // MARK: - Helpers
 
     private func handle(_ error: Error) {

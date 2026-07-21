@@ -13241,9 +13241,34 @@ async def list_friends(payload: dict = Depends(get_current_user)):
                 (user_id,),
             )
             rows = await cur.fetchall()
+
+            # Nicknames/tags (Feature: friends-tab-expansion, 2026-07-21) —
+            # two extra targeted queries rather than a GROUP_CONCAT'd join,
+            # since tags are one-to-many per friend and this stays simplest
+            # to read; a friends list isn't paginated, so this is still just
+            # 3 total queries per request, not N+1 per friend.
+            await cur.execute(
+                "SELECT friend_id, nickname FROM ios_social_friend_nicknames WHERE user_id = %s",
+                (user_id,),
+            )
+            nickname_by_friend = {r[0]: r[1] for r in await cur.fetchall()}
+
+            await cur.execute(
+                "SELECT friend_id, tag_name FROM ios_social_friend_tags WHERE user_id = %s ORDER BY tag_name ASC",
+                (user_id,),
+            )
+            tags_by_friend: dict[str, list[str]] = {}
+            for fid, tag in await cur.fetchall():
+                tags_by_friend.setdefault(fid, []).append(tag)
+
     return {
         "friends": [
-            {**_public_user_fields((r[0], r[1], r[2], r[3])), "friends_since": r[4].isoformat() if r[4] else None}
+            {
+                **_public_user_fields((r[0], r[1], r[2], r[3])),
+                "friends_since": r[4].isoformat() if r[4] else None,
+                "nickname": nickname_by_friend.get(r[0]),
+                "tags": tags_by_friend.get(r[0], []),
+            }
             for r in rows
         ]
     }
@@ -13780,6 +13805,223 @@ async def social_compatibility(user_id: str, payload: dict = Depends(get_current
         "shared_artists": [display_artists_a.get(k, k) for k in shared_artist_keys],
         "shared_genres": [display_genres_a.get(k, k) for k in shared_genre_keys],
     }
+
+
+# ---------------------------------------------------------------------------
+# Friends tab expansion (Feature: friends-tab-expansion, 2026-07-21) — five
+# additions woven into the redesigned Friends tab (see FriendsListView.swift
+# for the client side): private nicknames, custom friend tags/groups, a
+# weekly activity leaderboard, and a "listening together" presence
+# comparison. (A fifth feature, friendiversary callouts, is computed
+# entirely client-side from the `friends_since` timestamp GET
+# /api/social/friends already returns — no new backend surface needed for
+# it.) New tables: ios_social_friend_nicknames, ios_social_friend_tags (see
+# schema.sql). Everything else here reads from tables that already exist.
+# ---------------------------------------------------------------------------
+
+
+class FriendNicknameUpdate(BaseModel):
+    nickname: Optional[str] = None  # None or "" clears the nickname
+
+
+class FriendTagCreate(BaseModel):
+    tag_name: str
+
+
+async def _require_friendship(cur, user_id: str, friend_id: str) -> None:
+    await cur.execute(
+        "SELECT 1 FROM ios_social_friends WHERE user_id = %s AND friend_id = %s",
+        (user_id, friend_id),
+    )
+    if not await cur.fetchone():
+        raise HTTPException(status_code=404, detail="Not friends with this user")
+
+
+@app.put("/api/social/friends/{friend_id}/nickname")
+async def set_friend_nickname(friend_id: str, body: FriendNicknameUpdate, payload: dict = Depends(get_current_user)):
+    """Sets (or clears) a private nickname for a friend — visible only to the
+    caller, never to the friend themselves or anyone else; purely a personal
+    organizational label, same spirit as a phone contact's custom name."""
+    user_id = payload["sub"]
+    nickname = (body.nickname or "").strip()
+    if len(nickname) > 60:
+        raise HTTPException(status_code=400, detail="Nickname must be 60 characters or fewer")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await _require_friendship(cur, user_id, friend_id)
+            if not nickname:
+                await cur.execute(
+                    "DELETE FROM ios_social_friend_nicknames WHERE user_id = %s AND friend_id = %s",
+                    (user_id, friend_id),
+                )
+            else:
+                await cur.execute(
+                    """
+                    INSERT INTO ios_social_friend_nicknames (user_id, friend_id, nickname)
+                    VALUES (%s, %s, %s)
+                    ON DUPLICATE KEY UPDATE nickname = VALUES(nickname)
+                    """,
+                    (user_id, friend_id, nickname),
+                )
+    return {"ok": True}
+
+
+@app.get("/api/social/friends/tags")
+async def list_friend_tag_names(payload: dict = Depends(get_current_user)):
+    """Distinct tag names the caller has ever used, for the filter-chip row
+    above the redesigned friends list — a separate lightweight lookup rather
+    than deriving this client-side from the full friends payload, since the
+    chip row should exist even while the friends list itself is still
+    loading or filtered down to nothing."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT DISTINCT tag_name FROM ios_social_friend_tags WHERE user_id = %s ORDER BY tag_name ASC",
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+    return {"tags": [r[0] for r in rows]}
+
+
+@app.post("/api/social/friends/{friend_id}/tags", status_code=201)
+async def add_friend_tag(friend_id: str, body: FriendTagCreate, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    tag_name = body.tag_name.strip()
+    if not tag_name:
+        raise HTTPException(status_code=400, detail="Tag name can't be empty")
+    if len(tag_name) > 40:
+        raise HTTPException(status_code=400, detail="Tag name must be 40 characters or fewer")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await _require_friendship(cur, user_id, friend_id)
+            await cur.execute(
+                "SELECT COUNT(*) FROM ios_social_friend_tags WHERE user_id = %s AND friend_id = %s",
+                (user_id, friend_id),
+            )
+            if (await cur.fetchone())[0] >= 10:
+                raise HTTPException(status_code=400, detail="A friend can have at most 10 tags")
+            await cur.execute(
+                "INSERT IGNORE INTO ios_social_friend_tags (id, user_id, friend_id, tag_name) VALUES (%s, %s, %s, %s)",
+                (str(uuid.uuid4()), user_id, friend_id, tag_name),
+            )
+    return {"ok": True}
+
+
+@app.delete("/api/social/friends/{friend_id}/tags/{tag_name}")
+async def remove_friend_tag(friend_id: str, tag_name: str, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM ios_social_friend_tags WHERE user_id = %s AND friend_id = %s AND tag_name = %s",
+                (user_id, friend_id, tag_name),
+            )
+    return {"ok": True}
+
+
+@app.get("/api/social/friends/leaderboard")
+async def friends_leaderboard(
+    days: int = Query(7, ge=1, le=30), limit: int = Query(10, ge=1, le=30),
+    payload: dict = Depends(get_current_user),
+):
+    """Extra feature: "most active friend this week" — ranks the caller's
+    friends by play count over the trailing `days` window. Gated by the same
+    share_now_playing toggle the activity feed and presence use, since a play
+    count is a listening-activity signal just like those, not a neutral stat."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT friend_id FROM ios_social_friends WHERE user_id = %s", (user_id,))
+            friend_ids = [r[0] for r in await cur.fetchall()]
+            if not friend_ids:
+                return {"leaderboard": []}
+
+            placeholders = ",".join(["%s"] * len(friend_ids))
+            await cur.execute(
+                f"""
+                SELECT u.id, u.username, u.display_name, u.avatar_url, COUNT(*) AS play_count
+                FROM ios_play_history h
+                JOIN ios_users u ON u.id = h.user_id
+                LEFT JOIN ios_social_profiles sp ON sp.user_id = u.id
+                WHERE h.user_id IN ({placeholders}) AND u.is_active = TRUE
+                  AND h.played_at >= NOW() - INTERVAL %s DAY
+                  AND COALESCE(sp.share_now_playing, TRUE) = TRUE
+                GROUP BY u.id, u.username, u.display_name, u.avatar_url
+                ORDER BY play_count DESC
+                LIMIT %s
+                """,
+                (*friend_ids, days, limit),
+            )
+            rows = await cur.fetchall()
+    return {
+        "leaderboard": [
+            {**_public_user_fields((r[0], r[1], r[2], r[3])), "play_count": r[4]}
+            for r in rows
+        ]
+    }
+
+
+@app.get("/api/social/presence/listening-together")
+async def listening_together(payload: dict = Depends(get_current_user)):
+    """Extra feature: which friends are listening to the *exact same track*
+    right now. Compares the caller's own current now-playing (read directly,
+    bypassing the share_now_playing gate — that toggle only controls what
+    OTHER people see, and this is the caller's own data) against each
+    friend's presence (read through the normal batched/gated path, same as
+    GET /api/social/presence/friends)."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT is_online, is_playing, now_playing_title, now_playing_artist, last_seen_at "
+                "FROM ios_presence_state WHERE user_id = %s",
+                (user_id,),
+            )
+            own = await cur.fetchone()
+            if not own or not own[1] or not own[2]:
+                return {"title": None, "artist": None, "listening_together": []}
+            last_seen = own[4]
+            last_seen_utc = last_seen.replace(tzinfo=timezone.utc) if last_seen and last_seen.tzinfo is None else last_seen
+            fresh = bool(last_seen_utc) and (
+                datetime.now(timezone.utc) - last_seen_utc
+            ).total_seconds() <= _SOCIAL_PRESENCE_FRESH_SECONDS
+            if not own[0] or not fresh:
+                return {"title": None, "artist": None, "listening_together": []}
+            own_title, own_artist = own[2], own[3]
+
+            await cur.execute("SELECT friend_id FROM ios_social_friends WHERE user_id = %s", (user_id,))
+            friend_ids = [r[0] for r in await cur.fetchall()]
+            presence_by_id = await _fetch_presence_rows(cur, friend_ids)
+
+            def _norm(s: Optional[str]) -> str:
+                return (s or "").strip().lower()
+
+            matches: list[dict] = []
+            match_ids = [
+                fid for fid in friend_ids
+                if presence_by_id.get(fid, {}).get("is_playing")
+                and _norm(presence_by_id[fid].get("now_playing_title")) == _norm(own_title)
+                and _norm(presence_by_id[fid].get("now_playing_artist")) == _norm(own_artist)
+            ]
+            if match_ids:
+                ph = ",".join(["%s"] * len(match_ids))
+                await cur.execute(
+                    f"SELECT id, username, display_name, avatar_url FROM ios_users "
+                    f"WHERE id IN ({ph}) AND is_active = TRUE",
+                    tuple(match_ids),
+                )
+                matches = [_public_user_fields(r) for r in await cur.fetchall()]
+
+    return {"title": own_title, "artist": own_artist, "listening_together": matches}
 
 
 # ---------------------------------------------------------------------------
