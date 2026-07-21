@@ -59,11 +59,19 @@ struct ContentView: View {
     init() {
         // The native UITabBar itself is hidden (see `.toolbar(.hidden, for:
         // .tabBar)` in `body`) in favor of `CustomTabBar` below, which is
-        // what makes a 7th/8th tab a horizontal-scroll rather than getting
+        // what makes a 7th tab a horizontal-scroll rather than getting
         // silently collapsed into iOS's automatic "More" tab (the native
-        // UITabBarController does that itself past 5 items on iPhone, with
-        // no supported way to opt out short of replacing the bar entirely).
-        // No UITabBarAppearance configuration needed here as a result.
+        // UITabBarController does that itself past 5 items on iPhone). That
+        // alone only hides the bar's CHROME, though — hiding the drawn
+        // bar doesn't stop UITabBarController from applying that same
+        // collapsing behavior internally to whichever view controllers a
+        // `TabView` hands it, invisibly to SwiftUI. `body` avoids the actual
+        // trigger by never giving any single `TabView` more than 5 real
+        // `.tag()`ed children in the first place (see the comment above that
+        // `TabView` there) — the two tabs beyond that are rendered as
+        // sibling branches outside any TabView entirely, where
+        // UITabBarController has no involvement at all. No UITabBarAppearance
+        // configuration needed here as a result.
 
         // Navigation bar — fully transparent so gallery background shows
         // through, for EVERY UINavigationBar in the app (this is the sole
@@ -110,103 +118,118 @@ struct ContentView: View {
             // uses to route `selection:`, and each `.tabItem{}` still gives
             // VoiceOver a label for the (invisible) native item — harmless
             // either way, just unused visually.
-            TabView(selection: $selectedTab) {
-
-                // MARK: Tab 1 — Library
-                LibraryView()
-                    .toolbar(.hidden, for: .tabBar)
-                    .tabItem {
-                        Label("Library", systemImage: "music.note.list")
-                    }
-                    .tag(0)
-
-                // MARK: Tab 2 — Now Playing
-                NowPlayingView()
-                    .toolbar(.hidden, for: .tabBar)
-                    .tabItem {
-                        Label("Playing", systemImage: "play.circle")
-                    }
-                    .tag(1)
-
-                // MARK: Tab 3 — Queue
-                QueueView()
-                    .toolbar(.hidden, for: .tabBar)
-                    .tabItem {
-                        Label("Queue", systemImage: "list.number")
-                    }
-                    .tag(2)
-
-                // MARK: Tab 4 — Search Streaming
-                StreamSearchView()
-                    .toolbar(.hidden, for: .tabBar)
-                    .tabItem {
-                        Label("Cloud Services", systemImage: "icloud.and.arrow.down")
-                    }
-                    .tag(3)
-
-                // MARK: Tab 5 — Friends
-                // Its own NavigationStack since FriendsListView (like
-                // ProfileView below) is normally pushed from AccountView's
-                // Social section rather than hosted as a tab root.
-                NavigationStack {
-                    FriendsListView()
-                        .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
-                }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tabItem {
-                        Label("Friends", systemImage: "person.2.fill")
-                    }
-                    .tag(4)
-
-                // MARK: Tab 6 — Profile
-                NavigationStack {
-                    MyProfileTabView()
-                        .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
-                }
-                    .toolbar(.hidden, for: .tabBar)
-                    .tabItem {
-                        Label("Profile", systemImage: "person.crop.circle")
-                    }
-                    .tag(5)
-
-                // MARK: Tab 7 — Settings
-                SettingsView()
-                    .toolbar(.hidden, for: .tabBar)
-                    .tabItem {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-                    .tag(6)
-            }
-            // `.toolbar(.hidden, for: .tabBar)` has to be applied to each
-            // tab's OWN content (above), not to the TabView itself — it
-            // reads as a preference that bubbles up from whichever content
-            // is currently on screen, and applying it directly to the
-            // TabView container is a no-op the native UITabBar silently
-            // ignores. Discovered because doing exactly that in the first
-            // pass at this custom bar shipped with the native bar (and its
-            // automatic "More" overflow for tabs 5-7) still fully visible
-            // underneath the new custom one.
             //
-            // Attached directly to the TabView via `.safeAreaInset` so it
-            // sits flush against the real system safe area (home
-            // indicator) — the bottommost element on screen, same as any
-            // normal tab bar. NOTE: a `.safeAreaInset` applied here does
-            // NOT propagate down into each tab's own content — SwiftUI/
-            // UIKit hosts each `.tabItem{}` page in its own separate
-            // hierarchy, and safe-area/environment propagation doesn't
-            // cross that boundary. That means each tab's own
-            // `.safeAreaInset(edge: .bottom) { MiniPlayerBar() }` has no
-            // idea this bar exists and, left alone, places MiniPlayerBar
-            // flush against that same real bottom safe area — the two end
-            // up stacked in the exact same place instead of MiniPlayerBar
-            // sitting above this bar (the correct order — a first attempt
-            // at fixing their overlap had this backwards, shifting the tab
-            // bar itself up instead of the mini player). Fixed properly in
-            // `MiniPlayerBar` itself (see its own doc comment), which now
-            // reserves `CustomTabBar.totalHeight` of extra bottom padding
-            // so it always renders above this bar rather than trying to
-            // make the cross-tab safe-area propagation work (it
-            // structurally can't).
+            // Only tags 0-4 (5 tabs) are real `TabView` children — NOT all 7.
+            // Hiding the native bar's chrome (`.toolbar(.hidden, for:
+            // .tabBar)` below) only hides what's drawn on screen; it does
+            // NOT stop `UITabBarController` from applying its own automatic
+            // "collapse past the 5th item into 'More'" behavior to
+            // WHICHEVER view controllers TabView hands it, entirely beneath
+            // SwiftUI's abstraction. With all 7 tabs previously routed
+            // through one TabView, selecting Friends/Profile/Settings
+            // (items 5-7) could land on that hidden native "More" list
+            // screen instead of the real tab content — a genuinely
+            // different, still-functioning UIKit navigation controller
+            // most of this app's UI never expected to be reachable, visible
+            // as a second, unstyled back button leading to it. Keeping this
+            // TabView's real child count at 5 (at, not past, the threshold)
+            // means UIKit never has a reason to collapse anything — Profile
+            // and Settings are rendered as sibling branches below instead,
+            // fully outside any TabView/UITabBarController, where this
+            // failure mode structurally cannot occur.
+            Group {
+                if selectedTab <= 4 {
+                    TabView(selection: $selectedTab) {
+
+                        // MARK: Tab 1 — Library
+                        LibraryView()
+                            .toolbar(.hidden, for: .tabBar)
+                            .tabItem {
+                                Label("Library", systemImage: "music.note.list")
+                            }
+                            .tag(0)
+
+                        // MARK: Tab 2 — Now Playing
+                        NowPlayingView()
+                            .toolbar(.hidden, for: .tabBar)
+                            .tabItem {
+                                Label("Playing", systemImage: "play.circle")
+                            }
+                            .tag(1)
+
+                        // MARK: Tab 3 — Queue
+                        QueueView()
+                            .toolbar(.hidden, for: .tabBar)
+                            .tabItem {
+                                Label("Queue", systemImage: "list.number")
+                            }
+                            .tag(2)
+
+                        // MARK: Tab 4 — Search Streaming
+                        StreamSearchView()
+                            .toolbar(.hidden, for: .tabBar)
+                            .tabItem {
+                                Label("Cloud Services", systemImage: "icloud.and.arrow.down")
+                            }
+                            .tag(3)
+
+                        // MARK: Tab 5 — Friends
+                        // Its own NavigationStack since FriendsListView (like
+                        // ProfileView below) is normally pushed from AccountView's
+                        // Social section rather than hosted as a tab root.
+                        NavigationStack {
+                            FriendsListView()
+                                .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
+                        }
+                            .toolbar(.hidden, for: .tabBar)
+                            .tabItem {
+                                Label("Friends", systemImage: "person.2.fill")
+                            }
+                            .tag(4)
+                    }
+                    // `.toolbar(.hidden, for: .tabBar)` has to be applied to
+                    // each tab's OWN content (above), not to the TabView
+                    // itself — it reads as a preference that bubbles up from
+                    // whichever content is currently on screen, and applying
+                    // it directly to the TabView container is a no-op the
+                    // native UITabBar silently ignores.
+                } else if selectedTab == 5 {
+                    // MARK: Tab 6 — Profile (sibling branch, not a TabView
+                    // child — see the comment above `Group`)
+                    NavigationStack {
+                        MyProfileTabView()
+                            .safeAreaInset(edge: .bottom) { MiniPlayerBar() }
+                    }
+                } else {
+                    // MARK: Tab 7 — Settings (sibling branch, not a TabView
+                    // child — see the comment above `Group`). No
+                    // MiniPlayerBar here, matching this tab's existing
+                    // design (SettingsView has never shown one).
+                    SettingsView()
+                }
+            }
+            // Attached directly to the `Group` (not the TabView specifically
+            // — this bar has to render identically across all three
+            // branches above) so it sits flush against the real system safe
+            // area (home indicator) — the bottommost element on screen,
+            // same as any normal tab bar. NOTE: a `.safeAreaInset` applied
+            // here does NOT propagate down into the TabView branch's own
+            // tab content — SwiftUI/UIKit hosts each `.tabItem{}` page in
+            // its own separate hierarchy, and safe-area/environment
+            // propagation doesn't cross that boundary. That means each of
+            // those tabs' own `.safeAreaInset(edge: .bottom) {
+            // MiniPlayerBar() }` has no idea this bar exists and, left
+            // alone, places MiniPlayerBar flush against that same real
+            // bottom safe area — the two end up stacked in the exact same
+            // place instead of MiniPlayerBar sitting above this bar (the
+            // correct order — a first attempt at fixing their overlap had
+            // this backwards, shifting the tab bar itself up instead of the
+            // mini player). Fixed properly in `MiniPlayerBar` itself (see
+            // its own doc comment), which now reserves
+            // `CustomTabBar.totalHeight` of extra bottom padding so it
+            // always renders above this bar rather than trying to make the
+            // cross-branch safe-area propagation work (it structurally
+            // can't).
             .safeAreaInset(edge: .bottom) {
                 CustomTabBar(
                     selectedTab: $selectedTab,
@@ -413,11 +436,16 @@ struct MyProfileTabView: View {
 
 // MARK: - CustomTabBar
 
-/// A fully custom bottom tab bar, replacing the native (hidden) `UITabBar`.
-/// Needed once the app grew to 7 tabs — iOS's native `UITabBarController`
-/// automatically collapses anything past the 5th item into an unstyled
-/// "More" list on iPhone, with no supported way to opt out short of
-/// replacing the bar's chrome entirely. Wrapping the row in a horizontal
+/// A fully custom bottom tab bar, replacing the native (hidden) `UITabBar`,
+/// showing all 7 tabs as equal always-visible entries — unlike the native
+/// `UITabBarController`, which automatically collapses anything past the
+/// 5th item into an unstyled "More" list on iPhone. Purely hiding that
+/// native bar's chrome doesn't stop the collapsing behavior itself, though
+/// (it's driven by view-controller count, not visibility) — this bar's tap
+/// targets stay decoupled from that entirely because `body`'s `TabView`
+/// only ever holds 5 real `.tag()`ed children; the other 2 render as
+/// sibling branches with no `TabView`/`UITabBarController` involved (see
+/// the comment above that `TabView`). Wrapping the row in a horizontal
 /// `ScrollView` means it degrades gracefully — spreads evenly across the
 /// screen when everything fits (the common case), scrolls instead of
 /// clipping when it doesn't (smaller phones, larger Dynamic Type sizes) —
