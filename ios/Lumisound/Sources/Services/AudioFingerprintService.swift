@@ -51,11 +51,25 @@ actor AudioFingerprintService {
 
     /// Fraction of segments that must individually clear
     /// `segmentMatchThreshold` for two tracks to be considered the same
-    /// recording (with `segmentCount = 6`, this requires 5 of 6). A single
-    /// divergent segment — the moment two otherwise-similar-sounding but
-    /// genuinely different songs actually differ — is enough to reject a
-    /// match, which a single blended average could never catch.
+    /// recording (with `segmentCount = 12`, this requires 10 of 12,
+    /// evaluated over whatever segment range two tracks actually overlap on
+    /// after alignment — see `sequenceSimilarity`). A single divergent
+    /// segment — the moment two otherwise-similar-sounding but genuinely
+    /// different songs actually differ — is enough to reject a match, which
+    /// a single blended average could never catch.
     static let minMatchingSegmentFraction: Float = 0.8
+
+    /// Maximum segment-index shift tried when aligning two tracks' segment
+    /// sequences (see `sequenceSimilarity`). Two files of the "same"
+    /// recording routinely start a fraction of a second apart — different
+    /// silence trimming, a slightly different encoder lead-in, a re-upload
+    /// with a few extra intro frames — which used to make a same-index
+    /// segment compare see the whole excerpt as dissimilar even though the
+    /// underlying audio matches once aligned. At ~3s/segment (37s excerpt /
+    /// 12 segments), a shift of 3 searches roughly ±9s of offset —
+    /// comfortably past any trimming difference actually seen between
+    /// re-encodes/re-uploads of the same track.
+    static let maxAlignmentShift = 3
 
     private var cache: [String: [[Float]]]
     private let cacheURL: URL
@@ -65,16 +79,24 @@ actor AudioFingerprintService {
     private let sampleRate = 11025.0
     /// Number of equal time segments each excerpt is split into before
     /// fingerprinting — see the file-header comment for why segments beat a
-    /// single blended average.
-    private let segmentCount = 6
+    /// single blended average. Finer-grained than a naive "a few big
+    /// chunks" split specifically so `maxAlignmentShift` above has enough
+    /// resolution to actually express a sub-segment-sized timing offset
+    /// between two tracks, rather than only being able to shift by a whole
+    /// multi-second chunk at a time.
+    private let segmentCount = 12
 
     private init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        // v2: cache values changed shape from a single [Float] vector to
-        // [[Float]] (one vector per segment) — a new filename keeps an old
-        // v1 cache from being misread as the new format.
-        cacheURL = caches.appendingPathComponent("audio_fingerprint_cache_v2.json")
+        // v3: segment granularity changed (6 -> 12 segments per excerpt) —
+        // a v2 cache entry's segments cover a different time span each than
+        // v3 expects, so comparing an old cached fingerprint against a
+        // freshly-computed one would silently misalign even before
+        // `sequenceSimilarity`'s own shift search gets a chance to help. A
+        // new filename forces every track to be re-fingerprinted once under
+        // the new scheme instead of comparing incompatible granularities.
+        cacheURL = caches.appendingPathComponent("audio_fingerprint_cache_v3.json")
         if let data = try? Data(contentsOf: cacheURL),
            let decoded = try? JSONDecoder().decode([String: [[Float]]].self, from: data) {
             cache = decoded
@@ -125,29 +147,58 @@ actor AudioFingerprintService {
     }
 
     /// Combines two tracks' per-segment fingerprint sequences into a single
-    /// match score: requires at least `minMatchingSegmentFraction` of the
-    /// segments to individually clear `segmentMatchThreshold` (aligned by
-    /// segment index — both sequences come from the same excerpt window/skip
-    /// parameters, so segment N of one lines up with segment N of the
-    /// other), then returns the mean similarity across all segments for the
-    /// caller to compare against `matchThreshold`. Returns 0 (never a match)
-    /// if the per-segment requirement isn't met, the segment-count fraction
-    /// check being what actually catches unrelated same-duration tracks that
-    /// merely share overall spectral balance — a case where the mean alone
-    /// could still look deceptively high.
+    /// match score by trying every relative shift in `-maxAlignmentShift
+    /// ...maxAlignmentShift` (see its doc comment for why a fixed same-index
+    /// compare misses real duplicates) and keeping the best-scoring
+    /// alignment. Returns 0 (never a match) if no shift both meets
+    /// `minMatchingSegmentFraction` of its overlapping segments clearing
+    /// `segmentMatchThreshold` AND the resulting mean similarity clears
+    /// `matchThreshold` — the per-segment fraction check is what actually
+    /// catches unrelated same-duration tracks that merely share overall
+    /// spectral balance, a case where the mean alone could still look
+    /// deceptively high.
     static func sequenceSimilarity(_ a: [[Float]], _ b: [[Float]]) -> Float {
-        guard a.count == b.count, !a.isEmpty else { return 0 }
+        guard !a.isEmpty, !b.isEmpty else { return 0 }
+        var best: Float = 0
+        for shift in -maxAlignmentShift...maxAlignmentShift {
+            best = max(best, alignedSimilarity(a, b, shift: shift))
+        }
+        return best
+    }
+
+    /// Scores `a` against `b` shifted by `shift` segments (positive shifts
+    /// `b` later relative to `a`), over only the range where both actually
+    /// overlap after the shift — see the comment above `minMatchingSegments`
+    /// below for why that overlap's own fraction+threshold gate is the
+    /// guard against a coincidental sliver match, not a coverage weighting
+    /// on the returned score.
+    private static func alignedSimilarity(_ a: [[Float]], _ b: [[Float]], shift: Int) -> Float {
+        let aStart = max(0, -shift)
+        let bStart = max(0, shift)
+        let overlap = min(a.count - aStart, b.count - bStart)
+        guard overlap > 0 else { return 0 }
+
         var total: Float = 0
         var matchingSegments = 0
-        for i in 0..<a.count {
-            let similarity = cosineSimilarity(a[i], b[i])
+        for i in 0..<overlap {
+            let similarity = cosineSimilarity(a[aStart + i], b[bStart + i])
             total += similarity
             if similarity >= segmentMatchThreshold {
                 matchingSegments += 1
             }
         }
-        let mean = total / Float(a.count)
-        let minMatchingSegments = Int((Float(a.count) * minMatchingSegmentFraction).rounded(.up))
+        let mean = total / Float(overlap)
+        // Scaled to `overlap`, not the full `segmentCount` — the per-segment
+        // fraction+threshold gate above is what actually guards against a
+        // coincidental match here, not a separate coverage weighting on the
+        // returned score: `maxAlignmentShift` already bounds how small
+        // `overlap` can get (never below `segmentCount - maxAlignmentShift`,
+        // i.e. never a tiny sliver), and `matchThreshold` (0.98) is close
+        // enough to the cosine-similarity ceiling of 1.0 that multiplying
+        // the mean down by a coverage fraction would make ANY nonzero shift
+        // mathematically unable to ever clear it — silently defeating the
+        // whole point of searching alignments in the first place.
+        let minMatchingSegments = Int((Float(overlap) * minMatchingSegmentFraction).rounded(.up))
         guard matchingSegments >= minMatchingSegments else { return 0 }
         return mean
     }

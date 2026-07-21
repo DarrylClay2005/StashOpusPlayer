@@ -34,8 +34,10 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
+from starlette.requests import ClientDisconnect
 
 import aioapns
+import pymysql
 import pyotp
 import yt_dlp
 
@@ -437,6 +439,57 @@ async def _delete_pending_download(job_id: str) -> None:
         file_path.unlink(missing_ok=True)
         shutil.rmtree(file_path.parent, ignore_errors=True)
         logger.info("_delete_pending_download: job=%s durable copy removed after being served", job_id)
+
+
+async def _claim_pending_download(job_id: str, user_id: Optional[str]) -> Optional[dict]:
+    """Atomically hands out a durably-stored finished job's file to at most
+    ONE caller, deleting its `ios_pending_downloads` row in the same
+    transaction. Two concurrent GET /api/download/result calls for the same
+    job_id (foreground poll + background pending-downloads reconciliation
+    both landing at once is the common case) used to both pass a plain
+    existence check, both build a FileResponse for the same file, and race:
+    whichever's cleanup ran first deleted the file out from under the
+    other's still-pending FileResponse.open(), which raised an unhandled
+    FileNotFoundError -> 500 instead of a clean 404 the client already knows
+    how to recover from (see the 404 branch in the client's
+    attemptDownload). `SELECT ... FOR UPDATE` serializes concurrent callers
+    on the row lock: the loser's SELECT blocks until the winner's DELETE
+    commits, then finds nothing and returns None here — it never even
+    learns the file path, let alone tries to open it."""
+    if not user_id:
+        return None
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await conn.begin()
+            try:
+                await cur.execute(
+                    "SELECT file_path, media_type, filename FROM ios_pending_downloads "
+                    "WHERE job_id = %s AND user_id = %s FOR UPDATE",
+                    (job_id, user_id),
+                )
+                row = await cur.fetchone()
+                if row:
+                    await cur.execute(
+                        "DELETE FROM ios_pending_downloads WHERE job_id = %s AND user_id = %s",
+                        (job_id, user_id),
+                    )
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
+    if not row:
+        return None
+    return {"file_path": row[0], "media_type": row[1], "filename": row[2]}
+
+
+def _cleanup_claimed_download(file_path: str) -> None:
+    """Removes a claimed durable download's file/dir — safe to call
+    unconditionally since `_claim_pending_download` guarantees only the one
+    response holding this path was ever handed it."""
+    path = pathlib.Path(file_path)
+    path.unlink(missing_ok=True)
+    shutil.rmtree(path.parent, ignore_errors=True)
 
 
 async def _sweep_stale_pending_downloads() -> None:
@@ -3078,16 +3131,19 @@ async def download_result(request: Request, job_id: str = Query(...)):
     job = _DOWNLOAD_JOBS.get(job_id)
     if not job:
         user_id = _account_token_user_id(request)
-        pending = await _pending_download_row(job_id, user_id)
+        # Atomic claim (see its docstring) instead of a plain existence
+        # check + separate delete — only one concurrent caller for this
+        # job_id ever gets a file path back; everyone else cleanly 404s
+        # here instead of racing a FileResponse against a deleted file.
+        pending = await _claim_pending_download(job_id, user_id)
         if not pending:
             raise HTTPException(status_code=404, detail="Unknown job_id")
-        response = FileResponse(
+        return FileResponse(
             path=pending["file_path"],
             media_type=pending["media_type"],
             filename=pending["filename"],
+            background=BackgroundTask(_cleanup_claimed_download, pending["file_path"]),
         )
-        asyncio.create_task(_delete_pending_download(job_id))
-        return response
 
     if job["status"] == "pending":
         return JSONResponse({"status": "pending"}, status_code=202)
@@ -4512,7 +4568,14 @@ _METADATA_RESOLVE_SCHEMA = {
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
     },
     "required": ["best_index", "confidence"],
-    "additionalProperties": False,
+    # No `additionalProperties` key here — unlike standard JSON Schema,
+    # Gemini's structured-output Schema format doesn't have this field at
+    # all (confirmed by the real API: including it fails every single call
+    # with `400 INVALID_ARGUMENT: Unknown name "additional_properties" at
+    # 'generation_config.response_schema': Cannot find field`). Structured
+    # output already only ever returns the declared `properties`, so this
+    # key was never doing anything for us even before it started hard-
+    # failing the request — safe to just drop.
 }
 
 
@@ -5068,6 +5131,37 @@ async def remove_favorite(
 # ---------------------------------------------------------------------------
 
 
+# InnoDB deadlock / lock-wait-timeout errnos — retrying is MySQL's own
+# documented response to these, not a bug workaround: the transaction that
+# loses a deadlock is rolled back automatically and is safe to just re-run.
+_DEADLOCK_ERRNOS = {1213, 1205}
+
+
+async def _retry_on_deadlock(operation, max_attempts: int = 3):
+    """Runs `operation` (a zero-arg async callable doing the DB write),
+    retrying on a transient deadlock/lock-wait-timeout. A burst of
+    concurrent single-statement writes to the same user's rows — e.g. two
+    /user/library/inventory syncs (or a sync racing a large playlist
+    import's dedup writes) landing at once — can deadlock in InnoDB even
+    under autocommit with no explicit transaction spanning them, since a
+    bulk DELETE's gap locks and a concurrent bulk INSERT's range locks can
+    still be acquired in conflicting orders. Previously unhandled, that
+    surfaced as a raw 500 (pymysql.err.OperationalError 1213) instead of
+    just quietly succeeding on retry."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await operation()
+        except pymysql.err.OperationalError as exc:
+            errno = exc.args[0] if exc.args else None
+            if errno in _DEADLOCK_ERRNOS and attempt < max_attempts:
+                logger.warning(
+                    "_retry_on_deadlock: attempt %d/%d hit errno %s — retrying", attempt, max_attempts, errno
+                )
+                await asyncio.sleep(0.05 * attempt)
+                continue
+            raise
+
+
 @app.post("/user/library/inventory")
 async def upload_library_inventory(
     body: LibraryInventoryRequest,
@@ -5082,14 +5176,18 @@ async def upload_library_inventory(
     ids = {s.strip() for s in body.source_ids if s and s.strip()}
     ids = {s for s in ids if len(s) <= 255}
     pool = await get_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("DELETE FROM ios_user_library_inventory WHERE user_id = %s", (user_id,))
-            if ids:
-                await cur.executemany(
-                    "INSERT IGNORE INTO ios_user_library_inventory (user_id, source_id) VALUES (%s, %s)",
-                    [(user_id, sid) for sid in ids],
-                )
+
+    async def _write() -> None:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("DELETE FROM ios_user_library_inventory WHERE user_id = %s", (user_id,))
+                if ids:
+                    await cur.executemany(
+                        "INSERT IGNORE INTO ios_user_library_inventory (user_id, source_id) VALUES (%s, %s)",
+                        [(user_id, sid) for sid in ids],
+                    )
+
+    await _retry_on_deadlock(_write)
     _INVENTORY_CACHE.pop(user_id, None)  # reflect the new snapshot immediately
     return {"status": "ok", "count": len(ids)}
 
@@ -5158,15 +5256,56 @@ async def _chromaprint(path: str) -> tuple[float, list[int]]:
     return result
 
 
+# fpcalc's raw fingerprint emits roughly one 32-bit item per ~0.128s of
+# audio. Two files of the "same" recording routinely start a fraction of a
+# second apart — different silence trimming, a slightly different encoder
+# lead-in, a different re-upload with a few extra intro frames — which
+# shifts one fingerprint's items relative to the other's by a small
+# constant offset. A fixed-position-0 compare (the old behavior) then reads
+# the whole thing as dissimilar even though the underlying audio is
+# identical once aligned. 40 items ≈ 5s of offset search either direction,
+# comfortably past any trimming difference actually seen between
+# re-encodes/re-uploads of the same track.
+_FP_MAX_ALIGNMENT_OFFSET = 40
+
+
 def _fp_similarity(a: list[int], b: list[int]) -> float:
-    """Bit-match ratio (0–1) over the aligned prefix of two raw fingerprints."""
-    n = min(len(a), len(b))
-    if n == 0:
+    """Best bit-match ratio (0-1) across a small window of relative
+    alignments between two raw fingerprints — see `_FP_MAX_ALIGNMENT_OFFSET`
+    for why a single fixed-position compare misses real duplicates."""
+    if not a or not b:
         return 0.0
-    diff = 0
-    for i in range(n):
-        diff += bin((a[i] ^ b[i]) & 0xFFFFFFFF).count("1")
-    return 1.0 - diff / (n * 32)
+    shorter = min(len(a), len(b))
+
+    def score_at(offset: int) -> float:
+        aa = a[offset:] if offset >= 0 else a
+        bb = b if offset >= 0 else b[-offset:]
+        n = min(len(aa), len(bb))
+        # Below half the shorter fingerprint's length, reject outright
+        # rather than scoring it — `_FP_MAX_ALIGNMENT_OFFSET` already
+        # bounds the search to plausible trimming differences, so this
+        # only ever fires for a fingerprint under ~10s to begin with,
+        # guarding against a coincidental sliver-overlap match rather than
+        # a real one. A hard floor here rather than a multiplicative
+        # coverage weight on the returned score: this codebase's on-device
+        # Swift counterpart to this function used exactly that weighting
+        # and it back fired there (its 0.98 match threshold had so little
+        # headroom below 1.0 that scaling the score down by coverage made
+        # ANY nonzero offset mathematically unable to ever clear it). This
+        # threshold (0.85) has enough headroom that a coverage weight
+        # wouldn't have caused the same failure, but there's no reason to
+        # risk the same class of bug for the sake of a softer edge case.
+        if n == 0 or n < shorter / 2:
+            return 0.0
+        diff = 0
+        for i in range(n):
+            diff += ((aa[i] ^ bb[i]) & 0xFFFFFFFF).bit_count()
+        return 1.0 - diff / (n * 32)
+
+    return max(
+        score_at(offset)
+        for offset in range(-_FP_MAX_ALIGNMENT_OFFSET, _FP_MAX_ALIGNMENT_OFFSET + 1)
+    )
 
 
 async def _scan_acoustic_duplicates_core(user_id: str) -> Optional[dict]:
@@ -7078,6 +7217,17 @@ async def _measure_loudness(path: pathlib.Path) -> Optional[float]:
     cmd = [
         "ffmpeg", "-hide_banner", "-nostats",
         "-i", str(path),
+        # `-vn`: every track downloaded here was fetched with
+        # `--embed-thumbnail`, so every file carries an attached-picture
+        # "video" stream (the cover art). Without `-vn`, ffmpeg still has to
+        # decode/process that stream before discarding it into `-f null -`
+        # even though loudnorm only reads audio — and ffmpeg's
+        # attached-picture handling for Ogg/Opus specifically is slow/flaky
+        # enough that this was consistently timing out (60s) on every
+        # .opus file while every other container's thumbnail decoded fine.
+        # Excluding video entirely is also just correct for a
+        # loudness-only measurement regardless of container.
+        "-vn",
         "-af", "loudnorm=print_format=json",
         "-f", "null", "-",
     ]
@@ -7097,7 +7247,13 @@ async def _measure_loudness(path: pathlib.Path) -> Optional[float]:
         if proc is not None and proc.returncode is None:
             proc.kill()
             await proc.communicate()
-        logger.warning("_measure_loudness: ffmpeg failed for %s: %s", path.name, exc)
+        # `asyncio.TimeoutError` (the actual failure mode here pre-`-vn`)
+        # stringifies to "" — logging just `exc` produced a useless blank
+        # message ("ffmpeg failed for X.opus: "), which is what made this
+        # take real investigation instead of being obvious from the logs.
+        logger.warning(
+            "_measure_loudness: ffmpeg failed for %s: %s", path.name, exc or type(exc).__name__
+        )
         return None
 
     stderr_text = stderr_bytes.decode(errors="replace")
@@ -7724,7 +7880,16 @@ async def upload_user_music(
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / safe_name
 
-    body = await request.body()
+    # A concurrent big-playlist import routinely has several of these bodies
+    # in flight at once; the client can legitimately abort one mid-transfer
+    # (task cancellation, network hiccup, app backgrounded). Unhandled, that
+    # surfaces here as `starlette.requests.ClientDisconnect` — a real
+    # exception, not a bug — which without this catch propagates as an
+    # unhandled 500 with a full traceback instead of a clean, expected error.
+    try:
+        body = await request.body()
+    except ClientDisconnect:
+        raise HTTPException(status_code=499, detail="Client disconnected before upload completed")
     if not body:
         raise HTTPException(status_code=400, detail="Empty file body")
     if len(body) > 100 * 1024 * 1024:  # 100 MB
