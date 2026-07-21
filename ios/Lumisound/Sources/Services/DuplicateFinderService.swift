@@ -173,6 +173,19 @@ final class DuplicateFinderService: ObservableObject {
         }
     }
 
+    // MARK: - Scoped, non-mutating scan (folder-level duplicate checks, etc.)
+
+    /// Same three-pass matching logic as `runScan` (source-track ID ->
+    /// acoustic fingerprint -> title+artist fallback), but for an arbitrary
+    /// subset of songs and WITHOUT touching `duplicateGroups`/`lastScanDate`/
+    /// `isScanning` — those are owned by the full-library Duplicate Finder
+    /// screen (`DuplicateFilesView`), and a scoped scan (e.g. one triggered
+    /// from a single local folder's detail screen) must never clobber them.
+    /// Callers own their own result state; see `FolderDuplicatesSheet`.
+    nonisolated static func findDuplicateGroups(among songs: [Song]) async -> [DuplicateGroup] {
+        await findDuplicates(in: songs)
+    }
+
     // MARK: - Private Worker (nonisolated, runs off main actor)
 
     /// Hard cap on total fingerprints computed per scan — bounds worst-case
