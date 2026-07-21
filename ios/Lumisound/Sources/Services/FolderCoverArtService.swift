@@ -1,0 +1,87 @@
+import Foundation
+import UIKit
+import CryptoKit
+
+// MARK: - FolderCoverArtService
+//
+// Per-folder custom cover art for LocalFolderDetailView — lets the user pick
+// a photo to represent a local folder instead of always falling back to the
+// first song's embedded artwork (or a generic folder glyph). Deliberately
+// device-local only, no bridge/server involvement: stored under
+// Documents/FolderCoverArt, keyed by a stable SHA-256 of the folder's
+// standardized path so lookups survive relaunches without a network
+// round-trip. A per-device cover choice is a reasonable thing to NOT sync —
+// unlike library content, there's no "source of truth" to reconcile across
+// devices, and the folder's underlying files (which the cover represents)
+// aren't shared across devices either.
+@MainActor
+final class FolderCoverArtService: ObservableObject {
+    static let shared = FolderCoverArtService()
+
+    /// In-memory cache of loaded covers, keyed by the same digest used for
+    /// the on-disk filename — avoids re-reading from disk on every header
+    /// render for a folder already visited this launch.
+    private var cache: [String: UIImage] = [:]
+
+    private init() {}
+
+    private var storageDir: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return docs.appendingPathComponent("FolderCoverArt", isDirectory: true)
+    }
+
+    /// Stable, filesystem-safe key for `folderURL` — a raw path can't be used
+    /// directly as a filename (slashes, length limits), and `String.hashValue`
+    /// isn't guaranteed stable across launches (Swift randomizes its seed), so
+    /// this hashes the standardized path with SHA-256 instead.
+    private func key(for folderURL: URL) -> String {
+        let path = folderURL.standardizedFileURL.path
+        let digest = SHA256.hash(data: Data(path.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func fileURL(for folderURL: URL) -> URL {
+        storageDir.appendingPathComponent(key(for: folderURL)).appendingPathExtension("jpg")
+    }
+
+    /// Returns the cached/persisted cover for `folderURL`, if one was ever
+    /// set — `nil` means "use the default" (first song's artwork / folder
+    /// glyph), the same fallback LocalFolderDetailView already had.
+    func cover(for folderURL: URL) -> UIImage? {
+        let k = key(for: folderURL)
+        if let cached = cache[k] { return cached }
+        guard let data = try? Data(contentsOf: fileURL(for: folderURL)),
+              let image = UIImage(data: data)
+        else { return nil }
+        cache[k] = image
+        return image
+    }
+
+    /// Saves `image` as the cover for `folderURL`, downsampled to a fixed
+    /// max size first — this is only ever displayed at up to the 256x256
+    /// header size, so there's no reason to keep a full-resolution
+    /// photo-library asset on disk (same rationale as BackgroundService's
+    /// thumbnail downsampling).
+    func setCover(_ image: UIImage, for folderURL: URL) {
+        let downsized = ImageDownsampler.downscaled(image, maxPixelSize: 512)
+        guard let data = downsized.jpegData(compressionQuality: 0.85) else { return }
+        do {
+            try FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
+            try data.write(to: fileURL(for: folderURL), options: .atomic)
+            cache[key(for: folderURL)] = downsized
+            appLog("FolderCoverArtService: set custom cover for \"\(folderURL.lastPathComponent)\"", category: "library")
+        } catch {
+            appWarn("FolderCoverArtService: failed to save cover for \"\(folderURL.lastPathComponent)\": \(error.localizedDescription)", category: "library")
+        }
+    }
+
+    /// Removes the custom cover for `folderURL`, reverting the header back
+    /// to the default (first song's artwork / folder glyph).
+    func removeCover(for folderURL: URL) {
+        let k = key(for: folderURL)
+        cache.removeValue(forKey: k)
+        try? FileManager.default.removeItem(at: fileURL(for: folderURL))
+        appLog("FolderCoverArtService: removed custom cover for \"\(folderURL.lastPathComponent)\"", category: "library")
+    }
+}
