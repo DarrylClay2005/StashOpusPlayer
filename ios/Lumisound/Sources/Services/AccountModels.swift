@@ -482,6 +482,31 @@ struct ArtistSubscription: Decodable, Identifiable {
     let createdAt: String?
     let channelId: String?
     let channelThumbnail: String?
+    /// When true, new uploads from this channel are auto-downloaded into the
+    /// library (see `AccountService.checkSubscriptionAndAutoDownload`),
+    /// mirroring `TrackedPlaylist.isAutoDownload`. (Feature: subscriptions-expansion)
+    let autoDownload: Bool
+    /// Optional destination subfolder under "Imported Music" for this
+    /// subscription's auto-downloads — nil/empty falls back to the global
+    /// Download Folder setting, same convention as `TrackedPlaylist.destinationFolder`.
+    let destinationFolder: String?
+    /// When true, new-upload alerts (in-app notification + push + webhook)
+    /// are suppressed for this channel without unsubscribing — new uploads
+    /// still appear in the "New Releases" feed.
+    let notificationsMuted: Bool
+    /// Free-text grouping label the user assigns (e.g. "Podcasts", "DJs").
+    let category: String?
+    /// Human-readable insight derived server-side from observed upload
+    /// timestamps (e.g. "Uploads ~weekly"), or nil if there's not yet
+    /// enough history to estimate a cadence.
+    let uploadFrequencyLabel: String?
+    /// True if no new upload has been observed in a while (see the bridge's
+    /// `_INACTIVE_SUBSCRIPTION_MONTHS`) — surfaced in the UI as a one-tap
+    /// "consider unsubscribing" suggestion.
+    let isStale: Bool
+    /// Days since the last observed new upload (or since subscribing, if
+    /// none has ever been observed). nil only in pathological cases.
+    let daysSinceActivity: Int?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -491,6 +516,38 @@ struct ArtistSubscription: Decodable, Identifiable {
         case lastCheckedAt     = "last_checked_at"
         case createdAt         = "created_at"
         case channelId         = "channel_id"
+        case channelThumbnail  = "channel_thumbnail"
+        case autoDownload         = "auto_download"
+        case destinationFolder    = "destination_folder"
+        case notificationsMuted   = "notifications_muted"
+        case category
+        case uploadFrequencyLabel = "upload_frequency_label"
+        case isStale               = "is_stale"
+        case daysSinceActivity     = "days_since_activity"
+    }
+}
+
+/// One entry from GET /user/subscriptions/feed — a single new upload
+/// discovered for one of the user's subscriptions, aggregated across every
+/// followed channel into one persisted, browsable list (Feature:
+/// subscriptions-expansion). `track` is nil if the bridge's stored JSON
+/// somehow failed to decode (defensive — shouldn't normally happen).
+struct SubscriptionFeedItem: Decodable, Identifiable {
+    let id: String
+    let subscriptionId: String
+    let track: StreamTrack?
+    let discoveredAt: String?
+    let isRead: Bool
+    let channelName: String?
+    let channelThumbnail: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case subscriptionId   = "subscription_id"
+        case track
+        case discoveredAt     = "discovered_at"
+        case isRead            = "is_read"
+        case channelName       = "channel_name"
         case channelThumbnail  = "channel_thumbnail"
     }
 }
