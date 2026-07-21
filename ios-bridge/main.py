@@ -12959,6 +12959,12 @@ class SocialProfileUpdate(BaseModel):
     avatar_frame: Optional[str] = None
     show_top_genres: Optional[bool] = None
     show_guestbook: Optional[bool] = None
+    # Feature: profile-customization-3 (2026-07-21) — opt-out toggle for the
+    # visitor-stats card (default TRUE, mirrors share_now_playing) and
+    # opt-in toggle for the listening-streak card (default FALSE, mirrors
+    # show_top_genres). See _profile_visitor_stats / _compute_listening_streak.
+    show_visitor_stats: Optional[bool] = None
+    show_listening_stats: Optional[bool] = None
 
 
 class PinnedTrackIn(BaseModel):
@@ -13001,7 +13007,8 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT bio, main_accent_hex, sub_accent_hex, share_now_playing, "
-                "pronouns, status_emoji, status_text, avatar_frame, show_top_genres, show_guestbook "
+                "pronouns, status_emoji, status_text, avatar_frame, show_top_genres, show_guestbook, "
+                "show_visitor_stats, show_listening_stats, featured_playlist_id "
                 "FROM ios_social_profiles WHERE user_id = %s",
                 (user_id,),
             )
@@ -13018,6 +13025,17 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
             # users expect from the same concept on Discord/etc.
             await cur.execute("SELECT created_at FROM ios_users WHERE id = %s", (user_id,))
             user_row = await cur.fetchone()
+
+            # Own stats for the four new profile-customization-3 features are
+            # always computed for /me regardless of their own show_* toggle —
+            # same "it's your own data, the editor should always be able to
+            # preview what turning it on would publish" reasoning already
+            # used for top_genres/top_artists above. Badges have no privacy
+            # toggle at all (public flair, like a Discord badge).
+            streak = await _compute_listening_streak(cur, user_id)
+            badges = await _compute_profile_badges(cur, user_id, user_row[0] if user_row else None)
+            visitor_stats = await _profile_visitor_stats(cur, user_id, user_id, include_recent=True)
+            featured_playlist = await _featured_playlist_payload(cur, row[12] if row else None)
 
     # Own taste snapshot is always computed for /me regardless of
     # show_top_genres — that toggle only controls whether OTHER people's
@@ -13038,6 +13056,8 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
         "avatar_frame": (row[7] if row and row[7] else "none"),
         "show_top_genres": bool(row[8]) if row else False,
         "show_guestbook": bool(row[9]) if row is not None and row[9] is not None else True,
+        "show_visitor_stats": bool(row[10]) if row is not None and row[10] is not None else True,
+        "show_listening_stats": bool(row[11]) if row else False,
         "member_since": user_row[0].isoformat() if user_row and user_row[0] else None,
         "pinned_tracks": [
             {
@@ -13048,6 +13068,11 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
         ],
         "top_genres": taste["library_genres"][:6],
         "top_artists": (taste["top_played_artists"] or taste["favorited_artists"])[:8],
+        "listening_streak": streak,
+        "badges": badges,
+        "visitor_count": visitor_stats["visitor_count"],
+        "recent_visitors": visitor_stats["recent_visitors"],
+        "featured_playlist": featured_playlist,
     }
 
 
@@ -13097,8 +13122,10 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
                 """
                 INSERT INTO ios_social_profiles
                     (user_id, bio, main_accent_hex, sub_accent_hex, share_now_playing,
-                     pronouns, status_emoji, status_text, avatar_frame, show_top_genres, show_guestbook)
-                VALUES (%s, %s, %s, %s, COALESCE(%s, TRUE), %s, %s, %s, COALESCE(%s, 'none'), COALESCE(%s, FALSE), COALESCE(%s, TRUE))
+                     pronouns, status_emoji, status_text, avatar_frame, show_top_genres, show_guestbook,
+                     show_visitor_stats, show_listening_stats)
+                VALUES (%s, %s, %s, %s, COALESCE(%s, TRUE), %s, %s, %s, COALESCE(%s, 'none'), COALESCE(%s, FALSE), COALESCE(%s, TRUE),
+                        COALESCE(%s, TRUE), COALESCE(%s, FALSE))
                 ON DUPLICATE KEY UPDATE
                     bio = COALESCE(VALUES(bio), bio),
                     main_accent_hex = COALESCE(VALUES(main_accent_hex), main_accent_hex),
@@ -13109,13 +13136,16 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
                     status_text = COALESCE(VALUES(status_text), status_text),
                     avatar_frame = COALESCE(%s, avatar_frame),
                     show_top_genres = COALESCE(%s, show_top_genres),
-                    show_guestbook = COALESCE(%s, show_guestbook)
+                    show_guestbook = COALESCE(%s, show_guestbook),
+                    show_visitor_stats = COALESCE(%s, show_visitor_stats),
+                    show_listening_stats = COALESCE(%s, show_listening_stats)
                 """,
                 (
                     user_id, body.bio, main_hex, sub_hex, body.share_now_playing,
                     body.pronouns, body.status_emoji, body.status_text, frame,
-                    body.show_top_genres, body.show_guestbook,
+                    body.show_top_genres, body.show_guestbook, body.show_visitor_stats, body.show_listening_stats,
                     body.share_now_playing, frame, body.show_top_genres, body.show_guestbook,
+                    body.show_visitor_stats, body.show_listening_stats,
                 ),
             )
     return {"ok": True}
@@ -13240,7 +13270,8 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
 
             await cur.execute(
                 "SELECT bio, main_accent_hex, sub_accent_hex, pronouns, status_emoji, status_text, "
-                "avatar_frame, show_top_genres, show_guestbook "
+                "avatar_frame, show_top_genres, show_guestbook, "
+                "show_visitor_stats, show_listening_stats, featured_playlist_id "
                 "FROM ios_social_profiles WHERE user_id = %s",
                 (user_id,),
             )
@@ -13259,6 +13290,26 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
             )
             is_friend = (await cur.fetchone()) is not None
 
+            # Feature: profile-customization-3 — badges have no privacy
+            # toggle (public flair); streak/visitor-stats respect the
+            # profile owner's own show_listening_stats/show_visitor_stats
+            # toggle exactly like show_top_genres does for top_genres/
+            # top_artists above; recent_visitors additionally requires the
+            # caller to actually be a friend of the profile owner (same
+            # friends-only identity-reveal gating as the guestbook/
+            # compatibility features).
+            show_visitor_stats = bool(profile_row[9]) if profile_row is not None and profile_row[9] is not None else True
+            show_listening_stats = bool(profile_row[10]) if profile_row else False
+            featured_playlist_id = profile_row[11] if profile_row else None
+
+            badges = await _compute_profile_badges(cur, user_id, user_row[4])
+            streak = await _compute_listening_streak(cur, user_id) if show_listening_stats else None
+            if show_visitor_stats:
+                visitor_stats = await _profile_visitor_stats(cur, user_id, caller_id, include_recent=is_friend)
+            else:
+                visitor_stats = {"visitor_count": None, "recent_visitors": []}
+            featured_playlist = await _featured_playlist_payload(cur, featured_playlist_id)
+
     show_top_genres = bool(profile_row[7]) if profile_row else False
     top_genres: list[str] = []
     top_artists: list[str] = []
@@ -13266,6 +13317,13 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
         taste = await get_user_taste_profile(user_id)
         top_genres = taste["library_genres"][:6]
         top_artists = (taste["top_played_artists"] or taste["favorited_artists"])[:8]
+
+    # Fire-and-forget, same pattern as _fire_user_webhooks calls elsewhere —
+    # never block the response on logging a view, and never record a
+    # self-view (self-preview hits this same endpoint with caller_id ==
+    # user_id) or a view the owner opted out of tracking entirely.
+    if caller_id != user_id and show_visitor_stats:
+        asyncio.create_task(_record_profile_view(user_id, caller_id))
 
     return {
         **_public_user_fields((user_row[0], user_row[1], user_row[2], user_row[3])),
@@ -13285,6 +13343,11 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
         ],
         "top_genres": top_genres,
         "top_artists": top_artists,
+        "badges": badges,
+        "listening_streak": streak,
+        "visitor_count": visitor_stats["visitor_count"],
+        "recent_visitors": visitor_stats["recent_visitors"],
+        "featured_playlist": featured_playlist,
     }
 
 
@@ -14291,6 +14354,302 @@ async def listening_together(payload: dict = Depends(get_current_user)):
                 matches = [_public_user_fields(r) for r in await cur.fetchall()]
 
     return {"title": own_title, "artist": own_artist, "listening_together": matches}
+
+
+# ---------------------------------------------------------------------------
+# Feature: profile-customization-3 (2026-07-21) — five more profile/social-
+# profile features on top of the Social Ecosystem above:
+#   1. Profile visitor stats — a MySpace/Discord-style view counter plus a
+#      friends-only "recent visitors" list (ios_social_profile_views).
+#   2. Listening streak — current/longest consecutive-day streaks, computed
+#      live from ios_play_history (no new table).
+#   3. Milestone badges — account-age/plays/friends/guestbook/showcase
+#      achievement chips, computed live (no new table, no privacy toggle —
+#      public flair, like a Discord badge).
+#   4. Featured/spotlight playlist — an owner-chosen highlight from their
+#      own ios_user_playlists (ios_social_profiles.featured_playlist_id).
+#   5. "Recently played together" — a friends-only overlap card of tracks
+#      both users have played in the last 30 days.
+# All five wire into the existing get_my_social_profile / get_public_
+# social_profile responses (see those functions above) rather than adding
+# parallel endpoints, except #4's setter and #5, which are new endpoints
+# below. See schema.sql's matching "profile-customization-3" comment block.
+# ---------------------------------------------------------------------------
+
+
+async def _compute_listening_streak(cur, user_id: str) -> dict:
+    """Current + longest consecutive-day listening streaks, derived from the
+    distinct calendar days present in ios_play_history. Capped to the most
+    recent 400 distinct days (over a year) as a defensive limit — plenty for
+    any realistic streak, and keeps this a cheap query even for a
+    long-tenured power-listener account."""
+    await cur.execute(
+        "SELECT DISTINCT DATE(played_at) AS d FROM ios_play_history WHERE user_id = %s "
+        "ORDER BY d DESC LIMIT 400",
+        (user_id,),
+    )
+    rows = await cur.fetchall()
+    dates = {r[0] for r in rows if r[0]}
+    if not dates:
+        return {"current_streak_days": 0, "longest_streak_days": 0}
+
+    today = datetime.now(timezone.utc).date()
+    # A streak "counts" through today once you've played something today,
+    # but shouldn't drop to zero the instant midnight passes before you've
+    # opened the app yet — so if today has no play logged, start counting
+    # from yesterday instead of zeroing out immediately.
+    cursor_date = today if today in dates else today - timedelta(days=1)
+    current = 0
+    while cursor_date in dates:
+        current += 1
+        cursor_date -= timedelta(days=1)
+
+    longest = 0
+    run = 0
+    prev = None
+    for d in sorted(dates):
+        run = run + 1 if prev is not None and (d - prev).days == 1 else 1
+        longest = max(longest, run)
+        prev = d
+
+    return {"current_streak_days": current, "longest_streak_days": max(longest, current)}
+
+
+async def _compute_profile_badges(cur, user_id: str, member_since) -> list[dict]:
+    """Milestone achievement chips — always computed, no privacy toggle
+    (public flair like a Discord badge, not a data-exposure concern the way
+    top-genres/streak/visitor-identity are). Only the single highest tier
+    reached per category is returned, newest-unlocked-feeling first."""
+    badges: list[dict] = []
+
+    if member_since:
+        since = member_since if member_since.tzinfo else member_since.replace(tzinfo=timezone.utc)
+        days = (datetime.now(timezone.utc) - since).days
+        if days >= 365:
+            badges.append({"id": "veteran", "label": "1 Year+", "icon": "star.circle.fill", "tier": "gold"})
+        elif days >= 180:
+            badges.append({"id": "veteran", "label": "6 Months+", "icon": "star.circle.fill", "tier": "silver"})
+        elif days >= 30:
+            badges.append({"id": "veteran", "label": "1 Month+", "icon": "star.circle.fill", "tier": "bronze"})
+
+    await cur.execute("SELECT COUNT(*) FROM ios_play_history WHERE user_id = %s", (user_id,))
+    plays = (await cur.fetchone())[0]
+    if plays >= 5000:
+        badges.append({"id": "listener", "label": "5,000 Plays", "icon": "headphones", "tier": "gold"})
+    elif plays >= 500:
+        badges.append({"id": "listener", "label": "500 Plays", "icon": "headphones", "tier": "silver"})
+    elif plays >= 50:
+        badges.append({"id": "listener", "label": "50 Plays", "icon": "headphones", "tier": "bronze"})
+
+    await cur.execute("SELECT COUNT(*) FROM ios_social_friends WHERE user_id = %s", (user_id,))
+    friend_count = (await cur.fetchone())[0]
+    if friend_count >= 25:
+        badges.append({"id": "social", "label": "25 Friends", "icon": "person.3.fill", "tier": "gold"})
+    elif friend_count >= 10:
+        badges.append({"id": "social", "label": "10 Friends", "icon": "person.3.fill", "tier": "silver"})
+    elif friend_count >= 3:
+        badges.append({"id": "social", "label": "3 Friends", "icon": "person.3.fill", "tier": "bronze"})
+
+    await cur.execute(
+        "SELECT COUNT(*) FROM ios_social_profile_comments WHERE profile_user_id = %s", (user_id,)
+    )
+    comments_received = (await cur.fetchone())[0]
+    if comments_received >= 25:
+        badges.append({"id": "popular", "label": "25 Guestbook Notes", "icon": "bubble.left.and.bubble.right.fill", "tier": "gold"})
+    elif comments_received >= 5:
+        badges.append({"id": "popular", "label": "5 Guestbook Notes", "icon": "bubble.left.and.bubble.right.fill", "tier": "silver"})
+    elif comments_received >= 1:
+        badges.append({"id": "popular", "label": "First Guestbook Note", "icon": "bubble.left.and.bubble.right.fill", "tier": "bronze"})
+
+    await cur.execute("SELECT COUNT(*) FROM ios_social_pinned_tracks WHERE user_id = %s", (user_id,))
+    pinned_count = (await cur.fetchone())[0]
+    if pinned_count >= 5:
+        badges.append({"id": "curator", "label": "Full Showcase", "icon": "pin.fill", "tier": "gold"})
+
+    return badges
+
+
+async def _record_profile_view(profile_user_id: str, viewer_user_id: str) -> None:
+    """Fire-and-forget after the response is already on its way to the
+    client — same pattern as the _fire_user_webhooks calls elsewhere in this
+    section. Debounced to at most one recorded view per (profile, viewer)
+    pair every 30 minutes, so someone re-opening a friend's profile a few
+    times in a row doesn't inflate their view count like a naive
+    page-refresh counter would."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT 1 FROM ios_social_profile_views WHERE profile_user_id = %s AND viewer_user_id = %s "
+                    "AND viewed_at > NOW() - INTERVAL 30 MINUTE LIMIT 1",
+                    (profile_user_id, viewer_user_id),
+                )
+                if await cur.fetchone():
+                    return
+                await cur.execute(
+                    "INSERT INTO ios_social_profile_views (id, profile_user_id, viewer_user_id) VALUES (%s, %s, %s)",
+                    (str(uuid.uuid4()), profile_user_id, viewer_user_id),
+                )
+    except Exception as exc:
+        # Never let a logging failure surface anywhere — this task's result
+        # is never awaited by the request that spawned it.
+        logger.warning("_record_profile_view failed (%s -> %s): %s", viewer_user_id, profile_user_id, exc)
+
+
+async def _profile_visitor_stats(cur, profile_user_id: str, caller_id: str, include_recent: bool) -> dict:
+    """Total view count (visible to anyone who can view the profile, once
+    the owner's show_visitor_stats toggle is on) plus, only when
+    `include_recent` is True (the caller is a friend of the profile owner,
+    or is the profile owner themself), the up-to-5 most recent DISTINCT
+    friend-of-the-owner visitors — identity is friends-only even though the
+    raw count isn't, matching the guestbook/compatibility precedent that
+    anything identity-revealing needs an actual friendship."""
+    await cur.execute(
+        "SELECT COUNT(*) FROM ios_social_profile_views WHERE profile_user_id = %s", (profile_user_id,)
+    )
+    visitor_count = (await cur.fetchone())[0]
+
+    recent_visitors: list[dict] = []
+    if include_recent:
+        await cur.execute(
+            """
+            SELECT u.id, u.username, u.display_name, u.avatar_url, MAX(v.viewed_at) AS last_viewed
+            FROM ios_social_profile_views v
+            JOIN ios_users u ON u.id = v.viewer_user_id
+            JOIN ios_social_friends f ON f.user_id = %s AND f.friend_id = v.viewer_user_id
+            WHERE v.profile_user_id = %s
+            GROUP BY u.id, u.username, u.display_name, u.avatar_url
+            ORDER BY last_viewed DESC
+            LIMIT 5
+            """,
+            (profile_user_id, profile_user_id),
+        )
+        rows = await cur.fetchall()
+        recent_visitors = [
+            {**_public_user_fields((r[0], r[1], r[2], r[3])), "last_viewed_at": r[4].isoformat() if r[4] else None}
+            for r in rows
+        ]
+    return {"visitor_count": visitor_count, "recent_visitors": recent_visitors}
+
+
+async def _featured_playlist_payload(cur, playlist_id: Optional[str]) -> Optional[dict]:
+    """Resolves a featured_playlist_id into the small summary the client
+    needs — name, track count, and up to 3 preview tracks. Returns None for
+    a null id *or* an id that no longer resolves (the playlist was deleted
+    after being featured) — deliberately not an error, since a stale
+    pointer here is a normal, harmless state, not a data-integrity problem
+    (see the no-FK-constraint reasoning in schema.sql)."""
+    if not playlist_id:
+        return None
+    await cur.execute("SELECT id, name, description FROM ios_user_playlists WHERE id = %s", (playlist_id,))
+    row = await cur.fetchone()
+    if not row:
+        return None
+    await cur.execute("SELECT COUNT(*) FROM ios_playlist_tracks WHERE playlist_id = %s", (playlist_id,))
+    track_count = (await cur.fetchone())[0]
+    await cur.execute(
+        "SELECT title, artist FROM ios_playlist_tracks WHERE playlist_id = %s ORDER BY position ASC LIMIT 3",
+        (playlist_id,),
+    )
+    preview_rows = await cur.fetchall()
+    return {
+        "id": row[0],
+        "name": row[1],
+        "description": row[2],
+        "track_count": track_count,
+        "preview_tracks": [{"title": p[0], "artist": p[1]} for p in preview_rows],
+    }
+
+
+class FeaturedPlaylistUpdate(BaseModel):
+    playlist_id: Optional[str] = None
+
+
+@app.put("/api/social/profile/featured-playlist")
+async def set_featured_playlist(body: FeaturedPlaylistUpdate, payload: dict = Depends(get_current_user)):
+    """Sets (or, with playlist_id omitted/null, clears) the caller's
+    spotlight playlist. Validates ownership server-side rather than trusting
+    the client — a playlist_id belonging to someone else (or a stale/typo'd
+    id) is rejected outright rather than silently featuring nothing."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if body.playlist_id is not None:
+                await cur.execute(
+                    "SELECT 1 FROM ios_user_playlists WHERE id = %s AND user_id = %s",
+                    (body.playlist_id, user_id),
+                )
+                if not await cur.fetchone():
+                    raise HTTPException(status_code=404, detail="Playlist not found")
+            await cur.execute(
+                """
+                INSERT INTO ios_social_profiles (user_id, featured_playlist_id)
+                VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE featured_playlist_id = VALUES(featured_playlist_id)
+                """,
+                (user_id, body.playlist_id),
+            )
+    return {"ok": True}
+
+
+@app.get("/api/social/profile/{user_id}/recently-played-together")
+async def recently_played_together(user_id: str, payload: dict = Depends(get_current_user)):
+    """Extra feature #5: tracks both the caller and `user_id` have played in
+    the last 30 days, newest-shared-listen first. Friends-only, same
+    reasoning as compatibility above — real listening activity, even just
+    which specific tracks overlap, isn't exposed to non-friends."""
+    caller_id = payload["sub"]
+    if caller_id == user_id:
+        raise HTTPException(status_code=400, detail="Can't compare listening history with yourself")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if await _blocked_either_direction(cur, caller_id, user_id):
+                raise HTTPException(status_code=404, detail="User not found")
+            await cur.execute(
+                "SELECT 1 FROM ios_social_friends WHERE user_id = %s AND friend_id = %s",
+                (caller_id, user_id),
+            )
+            if not await cur.fetchone():
+                raise HTTPException(status_code=403, detail="Only available between friends")
+
+            # Self-join keyed on lower/trimmed title+artist (there's no
+            # shared cross-user track id in this schema — ios_play_history
+            # rows are per-user denormalized title/artist, same as pinned
+            # tracks/favorites elsewhere) to find titles both sides actually
+            # played in the last 30 days, newest overlap first.
+            await cur.execute(
+                """
+                SELECT MAX(a.title) AS title, MAX(a.artist) AS artist,
+                       MAX(a.played_at) AS your_last, MAX(b.played_at) AS their_last
+                FROM ios_play_history a
+                JOIN ios_play_history b
+                  ON LOWER(TRIM(a.title)) = LOWER(TRIM(b.title))
+                 AND LOWER(TRIM(COALESCE(a.artist, ''))) = LOWER(TRIM(COALESCE(b.artist, '')))
+                WHERE a.user_id = %s AND b.user_id = %s
+                  AND a.played_at > NOW() - INTERVAL 30 DAY
+                  AND b.played_at > NOW() - INTERVAL 30 DAY
+                GROUP BY LOWER(TRIM(a.title)), LOWER(TRIM(COALESCE(a.artist, '')))
+                ORDER BY GREATEST(MAX(a.played_at), MAX(b.played_at)) DESC
+                LIMIT 8
+                """,
+                (caller_id, user_id),
+            )
+            rows = await cur.fetchall()
+
+    return {
+        "tracks": [
+            {
+                "title": r[0], "artist": r[1],
+                "your_last_played_at": r[2].isoformat() if r[2] else None,
+                "their_last_played_at": r[3].isoformat() if r[3] else None,
+            }
+            for r in rows
+        ]
+    }
 
 
 # ---------------------------------------------------------------------------

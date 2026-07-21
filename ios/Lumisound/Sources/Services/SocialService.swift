@@ -57,7 +57,8 @@ final class SocialService: ObservableObject {
     func updateProfile(
         bio: String? = nil, mainAccentHex: String? = nil, subAccentHex: String? = nil, shareNowPlaying: Bool? = nil,
         pronouns: String? = nil, statusEmoji: String? = nil, statusText: String? = nil, avatarFrame: String? = nil,
-        showTopGenres: Bool? = nil, showGuestbook: Bool? = nil
+        showTopGenres: Bool? = nil, showGuestbook: Bool? = nil,
+        showVisitorStats: Bool? = nil, showListeningStats: Bool? = nil
     ) async {
         guard let account, account.isLoggedIn else { return }
         struct Body: Encodable {
@@ -71,6 +72,8 @@ final class SocialService: ObservableObject {
             let avatar_frame: String?
             let show_top_genres: Bool?
             let show_guestbook: Bool?
+            let show_visitor_stats: Bool?
+            let show_listening_stats: Bool?
         }
         do {
             _ = try await account.makeRequest(
@@ -78,7 +81,8 @@ final class SocialService: ObservableObject {
                 body: Body(
                     bio: bio, main_accent_hex: mainAccentHex, sub_accent_hex: subAccentHex, share_now_playing: shareNowPlaying,
                     pronouns: pronouns, status_emoji: statusEmoji, status_text: statusText, avatar_frame: avatarFrame,
-                    show_top_genres: showTopGenres, show_guestbook: showGuestbook
+                    show_top_genres: showTopGenres, show_guestbook: showGuestbook,
+                    show_visitor_stats: showVisitorStats, show_listening_stats: showListeningStats
                 )
             )
             await fetchMyProfile()
@@ -481,6 +485,50 @@ final class SocialService: ObservableObject {
             listeningTogetherTrack = response.title.map { ($0, response.artist) }
         } catch {
             handle(error)
+        }
+    }
+
+
+    // MARK: - Extra feature: featured/spotlight playlist
+
+    /// Fetches the caller's own server-stored playlists for the Featured
+    /// Playlist picker sheet. Deliberately not cached/`@Published` — this is
+    /// only ever needed while that one sheet is open.
+    func fetchMyPlaylists() async -> [RemotePlaylistSummary] {
+        guard let account, account.isLoggedIn else { return [] }
+        do {
+            let data = try await account.makeRequest("/user/playlists")
+            return try JSONDecoder().decode([RemotePlaylistSummary].self, from: data)
+        } catch {
+            handle(error)
+            return []
+        }
+    }
+
+    /// Sets (`playlistId` non-nil) or clears (`nil`) the featured playlist.
+    func setFeaturedPlaylist(playlistId: String?) async {
+        guard let account, account.isLoggedIn else { return }
+        struct Body: Encodable { let playlist_id: String? }
+        do {
+            _ = try await account.makeRequest(
+                "/api/social/profile/featured-playlist", method: "PUT", body: Body(playlist_id: playlistId)
+            )
+            await fetchMyProfile()
+        } catch {
+            handle(error)
+        }
+    }
+
+    // MARK: - Extra feature: "recently played together"
+
+    func fetchRecentlyPlayedTogether(userId: String) async -> [SharedRecentTrack] {
+        guard let account, account.isLoggedIn else { return [] }
+        do {
+            let data = try await account.makeRequest("/api/social/profile/\(userId)/recently-played-together")
+            return try JSONDecoder().decode(SharedRecentTracksResponse.self, from: data).tracks
+        } catch {
+            handle(error)
+            return []
         }
     }
 

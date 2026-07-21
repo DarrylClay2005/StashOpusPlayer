@@ -40,6 +40,8 @@ struct PublicProfileView: View {
     @State private var draftComment = ""
     @State private var isPostingComment = false
     @State private var compatibility: MusicCompatibility? = nil
+    // MARK: Feature: profile-customization-3
+    @State private var recentlyPlayedTogether: [SharedRecentTrack] = []
 
     private var mainAccentColor: Color { SocialAccentPalette.color(for: profile?.mainAccentHex) ?? AppTheme.dynamicAccent }
     private var subAccentColor: Color { SocialAccentPalette.color(for: profile?.subAccentHex) ?? AppTheme.accentSoft }
@@ -157,6 +159,14 @@ struct PublicProfileView: View {
                             MemberSinceRow(memberSince: profile.memberSince)
                         }
 
+                        // MARK: Badges — no privacy toggle, always shown
+                        // once earned (public flair, like a Discord badge).
+                        if !profile.badges.isEmpty {
+                            ProfileInfoCard(title: "Badges", icon: "rosette", tint: mainAccentColor) {
+                                ProfileBadgeRow(badges: profile.badges)
+                            }
+                        }
+
                         if !profile.pinnedTracks.isEmpty {
                             ProfileInfoCard(title: "Pinned Favorite Tracks", icon: "pin.fill", tint: subAccentColor) {
                                 VStack(spacing: 10) {
@@ -170,9 +180,48 @@ struct PublicProfileView: View {
                             }
                         }
 
+                        // MARK: Featured Playlist — an owner-chosen
+                        // spotlight; shown whenever set, same visibility as
+                        // pinned tracks above (no separate privacy toggle —
+                        // featuring a playlist is itself an intentional
+                        // public action).
+                        if let featuredPlaylist = profile.featuredPlaylist {
+                            ProfileInfoCard(title: "Featured Playlist", icon: "music.note.list", tint: subAccentColor) {
+                                FeaturedPlaylistRow(playlist: featuredPlaylist, tint: subAccentColor)
+                            }
+                        }
+
+                        // MARK: Listening Streak — only present when the
+                        // owner opted in via show_listening_stats.
+                        if let streak = profile.listeningStreak {
+                            ProfileInfoCard(title: "Listening Streak", icon: "flame.fill", tint: mainAccentColor) {
+                                ListeningStreakRow(streak: streak, tint: mainAccentColor)
+                            }
+                        }
+
+                        // MARK: Profile Visitors — only present when the
+                        // owner opted in via show_visitor_stats; the
+                        // recent-visitor avatar stack inside further
+                        // requires the viewer to actually be a friend (see
+                        // the bridge's _profile_visitor_stats).
+                        if let visitorCount = profile.visitorCount {
+                            ProfileInfoCard(title: "Profile Visitors", icon: "eye.fill", tint: mainAccentColor) {
+                                ProfileVisitorStatsRow(visitorCount: visitorCount, recentVisitors: profile.recentVisitors, tint: mainAccentColor)
+                            }
+                        }
+
                         if let compatibility, profile.isFriend, !isSelfPreview {
                             ProfileInfoCard(title: "Music Match", icon: "waveform.path.ecg", tint: mainAccentColor) {
                                 MusicCompatibilityRow(compatibility: compatibility, tint: mainAccentColor)
+                            }
+                        }
+
+                        // MARK: Recently Played Together — extra feature #5,
+                        // friends-only (the fetch itself is skipped for
+                        // self-preview/non-friends — see the .task below).
+                        if !recentlyPlayedTogether.isEmpty, profile.isFriend, !isSelfPreview {
+                            ProfileInfoCard(title: "Recently Played Together", icon: "person.2.wave.2.fill", tint: subAccentColor) {
+                                SharedRecentTracksRow(tracks: recentlyPlayedTogether, tint: subAccentColor)
                             }
                         }
 
@@ -237,6 +286,14 @@ struct PublicProfileView: View {
         .task {
             guard !isSelfPreview else { return }
             compatibility = await social.fetchCompatibility(userId: userId)
+        }
+        // Extra feature #5 — same friends-only/self-preview-skip reasoning
+        // as compatibility just above (the endpoint itself 400s on a
+        // self-lookup and 403s on a non-friend, so there's no point firing
+        // it in either case).
+        .task {
+            guard !isSelfPreview else { return }
+            recentlyPlayedTogether = await social.fetchRecentlyPlayedTogether(userId: userId)
         }
         .confirmationDialog("Block this user?", isPresented: $showBlockConfirm, titleVisibility: .visible) {
             Button("Block", role: .destructive) {

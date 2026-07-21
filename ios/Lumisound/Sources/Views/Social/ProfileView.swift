@@ -29,6 +29,15 @@ struct ProfileView: View {
     @State private var topArtists: [String] = []
     @State private var memberSince: String? = nil
     @State private var pinnedTracks: [PinnedTrack] = []
+    // MARK: Feature: profile-customization-3
+    @State private var showVisitorStats: Bool = true
+    @State private var showListeningStats: Bool = false
+    @State private var listeningStreak: ListeningStreak? = nil
+    @State private var badges: [ProfileBadge] = []
+    @State private var visitorCount: Int = 0
+    @State private var recentVisitors: [ProfileVisitor] = []
+    @State private var featuredPlaylist: FeaturedPlaylist? = nil
+    @State private var showFeaturedPlaylistPicker = false
     @State private var isSaving = false
     @State private var editingSlot: Int? = nil // which pinned-track slot the picker sheet is editing
     @State private var photosPickerItem: PhotosPickerItem? = nil
@@ -304,6 +313,14 @@ struct ProfileView: View {
                         MemberSinceRow(memberSince: memberSince)
                     }
 
+                    // MARK: Badges — milestone achievement chips, no privacy
+                    // toggle (public flair, always shown once earned).
+                    if !badges.isEmpty {
+                        ProfileInfoCard(title: "Badges", icon: "rosette", tint: mainAccentColor) {
+                            ProfileBadgeRow(badges: badges)
+                        }
+                    }
+
                     // MARK: Accent colors — Discord-style two-tone
                     ProfileInfoCard(title: "Profile Colors", icon: "paintpalette.fill", tint: mainAccentColor) {
                         AccentColorPickerView(title: "Main Accent", selectedHex: $mainAccentHex)
@@ -391,6 +408,88 @@ struct ProfileView: View {
                             TopMusicShowcaseRow(topGenres: topGenres, topArtists: topArtists, tint: mainAccentColor)
                                 .opacity(showTopGenres ? 1 : 0.5)
                         }
+                    }
+
+                    // MARK: Listening Streak — opt-in like Top Music
+                    // Showcase above; the preview always renders your own
+                    // real streak regardless of the toggle, same "preview
+                    // before you publish" reasoning as topGenres/topArtists.
+                    if let listeningStreak {
+                        ProfileInfoCard(title: "Listening Streak", icon: "flame.fill", tint: mainAccentColor) {
+                            Toggle(isOn: $showListeningStats) {
+                                Label("Show Listening Streak", systemImage: "flame.fill")
+                                    .foregroundStyle(AppTheme.textPrimary)
+                            }
+                            .tint(mainAccentColor)
+                            .onChange(of: showListeningStats) { newValue in
+                                Task { await social.updateProfile(showListeningStats: newValue) }
+                            }
+                            ListeningStreakRow(streak: listeningStreak, tint: mainAccentColor)
+                                .opacity(showListeningStats ? 1 : 0.5)
+                        }
+                    }
+
+                    // MARK: Featured Playlist — an owner-chosen spotlight
+                    // from their own server-stored playlists.
+                    ProfileInfoCard(title: "Featured Playlist", icon: "music.note.list", tint: subAccentColor) {
+                        if let featuredPlaylist {
+                            FeaturedPlaylistRow(playlist: featuredPlaylist, tint: subAccentColor)
+                        } else {
+                            Text("No playlist featured yet.")
+                                .font(AppTheme.bodyFont(size: 13))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        HStack(spacing: 10) {
+                            Button {
+                                showFeaturedPlaylistPicker = true
+                            } label: {
+                                Text(featuredPlaylist == nil ? "Choose Playlist" : "Change Playlist")
+                                    .font(AppTheme.bodyFont(size: 13))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .foregroundStyle(subAccentColor)
+                                    .adaptiveGlass(
+                                        tint: subAccentColor.opacity(0.14),
+                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous),
+                                        fallback: AppTheme.surface
+                                    )
+                            }
+                            if featuredPlaylist != nil {
+                                Button(role: .destructive) {
+                                    featuredPlaylist = nil
+                                    Task { await social.setFeaturedPlaylist(playlistId: nil) }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                        .padding(8)
+                                        .adaptiveGlass(
+                                            in: RoundedRectangle(cornerRadius: 10, style: .continuous),
+                                            fallback: AppTheme.surface
+                                        )
+                                }
+                            }
+                        }
+                        .padding(.top, 2)
+                    }
+
+                    // MARK: Profile Visitors — opt-out (default on), unlike
+                    // the opt-in showcase/streak cards above; the preview
+                    // always shows your own real stats regardless of the
+                    // toggle, same "preview before you publish" reasoning.
+                    ProfileInfoCard(title: "Profile Visitors", icon: "eye.fill", tint: mainAccentColor) {
+                        Toggle(isOn: $showVisitorStats) {
+                            Label("Show Visitor Stats", systemImage: "eye.fill")
+                                .foregroundStyle(AppTheme.textPrimary)
+                        }
+                        .tint(mainAccentColor)
+                        .onChange(of: showVisitorStats) { newValue in
+                            Task { await social.updateProfile(showVisitorStats: newValue) }
+                        }
+                        ProfileVisitorStatsRow(visitorCount: visitorCount, recentVisitors: recentVisitors, tint: mainAccentColor)
+                            .opacity(showVisitorStats ? 1 : 0.5)
+                        Text("When off, no one sees your view count or recent visitors, and new visits stop being counted.")
+                            .font(AppTheme.bodyFont(size: 12))
+                            .foregroundStyle(AppTheme.textSecondary)
                     }
 
                     // MARK: Guestbook — lets the owner turn off new posts
@@ -541,6 +640,21 @@ struct ProfileView: View {
                 }
             }
         }
+        .sheet(isPresented: $showFeaturedPlaylistPicker) {
+            FeaturedPlaylistPickerSheet(currentPlaylistID: featuredPlaylist?.id) { picked in
+                // Optimistic local update from just the summary the picker
+                // already has (id/name/trackCount) — same "don't make the
+                // user wait on a round trip to see their own change take
+                // effect" reasoning as the avatar/banner uploads above.
+                // `setFeaturedPlaylist` below refetches the full profile
+                // (with real preview tracks) right after.
+                featuredPlaylist = picked.map {
+                    FeaturedPlaylist(id: $0.id, name: $0.name, description: nil, trackCount: $0.trackCount, previewTracks: [])
+                }
+                Task { await social.setFeaturedPlaylist(playlistId: picked?.id) }
+            }
+            .environmentObject(social)
+        }
     }
 
     private struct PinnedSlot: Identifiable { let index: Int; var id: Int { index } }
@@ -566,6 +680,13 @@ struct ProfileView: View {
         topArtists = profile.topArtists
         memberSince = profile.memberSince
         pinnedTracks = profile.pinnedTracks
+        showVisitorStats = profile.showVisitorStats
+        showListeningStats = profile.showListeningStats
+        listeningStreak = profile.listeningStreak
+        badges = profile.badges
+        visitorCount = profile.visitorCount
+        recentVisitors = profile.recentVisitors
+        featuredPlaylist = profile.featuredPlaylist
     }
 
     private func setPinnedSlot(_ slot: Int, track: PinnedTrack) {
@@ -678,6 +799,77 @@ private struct PinnedTrackPickerSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+            }
+        }
+    }
+}
+
+// MARK: - FeaturedPlaylistPickerSheet
+
+/// Picker over the caller's own server-stored playlists (GET
+/// /user/playlists) for the Featured Playlist card — distinct from
+/// `PinnedTrackPickerSheet` above, which picks from the on-device library;
+/// a featured playlist has to be one the bridge itself knows about, since
+/// `PUT /api/social/profile/featured-playlist` validates ownership by id.
+private struct FeaturedPlaylistPickerSheet: View {
+    @EnvironmentObject private var social: SocialService
+    @Environment(\.dismiss) private var dismiss
+
+    let currentPlaylistID: String?
+    let onPick: (RemotePlaylistSummary?) -> Void
+
+    @State private var playlists: [RemotePlaylistSummary] = []
+    @State private var isLoading = true
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if currentPlaylistID != nil {
+                    Button(role: .destructive) {
+                        onPick(nil)
+                        dismiss()
+                    } label: {
+                        Label("Remove Featured Playlist", systemImage: "pin.slash")
+                    }
+                }
+                if isLoading {
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                } else if playlists.isEmpty {
+                    Text("You don't have any playlists yet.")
+                        .foregroundStyle(AppTheme.textSecondary)
+                } else {
+                    ForEach(playlists) { playlist in
+                        Button {
+                            onPick(playlist)
+                            dismiss()
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(playlist.name).foregroundStyle(AppTheme.textPrimary)
+                                    Text(playlist.trackCount == 1 ? "1 track" : "\(playlist.trackCount) tracks")
+                                        .font(AppTheme.bodyFont(size: 12))
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                }
+                                Spacer()
+                                if playlist.id == currentPlaylistID {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(AppTheme.dynamicAccent)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Feature a Playlist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .task {
+                playlists = await social.fetchMyPlaylists()
+                isLoading = false
             }
         }
     }

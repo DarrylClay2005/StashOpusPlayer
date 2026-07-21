@@ -484,6 +484,217 @@ struct ProfileCommentRow: View {
     }
 }
 
+// MARK: - Feature: profile-customization-3 components
+//
+// Five more building blocks, mirroring the family above: milestone badges,
+// a listening-streak stat, profile visitor stats, a featured/spotlight
+// playlist, and a friends-only "recently played together" track list.
+
+// MARK: - ProfileBadgeRow
+
+/// A horizontally-scrolling row of milestone achievement chips (e.g.
+/// "1 Year+", "500 Plays") — backed by `ProfileBadge`, always populated on
+/// both the owner's editor and any visitor's read-only view (no privacy
+/// toggle; these are public flair, like a Discord badge).
+struct ProfileBadgeRow: View {
+    let badges: [ProfileBadge]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(badges) { badge in
+                    HStack(spacing: 5) {
+                        Image(systemName: badge.icon)
+                            .font(.caption2.weight(.bold))
+                        Text(badge.label)
+                            .font(AppTheme.bodyFont(size: 11).weight(.medium))
+                    }
+                    .foregroundStyle(Self.tierColor(badge.tier))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Self.tierColor(badge.tier).opacity(0.16)))
+                }
+            }
+        }
+    }
+
+    static func tierColor(_ tier: String) -> Color {
+        switch tier {
+        case "gold":   return Color(red: 0.96, green: 0.78, blue: 0.15)
+        case "silver": return Color(white: 0.72)
+        default:       return Color(red: 0.80, green: 0.52, blue: 0.25) // bronze
+        }
+    }
+}
+
+// MARK: - ListeningStreakRow
+
+/// "🔥 N day streak" plus a smaller "best streak" figure alongside it —
+/// backed by `ListeningStreak`, computed live from play history on the
+/// bridge (see `_compute_listening_streak`).
+struct ListeningStreakRow: View {
+    let streak: ListeningStreak
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Image(systemName: "flame.fill")
+                        .foregroundStyle(.orange)
+                    Text("\(streak.currentStreakDays)")
+                        .font(.title2.bold())
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                Text(streak.currentStreakDays == 1 ? "day streak" : "day streak")
+                    .font(AppTheme.bodyFont(size: 11))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Divider()
+                .frame(height: 32)
+                .background(AppTheme.textSecondary.opacity(0.2))
+                .padding(.horizontal, 14)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(streak.longestStreakDays)")
+                    .font(.title3.bold())
+                    .foregroundStyle(tint)
+                Text("best streak")
+                    .font(AppTheme.bodyFont(size: 11))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+// MARK: - ProfileVisitorStatsRow
+
+/// "N profile views" plus a stack of small friend-visitor avatars —
+/// backed by `visitorCount`/`recentVisitors` on MySocialProfile /
+/// PublicSocialProfile. `recentVisitors` is only ever non-empty when the
+/// viewer is a friend of the profile owner (see the bridge's
+/// `_profile_visitor_stats`), so the avatar stack simply doesn't render
+/// for a non-friend visitor even though the count above it still does.
+struct ProfileVisitorStatsRow: View {
+    let visitorCount: Int
+    let recentVisitors: [ProfileVisitor]
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "eye.fill")
+                    .foregroundStyle(tint)
+                Text(visitorCount == 1 ? "1 profile view" : "\(visitorCount) profile views")
+                    .font(AppTheme.bodyFont(size: 13))
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            if !recentVisitors.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Recent Visitors")
+                        .font(AppTheme.bodyFont(size: 9))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .kerning(0.6)
+                    HStack(spacing: -8) {
+                        ForEach(recentVisitors.prefix(6)) { visitor in
+                            SocialAvatarView(userId: visitor.userId, size: 28, fallbackFill: .clear)
+                                .overlay(Circle().stroke(AppTheme.background, lineWidth: 2))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - FeaturedPlaylistRow
+
+/// A spotlighted playlist card — cover-less (this app has no per-playlist
+/// artwork concept server-side), so a tinted icon tile stands in, with the
+/// track count and up to 3 track-title preview lines underneath, backed by
+/// `FeaturedPlaylist`.
+struct FeaturedPlaylistRow: View {
+    let playlist: FeaturedPlaylist
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(tint.opacity(0.2))
+                    Image(systemName: "music.note.list")
+                        .foregroundStyle(tint)
+                }
+                .frame(width: 40, height: 40)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(playlist.name)
+                        .font(AppTheme.bodyFont(size: 14).weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .lineLimit(1)
+                    Text(playlist.trackCount == 1 ? "1 track" : "\(playlist.trackCount) tracks")
+                        .font(AppTheme.bodyFont(size: 12))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                Spacer(minLength: 0)
+            }
+            if !playlist.previewTracks.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(playlist.previewTracks.enumerated()), id: \.offset) { _, track in
+                        let artistSuffix = (track.artist?.isEmpty == false) ? " — \(track.artist!)" : ""
+                        Text("• \(track.title)\(artistSuffix)")
+                            .font(AppTheme.bodyFont(size: 11))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - SharedRecentTracksRow
+
+/// Extra feature #5's "Recently Played Together" list — backed by
+/// `SharedRecentTrack`, only ever fetched between confirmed friends (see
+/// GET /api/social/profile/{user_id}/recently-played-together).
+struct SharedRecentTracksRow: View {
+    let tracks: [SharedRecentTrack]
+    let tint: Color
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                HStack(spacing: 10) {
+                    Image(systemName: "music.note")
+                        .font(.caption)
+                        .foregroundStyle(tint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(track.title)
+                            .font(AppTheme.bodyFont(size: 13))
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .lineLimit(1)
+                        if let artist = track.artist, !artist.isEmpty {
+                            Text(artist)
+                                .font(AppTheme.bodyFont(size: 11))
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                if index < tracks.count - 1 {
+                    Divider().background(AppTheme.textSecondary.opacity(0.15))
+                }
+            }
+        }
+    }
+}
+
 // MARK: - PinnedTrackRow
 
 /// One pinned-track row inside a Pinned Tracks `ProfileInfoCard` — shared

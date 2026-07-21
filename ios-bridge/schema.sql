@@ -1160,6 +1160,57 @@ CREATE TABLE IF NOT EXISTS ios_social_friend_tags (
     FOREIGN KEY (friend_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
+-- ---------------------------------------------------------------------------
+-- Profile customization additions (Feature: profile-customization-3,
+-- 2026-07-21) — five more profile/social-profile features layered on top of
+-- the Social Ecosystem above: profile visitor stats, a listening streak
+-- stat, milestone badges, a featured/spotlight playlist, and a friends-only
+-- "recently played together" overlap card. See main.py's SOCIAL ECOSYSTEM
+-- section (search for "profile-customization-3") for the endpoints.
+-- ---------------------------------------------------------------------------
+
+-- show_visitor_stats: opt-out toggle (default TRUE, matching
+-- share_now_playing's "on by default, some people will want to turn it
+-- off" precedent) gating both the visitor_count and recent_visitors fields
+-- on GET /api/social/profile/{user_id} — when FALSE, no view is recorded
+-- for this user at all and both fields are withheld entirely, same
+-- "toggle off = withhold, don't just hide client-side" convention as
+-- show_top_genres. show_listening_stats: opt-in toggle (default FALSE,
+-- matching show_top_genres's precedent) gating the listening_streak field.
+-- featured_playlist_id: an owner-chosen spotlight from their own
+-- ios_user_playlists, shown on the public profile if set. Deliberately no
+-- FK constraint here (no existing table in this schema adds one via a
+-- later ALTER — every FK elsewhere is declared inline on CREATE TABLE, and
+-- ALTER ... ADD CONSTRAINT ... FOREIGN KEY has no "IF NOT EXISTS" form, so
+-- it wouldn't be safely re-runnable like every other statement in this
+-- file); PUT /api/social/profile/featured-playlist validates ownership at
+-- write time, and the read path (_featured_playlist_payload) already
+-- treats a since-deleted playlist id as "nothing featured" rather than
+-- erroring, so a dangling id is harmless either way.
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS show_visitor_stats BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS show_listening_stats BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS featured_playlist_id VARCHAR(36) NULL;
+
+-- Profile view log backing the visitor-stats feature. One row per (viewer,
+-- profile) visit, debounced server-side to at most one row per 30 minutes
+-- per pair (see main.py's _record_profile_view) so repeatedly reopening a
+-- profile doesn't inflate the count like a naive page-refresh counter.
+-- visitor_count is a simple COUNT(*) over this table; recent_visitors is
+-- restricted to the profile owner's own friends (see _profile_visitor_stats)
+-- — a stranger's view still counts toward the total, but their identity is
+-- never exposed the way a friend's is, matching the guestbook/compatibility
+-- precedent of gating anything identity-revealing behind friendship.
+CREATE TABLE IF NOT EXISTS ios_social_profile_views (
+    id VARCHAR(36) PRIMARY KEY,
+    profile_user_id VARCHAR(36) NOT NULL,
+    viewer_user_id VARCHAR(36) NOT NULL,
+    viewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_profile_views_profile (profile_user_id, viewed_at),
+    INDEX idx_profile_views_pair (profile_user_id, viewer_user_id, viewed_at),
+    FOREIGN KEY (profile_user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
+    FOREIGN KEY (viewer_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
 -- Feature: pending-download folder routing (2026-07-19). The job that
 -- created a pending download already knows which local folder it's destined
 -- for (e.g. a tracked playlist's own destination folder — see
