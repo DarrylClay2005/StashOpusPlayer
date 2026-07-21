@@ -70,9 +70,18 @@ enum BackgroundRefreshService {
     @MainActor
     private static func runChecks() async {
         appLog("BackgroundRefreshService: running checks", category: "background")
-        await AccountService.shared?.checkAllSubscriptions()
 
-        guard let library = LibraryManager.shared, let streaming = StreamingService.shared else { return }
+        guard let library = LibraryManager.shared, let streaming = StreamingService.shared else {
+            // No library/streaming yet (e.g. very early launch) — still run
+            // the subscription check itself, just without auto-download.
+            await AccountService.shared?.checkAllSubscriptions()
+            return
+        }
+
+        // Passing streaming/library lets checkAllSubscriptions auto-download
+        // new uploads for any subscription with that opt-in enabled, same as
+        // runAutoDownloads below does for tracked playlists.
+        await AccountService.shared?.checkAllSubscriptions(streaming: streaming, library: library)
 
         // Pick up any downloads that finished server-side while the app
         // wasn't around to fetch them (see StreamingService+PendingDownloads)

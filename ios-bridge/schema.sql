@@ -345,6 +345,52 @@ CREATE TABLE IF NOT EXISTS ios_artist_subscriptions (
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
+-- ---------------------------------------------------------------------------
+-- Subscriptions expansion (Feature: subscriptions-expansion) — additive
+-- columns/tables on top of ios_artist_subscriptions above. Adds: per-
+-- subscription auto-download (+ destination folder) mirroring tracked
+-- playlists' own auto-download, per-subscription notification muting,
+-- free-text categories for grouping, a persisted cross-subscription "New
+-- Releases" feed (so it survives across sessions and captures uploads found
+-- by the background polling loop too, not just on-demand "Check"), and an
+-- upload-history log used to derive an "uploads ~weekly" style insight and
+-- flag inactive/stale subscriptions.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE ios_artist_subscriptions ADD COLUMN IF NOT EXISTS auto_download BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE ios_artist_subscriptions ADD COLUMN IF NOT EXISTS destination_folder VARCHAR(255) NULL;
+ALTER TABLE ios_artist_subscriptions ADD COLUMN IF NOT EXISTS notifications_muted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE ios_artist_subscriptions ADD COLUMN IF NOT EXISTS category VARCHAR(64) NULL;
+
+-- Every new upload discovered for any subscription (on-demand "Check" AND
+-- the periodic background polling loop) gets a row here, giving the client
+-- an aggregated "New Releases" feed across all followed channels in one
+-- list instead of checking each channel individually.
+CREATE TABLE IF NOT EXISTS ios_subscription_feed (
+    id VARCHAR(36) PRIMARY KEY,
+    subscription_id VARCHAR(36) NOT NULL,
+    user_id VARCHAR(36) NOT NULL,
+    track_json TEXT NOT NULL,
+    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    INDEX idx_user_discovered (user_id, discovered_at),
+    INDEX idx_subscription (subscription_id),
+    FOREIGN KEY (subscription_id) REFERENCES ios_artist_subscriptions(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- One row per newly-discovered video, kept even after the feed row above
+-- might be dismissed/pruned — used to compute an average inter-upload gap
+-- ("uploads ~weekly") and to detect subscriptions that have gone quiet.
+CREATE TABLE IF NOT EXISTS ios_subscription_upload_history (
+    id VARCHAR(36) PRIMARY KEY,
+    subscription_id VARCHAR(36) NOT NULL,
+    video_id VARCHAR(64) NOT NULL,
+    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_subscription_discovered (subscription_id, discovered_at),
+    FOREIGN KEY (subscription_id) REFERENCES ios_artist_subscriptions(id) ON DELETE CASCADE
+);
+
 -- Feature: collaborative playlists — additional users granted editor/viewer
 -- access to a playlist they don't own.
 CREATE TABLE IF NOT EXISTS ios_playlist_collaborators (

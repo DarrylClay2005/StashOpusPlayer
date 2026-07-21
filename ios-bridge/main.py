@@ -1808,6 +1808,16 @@ class SubscribeChannelRequest(BaseModel):
     channel_name: Optional[str] = None
 
 
+class UpdateSubscriptionSettingsRequest(BaseModel):
+    """Partial-update body for PATCH /user/subscriptions/{id} (Feature:
+    subscriptions-expansion). Every field is optional — only the ones the
+    client actually sends are changed."""
+    auto_download: Optional[bool] = None
+    destination_folder: Optional[str] = None
+    notifications_muted: Optional[bool] = None
+    category: Optional[str] = None
+
+
 class ResolveChannelRequest(BaseModel):
     query: str
 
@@ -9769,7 +9779,8 @@ async def _poll_due_subscriptions() -> None:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                SELECT id, user_id, channel_url, channel_name, last_video_id, channel_id
+                SELECT id, user_id, channel_url, channel_name, last_video_id, channel_id,
+                       notifications_muted
                 FROM ios_artist_subscriptions
                 WHERE last_checked_at IS NULL OR last_checked_at < NOW() - INTERVAL %s HOUR
                 ORDER BY last_checked_at IS NULL DESC, last_checked_at ASC
@@ -9779,10 +9790,11 @@ async def _poll_due_subscriptions() -> None:
             )
             rows = await cur.fetchall()
 
-    for sub_id, user_id, channel_url, channel_name, last_video_id, channel_id in rows:
+    for sub_id, user_id, channel_url, channel_name, last_video_id, channel_id, notifications_muted in rows:
         try:
             new_tracks = await _check_subscription_core(
-                sub_id, user_id, channel_url, channel_name, last_video_id, channel_id
+                sub_id, user_id, channel_url, channel_name, last_video_id, channel_id,
+                notifications_muted=bool(notifications_muted),
             )
             if new_tracks:
                 logger.info(
@@ -11099,33 +11111,168 @@ async def create_subscription(
     }
 
 
+_INACTIVE_SUBSCRIPTION_MONTHS = 3  # flagged "stale" client-side if no new upload observed this long
+_SUBSCRIPTION_FEED_MAX_PER_USER = 300  # ios_subscription_feed is pruned back to this many rows/user
+
+
+def _describe_upload_frequency(avg_days: float) -> str:
+    """Buckets an average inter-upload gap (in days, derived from
+    ios_subscription_upload_history) into a human-readable insight string —
+    lets the user gauge whether tapping "Check Now" on a given channel is
+    likely to be worth it."""
+    if avg_days <= 2:
+        return "Uploads ~daily"
+    if avg_days <= 10:
+        return "Uploads ~weekly"
+    if avg_days <= 20:
+        return "Uploads ~every 2 weeks"
+    if avg_days <= 45:
+        return "Uploads ~monthly"
+    if avg_days <= 100:
+        return "Uploads every few months"
+    return "Uploads rarely"
+
+
 @app.get("/user/subscriptions")
 async def list_subscriptions(payload: dict = Depends(get_current_user)):
     user_id = payload["sub"]
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            # LEFT JOINs the upload-history log so the frequency insight and
+            # staleness flag (Feature: subscriptions-expansion) can be
+            # computed in one pass instead of a query per subscription.
             await cur.execute(
-                "SELECT id, channel_url, channel_name, last_video_id, last_checked_at, created_at, "
-                "channel_id, channel_thumbnail "
-                "FROM ios_artist_subscriptions WHERE user_id = %s ORDER BY created_at DESC",
+                """
+                SELECT s.id, s.channel_url, s.channel_name, s.last_video_id, s.last_checked_at,
+                       s.created_at, s.channel_id, s.channel_thumbnail, s.auto_download,
+                       s.destination_folder, s.notifications_muted, s.category,
+                       COUNT(h.id) AS sample_count,
+                       MIN(h.discovered_at) AS first_seen,
+                       MAX(h.discovered_at) AS last_seen,
+                       CASE WHEN MAX(h.discovered_at) IS NOT NULL
+                            THEN TIMESTAMPDIFF(DAY, MAX(h.discovered_at), NOW())
+                            ELSE TIMESTAMPDIFF(DAY, s.created_at, NOW())
+                       END AS days_since_activity
+                FROM ios_artist_subscriptions s
+                LEFT JOIN ios_subscription_upload_history h ON h.subscription_id = s.id
+                WHERE s.user_id = %s
+                GROUP BY s.id
+                ORDER BY s.created_at DESC
+                """,
                 (user_id,),
             )
             rows = await cur.fetchall()
 
-    return [
-        {
-            "id": r[0],
-            "channel_url": r[1],
-            "channel_name": r[2],
-            "last_video_id": r[3],
-            "last_checked_at": r[4].isoformat() if r[4] else None,
-            "created_at": r[5].isoformat() if r[5] else None,
-            "channel_id": r[6],
-            "channel_thumbnail": r[7],
-        }
-        for r in rows
-    ]
+    results = []
+    for (sub_id, channel_url, channel_name, last_video_id, last_checked_at, created_at,
+         channel_id, channel_thumbnail, auto_download, destination_folder,
+         notifications_muted, category, sample_count, first_seen, last_seen,
+         days_since_activity) in rows:
+
+        frequency_label: Optional[str] = None
+        if sample_count >= 2 and first_seen and last_seen and last_seen > first_seen:
+            avg_days = (last_seen - first_seen).days / (sample_count - 1)
+            frequency_label = _describe_upload_frequency(avg_days)
+
+        is_stale = bool(
+            days_since_activity is not None
+            and days_since_activity >= _INACTIVE_SUBSCRIPTION_MONTHS * 30
+        )
+
+        results.append({
+            "id": sub_id,
+            "channel_url": channel_url,
+            "channel_name": channel_name,
+            "last_video_id": last_video_id,
+            "last_checked_at": last_checked_at.isoformat() if last_checked_at else None,
+            "created_at": created_at.isoformat() if created_at else None,
+            "channel_id": channel_id,
+            "channel_thumbnail": channel_thumbnail,
+            "auto_download": bool(auto_download),
+            "destination_folder": destination_folder,
+            "notifications_muted": bool(notifications_muted),
+            "category": category,
+            "upload_frequency_label": frequency_label,
+            "is_stale": is_stale,
+            "days_since_activity": int(days_since_activity) if days_since_activity is not None else None,
+        })
+    return results
+
+
+@app.patch("/user/subscriptions/{sub_id}")
+async def update_subscription_settings(
+    sub_id: str,
+    body: UpdateSubscriptionSettingsRequest,
+    payload: dict = Depends(get_current_user),
+):
+    """Partial-updates one subscription's auto-download opt-in (+ optional
+    destination subfolder), notification mute, and/or category (Feature:
+    subscriptions-expansion). Only fields the client actually sent are
+    changed; the rest are left as-is."""
+    user_id = payload["sub"]
+
+    set_clauses: list[str] = []
+    values: list = []
+    if body.auto_download is not None:
+        set_clauses.append("auto_download = %s")
+        values.append(body.auto_download)
+    if body.destination_folder is not None:
+        set_clauses.append("destination_folder = %s")
+        values.append(body.destination_folder if body.destination_folder.strip() else None)
+    if body.notifications_muted is not None:
+        set_clauses.append("notifications_muted = %s")
+        values.append(body.notifications_muted)
+    if body.category is not None:
+        set_clauses.append("category = %s")
+        values.append(body.category.strip() if body.category.strip() else None)
+
+    if not set_clauses:
+        raise HTTPException(status_code=400, detail="No settings provided")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"UPDATE ios_artist_subscriptions SET {', '.join(set_clauses)} "
+                "WHERE id = %s AND user_id = %s",
+                (*values, sub_id, user_id),
+            )
+            # rowcount is 0 both when nothing matched AND when the row
+            # matched but already held these exact values — disambiguate
+            # with an existence check rather than misreporting a no-op
+            # update as "not found".
+            if cur.rowcount == 0:
+                await cur.execute(
+                    "SELECT id FROM ios_artist_subscriptions WHERE id = %s AND user_id = %s",
+                    (sub_id, user_id),
+                )
+                if not await cur.fetchone():
+                    raise HTTPException(status_code=404, detail="Subscription not found")
+
+            await cur.execute(
+                "SELECT id, channel_url, channel_name, last_video_id, last_checked_at, created_at, "
+                "channel_id, channel_thumbnail, auto_download, destination_folder, "
+                "notifications_muted, category "
+                "FROM ios_artist_subscriptions WHERE id = %s AND user_id = %s",
+                (sub_id, user_id),
+            )
+            row = await cur.fetchone()
+
+    return {
+        "id": row[0],
+        "channel_url": row[1],
+        "channel_name": row[2],
+        "last_video_id": row[3],
+        "last_checked_at": row[4].isoformat() if row[4] else None,
+        "created_at": row[5].isoformat() if row[5] else None,
+        "channel_id": row[6],
+        "channel_thumbnail": row[7],
+        "auto_download": bool(row[8]),
+        "destination_folder": row[9],
+        "notifications_muted": bool(row[10]),
+        "category": row[11],
+    }
 
 
 @app.delete("/user/subscriptions/{sub_id}", status_code=204)
@@ -11149,12 +11296,20 @@ async def _check_subscription_core(
     channel_name: Optional[str],
     last_video_id: Optional[str],
     channel_id: Optional[str],
+    notifications_muted: bool = False,
 ) -> list[dict]:
     """Core "check one subscription" logic, shared by the on-demand
     POST /user/subscriptions/{id}/check endpoint and the periodic
     _subscription_polling_loop background task (Feature: scheduled
     background polling) — previously subscriptions were ONLY re-checked
-    when the client explicitly tapped "Check", never automatically."""
+    when the client explicitly tapped "Check", never automatically.
+
+    Every new track found is also logged to ios_subscription_upload_history
+    (powers the "uploads ~weekly" insight and stale-subscription detection)
+    and ios_subscription_feed (powers the aggregated "New Releases" feed) —
+    both happen regardless of `notifications_muted`, since muting only
+    silences the alert, not visibility of the upload itself (Feature:
+    subscriptions-expansion)."""
     tracks: list[dict] = []
     if channel_id:
         api_key = await _youtube_api_key_for_user(user_id)
@@ -11203,14 +11358,35 @@ async def _check_subscription_core(
                 (latest_id, sub_id),
             )
             for track in new_tracks:
-                await _create_notification(
-                    cur, user_id, "new_upload",
-                    f"New from {channel_name or 'a channel you follow'}",
-                    track["title"],
-                    {"track": track, "subscription_id": sub_id},
+                await cur.execute(
+                    "INSERT INTO ios_subscription_upload_history (id, subscription_id, video_id) "
+                    "VALUES (%s, %s, %s)",
+                    (str(uuid.uuid4()), sub_id, track["id"]),
+                )
+                await cur.execute(
+                    "INSERT INTO ios_subscription_feed (id, subscription_id, user_id, track_json) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (str(uuid.uuid4()), sub_id, user_id, json.dumps(track)),
+                )
+                if not notifications_muted:
+                    await _create_notification(
+                        cur, user_id, "new_upload",
+                        f"New from {channel_name or 'a channel you follow'}",
+                        track["title"],
+                        {"track": track, "subscription_id": sub_id},
+                    )
+            if new_tracks:
+                # Keep the feed bounded — prune back to the most recent
+                # _SUBSCRIPTION_FEED_MAX_PER_USER rows for this user rather
+                # than growing it forever.
+                await cur.execute(
+                    "DELETE FROM ios_subscription_feed WHERE user_id = %s AND id NOT IN ("
+                    "SELECT id FROM (SELECT id FROM ios_subscription_feed WHERE user_id = %s "
+                    "ORDER BY discovered_at DESC LIMIT %s) AS keep)",
+                    (user_id, user_id, _SUBSCRIPTION_FEED_MAX_PER_USER),
                 )
 
-    if new_tracks:
+    if new_tracks and not notifications_muted:
         await _fire_user_webhooks(user_id, "new_upload", {
             "subscription_id": sub_id, "channel_name": channel_name, "tracks": new_tracks,
         })
@@ -11221,25 +11397,118 @@ async def _check_subscription_core(
 @app.post("/user/subscriptions/{sub_id}/check")
 async def check_subscription(sub_id: str, payload: dict = Depends(get_current_user)):
     """Re-resolves a channel's latest uploads and reports any new videos since
-    the last check, creating an in-app notification for each."""
+    the last check, creating an in-app notification for each (unless the
+    subscription has notifications muted — see UpdateSubscriptionSettingsRequest)."""
     user_id = payload["sub"]
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT channel_url, channel_name, last_video_id, channel_id "
+                "SELECT channel_url, channel_name, last_video_id, channel_id, notifications_muted "
                 "FROM ios_artist_subscriptions WHERE id = %s AND user_id = %s",
                 (sub_id, user_id),
             )
             row = await cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Subscription not found")
-            channel_url, channel_name, last_video_id, channel_id = row
+            channel_url, channel_name, last_video_id, channel_id, notifications_muted = row
 
     new_tracks = await _check_subscription_core(
-        sub_id, user_id, channel_url, channel_name, last_video_id, channel_id
+        sub_id, user_id, channel_url, channel_name, last_video_id, channel_id,
+        notifications_muted=bool(notifications_muted),
     )
     return {"new_tracks": new_tracks}
+
+
+# ---------------------------------------------------------------------------
+# Subscription "New Releases" feed (Feature: subscriptions-expansion) —
+# aggregates every new upload discovered across ALL of the user's
+# subscriptions (on-demand checks and the background polling loop alike)
+# into one persisted, browsable list backed by ios_subscription_feed.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/user/subscriptions/feed")
+async def get_subscription_feed(
+    limit: int = Query(50, ge=1, le=200),
+    unread_only: bool = Query(False),
+    payload: dict = Depends(get_current_user),
+):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            query = (
+                "SELECT f.id, f.subscription_id, f.track_json, f.discovered_at, f.is_read, "
+                "s.channel_name, s.channel_thumbnail "
+                "FROM ios_subscription_feed f "
+                "JOIN ios_artist_subscriptions s ON s.id = f.subscription_id "
+                "WHERE f.user_id = %s"
+            )
+            params: list = [user_id]
+            if unread_only:
+                query += " AND f.is_read = FALSE"
+            query += " ORDER BY f.discovered_at DESC LIMIT %s"
+            params.append(limit)
+            await cur.execute(query, tuple(params))
+            rows = await cur.fetchall()
+
+    items = []
+    for r in rows:
+        try:
+            track = json.loads(r[2])
+        except Exception:
+            track = None
+        items.append({
+            "id": r[0],
+            "subscription_id": r[1],
+            "track": track,
+            "discovered_at": r[3].isoformat() if r[3] else None,
+            "is_read": bool(r[4]),
+            "channel_name": r[5],
+            "channel_thumbnail": r[6],
+        })
+    return items
+
+
+@app.post("/user/subscriptions/feed/read-all", status_code=204)
+async def mark_all_subscription_feed_read(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_subscription_feed SET is_read = TRUE WHERE user_id = %s AND is_read = FALSE",
+                (user_id,),
+            )
+
+
+@app.post("/user/subscriptions/feed/{item_id}/read", status_code=204)
+async def mark_subscription_feed_item_read(item_id: str, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_subscription_feed SET is_read = TRUE WHERE id = %s AND user_id = %s",
+                (item_id, user_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Feed item not found")
+
+
+@app.delete("/user/subscriptions/feed/{item_id}", status_code=204)
+async def dismiss_subscription_feed_item(item_id: str, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM ios_subscription_feed WHERE id = %s AND user_id = %s",
+                (item_id, user_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Feed item not found")
 
 
 # ---------------------------------------------------------------------------
