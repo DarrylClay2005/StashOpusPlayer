@@ -209,6 +209,35 @@ extension StreamingService {
 
         DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
         recordRecentImport(title: rawName, artist: entry.artist, destinationFolder: resolvedFolder)
+
+        // Unlike the foreground download path (attemptDownload /
+        // finalizeRelayedFile, both of which call prefetchArtworkWithFallback
+        // right after a successful download), this reconciliation path never
+        // seeds ArtworkService's cache — a track imported here relies
+        // entirely on ArtworkService.loadArtwork's fallback chain (embedded-
+        // metadata read -> LUMISOUND_THUMBNAIL tag recovery -> iTunes Search)
+        // the first time its artwork is actually displayed. That chain can
+        // genuinely come up empty rather than just slow: AVFoundation's
+        // metadata parsing for Ogg/Opus's vorbis-comment picture blocks is
+        // far less reliable than for MP4/ID3 tags, and iTunes Search has no
+        // fan remix/game-rip upload in its commercial catalog to match — the
+        // exact combination this app's own yt-dlp pipeline routinely
+        // produces. `PendingDownloadInfo` doesn't carry the original
+        // thumbnail URL (the bridge's /api/download/pending response never
+        // included one), but YouTube's hqdefault.jpg is deterministic from
+        // the video ID alone and virtually always exists — the same
+        // guaranteed fallback prefetchArtworkWithFallback itself reaches for
+        // when a track's *actual* thumbnail URL 404s. prefetchRemoteImage is
+        // a cheap no-op if artwork is already cached under this filename
+        // (e.g. the `alreadyComplete` branch above, which already has real
+        // artwork from its original download), so this is safe to always try.
+        if sourceTrackID.hasPrefix("youtube:") {
+            let videoID = String(sourceTrackID.dropFirst("youtube:".count))
+            if let thumbnailURL = URL(string: "https://i.ytimg.com/vi/\(videoID)/hqdefault.jpg") {
+                await ArtworkService.shared.prefetchRemoteImage(url: thumbnailURL, forKey: destURL.lastPathComponent)
+            }
+        }
+
         appLog("reconcilePendingDownloads: imported job \(entry.job_id) -> \(destURL.lastPathComponent)", category: "network")
         return true
     }

@@ -237,6 +237,32 @@ final class ArtworkService {
                 return persistFullArtwork(image, forKey: key)
             }
 
+            // Both branches above read embedded file metadata via
+            // AVFoundation — which, for Ogg/Opus's vorbis-comment-based
+            // picture/tag blocks, is far less reliable than for MP4/ID3
+            // (confirmed: several Opus tracks downloaded through this
+            // exact pipeline show no artwork despite yt-dlp's
+            // --embed-thumbnail having run at download time). For a
+            // YouTube-sourced track this doesn't need to depend on reading
+            // the file at all: YouTube's hqdefault.jpg is deterministic
+            // from the video ID alone and virtually always exists — the
+            // same guaranteed fallback the download-time prefetch
+            // (StreamingService+DownloadToLibrary's
+            // prefetchArtworkWithFallback) already reaches for when a
+            // track's *actual* thumbnail URL 404s. Tried before iTunes
+            // Search since a real (if lower-resolution) match beats a
+            // guess-based text search that a niche fan remix/game-rip
+            // upload was never going to match in iTunes's commercial
+            // catalog anyway.
+            if let sourceTrackID = song.sourceTrackID, sourceTrackID.hasPrefix("youtube:") {
+                let videoID = String(sourceTrackID.dropFirst("youtube:".count))
+                if let thumbnailURL = URL(string: "https://i.ytimg.com/vi/\(videoID)/hqdefault.jpg"),
+                   let image = await fetchRemoteImage(url: thumbnailURL) {
+                    appLog("Artwork: recovered via YouTube hqdefault fallback for \"\(song.displayName)\"", category: "artwork")
+                    return persistFullArtwork(image, forKey: key)
+                }
+            }
+
             // For local video files, extract the first frame as artwork.
             if Self.videoExtensions.contains(url.pathExtension.lowercased()) {
                 appLog("Artwork: extracting video frame for \"\(song.displayName)\"", category: "artwork")
