@@ -935,6 +935,24 @@ CREATE TABLE IF NOT EXISTS ios_social_profiles (
 -- the profile header falls back to a plain main/sub accent gradient.
 ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS banner_data MEDIUMBLOB NULL;
 
+-- Profile customization additions (Feature: profile-customization-2,
+-- 2026-07-21): pronouns/status say a little more about a person than just
+-- an accent pair + bio; avatar_frame is a purely cosmetic, client-rendered
+-- ring style around the avatar (validated server-side against a curated set
+-- — see _valid_avatar_frame — same "malformed value must never make a
+-- profile broken" reasoning as main/sub_accent_hex above). show_top_genres
+-- is an opt-in privacy toggle, mirroring share_now_playing exactly, gating
+-- the new "Top Genres"/"Top Artists" showcase card built from the same
+-- get_user_taste_profile signal already used for /api/social/compatibility.
+-- show_guestbook lets an owner turn off new guestbook posts entirely without
+-- deleting messages already left — see post_profile_comment's check.
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS pronouns VARCHAR(30) NULL;
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS status_emoji VARCHAR(8) NULL;
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS status_text VARCHAR(60) NULL;
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS avatar_frame VARCHAR(20) NOT NULL DEFAULT 'none';
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS show_top_genres BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS show_guestbook BOOLEAN NOT NULL DEFAULT TRUE;
+
 -- Up to 5 user-pinned "favorite songs" shown on the profile, ordered by
 -- `position` (0-4). Saved as a full replace (delete-then-insert in one
 -- transaction) from PUT /api/social/profile/pinned-tracks rather than
@@ -1028,6 +1046,26 @@ CREATE TABLE IF NOT EXISTS ios_presence_state (
     last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+
+-- Profile guestbook (Feature: profile-comments, 2026-07-21) — short messages
+-- friends can leave on each other's profiles, Discord/MySpace-style. Posting
+-- requires an existing friendship (this app has no moderation tooling, so
+-- the anti-spam/harassment guard is simply "only people you've already
+-- accepted can write on your wall"); reading follows the same visibility as
+-- the profile itself (GET /api/social/profile/{user_id} — anyone not
+-- blocked, not friends-only). Deletable by either the author (retract your
+-- own comment) or the profile owner (moderate your own wall) — see
+-- DELETE /api/social/profile/comments/{comment_id}.
+CREATE TABLE IF NOT EXISTS ios_social_profile_comments (
+    id VARCHAR(36) PRIMARY KEY,
+    profile_user_id VARCHAR(36) NOT NULL,
+    author_user_id VARCHAR(36) NOT NULL,
+    body VARCHAR(280) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_comments_profile (profile_user_id, created_at),
+    FOREIGN KEY (profile_user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
+    FOREIGN KEY (author_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
 -- Feature: pending-download folder routing (2026-07-19). The job that

@@ -30,6 +30,16 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
     /// main/sub accent gradient. Rendered through `AnimatedImageView` (not a
     /// plain SwiftUI `Image`) so a GIF banner actually plays.
     var bannerImage: UIImage? = nil
+    /// Purely cosmetic ring/glow/etc. layered around the avatar — see
+    /// AvatarFrameStyle.swift. Defaults to "none" so every existing call
+    /// site is unaffected.
+    var avatarFrame: String = "none"
+    /// e.g. "she/her" — shown right after the @username, Discord-style.
+    var pronouns: String? = nil
+    /// A short "what I'm up to" line (emoji + text), independent of the
+    /// longer Bio card below — Discord custom-status style.
+    var statusEmoji: String? = nil
+    var statusText: String? = nil
 
     private let avatar: Avatar
     private let action: Action
@@ -41,6 +51,10 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
         username: String,
         isOnline: Bool?,
         bannerImage: UIImage? = nil,
+        avatarFrame: String = "none",
+        pronouns: String? = nil,
+        statusEmoji: String? = nil,
+        statusText: String? = nil,
         @ViewBuilder avatar: () -> Avatar,
         @ViewBuilder action: () -> Action
     ) {
@@ -50,6 +64,10 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
         self.username = username
         self.isOnline = isOnline
         self.bannerImage = bannerImage
+        self.avatarFrame = avatarFrame
+        self.pronouns = pronouns
+        self.statusEmoji = statusEmoji
+        self.statusText = statusText
         self.avatar = avatar()
         self.action = action()
     }
@@ -85,6 +103,7 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
             // cut off at its edge.
             .overlay(alignment: .bottomLeading) {
                 ZStack(alignment: .bottomTrailing) {
+                    AvatarFrameOverlay(style: AvatarFrameStyle.from(avatarFrame), diameter: 84, mainTint: mainAccent, subTint: subAccent)
                     avatar
                         .frame(width: 84, height: 84)
                         .clipShape(Circle())
@@ -116,9 +135,28 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
                     .font(.title2.bold())
                     .foregroundStyle(AppTheme.textPrimary)
                     .lineLimit(1)
-                Text("@\(username)")
-                    .font(AppTheme.bodyFont(size: 13))
-                    .foregroundStyle(AppTheme.textSecondary)
+                HStack(spacing: 6) {
+                    Text("@\(username)")
+                        .font(AppTheme.bodyFont(size: 13))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    if let pronouns, !pronouns.isEmpty {
+                        Text("· \(pronouns)")
+                            .font(AppTheme.bodyFont(size: 13))
+                            .foregroundStyle(AppTheme.textSecondary.opacity(0.8))
+                    }
+                }
+                if let statusText, !statusText.isEmpty {
+                    HStack(spacing: 4) {
+                        if let statusEmoji, !statusEmoji.isEmpty {
+                            Text(statusEmoji)
+                        }
+                        Text(statusText)
+                            .font(AppTheme.bodyFont(size: 12))
+                            .foregroundStyle(AppTheme.textPrimary.opacity(0.85))
+                            .lineLimit(1)
+                    }
+                    .padding(.top, 2)
+                }
             }
             .padding(.leading, 32)
             .padding(.top, 48)
@@ -294,6 +332,154 @@ struct MemberSinceRow: View {
             Text(formatted)
                 .font(AppTheme.bodyFont(size: 13))
                 .foregroundStyle(AppTheme.textPrimary)
+        }
+    }
+}
+
+// MARK: - MusicCompatibilityRow
+
+/// "Music Match" score row — a percentage bar plus a couple of rows of
+/// shared-artist/shared-genre chips, backed by GET
+/// /api/social/compatibility/{user_id}. Friends-only server-side (see
+/// main.py's `social_compatibility`), so this is only ever shown once the
+/// viewed profile is confirmed a friend.
+struct MusicCompatibilityRow: View {
+    let compatibility: MusicCompatibility
+    let tint: Color
+
+    var body: some View {
+        if compatibility.insufficientData {
+            Text("Not enough listening history yet to compute a match.")
+                .font(AppTheme.bodyFont(size: 13))
+                .foregroundStyle(AppTheme.textSecondary)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(compatibility.score)%")
+                        .font(.title2.bold())
+                        .foregroundStyle(tint)
+                    Text("match")
+                        .font(AppTheme.bodyFont(size: 13))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(tint.opacity(0.15))
+                        Capsule().fill(tint)
+                            .frame(width: geo.size.width * CGFloat(min(max(compatibility.score, 0), 100)) / 100)
+                    }
+                }
+                .frame(height: 8)
+
+                if !compatibility.sharedArtists.isEmpty {
+                    CompatibilityChipRow(label: "Shared Artists", items: compatibility.sharedArtists, tint: tint)
+                }
+                if !compatibility.sharedGenres.isEmpty {
+                    CompatibilityChipRow(label: "Shared Genres", items: compatibility.sharedGenres, tint: tint)
+                }
+            }
+        }
+    }
+}
+
+private struct CompatibilityChipRow: View {
+    let label: String
+    let items: [String]
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(AppTheme.bodyFont(size: 9))
+                .foregroundStyle(AppTheme.textSecondary)
+                .kerning(0.6)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(items, id: \.self) { item in
+                        Text(item)
+                            .font(AppTheme.bodyFont(size: 11))
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(tint.opacity(0.16)))
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - TopMusicShowcaseRow
+
+/// "Top Genres" / "Top Artists" showcase — an auto-generated snapshot of
+/// what someone actually listens to, built from the same
+/// `get_user_taste_profile` signal already used for the Music Match score,
+/// gated behind the profile's own `show_top_genres` opt-in (see
+/// `MusicCompatibilityRow`'s doc comment for why artists/genres are kept as
+/// separate chip rows rather than merged into one list).
+struct TopMusicShowcaseRow: View {
+    let topGenres: [String]
+    let topArtists: [String]
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !topArtists.isEmpty {
+                CompatibilityChipRow(label: "Top Artists", items: topArtists, tint: tint)
+            }
+            if !topGenres.isEmpty {
+                CompatibilityChipRow(label: "Top Genres", items: topGenres, tint: tint)
+            }
+        }
+    }
+}
+
+// MARK: - ProfileCommentRow
+
+/// One guestbook message row — author avatar/name, body text, relative
+/// timestamp, and (when permitted) a delete button. Deletion is allowed for
+/// whoever wrote the comment OR the profile owner moderating their own
+/// guestbook, mirroring the bridge's `delete_profile_comment` rule exactly.
+struct ProfileCommentRow: View {
+    let comment: ProfileComment
+    let tint: Color
+    let canDelete: Bool
+    let onDelete: () -> Void
+
+    private var relativeTime: String {
+        guard let date = comment.date else { return "" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            SocialAvatarView(userId: comment.authorUserId, size: 32, fallbackFill: .clear)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(comment.authorDisplayName ?? comment.authorUsername)
+                        .font(AppTheme.bodyFont(size: 13).weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    if !relativeTime.isEmpty {
+                        Text(relativeTime)
+                            .font(AppTheme.bodyFont(size: 11))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+                Text(comment.body)
+                    .font(AppTheme.bodyFont(size: 13))
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            Spacer(minLength: 0)
+            if canDelete {
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
         }
     }
 }

@@ -54,18 +54,32 @@ final class SocialService: ObservableObject {
         }
     }
 
-    func updateProfile(bio: String? = nil, mainAccentHex: String? = nil, subAccentHex: String? = nil, shareNowPlaying: Bool? = nil) async {
+    func updateProfile(
+        bio: String? = nil, mainAccentHex: String? = nil, subAccentHex: String? = nil, shareNowPlaying: Bool? = nil,
+        pronouns: String? = nil, statusEmoji: String? = nil, statusText: String? = nil, avatarFrame: String? = nil,
+        showTopGenres: Bool? = nil, showGuestbook: Bool? = nil
+    ) async {
         guard let account, account.isLoggedIn else { return }
         struct Body: Encodable {
             let bio: String?
             let main_accent_hex: String?
             let sub_accent_hex: String?
             let share_now_playing: Bool?
+            let pronouns: String?
+            let status_emoji: String?
+            let status_text: String?
+            let avatar_frame: String?
+            let show_top_genres: Bool?
+            let show_guestbook: Bool?
         }
         do {
             _ = try await account.makeRequest(
                 "/api/social/profile", method: "PUT",
-                body: Body(bio: bio, main_accent_hex: mainAccentHex, sub_accent_hex: subAccentHex, share_now_playing: shareNowPlaying)
+                body: Body(
+                    bio: bio, main_accent_hex: mainAccentHex, sub_accent_hex: subAccentHex, share_now_playing: shareNowPlaying,
+                    pronouns: pronouns, status_emoji: statusEmoji, status_text: statusText, avatar_frame: avatarFrame,
+                    show_top_genres: showTopGenres, show_guestbook: showGuestbook
+                )
             )
             await fetchMyProfile()
         } catch {
@@ -321,6 +335,56 @@ final class SocialService: ObservableObject {
             friendsActivity = try JSONDecoder().decode(Response.self, from: data).activity
         } catch {
             handle(error)
+        }
+    }
+
+    // MARK: - Extra feature: profile guestbook (comments)
+
+    func fetchProfileComments(userId: String) async -> [ProfileComment] {
+        guard let account, account.isLoggedIn else { return [] }
+        do {
+            let data = try await account.makeRequest("/api/social/profile/\(userId)/comments")
+            return try JSONDecoder().decode(ProfileCommentsResponse.self, from: data).comments
+        } catch {
+            handle(error)
+            return []
+        }
+    }
+
+    @discardableResult
+    func postProfileComment(userId: String, body: String) async -> ProfileComment? {
+        guard let account, account.isLoggedIn else { return nil }
+        struct Body: Encodable { let body: String }
+        do {
+            let data = try await account.makeRequest(
+                "/api/social/profile/\(userId)/comments", method: "POST", body: Body(body: body)
+            )
+            return try JSONDecoder().decode(ProfileComment.self, from: data)
+        } catch {
+            handle(error)
+            return nil
+        }
+    }
+
+    func deleteProfileComment(_ commentId: String) async {
+        guard let account, account.isLoggedIn else { return }
+        do {
+            _ = try await account.makeRequest("/api/social/profile/comments/\(commentId)", method: "DELETE")
+        } catch {
+            handle(error)
+        }
+    }
+
+    // MARK: - Extra feature: music compatibility ("Music Match")
+
+    func fetchCompatibility(userId: String) async -> MusicCompatibility? {
+        guard let account, account.isLoggedIn else { return nil }
+        do {
+            let data = try await account.makeRequest("/api/social/compatibility/\(userId)")
+            return try JSONDecoder().decode(MusicCompatibility.self, from: data)
+        } catch {
+            handle(error)
+            return nil
         }
     }
 

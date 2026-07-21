@@ -12647,6 +12647,21 @@ def _valid_accent_hex(value: Optional[str]) -> Optional[str]:
     return upper
 
 
+# Purely cosmetic, client-rendered ring styles around the profile avatar
+# (see ProfileHeaderCard / AvatarFrame in ProfileHeaderComponents.swift) —
+# validated the same way as accent hexes: an allowlist, not free text.
+_VALID_AVATAR_FRAMES = {"none", "glow", "ring", "dashed", "pulse", "gradient"}
+
+
+def _valid_avatar_frame(value: Optional[str]) -> str:
+    if value is None:
+        return "none"
+    lower = value.lower()
+    if lower not in _VALID_AVATAR_FRAMES:
+        raise HTTPException(status_code=400, detail=f"Unrecognized avatar frame: {value}")
+    return lower
+
+
 async def _blocked_either_direction(cur, user_a: str, user_b: str) -> bool:
     await cur.execute(
         """
@@ -12669,6 +12684,12 @@ class SocialProfileUpdate(BaseModel):
     main_accent_hex: Optional[str] = None
     sub_accent_hex: Optional[str] = None
     share_now_playing: Optional[bool] = None
+    pronouns: Optional[str] = None
+    status_emoji: Optional[str] = None
+    status_text: Optional[str] = None
+    avatar_frame: Optional[str] = None
+    show_top_genres: Optional[bool] = None
+    show_guestbook: Optional[bool] = None
 
 
 class PinnedTrackIn(BaseModel):
@@ -12710,7 +12731,8 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT bio, main_accent_hex, sub_accent_hex, share_now_playing "
+                "SELECT bio, main_accent_hex, sub_accent_hex, share_now_playing, "
+                "pronouns, status_emoji, status_text, avatar_frame, show_top_genres, show_guestbook "
                 "FROM ios_social_profiles WHERE user_id = %s",
                 (user_id,),
             )
@@ -12728,12 +12750,25 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
             await cur.execute("SELECT created_at FROM ios_users WHERE id = %s", (user_id,))
             user_row = await cur.fetchone()
 
+    # Own taste snapshot is always computed for /me regardless of
+    # show_top_genres — that toggle only controls whether OTHER people's
+    # requests get it back (see get_public_social_profile); it's your own
+    # data, so the editor should always be able to preview what the
+    # showcase card would say once turned on.
+    taste = await get_user_taste_profile(user_id)
+
     return {
         "user_id": user_id,
         "bio": row[0] if row else None,
         "main_accent_hex": row[1] if row else None,
         "sub_accent_hex": row[2] if row else None,
         "share_now_playing": bool(row[3]) if row else True,
+        "pronouns": row[4] if row else None,
+        "status_emoji": row[5] if row else None,
+        "status_text": row[6] if row else None,
+        "avatar_frame": (row[7] if row and row[7] else "none"),
+        "show_top_genres": bool(row[8]) if row else False,
+        "show_guestbook": bool(row[9]) if row is not None and row[9] is not None else True,
         "member_since": user_row[0].isoformat() if user_row and user_row[0] else None,
         "pinned_tracks": [
             {
@@ -12742,6 +12777,8 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
             }
             for p in pinned
         ],
+        "top_genres": taste["library_genres"][:6],
+        "top_artists": (taste["top_played_artists"] or taste["favorited_artists"])[:8],
     }
 
 
@@ -12750,8 +12787,20 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
     user_id = payload["sub"]
     if body.bio is not None and len(body.bio) > 280:
         raise HTTPException(status_code=400, detail="Bio must be 280 characters or fewer")
+    if body.pronouns is not None and len(body.pronouns) > 30:
+        raise HTTPException(status_code=400, detail="Pronouns must be 30 characters or fewer")
+    if body.status_text is not None and len(body.status_text) > 60:
+        raise HTTPException(status_code=400, detail="Status must be 60 characters or fewer")
+    if body.status_emoji is not None and len(body.status_emoji) > 8:
+        raise HTTPException(status_code=400, detail="Status emoji is too long")
     main_hex = _valid_accent_hex(body.main_accent_hex)
     sub_hex = _valid_accent_hex(body.sub_accent_hex)
+    # Only actually validate/overwrite avatar_frame when the caller sent one
+    # — unlike accent hexes (nullable, "unset" is a valid state), the column
+    # is NOT NULL DEFAULT 'none', so an *omitted* field must fall back to the
+    # existing value the same way share_now_playing does below, not to the
+    # literal string "none" every time it's left out of a partial PATCH.
+    frame = _valid_avatar_frame(body.avatar_frame) if body.avatar_frame is not None else None
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -12760,30 +12809,45 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
             # same "partial PATCH via UPDATE ... VALUES()" pattern used by
             # /user/discord-rpc-config above.
             #
-            # share_now_playing is NOT NULL DEFAULT TRUE, so it can't just
-            # follow the same COALESCE(VALUES(...), existing) shape as the
-            # nullable columns above it: on a brand-new row (no existing
-            # value to fall back to), inserting a raw NULL when the caller
-            # omits the field would violate the NOT NULL constraint outright
-            # rather than falling back to the column default (DEFAULT only
-            # applies when a column is left out of the INSERT entirely, not
-            # when it's explicitly bound to NULL). The insert-side value uses
-            # COALESCE(%s, TRUE) so a first-ever profile always gets a
-            # concrete TRUE/FALSE; the update-side re-binds the same raw
-            # parameter (not VALUES(), which would already be TRUE-defaulted)
-            # so an omitted field on an existing row still preserves whatever
-            # was there before.
+            # share_now_playing/show_top_genres/show_guestbook are all
+            # NOT NULL DEFAULT-ed booleans, so none of them can just follow
+            # the same COALESCE(VALUES(...), existing) shape as the nullable
+            # columns above them: on a brand-new row (no existing value to
+            # fall back to), inserting a raw NULL when the caller omits the
+            # field would violate the NOT NULL constraint outright rather
+            # than falling back to the column default (DEFAULT only applies
+            # when a column is left out of the INSERT entirely, not when
+            # it's explicitly bound to NULL). The insert-side value uses
+            # COALESCE(%s, <default>) so a first-ever profile always gets a
+            # concrete value; the update-side re-binds the same raw
+            # parameter (not VALUES(), which would already be defaulted) so
+            # an omitted field on an existing row still preserves whatever
+            # was there before. avatar_frame gets the identical treatment
+            # even though it's a string column, for the same reason.
             await cur.execute(
                 """
-                INSERT INTO ios_social_profiles (user_id, bio, main_accent_hex, sub_accent_hex, share_now_playing)
-                VALUES (%s, %s, %s, %s, COALESCE(%s, TRUE))
+                INSERT INTO ios_social_profiles
+                    (user_id, bio, main_accent_hex, sub_accent_hex, share_now_playing,
+                     pronouns, status_emoji, status_text, avatar_frame, show_top_genres, show_guestbook)
+                VALUES (%s, %s, %s, %s, COALESCE(%s, TRUE), %s, %s, %s, COALESCE(%s, 'none'), COALESCE(%s, FALSE), COALESCE(%s, TRUE))
                 ON DUPLICATE KEY UPDATE
                     bio = COALESCE(VALUES(bio), bio),
                     main_accent_hex = COALESCE(VALUES(main_accent_hex), main_accent_hex),
                     sub_accent_hex = COALESCE(VALUES(sub_accent_hex), sub_accent_hex),
-                    share_now_playing = COALESCE(%s, share_now_playing)
+                    share_now_playing = COALESCE(%s, share_now_playing),
+                    pronouns = COALESCE(VALUES(pronouns), pronouns),
+                    status_emoji = COALESCE(VALUES(status_emoji), status_emoji),
+                    status_text = COALESCE(VALUES(status_text), status_text),
+                    avatar_frame = COALESCE(%s, avatar_frame),
+                    show_top_genres = COALESCE(%s, show_top_genres),
+                    show_guestbook = COALESCE(%s, show_guestbook)
                 """,
-                (user_id, body.bio, main_hex, sub_hex, body.share_now_playing, body.share_now_playing),
+                (
+                    user_id, body.bio, main_hex, sub_hex, body.share_now_playing,
+                    body.pronouns, body.status_emoji, body.status_text, frame,
+                    body.show_top_genres, body.show_guestbook,
+                    body.share_now_playing, frame, body.show_top_genres, body.show_guestbook,
+                ),
             )
     return {"ok": True}
 
@@ -12906,7 +12970,9 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
                 raise HTTPException(status_code=404, detail="User not found")
 
             await cur.execute(
-                "SELECT bio, main_accent_hex, sub_accent_hex FROM ios_social_profiles WHERE user_id = %s",
+                "SELECT bio, main_accent_hex, sub_accent_hex, pronouns, status_emoji, status_text, "
+                "avatar_frame, show_top_genres, show_guestbook "
+                "FROM ios_social_profiles WHERE user_id = %s",
                 (user_id,),
             )
             profile_row = await cur.fetchone()
@@ -12924,17 +12990,32 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
             )
             is_friend = (await cur.fetchone()) is not None
 
+    show_top_genres = bool(profile_row[7]) if profile_row else False
+    top_genres: list[str] = []
+    top_artists: list[str] = []
+    if show_top_genres:
+        taste = await get_user_taste_profile(user_id)
+        top_genres = taste["library_genres"][:6]
+        top_artists = (taste["top_played_artists"] or taste["favorited_artists"])[:8]
+
     return {
         **_public_user_fields((user_row[0], user_row[1], user_row[2], user_row[3])),
         "bio": profile_row[0] if profile_row else None,
         "main_accent_hex": profile_row[1] if profile_row else None,
         "sub_accent_hex": profile_row[2] if profile_row else None,
+        "pronouns": profile_row[3] if profile_row else None,
+        "status_emoji": profile_row[4] if profile_row else None,
+        "status_text": profile_row[5] if profile_row else None,
+        "avatar_frame": (profile_row[6] if profile_row and profile_row[6] else "none"),
+        "show_guestbook": bool(profile_row[8]) if profile_row is not None and profile_row[8] is not None else True,
         "is_friend": is_friend,
         "member_since": user_row[4].isoformat() if user_row[4] else None,
         "pinned_tracks": [
             {"source_track_id": p[0], "track_url": p[1], "title": p[2], "artist": p[3], "album": p[4]}
             for p in pinned
         ],
+        "top_genres": top_genres,
+        "top_artists": top_artists,
     }
 
 
@@ -13017,6 +13098,19 @@ async def send_friend_request(body: FriendRequestCreate, payload: dict = Depends
                 "INSERT INTO ios_social_friend_requests (id, from_user_id, to_user_id) VALUES (%s, %s, %s)",
                 (request_id, from_id, to_id),
             )
+            # Neither this nor accept's notification (see _respond_to_request)
+            # existed before — a whole friend-request system with no way to
+            # actually learn a request arrived/was accepted short of manually
+            # reopening the Friends tab was a real gap for a "social" feature.
+            await cur.execute("SELECT username, display_name FROM ios_users WHERE id = %s", (from_id,))
+            sender = await cur.fetchone()
+            sender_name = (sender[1] or sender[0]) if sender else "Someone"
+            await _create_notification(
+                cur, to_id, "friend_request",
+                "New Friend Request",
+                f"{sender_name} wants to be friends",
+                {"request_id": request_id, "from_user_id": from_id},
+            )
     return {"ok": True, "request_id": request_id}
 
 
@@ -13052,6 +13146,18 @@ async def _respond_to_request(request_id: str, caller_id: str, new_status: str) 
                     await cur.execute(
                         "INSERT IGNORE INTO ios_social_friends (user_id, friend_id) VALUES (%s, %s), (%s, %s)",
                         (from_id, to_id, to_id, from_id),
+                    )
+                    # Tell the original sender their request was accepted —
+                    # see the matching comment on send_friend_request's own
+                    # new notification for why this didn't exist before.
+                    await cur.execute("SELECT username, display_name FROM ios_users WHERE id = %s", (to_id,))
+                    accepter = await cur.fetchone()
+                    accepter_name = (accepter[1] or accepter[0]) if accepter else "Someone"
+                    await _create_notification(
+                        cur, from_id, "friend_request_accepted",
+                        "Friend Request Accepted",
+                        f"{accepter_name} accepted your friend request",
+                        {"user_id": to_id},
                     )
                 await conn.commit()
             except Exception:
@@ -13450,6 +13556,229 @@ async def friends_activity_feed(limit: int = Query(30, ge=1, le=100), payload: d
             }
             for r in rows
         ]
+    }
+
+
+# ---------------------------------------------------------------------------
+# Profile guestbook (Feature: profile-comments, 2026-07-21) — short messages
+# friends can leave on each other's profiles. See the doc comment on
+# ios_social_profile_comments in schema.sql for the visibility/moderation
+# rules (posting is friends-only, reading matches profile visibility,
+# deletable by the author or the profile owner).
+# ---------------------------------------------------------------------------
+
+
+class ProfileCommentIn(BaseModel):
+    body: str
+
+
+def _comment_dict(row) -> dict:
+    return {
+        "id": row[0],
+        "author_user_id": row[1],
+        "author_username": row[2],
+        "author_display_name": row[3],
+        "author_avatar_url": row[4],
+        "body": row[5],
+        "created_at": row[6].isoformat() if row[6] else None,
+    }
+
+
+@app.get("/api/social/profile/{user_id}/comments")
+async def get_profile_comments(
+    user_id: str, limit: int = Query(50, ge=1, le=100), payload: dict = Depends(get_current_user)
+):
+    caller_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if caller_id != user_id and await _blocked_either_direction(cur, caller_id, user_id):
+                raise HTTPException(status_code=404, detail="User not found")
+            await cur.execute(
+                """
+                SELECT c.id, c.author_user_id, u.username, u.display_name, u.avatar_url, c.body, c.created_at
+                FROM ios_social_profile_comments c
+                JOIN ios_users u ON u.id = c.author_user_id
+                WHERE c.profile_user_id = %s
+                ORDER BY c.created_at DESC
+                LIMIT %s
+                """,
+                (user_id, limit),
+            )
+            rows = await cur.fetchall()
+    return {"comments": [_comment_dict(r) for r in rows]}
+
+
+@app.post("/api/social/profile/{user_id}/comments", status_code=201)
+async def post_profile_comment(user_id: str, body: ProfileCommentIn, payload: dict = Depends(get_current_user)):
+    author_id = payload["sub"]
+    if author_id == user_id:
+        raise HTTPException(status_code=400, detail="You can't leave a comment on your own profile")
+    text = body.body.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Comment can't be empty")
+    if len(text) > 280:
+        raise HTTPException(status_code=400, detail="Comment must be 280 characters or fewer")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if await _blocked_either_direction(cur, author_id, user_id):
+                raise HTTPException(status_code=404, detail="User not found")
+            await cur.execute(
+                "SELECT 1 FROM ios_social_friends WHERE user_id = %s AND friend_id = %s",
+                (author_id, user_id),
+            )
+            if not await cur.fetchone():
+                raise HTTPException(status_code=403, detail="You can only comment on friends' profiles")
+            await cur.execute(
+                "SELECT show_guestbook FROM ios_social_profiles WHERE user_id = %s", (user_id,)
+            )
+            guestbook_row = await cur.fetchone()
+            # NULL/no-row means the profile row simply hasn't been created
+            # yet (an untouched brand-new profile) — that's the same as the
+            # column's own default, TRUE, not "disabled".
+            if guestbook_row is not None and guestbook_row[0] is not None and not guestbook_row[0]:
+                raise HTTPException(status_code=403, detail="This user has turned off their guestbook")
+
+            comment_id = str(uuid.uuid4())
+            await cur.execute(
+                "INSERT INTO ios_social_profile_comments (id, profile_user_id, author_user_id, body) "
+                "VALUES (%s, %s, %s, %s)",
+                (comment_id, user_id, author_id, text),
+            )
+            await cur.execute("SELECT username, display_name FROM ios_users WHERE id = %s", (author_id,))
+            author = await cur.fetchone()
+            author_name = (author[1] or author[0]) if author else "Someone"
+            await _create_notification(
+                cur, user_id, "profile_comment",
+                "New Profile Comment",
+                f"{author_name}: {text[:100]}",
+                {"comment_id": comment_id, "author_user_id": author_id},
+            )
+
+            await cur.execute(
+                "SELECT c.id, c.author_user_id, u.username, u.display_name, u.avatar_url, c.body, c.created_at "
+                "FROM ios_social_profile_comments c JOIN ios_users u ON u.id = c.author_user_id "
+                "WHERE c.id = %s",
+                (comment_id,),
+            )
+            row = await cur.fetchone()
+
+    asyncio.create_task(_fire_user_webhooks(user_id, "profile_comment", {
+        "author_user_id": author_id, "body": text,
+    }))
+    return _comment_dict(row)
+
+
+@app.delete("/api/social/profile/comments/{comment_id}", status_code=204)
+async def delete_profile_comment(comment_id: str, payload: dict = Depends(get_current_user)):
+    """Deletable by whoever wrote the comment, or the profile owner
+    moderating their own guestbook — either side of that relationship
+    should be able to take an unwanted comment down."""
+    caller_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT author_user_id, profile_user_id FROM ios_social_profile_comments WHERE id = %s",
+                (comment_id,),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Comment not found")
+            author_user_id, profile_user_id = row
+            if caller_id not in (author_user_id, profile_user_id):
+                raise HTTPException(status_code=403, detail="Not authorized to delete this comment")
+            await cur.execute("DELETE FROM ios_social_profile_comments WHERE id = %s", (comment_id,))
+
+
+# ---------------------------------------------------------------------------
+# Music compatibility score (Feature: social-compatibility, 2026-07-21) — how
+# much two friends' listening tastes overlap, as a shareable "X% Music
+# Match" badge on their profile. Deliberately reuses
+# intelligence.get_user_taste_profile (Aria's own metadata-matching signal:
+# recency/engagement-weighted top played artists, favorited artists/albums,
+# library genre composition) rather than standing up a second, separate
+# taste-analysis pipeline — same underlying data, already cached, already
+# proven correct for a different feature.
+# ---------------------------------------------------------------------------
+
+
+def _taste_display_map_and_keys(items: list[str]) -> tuple[dict[str, str], set[str]]:
+    """Lowercased-for-comparison keys, mapped back to one original display
+    casing per key, so e.g. "Daft Punk" and "daft punk" from two different
+    users' data still count as the same shared artist without the response
+    showing an all-lowercased list."""
+    display: dict[str, str] = {}
+    keys: set[str] = set()
+    for item in items:
+        stripped = item.strip()
+        if not stripped:
+            continue
+        key = stripped.lower()
+        keys.add(key)
+        display.setdefault(key, stripped)
+    return display, keys
+
+
+def _jaccard(a: set, b: set) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+@app.get("/api/social/compatibility/{user_id}")
+async def social_compatibility(user_id: str, payload: dict = Depends(get_current_user)):
+    """Friend-to-friend "Music Match" score. Only offered between actual
+    friends (not strangers, not self) — one user's real listening habits
+    aren't data this exposes to just anyone who can view their profile,
+    unlike the profile fields themselves."""
+    caller_id = payload["sub"]
+    if caller_id == user_id:
+        raise HTTPException(status_code=400, detail="Can't compute compatibility with yourself")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if await _blocked_either_direction(cur, caller_id, user_id):
+                raise HTTPException(status_code=404, detail="User not found")
+            await cur.execute(
+                "SELECT 1 FROM ios_social_friends WHERE user_id = %s AND friend_id = %s",
+                (caller_id, user_id),
+            )
+            if not await cur.fetchone():
+                raise HTTPException(status_code=403, detail="Compatibility is only available between friends")
+
+    profile_a = await get_user_taste_profile(caller_id)
+    profile_b = await get_user_taste_profile(user_id)
+
+    display_artists_a, artists_a = _taste_display_map_and_keys(
+        profile_a["top_played_artists"] + profile_a["favorited_artists"]
+    )
+    _, artists_b = _taste_display_map_and_keys(profile_b["top_played_artists"] + profile_b["favorited_artists"])
+    display_genres_a, genres_a = _taste_display_map_and_keys(profile_a["library_genres"])
+    _, genres_b = _taste_display_map_and_keys(profile_b["library_genres"])
+
+    if not artists_a or not artists_b:
+        return {"score": 0, "insufficient_data": True, "shared_artists": [], "shared_genres": []}
+
+    # Artists weighted well above genres — sharing a specific artist is much
+    # stronger evidence of real taste overlap than sharing a broad genre
+    # label, which two very different-sounding libraries can both happen to
+    # tag as e.g. "Rock".
+    artist_similarity = _jaccard(artists_a, artists_b)
+    genre_similarity = _jaccard(genres_a, genres_b)
+    score = round(100 * (0.7 * artist_similarity + 0.3 * genre_similarity))
+
+    shared_artist_keys = sorted(artists_a & artists_b)[:10]
+    shared_genre_keys = sorted(genres_a & genres_b)[:6]
+
+    return {
+        "score": score,
+        "insufficient_data": False,
+        "shared_artists": [display_artists_a.get(k, k) for k in shared_artist_keys],
+        "shared_genres": [display_genres_a.get(k, k) for k in shared_genre_keys],
     }
 
 

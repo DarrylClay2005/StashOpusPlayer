@@ -19,6 +19,14 @@ struct ProfileView: View {
     @State private var mainAccentHex: String? = nil
     @State private var subAccentHex: String? = nil
     @State private var shareNowPlaying: Bool = true
+    @State private var pronouns: String = ""
+    @State private var statusEmoji: String = ""
+    @State private var statusText: String = ""
+    @State private var avatarFrame: AvatarFrameStyle = .none
+    @State private var showTopGenres: Bool = false
+    @State private var showGuestbook: Bool = true
+    @State private var topGenres: [String] = []
+    @State private var topArtists: [String] = []
     @State private var memberSince: String? = nil
     @State private var pinnedTracks: [PinnedTrack] = []
     @State private var isSaving = false
@@ -60,7 +68,11 @@ struct ProfileView: View {
                         displayName: account.currentUser?.displayName ?? account.currentUser?.username ?? "",
                         username: account.currentUser?.username ?? "",
                         isOnline: true,
-                        bannerImage: bannerImage
+                        bannerImage: bannerImage,
+                        avatarFrame: avatarFrame.rawValue,
+                        pronouns: pronouns,
+                        statusEmoji: statusEmoji,
+                        statusText: statusText
                     ) {
                         ZStack {
                             if let img = account.avatarImage {
@@ -259,6 +271,34 @@ struct ProfileView: View {
                         }
                     }
 
+                    // MARK: About You — pronouns + a short Discord-style
+                    // custom status, distinct from the longer Bio card above.
+                    ProfileInfoCard(title: "About You", icon: "person.text.rectangle", tint: mainAccentColor) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            TextField("Pronouns (e.g. she/her)", text: $pronouns)
+                                .font(AppTheme.bodyFont(size: 14))
+                                .foregroundStyle(AppTheme.textPrimary)
+                                .onChange(of: pronouns) { newValue in
+                                    if newValue.count > 30 { pronouns = String(newValue.prefix(30)) }
+                                }
+                            Divider().background(AppTheme.textSecondary.opacity(0.15))
+                            HStack(spacing: 8) {
+                                TextField("🎧", text: $statusEmoji)
+                                    .font(AppTheme.bodyFont(size: 14))
+                                    .frame(width: 40)
+                                    .onChange(of: statusEmoji) { newValue in
+                                        if newValue.count > 8 { statusEmoji = String(newValue.prefix(8)) }
+                                    }
+                                TextField("What are you up to?", text: $statusText)
+                                    .font(AppTheme.bodyFont(size: 14))
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                    .onChange(of: statusText) { newValue in
+                                        if newValue.count > 60 { statusText = String(newValue.prefix(60)) }
+                                    }
+                            }
+                        }
+                    }
+
                     // MARK: Member Since
                     ProfileInfoCard(title: "Member Since", icon: "calendar", tint: subAccentColor) {
                         MemberSinceRow(memberSince: memberSince)
@@ -273,6 +313,17 @@ struct ProfileView: View {
                         Text("Main drives your profile's primary chrome; Sub drives secondary highlights — shown to anyone who visits your profile.")
                             .font(AppTheme.bodyFont(size: 12))
                             .foregroundStyle(AppTheme.textSecondary)
+                    }
+
+                    // MARK: Avatar frame — purely cosmetic, client-rendered.
+                    // Batched into the toolbar's Save button along with
+                    // bio/accents/pronouns/status, not auto-saved per tap —
+                    // same "pick, then Save" flow as the accent color
+                    // pickers right above, so a user who taps through a few
+                    // options before deciding can still back out with the
+                    // system-standard "leave without saving" navigation gesture.
+                    ProfileInfoCard(title: "Avatar Frame", icon: "circle.dashed", tint: subAccentColor) {
+                        AvatarFramePickerView(mainTint: mainAccentColor, subTint: subAccentColor, selected: $avatarFrame)
                     }
 
                     // MARK: Pinned favorite tracks
@@ -314,6 +365,49 @@ struct ProfileView: View {
                             .font(AppTheme.bodyFont(size: 12))
                             .foregroundStyle(AppTheme.textSecondary)
                             .padding(.top, 4)
+                    }
+
+                    // MARK: Top Music showcase — auto-generated from actual
+                    // listening history (same signal as the Music Match
+                    // score), opt-in like Share Now Playing below. The
+                    // preview always renders from `topGenres`/`topArtists`
+                    // (server sends these for /me regardless of the toggle)
+                    // so the owner can see exactly what turning it on would
+                    // publish before committing to it.
+                    ProfileInfoCard(title: "Top Music Showcase", icon: "chart.bar.fill", tint: mainAccentColor) {
+                        Toggle(isOn: $showTopGenres) {
+                            Label("Show Top Genres & Artists", systemImage: "chart.bar.fill")
+                                .foregroundStyle(AppTheme.textPrimary)
+                        }
+                        .tint(mainAccentColor)
+                        .onChange(of: showTopGenres) { newValue in
+                            Task { await social.updateProfile(showTopGenres: newValue) }
+                        }
+                        if topGenres.isEmpty && topArtists.isEmpty {
+                            Text("Not enough listening history yet to build a showcase.")
+                                .font(AppTheme.bodyFont(size: 12))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        } else {
+                            TopMusicShowcaseRow(topGenres: topGenres, topArtists: topArtists, tint: mainAccentColor)
+                                .opacity(showTopGenres ? 1 : 0.5)
+                        }
+                    }
+
+                    // MARK: Guestbook — lets the owner turn off new posts
+                    // without deleting messages already left (see
+                    // post_profile_comment's show_guestbook check).
+                    ProfileInfoCard(title: "Guestbook", icon: "bubble.left.and.bubble.right.fill", tint: subAccentColor) {
+                        Toggle(isOn: $showGuestbook) {
+                            Label("Allow Guestbook Messages", systemImage: "bubble.left.and.bubble.right.fill")
+                                .foregroundStyle(AppTheme.textPrimary)
+                        }
+                        .tint(subAccentColor)
+                        .onChange(of: showGuestbook) { newValue in
+                            Task { await social.updateProfile(showGuestbook: newValue) }
+                        }
+                        Text("When off, friends can no longer leave new messages on your profile. Messages already posted stay visible until you delete them.")
+                            .font(AppTheme.bodyFont(size: 12))
+                            .foregroundStyle(AppTheme.textSecondary)
                     }
 
                     // MARK: Privacy — now-playing sharing hook for presence
@@ -462,6 +556,14 @@ struct ProfileView: View {
         mainAccentHex = profile.mainAccentHex
         subAccentHex = profile.subAccentHex
         shareNowPlaying = profile.shareNowPlaying
+        pronouns = profile.pronouns ?? ""
+        statusEmoji = profile.statusEmoji ?? ""
+        statusText = profile.statusText ?? ""
+        avatarFrame = AvatarFrameStyle.from(profile.avatarFrame)
+        showTopGenres = profile.showTopGenres
+        showGuestbook = profile.showGuestbook
+        topGenres = profile.topGenres
+        topArtists = profile.topArtists
         memberSince = profile.memberSince
         pinnedTracks = profile.pinnedTracks
     }
@@ -486,11 +588,18 @@ struct ProfileView: View {
         Task { @MainActor in
             defer { isSaving = false }
             let trimmed = draftBio.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedPronouns = pronouns.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedStatusEmoji = statusEmoji.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedStatusText = statusText.trimmingCharacters(in: .whitespacesAndNewlines)
             await social.updateProfile(
                 bio: trimmed,
                 mainAccentHex: mainAccentHex,
                 subAccentHex: subAccentHex,
-                shareNowPlaying: shareNowPlaying
+                shareNowPlaying: shareNowPlaying,
+                pronouns: trimmedPronouns,
+                statusEmoji: trimmedStatusEmoji,
+                statusText: trimmedStatusText,
+                avatarFrame: avatarFrame.rawValue
             )
             // Re-sync local @State from whatever the server actually persisted
             // (updateProfile() already refetches into social.myProfile) rather

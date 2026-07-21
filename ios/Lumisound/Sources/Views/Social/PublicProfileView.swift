@@ -26,6 +26,7 @@ struct PublicProfileView: View {
 
     @EnvironmentObject private var social: SocialService
     @EnvironmentObject private var account: AccountService
+    @EnvironmentObject private var player: AudioPlayerManager
     @StateObject private var presenceService = PresenceService()
 
     @State private var profile: PublicSocialProfile? = nil
@@ -35,6 +36,10 @@ struct PublicProfileView: View {
     @State private var isActing = false
     @State private var showBlockConfirm = false
     @State private var showRemoveConfirm = false
+    @State private var comments: [ProfileComment] = []
+    @State private var draftComment = ""
+    @State private var isPostingComment = false
+    @State private var compatibility: MusicCompatibility? = nil
 
     private var mainAccentColor: Color { SocialAccentPalette.color(for: profile?.mainAccentHex) ?? AppTheme.dynamicAccent }
     private var subAccentColor: Color { SocialAccentPalette.color(for: profile?.subAccentHex) ?? AppTheme.accentSoft }
@@ -55,6 +60,31 @@ struct PublicProfileView: View {
             return account.isLoggedIn && UIApplication.shared.applicationState == .active
         }
         return presence?.online ?? false
+    }
+
+    /// What to show in the "Listening To" card, if anything. Was driven by
+    /// `presence` unconditionally, which meant this NEVER showed in
+    /// self-preview: the presence-polling `.task` below is deliberately
+    /// skipped for self-preview (same reasoning as `isOnline` above — no
+    /// need to round-trip through a remote GET, racy against your own
+    /// heartbeat, to learn what YOUR OWN device is currently playing), so
+    /// `presence` just stayed `nil` forever there and this card silently
+    /// never appeared — on the Profile tab itself, or on the "View as
+    /// Public" preview, even with "Share Now Playing" turned on. Local
+    /// player state for self-preview (same source `ProfileView`'s own
+    /// "Listening To" section already uses, unconditionally — matching that
+    /// precedent rather than re-deriving the share-now-playing check here,
+    /// since this is your own screen showing your own state, not a
+    /// broadcast to someone else); server-provided, privacy-gated presence
+    /// for an actual visitor.
+    private var displayedNowPlaying: (title: String, artist: String?)? {
+        if isSelfPreview {
+            guard let song = player.currentSong, player.isPlaying else { return nil }
+            return (song.title, song.artist.isEmpty ? nil : song.artist)
+        }
+        guard presence?.online == true, presence?.isPlaying == true,
+              let title = presence?.nowPlayingTitle else { return nil }
+        return (title, presence?.nowPlayingArtist)
     }
 
     /// An incoming pending request FROM this user, if any.
@@ -91,7 +121,11 @@ struct PublicProfileView: View {
                             displayName: profile.displayName ?? profile.username,
                             username: profile.username,
                             isOnline: isOnline,
-                            bannerImage: bannerImage
+                            bannerImage: bannerImage,
+                            avatarFrame: profile.avatarFrame,
+                            pronouns: profile.pronouns,
+                            statusEmoji: profile.statusEmoji,
+                            statusText: profile.statusText
                         ) {
                             SocialAvatarView(userId: userId, size: 84, fallbackFill: .clear)
                         } action: {
@@ -105,10 +139,9 @@ struct PublicProfileView: View {
                             }
                         }
 
-                        if presence?.online == true, presence?.isPlaying == true,
-                           let title = presence?.nowPlayingTitle {
+                        if let nowPlaying = displayedNowPlaying {
                             ProfileInfoCard(title: "Listening To", icon: "waveform", tint: mainAccentColor) {
-                                NowPlayingActivityRow(title: title, artist: presence?.nowPlayingArtist, tint: mainAccentColor)
+                                NowPlayingActivityRow(title: nowPlaying.title, artist: nowPlaying.artist, tint: mainAccentColor)
                             }
                         }
 
@@ -134,6 +167,24 @@ struct PublicProfileView: View {
                                         }
                                     }
                                 }
+                            }
+                        }
+
+                        if let compatibility, profile.isFriend, !isSelfPreview {
+                            ProfileInfoCard(title: "Music Match", icon: "waveform.path.ecg", tint: mainAccentColor) {
+                                MusicCompatibilityRow(compatibility: compatibility, tint: mainAccentColor)
+                            }
+                        }
+
+                        if !profile.topGenres.isEmpty || !profile.topArtists.isEmpty {
+                            ProfileInfoCard(title: "Top Music", icon: "chart.bar.fill", tint: mainAccentColor) {
+                                TopMusicShowcaseRow(topGenres: profile.topGenres, topArtists: profile.topArtists, tint: mainAccentColor)
+                            }
+                        }
+
+                        if profile.showGuestbook || isSelfPreview {
+                            ProfileInfoCard(title: "Guestbook", icon: "bubble.left.and.bubble.right.fill", tint: subAccentColor) {
+                                guestbookContent
                             }
                         }
 
@@ -177,6 +228,15 @@ struct PublicProfileView: View {
                 presence = await presenceService.fetchPresence(userId: userId, account: account)
                 try? await Task.sleep(nanoseconds: UInt64(PresenceService.friendsPollInterval * 1_000_000_000))
             }
+        }
+        // Guestbook comments are readable regardless of relationship (the
+        // bridge only blocks a blocked-either-direction pair, matching
+        // profile visibility generally) — fetched unconditionally, unlike
+        // compatibility below which the bridge hard-requires friendship for.
+        .task { comments = await social.fetchProfileComments(userId: userId) }
+        .task {
+            guard !isSelfPreview else { return }
+            compatibility = await social.fetchCompatibility(userId: userId)
         }
         .confirmationDialog("Block this user?", isPresented: $showBlockConfirm, titleVisibility: .visible) {
             Button("Block", role: .destructive) {
@@ -239,6 +299,74 @@ struct PublicProfileView: View {
                     .foregroundStyle(AppTheme.dynamicAccent)
             }
         }
+    }
+
+    /// Guestbook contents: the message list (if any), a compose box for
+    /// friends (posting is friends-only server-side — a non-friend visitor
+    /// or self-preview just sees the read-only list), and an empty-state
+    /// hint otherwise.
+    @ViewBuilder
+    private var guestbookContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if comments.isEmpty {
+                Text(isSelfPreview ? "No messages yet — friends can leave one here." : "No messages yet.")
+                    .font(AppTheme.bodyFont(size: 13))
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(Array(comments.enumerated()), id: \.element.id) { index, comment in
+                        ProfileCommentRow(
+                            comment: comment,
+                            tint: subAccentColor,
+                            canDelete: isSelfPreview || comment.authorUserId == account.currentUser?.id
+                        ) {
+                            Task { await deleteComment(comment.id) }
+                        }
+                        if index < comments.count - 1 {
+                            Divider().background(AppTheme.textSecondary.opacity(0.15))
+                        }
+                    }
+                }
+            }
+
+            if let profile, profile.isFriend, !isSelfPreview {
+                HStack(spacing: 8) {
+                    TextField("Leave a message...", text: $draftComment, axis: .vertical)
+                        .font(AppTheme.bodyFont(size: 13))
+                        .lineLimit(1...3)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(AppTheme.textSecondary.opacity(0.1)))
+                    Button {
+                        Task { await postComment() }
+                    } label: {
+                        if isPostingComment {
+                            ProgressView().tint(subAccentColor)
+                        } else {
+                            Image(systemName: "paperplane.fill")
+                                .foregroundStyle(subAccentColor)
+                        }
+                    }
+                    .disabled(isPostingComment || draftComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func postComment() async {
+        let text = draftComment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isPostingComment else { return }
+        isPostingComment = true
+        defer { isPostingComment = false }
+        if let posted = await social.postProfileComment(userId: userId, body: text) {
+            comments.insert(posted, at: 0)
+            draftComment = ""
+        }
+    }
+
+    private func deleteComment(_ commentId: String) async {
+        comments.removeAll { $0.id == commentId }
+        await social.deleteProfileComment(commentId)
     }
 
     private func act(_ operation: @escaping () async -> Void) {
