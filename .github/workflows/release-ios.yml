@@ -185,6 +185,22 @@ jobs:
           echo "AppIconDisplay:"
           ls "$APP/"AppIconDisplay*.png 2>/dev/null | head -3 || echo "  none"
 
+      # xcodebuild archive with CODE_SIGNING_ALLOWED=NO skips the whole "Copy
+      # Bundle Resources" phase, not just asset catalogs -- Assets.xcassets
+      # has its own actool step above, but any other declared `resources:`
+      # in project.yml (currently just LuaPresets/) needs the same manual
+      # treatment or it silently isn't in the shipped .app. If you add a new
+      # resources: entry to the Lumisound target, add its copy here too.
+      - name: Copy bundled resources (unsigned builds only)
+        if: steps.signing.outputs.signed != 'true'
+        working-directory: ios
+        run: |
+          APP="$APP_PATH"
+          echo "Copying LuaPresets into $APP"
+          cp -R "Lumisound/Resources/LuaPresets" "$APP/LuaPresets"
+          echo "LuaPresets in bundle:"
+          ls "$APP/LuaPresets" || echo "  MISSING"
+
       - name: Package IPA
         id: ipa
         working-directory: ios
