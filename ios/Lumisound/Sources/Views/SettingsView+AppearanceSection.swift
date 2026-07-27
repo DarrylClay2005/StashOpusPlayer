@@ -27,6 +27,19 @@ extension SettingsView {
                 Label("Liquid Glass", systemImage: "circle.hexagongrid.fill")
                     .foregroundStyle(AppTheme.textPrimary)
             }
+            NavigationLink(destination: LuaThemePresetsView()) {
+                HStack {
+                    Label("Lua Theme Presets", systemImage: "scroll.fill")
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    if let activeID = LuaThemeEngine.shared.activePresetID,
+                       let preset = LuaPreset(rawValue: activeID) {
+                        Text(preset.displayName)
+                            .font(AppTheme.bodyFont(size: 13))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+            }
         } header: {
             sectionHeader("Appearance")
         }

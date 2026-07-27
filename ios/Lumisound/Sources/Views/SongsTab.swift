@@ -66,22 +66,38 @@ struct SongsTab: View {
     @AppStorage("library_songs_sort") private var sortOrderRaw: String = SongSortOrder.title.rawValue
     private var sortOrder: SongSortOrder { SongSortOrder(rawValue: sortOrderRaw) ?? .title }
 
+    /// Logic hook the active Lua theme preset can set (`hooks.pin_favorites_first`
+    /// in the preset script — see `Theme/LuaThemeEngine.swift`): when on,
+    /// favorited songs float to the top of whatever `sortOrder` is chosen,
+    /// keeping that order stable within each of the two groups.
+    @AppStorage("lua_pin_favorites_first") private var pinFavoritesFirst: Bool = false
+
     /// `songs`, sorted per `sortOrder` — every place `songs` used to be
     /// rendered/played/shuffled/prefetched now goes through this instead, so
     /// "Play" starts from the top of whatever order is currently showing.
     private var sortedSongs: [Song] {
+        let base: [Song]
         switch sortOrder {
         case .title:
-            return songs.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+            base = songs.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
         case .artist:
-            return songs.sorted { $0.artistName.localizedCaseInsensitiveCompare($1.artistName) == .orderedAscending }
+            base = songs.sorted { $0.artistName.localizedCaseInsensitiveCompare($1.artistName) == .orderedAscending }
         case .dateAdded:
-            return songs.sorted { ($0.dateAdded ?? .distantPast) > ($1.dateAdded ?? .distantPast) }
+            base = songs.sorted { ($0.dateAdded ?? .distantPast) > ($1.dateAdded ?? .distantPast) }
         case .playCount:
-            return songs.sorted { PlayHistoryStore.shared.playCount(for: $0.id) > PlayHistoryStore.shared.playCount(for: $1.id) }
+            base = songs.sorted { PlayHistoryStore.shared.playCount(for: $0.id) > PlayHistoryStore.shared.playCount(for: $1.id) }
         case .duration:
-            return songs.sorted { $0.duration > $1.duration }
+            base = songs.sorted { $0.duration > $1.duration }
         }
+        guard pinFavoritesFirst else { return base }
+        // `.sorted` on a Bool key is stable in practice here since we only
+        // ever compare across the two favorite/non-favorite partitions —
+        // done via an explicit stable filter+filter split (not `.sorted`)
+        // so the relative order within each group from `base` above is
+        // preserved exactly.
+        let favorites = base.filter { library.isFavorite(songID: $0.id) }
+        let rest = base.filter { !library.isFavorite(songID: $0.id) }
+        return favorites + rest
     }
 
     private var gridColumns: [GridItem] {
@@ -254,8 +270,15 @@ struct SongsTab: View {
                                 // anything already cached) while keeping artwork ready a
                                 // little ahead of and behind wherever the user is scrolling.
                                 .onAppear {
-                                    let lower = max(0, index - 8)
-                                    let upper = min(sortedSongs.count, index + 24)
+                                    // Widened ahead/behind window when the active Lua
+                                    // theme preset's `flags.aggressive_prefetch` is on
+                                    // (see LuaFeatureFlags) — trades some extra network/
+                                    // decode work for artwork being ready further in
+                                    // advance of fast scrolling.
+                                    let behind = LuaFeatureFlags.aggressivePrefetch ? 16 : 8
+                                    let ahead = LuaFeatureFlags.aggressivePrefetch ? 48 : 24
+                                    let lower = max(0, index - behind)
+                                    let upper = min(sortedSongs.count, index + ahead)
                                     guard lower < upper else { return }
                                     ArtworkService.shared.prefetch(songs: Array(sortedSongs[lower..<upper]), pixelSize: 192)
                                 }

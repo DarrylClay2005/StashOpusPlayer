@@ -17,6 +17,7 @@ A full-featured, privacy-respecting iOS music player built with SwiftUI and AVFo
 | **Account** | Free accounts on the shared server — sync playlists, settings, play history, and favourites |
 | **Friends & Profiles** | Add friends, see live online/now-playing status, and a public profile page with banner, avatar, bio, and pinned tracks |
 | **Visuals** | Gallery background (slideshow with transitions), 25 Now Playing artwork styles plus a custom style editor, lyric display |
+| **Lua Theme Presets** | 10 complete, swappable Lua-scripted presets (Settings → Appearance → Lua Theme Presets) — each one script sets colors, fonts, panel/glass style, feature flags, and Library sort/display defaults in one tap |
 | **Now Playing** | Full transport controls, Up Next queue, lock-screen & headphone controls |
 
 ---
@@ -102,6 +103,12 @@ open Lumisound.xcodeproj   # build from Xcode
 ```
 
 Set your Apple development team in **Xcode → Signing & Capabilities** before archiving.
+
+### Lua Theme Presets
+
+The Lumisound target depends on [ChrisGVE/LuaSwift](https://github.com/ChrisGVE/LuaSwift) (added under `packages:` in `project.yml`, resolved automatically by `xcodegen generate` + Xcode/`xcodebuild`'s SPM resolution — no extra setup needed) to run the Lua-scripted config/theming/logic layer in `Lumisound/Sources/Theme/LuaThemeEngine.swift`. It bundles Lua's C source directly rather than linking a system/dynamic Lua, so it needs no embedding step and is App-Store-safe.
+
+The 10 bundled presets live in `Lumisound/Resources/LuaPresets/*.lua` and are bundled as a folder reference (declared under the `Lumisound` target's `resources:` in `project.yml`) so `LuaThemeEngine` can look each one up by name at runtime. Each preset script assigns a single global `theme` table covering colors, font/panel/artwork/seeker/card styles, Liquid Glass tuning, feature flags, and a couple of Library tab display-logic hooks — see any of the 10 files for the exact shape, or `LuaThemeConfig` in `LuaThemeEngine.swift` for the Swift-side schema they decode into. Users pick a preset from **Settings → Appearance → Lua Theme Presets**.
 
 ### CI / GitHub Actions
 

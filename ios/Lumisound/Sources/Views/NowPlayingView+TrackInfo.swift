@@ -65,7 +65,7 @@ extension NowPlayingView {
                             .frame(height: 20)
                             .contentTransition(.opacity)
 
-                            if let bpm = player.currentSong?.bpm {
+                            if LuaFeatureFlags.showBpmBadges, let bpm = player.currentSong?.bpm {
                                 Text("\(Int(bpm.rounded())) BPM")
                                     .font(AppTheme.monoFont(size: 11))
                                     .foregroundStyle(AppTheme.textSecondary)

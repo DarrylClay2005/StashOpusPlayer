@@ -13,13 +13,20 @@ packages:
   DSWaveformImage:
     url: https://github.com/dmrschmidt/DSWaveformImage
     from: "14.5.0"
+  # Lua VM for the Lua-scripted config/theming/logic layer (Theme/LuaThemeEngine.swift).
+  # Lightweight Swift wrapper around Lua 5.1-5.5 (default 5.4); bundles the Lua C
+  # source directly (no dynamic library), so it's App-Store-safe and needs no extra
+  # embed/signing step — same reason DSWaveformImage above is consumed as plain SPM.
+  LuaSwift:
+    url: https://github.com/ChrisGVE/LuaSwift
+    from: "1.4.0"
 
 settings:
   base:
     SWIFT_VERSION: "5.10"
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
     TARGETED_DEVICE_FAMILY: "1,2"
-    MARKETING_VERSION: "1.4.109"
+    MARKETING_VERSION: "1.4.110"
     CURRENT_PROJECT_VERSION: "1"
     ENABLE_BITCODE: "NO"
     DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
@@ -48,6 +55,12 @@ targets:
     # Info.plist and .entitlements are handled via build settings, not here.
     resources:
       - path: Lumisound/Resources/Assets.xcassets
+      # Bundled as a folder reference (XcodeGen's default for a plain
+      # directory path with no special extension) so the 10 preset scripts
+      # stay under a "LuaPresets" subdirectory inside the app bundle —
+      # LuaThemeEngine looks them up via
+      # `Bundle.main.url(forResource:withExtension:subdirectory: "LuaPresets")`.
+      - path: Lumisound/Resources/LuaPresets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lumisound.ios
@@ -66,6 +79,8 @@ targets:
       # once a signing path that supports embedded watch apps is in use.
       - package: DSWaveformImage
         product: DSWaveformImageViews
+      - package: LuaSwift
+        product: LuaSwift
     scheme:
       buildAction:
         targets:

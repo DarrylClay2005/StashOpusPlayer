@@ -40,9 +40,87 @@ enum AppTheme {
         UserDefaults.standard.removeObject(forKey: "app_background_theme")
     }
 
-    static var background: Color { backgroundTheme.background }
-    static var surface: Color { backgroundTheme.surface }
-    static var elevatedSurface: Color { backgroundTheme.elevatedSurface }
+    static var background: Color { customBackgroundOverride?.background ?? backgroundTheme.background }
+    static var surface: Color { customBackgroundOverride?.surface ?? backgroundTheme.surface }
+    static var elevatedSurface: Color { customBackgroundOverride?.elevatedSurface ?? backgroundTheme.elevatedSurface }
+
+    // MARK: Lua-Driven Custom Background Override
+    //
+    // A Lua theme preset (see `Theme/LuaThemeEngine.swift`) can supply its own
+    // arbitrary background/surface/elevated-surface hex colors instead of
+    // reusing one of the fixed `AppBackgroundTheme` cases above — this is
+    // where those land. `background`/`surface`/`elevatedSurface` above check
+    // this FIRST, falling back to `backgroundTheme` exactly as before, so
+    // every existing install (no override ever saved) is completely
+    // unaffected.
+
+    private enum LuaBackgroundKeys {
+        static let background = "lua_bg_override_background"
+        static let surface = "lua_bg_override_surface"
+        static let elevatedSurface = "lua_bg_override_elevated"
+    }
+
+    static var customBackgroundOverride: (background: Color, surface: Color, elevatedSurface: Color)? {
+        let d = UserDefaults.standard
+        guard
+            let bg = d.string(forKey: LuaBackgroundKeys.background),
+            let sf = d.string(forKey: LuaBackgroundKeys.surface),
+            let el = d.string(forKey: LuaBackgroundKeys.elevatedSurface)
+        else { return nil }
+        return (Color(hex: bg), Color(hex: sf), Color(hex: el))
+    }
+
+    static func saveCustomBackgroundOverride(background: String, surface: String, elevatedSurface: String) {
+        let d = UserDefaults.standard
+        d.set(background, forKey: LuaBackgroundKeys.background)
+        d.set(surface, forKey: LuaBackgroundKeys.surface)
+        d.set(elevatedSurface, forKey: LuaBackgroundKeys.elevatedSurface)
+    }
+
+    static func resetCustomBackgroundOverride() {
+        let d = UserDefaults.standard
+        d.removeObject(forKey: LuaBackgroundKeys.background)
+        d.removeObject(forKey: LuaBackgroundKeys.surface)
+        d.removeObject(forKey: LuaBackgroundKeys.elevatedSurface)
+    }
+
+    // MARK: Lua-Driven Layout Scale
+    //
+    // Corner-radius / spacing multipliers a Lua preset can set (e.g. a
+    // "high contrast" preset using sharper corners and more breathing room,
+    // or a "retro" preset using tighter spacing). Consumed by
+    // `PanelStyleModifier` below — the same shared modifier every
+    // `panelStyle()` call site (all 8 Now Playing sub-panels) already uses,
+    // so no individual call site needs to change. `0` (UserDefaults' default
+    // for a missing Double key) is treated as "unset" so the multiplier is
+    // always a real, positive scale.
+
+    private enum LuaLayoutKeys {
+        static let cornerRadiusScale = "lua_layout_corner_radius_scale"
+        static let spacingScale = "lua_layout_spacing_scale"
+    }
+
+    static var layoutCornerRadiusScale: Double {
+        let v = UserDefaults.standard.double(forKey: LuaLayoutKeys.cornerRadiusScale)
+        return v > 0 ? v : 1.0
+    }
+
+    static var layoutSpacingScale: Double {
+        let v = UserDefaults.standard.double(forKey: LuaLayoutKeys.spacingScale)
+        return v > 0 ? v : 1.0
+    }
+
+    static func saveLayoutScales(cornerRadius: Double, spacing: Double) {
+        let d = UserDefaults.standard
+        d.set(cornerRadius, forKey: LuaLayoutKeys.cornerRadiusScale)
+        d.set(spacing, forKey: LuaLayoutKeys.spacingScale)
+    }
+
+    static func resetLayoutScales() {
+        let d = UserDefaults.standard
+        d.removeObject(forKey: LuaLayoutKeys.cornerRadiusScale)
+        d.removeObject(forKey: LuaLayoutKeys.spacingScale)
+    }
 
     // MARK: Dynamic Accent
 
@@ -282,17 +360,22 @@ private struct PanelStyleModifier: ViewModifier {
     }
 
     func body(content: Content) -> some View {
+        // Scaled by AppTheme.layoutCornerRadiusScale/layoutSpacingScale — both
+        // default to 1.0 (reproducing the original 8pt/14pt literals exactly)
+        // until a Lua theme preset sets them to something else.
+        let radius = CGFloat(8 * AppTheme.layoutCornerRadiusScale)
+        let pad = CGFloat(14 * AppTheme.layoutSpacingScale)
         if isFrostedGlass {
             content
-                .padding(14)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .background(AppTheme.surface.opacity(opacity * 0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .padding(pad)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .background(AppTheme.surface.opacity(opacity * 0.35), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
         } else {
             content
-                .padding(14)
+                .padding(pad)
                 .background(
                     AppTheme.surface.opacity(opacity),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: radius, style: .continuous)
                 )
         }
     }
