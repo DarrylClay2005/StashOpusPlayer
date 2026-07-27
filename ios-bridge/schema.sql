@@ -16,9 +16,9 @@ CREATE TABLE IF NOT EXISTS ios_user_sessions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP NOT NULL,
     device_name VARCHAR(255),
-    INDEX idx_user_id (user_id),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_user_sessions_idx_user_id ON ios_user_sessions (user_id);
 
 CREATE TABLE IF NOT EXISTS ios_user_playlists (
     id VARCHAR(36) PRIMARY KEY,
@@ -26,10 +26,10 @@ CREATE TABLE IF NOT EXISTS ios_user_playlists (
     name VARCHAR(255) NOT NULL,
     description TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_user_id (user_id),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_user_playlists_idx_user_id ON ios_user_playlists (user_id);
 
 CREATE TABLE IF NOT EXISTS ios_playlist_tracks (
     id VARCHAR(36) PRIMARY KEY,
@@ -42,9 +42,9 @@ CREATE TABLE IF NOT EXISTS ios_playlist_tracks (
     duration_seconds INT DEFAULT 0,
     position INT DEFAULT 0,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_playlist (playlist_id),
     FOREIGN KEY (playlist_id) REFERENCES ios_user_playlists(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_playlist_tracks_idx_playlist ON ios_playlist_tracks (playlist_id);
 
 CREATE TABLE IF NOT EXISTS ios_user_favorites (
     user_id VARCHAR(36) NOT NULL,
@@ -66,24 +66,24 @@ CREATE TABLE IF NOT EXISTS ios_play_history (
     artist TEXT,
     played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     listen_seconds INT DEFAULT 0,
-    INDEX idx_user_played (user_id, played_at),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_play_history_idx_user_played ON ios_play_history (user_id, played_at);
 
 CREATE TABLE IF NOT EXISTS ios_user_settings (
     user_id VARCHAR(36) PRIMARY KEY,
-    audio_settings_json MEDIUMTEXT,
+    audio_settings_json TEXT,
     theme_color VARCHAR(7) DEFAULT '#EC4079',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
 -- Profile extensions: avatar and DOB (DOB immutable once set without admin)
 ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS date_of_birth DATE NULL;
-ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS avatar_data MEDIUMBLOB NULL;
+ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS avatar_data BYTEA NULL;
 
 -- Per-track audio settings overrides, stored as a JSON map of song id -> AudioSettings.
-ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS track_audio_settings_json MEDIUMTEXT;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS track_audio_settings_json TEXT;
 
 -- User library tracking: what songs the user has played/imported
 CREATE TABLE IF NOT EXISTS ios_user_library (
@@ -98,14 +98,14 @@ CREATE TABLE IF NOT EXISTS ios_user_library (
     skip_count INT DEFAULT 0,
     last_played TIMESTAMP NULL,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY user_song (user_id, song_id),
+    CONSTRAINT user_song UNIQUE (user_id, song_id),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
 -- Expanded settings (audio + visual preferences)
 CREATE TABLE IF NOT EXISTS ios_user_settings_expanded (
     user_id VARCHAR(36) PRIMARY KEY,
-    audio_settings_json MEDIUMTEXT,
+    audio_settings_json TEXT,
     theme_color VARCHAR(7) DEFAULT '#EC4079',
     vinyl_disc_enabled BOOLEAN DEFAULT TRUE,
     show_queue_preview BOOLEAN DEFAULT TRUE,
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS ios_user_settings_expanded (
     bg_opacity FLOAT DEFAULT 0.35,
     preferred_audio_format VARCHAR(10) DEFAULT 'm4a',
     download_path TEXT,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
@@ -127,9 +127,9 @@ CREATE TABLE IF NOT EXISTS ios_user_music_uploads (
     folder VARCHAR(255) DEFAULT '',
     file_size_bytes INT DEFAULT 0,
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_user_uploads (user_id, uploaded_at),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_user_music_uploads_idx_user_uploads ON ios_user_music_uploads (user_id, uploaded_at);
 
 -- Rich metadata for uploaded user music files (keyed by SHA-256 of file content)
 CREATE TABLE IF NOT EXISTS ios_user_music_metadata (
@@ -149,9 +149,9 @@ CREATE TABLE IF NOT EXISTS ios_user_music_metadata (
   mime_type VARCHAR(50),
   has_artwork BOOLEAN DEFAULT FALSE,
   uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
-  INDEX idx_user_id (user_id)
+  FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_user_music_metadata_idx_user_id ON ios_user_music_metadata (user_id);
 
 -- `filename` above is only ever the bare basename (see upload_user_music's
 -- `safe_name`), but the actual on-disk location used by GET /user/music/stream
@@ -165,18 +165,18 @@ ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS relative_path VARCH
 
 -- Per-user gallery images (cloud-synced)
 CREATE TABLE IF NOT EXISTS ios_user_gallery_images (
-  id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
   user_id VARCHAR(36) NOT NULL,
   filename VARCHAR(255) NOT NULL,
   display_order INT DEFAULT 0,
   uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
-  INDEX idx_user_id (user_id)
+  FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_user_gallery_images_idx_user_id ON ios_user_gallery_images (user_id);
 
 -- iOS client telemetry / background log ingestion
 CREATE TABLE IF NOT EXISTS ios_app_logs (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     level VARCHAR(10),
     category VARCHAR(30),
     message TEXT,
@@ -188,11 +188,11 @@ CREATE TABLE IF NOT EXISTS ios_app_logs (
     os_version VARCHAR(20) NULL,
     app_version VARCHAR(20) NULL,
     user_id VARCHAR(36) NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_level (level),
-    INDEX idx_created (created_at),
-    INDEX idx_user (user_id)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS ios_app_logs_idx_level ON ios_app_logs (level);
+CREATE INDEX IF NOT EXISTS ios_app_logs_idx_created ON ios_app_logs (created_at);
+CREATE INDEX IF NOT EXISTS ios_app_logs_idx_user ON ios_app_logs (user_id);
 ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS device_model VARCHAR(50) NULL;
 ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS os_version VARCHAR(20) NULL;
 ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS app_version VARCHAR(20) NULL;
@@ -200,11 +200,11 @@ ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(36) NULL;
 
 -- Collaborative playlist sharing (snapshot-based, bridge side)
 CREATE TABLE IF NOT EXISTS ios_shared_playlists (
-  id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
   playlist_id VARCHAR(36) NOT NULL,
   owner_user_id VARCHAR(36) NOT NULL,
   share_token VARCHAR(36) UNIQUE NOT NULL,
-  playlist_data JSON NOT NULL DEFAULT ('{}'),
+  playlist_data JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   is_active BOOLEAN DEFAULT TRUE,
   FOREIGN KEY (owner_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
@@ -220,13 +220,13 @@ CREATE TABLE IF NOT EXISTS ios_bug_reports (
     contact_email VARCHAR(255),
     app_version VARCHAR(20),
     device_info VARCHAR(255),
-    recent_logs MEDIUMTEXT,
+    recent_logs TEXT,
     status VARCHAR(20) DEFAULT 'open',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_status (status),
-    INDEX idx_created (created_at),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE SET NULL
 );
+CREATE INDEX IF NOT EXISTS ios_bug_reports_idx_status ON ios_bug_reports (status);
+CREATE INDEX IF NOT EXISTS ios_bug_reports_idx_created ON ios_bug_reports (created_at);
 
 -- Opt-in flag for the public listening activity / discovery feature.
 -- When TRUE, this user's recent plays (song title/artist only — never file
@@ -250,30 +250,32 @@ CREATE TABLE IF NOT EXISTS ios_user_backups (
     id VARCHAR(36) PRIMARY KEY,
     user_id VARCHAR(36) NOT NULL,
     reason VARCHAR(30) NOT NULL,
-    snapshot_json MEDIUMTEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_user_created (user_id, created_at),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_user_backups_idx_user_created ON ios_user_backups (user_id, created_at);
 
 -- Per-user audit log of sync activity (push/pull/restore), for diagnosing
 -- "where did my data go" reports without digging through ios_app_logs.
 CREATE TABLE IF NOT EXISTS ios_sync_log (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     user_id VARCHAR(36) NOT NULL,
     action VARCHAR(20) NOT NULL,
     details VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_user_created (user_id, created_at),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_sync_log_idx_user_created ON ios_sync_log (user_id, created_at);
 
 -- Fix playlist_id column type in ios_shared_playlists (was INT, must be VARCHAR for UUID strings).
 -- Must run after the CREATE TABLE above — on a fresh database this ALTER previously executed
 -- before the table existed, causing init_db() to throw "table doesn't exist", roll back
 -- (a no-op since DDL auto-commits in MySQL), and crash the bridge on startup before
 -- ios_app_logs/ios_shared_playlists were ever created.
-ALTER TABLE ios_shared_playlists MODIFY COLUMN playlist_id VARCHAR(36) NOT NULL DEFAULT '';
+ALTER TABLE ios_shared_playlists ALTER COLUMN playlist_id TYPE VARCHAR(36);
+ALTER TABLE ios_shared_playlists ALTER COLUMN playlist_id SET DEFAULT '';
+ALTER TABLE ios_shared_playlists ALTER COLUMN playlist_id SET NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- 10 new server-side features
@@ -289,7 +291,7 @@ CREATE TABLE IF NOT EXISTS ios_playback_state (
     source VARCHAR(20),
     position_seconds FLOAT DEFAULT 0,
     duration_seconds FLOAT DEFAULT 0,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
@@ -323,7 +325,7 @@ CREATE TABLE IF NOT EXISTS ios_listen_rooms (
     position_seconds FLOAT DEFAULT 0,
     is_playing BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (host_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
@@ -341,9 +343,9 @@ CREATE TABLE IF NOT EXISTS ios_artist_subscriptions (
     last_video_id VARCHAR(64),
     last_checked_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_user (user_id),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_artist_subscriptions_idx_user ON ios_artist_subscriptions (user_id);
 
 -- ---------------------------------------------------------------------------
 -- Subscriptions expansion (Feature: subscriptions-expansion) — additive
@@ -373,11 +375,11 @@ CREATE TABLE IF NOT EXISTS ios_subscription_feed (
     track_json TEXT NOT NULL,
     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
-    INDEX idx_user_discovered (user_id, discovered_at),
-    INDEX idx_subscription (subscription_id),
     FOREIGN KEY (subscription_id) REFERENCES ios_artist_subscriptions(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_subscription_feed_idx_user_discovered ON ios_subscription_feed (user_id, discovered_at);
+CREATE INDEX IF NOT EXISTS ios_subscription_feed_idx_subscription ON ios_subscription_feed (subscription_id);
 
 -- One row per newly-discovered video, kept even after the feed row above
 -- might be dismissed/pruned — used to compute an average inter-upload gap
@@ -387,9 +389,9 @@ CREATE TABLE IF NOT EXISTS ios_subscription_upload_history (
     subscription_id VARCHAR(36) NOT NULL,
     video_id VARCHAR(64) NOT NULL,
     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_subscription_discovered (subscription_id, discovered_at),
     FOREIGN KEY (subscription_id) REFERENCES ios_artist_subscriptions(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_subscription_upload_history_idx_subscription_discovered ON ios_subscription_upload_history (subscription_id, discovered_at);
 
 -- Feature: collaborative playlists — additional users granted editor/viewer
 -- access to a playlist they don't own.
@@ -416,9 +418,9 @@ CREATE TABLE IF NOT EXISTS ios_user_queue (
     album TEXT,
     duration_seconds INT DEFAULT 0,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_user_position (user_id, position),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_user_queue_idx_user_position ON ios_user_queue (user_id, position);
 
 -- Feature: scrobbling to Last.fm / ListenBrainz
 CREATE TABLE IF NOT EXISTS ios_scrobble_links (
@@ -427,7 +429,7 @@ CREATE TABLE IF NOT EXISTS ios_scrobble_links (
     lastfm_username VARCHAR(255) NULL,
     listenbrainz_token VARCHAR(64) NULL,
     enabled BOOLEAN DEFAULT TRUE,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
@@ -436,14 +438,14 @@ ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS bpm FLOAT NULL;
 
 -- Feature: search autocomplete / trending searches
 CREATE TABLE IF NOT EXISTS ios_search_log (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     user_id VARCHAR(36) NULL,
     query VARCHAR(255) NOT NULL,
     source VARCHAR(20) DEFAULT 'youtube',
-    searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_query (query),
-    INDEX idx_searched (searched_at)
+    searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS ios_search_log_idx_query ON ios_search_log (query);
+CREATE INDEX IF NOT EXISTS ios_search_log_idx_searched ON ios_search_log (searched_at);
 
 -- Feature: playlist folders/tags for organization
 ALTER TABLE ios_user_playlists ADD COLUMN IF NOT EXISTS folder VARCHAR(255) NULL;
@@ -469,9 +471,9 @@ CREATE TABLE IF NOT EXISTS ios_notifications (
     data_json TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     read_at TIMESTAMP NULL,
-    INDEX idx_user_created (user_id, created_at),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_notifications_idx_user_created ON ios_notifications (user_id, created_at);
 
 -- Per-user YouTube Data API v3 key, used by /api/resolve to enumerate full
 -- YouTube playlists via playlistItems.list (bypassing yt-dlp's ~205-entry
@@ -491,7 +493,7 @@ ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS acoustid_api_key VARCHAR(
 -- session — required for age-restricted content and avoids YouTube's
 -- anonymous-request bot-detection blocks. Never echoed back to clients (see
 -- the /user/ytdlp-cookies status + /user/ytdlp-cookies/validate endpoints).
-ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS ytdlp_cookies MEDIUMTEXT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS ytdlp_cookies TEXT NULL;
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS ytdlp_cookies_updated_at TIMESTAMP NULL;
 
 -- Feature: Discord "now playing" webhook integration. True per-user Discord
@@ -503,7 +505,7 @@ CREATE TABLE IF NOT EXISTS ios_discord_webhooks (
     user_id VARCHAR(36) PRIMARY KEY,
     webhook_url TEXT NOT NULL,
     enabled BOOLEAN DEFAULT TRUE,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
@@ -518,7 +520,7 @@ CREATE TABLE IF NOT EXISTS ios_discord_rpc_config (
     discord_client_id VARCHAR(64) NOT NULL,
     large_image VARCHAR(255),
     enabled BOOLEAN DEFAULT TRUE,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
@@ -548,11 +550,11 @@ CREATE TABLE IF NOT EXISTS ios_user_folder_backups (
     id VARCHAR(36) PRIMARY KEY,
     user_id VARCHAR(36) NOT NULL,
     folder_path VARCHAR(1024) NOT NULL,
-    track_filenames_json MEDIUMTEXT NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_user_id (user_id),
+    track_filenames_json TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_user_folder_backups_idx_user_id ON ios_user_folder_backups (user_id);
 
 -- Feature: Libre.fm scrobbling (Last.fm-API-compatible, different base URL).
 -- Stored separately from the lastfm_* columns since a user may link both
@@ -583,13 +585,14 @@ ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS now_playing_seeker_style 
 -- 500s the whole settings sync for anyone using a custom style. Widen to
 -- match channel_id's VARCHAR(64) below. Plain MODIFY is idempotent (a no-op
 -- once already widened), unlike ADD COLUMN IF NOT EXISTS.
-ALTER TABLE ios_user_settings MODIFY COLUMN now_playing_artwork_style VARCHAR(64) NULL;
-ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS earned_badges_json MEDIUMTEXT NULL;
+ALTER TABLE ios_user_settings ALTER COLUMN now_playing_artwork_style TYPE VARCHAR(64);
+ALTER TABLE ios_user_settings ALTER COLUMN now_playing_artwork_style DROP NOT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS earned_badges_json TEXT NULL;
 -- Generic JSON bag of additional UserDefaults-backed preferences included in
 -- the per-user auto backup (notifications toggle, card style, auto-radio,
 -- Liquid Glass customization, etc.). A single extensible column so new
 -- settings can be backed up without per-field schema migrations.
-ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS extra_settings_json MEDIUMTEXT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS extra_settings_json TEXT NULL;
 
 -- The client (AccountService+Sync.swift) has built and sent bg_enabled/
 -- bg_blur_radius/bg_shuffle_interval in every sync push since the gallery
@@ -607,11 +610,11 @@ ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS bg_shuffle_interval FLOAT
 -- playlists, play history/stats, track bookmarks, and per-track BPM keyed
 -- portably by sourceTrackID rather than the on-device-only path/mtime/size
 -- key BPMAnalyzerService's own cache uses).
-ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS play_history_json MEDIUMTEXT NULL;
-ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS smart_playlists_json MEDIUMTEXT NULL;
-ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS tracked_playlists_json MEDIUMTEXT NULL;
-ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS bookmarks_json MEDIUMTEXT NULL;
-ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS bpm_by_source_track_id_json MEDIUMTEXT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS play_history_json TEXT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS smart_playlists_json TEXT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS tracked_playlists_json TEXT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS bookmarks_json TEXT NULL;
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS bpm_by_source_track_id_json TEXT NULL;
 
 -- Feature: Discover subscriptions — resolve a user-entered channel
 -- URL/handle/search term to a real YouTube channel_id + thumbnail at
@@ -639,11 +642,11 @@ CREATE TABLE IF NOT EXISTS ios_download_history (
     format VARCHAR(10) DEFAULT 'm4a',
     download_count INT DEFAULT 1,
     first_downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY user_track (user_id, source, source_id),
-    INDEX idx_user_history (user_id, last_downloaded_at),
+    last_downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT user_track UNIQUE (user_id, source, source_id),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_download_history_idx_user_history ON ios_download_history (user_id, last_downloaded_at);
 
 -- Durable record of a finished /api/download job whose file hasn't been
 -- fetched by the client yet. Previously a finished job's file lived only in
@@ -667,9 +670,9 @@ CREATE TABLE IF NOT EXISTS ios_pending_downloads (
     media_type VARCHAR(50) NOT NULL,
     filename TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_pending_user (user_id, created_at),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_pending_downloads_idx_pending_user ON ios_pending_downloads (user_id, created_at);
 
 -- Per-user snapshot of the source ids CURRENTLY in the user's on-device library
 -- (Song.sourceTrackID values + download-ledger ids), uploaded periodically by
@@ -695,7 +698,7 @@ CREATE TABLE IF NOT EXISTS ios_user_library_inventory (
 -- every file on every request — slow for big libraries and no typo
 -- tolerance. This FULLTEXT index lets /user/music/search query the
 -- already-populated metadata table directly instead.
-ALTER TABLE ios_user_music_metadata ADD FULLTEXT INDEX IF NOT EXISTS ft_search (title, artist, album);
+CREATE INDEX IF NOT EXISTS ft_search ON ios_user_music_metadata USING GIN (to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(artist, '') || ' ' || COALESCE(album, '')));
 
 -- Feature: per-user storage quota override. NULL/0 means "use the server
 -- default" (USER_MUSIC_QUOTA_BYTES env var, itself unlimited unless the
@@ -713,14 +716,14 @@ CREATE TABLE IF NOT EXISTS ios_lyrics_cache (
     id VARCHAR(64) PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     artist VARCHAR(255) NOT NULL,
-    synced_lyrics MEDIUMTEXT NULL,
-    plain_lyrics MEDIUMTEXT NULL,
+    synced_lyrics TEXT NULL,
+    plain_lyrics TEXT NULL,
     found BOOLEAN NOT NULL DEFAULT FALSE,
     is_user_submitted BOOLEAN NOT NULL DEFAULT FALSE,
     submitted_by_user_id VARCHAR(36) NULL,
-    cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_title_artist (title, artist)
+    cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS ios_lyrics_cache_idx_title_artist ON ios_lyrics_cache (title, artist);
 
 -- Cache of GET /api/artist/bio results (MusicBrainz facts + Wikipedia bio
 -- text/photo — see main.py). artist_name is the lowercased/trimmed lookup
@@ -731,9 +734,9 @@ CREATE TABLE IF NOT EXISTS ios_lyrics_cache (
 -- indefinitely — unlike lyrics, a bio can meaningfully change over time.
 CREATE TABLE IF NOT EXISTS ios_artist_bio_cache (
     artist_name VARCHAR(255) PRIMARY KEY,
-    bio_json MEDIUMTEXT NULL,
+    bio_json TEXT NULL,
     found BOOLEAN NOT NULL DEFAULT FALSE,
-    cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Cache of Claude "intelligence" task results (see ios-bridge/intelligence.py),
@@ -743,7 +746,7 @@ CREATE TABLE IF NOT EXISTS ios_artist_bio_cache (
 CREATE TABLE IF NOT EXISTS ios_intelligence_cache (
     task VARCHAR(32) NOT NULL,
     cache_key VARCHAR(64) NOT NULL,
-    result_json MEDIUMTEXT NOT NULL,
+    result_json TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (task, cache_key)
 );
@@ -757,21 +760,21 @@ CREATE TABLE IF NOT EXISTS ios_intelligence_cache (
 -- decision for reuse) since this table's purpose is a learning signal, not
 -- a cache — it's read in small recent-N slices, never looked up by key.
 CREATE TABLE IF NOT EXISTS ios_aria_memory (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     user_id VARCHAR(36) NOT NULL,
     task VARCHAR(32) NOT NULL,
-    input_json MEDIUMTEXT NOT NULL,
-    ai_result_json MEDIUMTEXT NOT NULL,
-    correction_json MEDIUMTEXT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_task_created (task, created_at)
+    input_json TEXT NOT NULL,
+    ai_result_json TEXT NOT NULL,
+    correction_json TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS ios_aria_memory_idx_task_created ON ios_aria_memory (task, created_at);
 
 -- Feature: server-side waveform peak-data precomputation, alongside the
 -- existing loudness/BPM/key analysis at upload time — saves the client from
 -- decoding the whole file locally just to draw a scrubber waveform. Stored
 -- as a JSON array of ~200 normalized (0.0-1.0) peak values.
-ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS waveform_json MEDIUMTEXT NULL;
+ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS waveform_json TEXT NULL;
 
 -- Feature: cached acoustic-duplicate scan results, computed by a periodic
 -- background job (see _duplicate_scan_loop) instead of live on every
@@ -779,8 +782,8 @@ ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS waveform_json MEDIU
 -- libraries (re-fingerprinting everything on demand).
 CREATE TABLE IF NOT EXISTS ios_duplicate_scan_cache (
     user_id VARCHAR(36) PRIMARY KEY,
-    groups_json MEDIUMTEXT NOT NULL,
-    scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    groups_json TEXT NOT NULL,
+    scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
@@ -795,15 +798,15 @@ CREATE TABLE IF NOT EXISTS ios_user_webhooks (
     webhook_url TEXT NOT NULL,
     enabled BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_user_event (user_id, event_type),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_user_webhooks_idx_user_event ON ios_user_webhooks (user_id, event_type);
 
 -- Feature: persistent listening-room chat/history — ios_listen_rooms only
 -- tracks the host's current track/position; this records track changes and
 -- chat messages so guests joining late (or reopening the room) see history.
 CREATE TABLE IF NOT EXISTS ios_room_events (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     room_id VARCHAR(36) NOT NULL,
     user_id VARCHAR(36) NULL,
     event_type VARCHAR(20) NOT NULL,
@@ -811,10 +814,10 @@ CREATE TABLE IF NOT EXISTS ios_room_events (
     artist TEXT NULL,
     message TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_room_created (room_id, created_at),
     FOREIGN KEY (room_id) REFERENCES ios_listen_rooms(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE SET NULL
 );
+CREATE INDEX IF NOT EXISTS ios_room_events_idx_room_created ON ios_room_events (room_id, created_at);
 
 -- Feature: collaborative room queue — members can add/vote on tracks for a
 -- shared listening room's "up next" order, independent of the host's own
@@ -828,10 +831,10 @@ CREATE TABLE IF NOT EXISTS ios_room_queue (
     artist TEXT,
     votes INT DEFAULT 0,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_room_votes (room_id, votes),
     FOREIGN KEY (room_id) REFERENCES ios_listen_rooms(id) ON DELETE CASCADE,
     FOREIGN KEY (added_by_user_id) REFERENCES ios_users(id) ON DELETE SET NULL
 );
+CREATE INDEX IF NOT EXISTS ios_room_queue_idx_room_votes ON ios_room_queue (room_id, votes);
 
 -- Feature: personalized history-based weekly mix (distinct from the existing
 -- static tempo-bucket ios_user_music_metadata-derived smart-playlists) —
@@ -839,8 +842,8 @@ CREATE TABLE IF NOT EXISTS ios_room_queue (
 -- _weekly_mix_loop rather than computed per-request.
 CREATE TABLE IF NOT EXISTS ios_weekly_mix_cache (
     user_id VARCHAR(36) PRIMARY KEY,
-    track_ids_json MEDIUMTEXT NOT NULL,
-    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    track_ids_json TEXT NOT NULL,
+    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
@@ -852,7 +855,7 @@ CREATE TABLE IF NOT EXISTS ios_weekly_mix_cache (
 -- /user/lyrics/prefetch in main.py). MATCH()'s column list must exactly match
 -- a FULLTEXT index's columns, hence (title, artist, plain_lyrics) here rather
 -- than plain_lyrics alone — lets a query also hit on title/artist words.
-ALTER TABLE ios_lyrics_cache ADD FULLTEXT INDEX IF NOT EXISTS ft_lyrics_search (title, artist, plain_lyrics);
+CREATE INDEX IF NOT EXISTS ft_lyrics_search ON ios_lyrics_cache USING GIN (to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(artist, '') || ' ' || COALESCE(plain_lyrics, '')));
 
 -- Feature: TOTP two-factor authentication (see /auth/2fa/* in main.py).
 -- totp_secret is only meaningful once totp_enabled is TRUE (set by
@@ -880,19 +883,19 @@ ALTER TABLE ios_users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEF
 -- blob. user_id is nullable since some events (e.g. a failed login attempt
 -- for an unknown username) have no known user yet.
 CREATE TABLE IF NOT EXISTS ios_app_event_log (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     source VARCHAR(20) NOT NULL DEFAULT 'bridge',
     user_id VARCHAR(36) NULL,
     category VARCHAR(30) NOT NULL,
     event VARCHAR(60) NOT NULL,
     level VARCHAR(10) NOT NULL DEFAULT 'info',
     message TEXT,
-    detail JSON NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_category_created (category, created_at),
-    INDEX idx_user_created (user_id, created_at),
-    INDEX idx_level (level)
+    detail JSONB NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS ios_app_event_log_idx_category_created ON ios_app_event_log (category, created_at);
+CREATE INDEX IF NOT EXISTS ios_app_event_log_idx_user_created ON ios_app_event_log (user_id, created_at);
+CREATE INDEX IF NOT EXISTS ios_app_event_log_idx_level ON ios_app_event_log (level);
 
 -- ---------------------------------------------------------------------------
 -- Download/streaming attempt logging (2026-07-18)
@@ -910,7 +913,7 @@ CREATE TABLE IF NOT EXISTS ios_app_event_log (
 -- tables here) so a deleted account's download history stays available for
 -- aggregate/ops diagnostics instead of disappearing with the account.
 CREATE TABLE IF NOT EXISTS ios_download_log (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     user_id VARCHAR(36) NULL,
     source VARCHAR(20) NOT NULL,
     source_id VARCHAR(280) NOT NULL,
@@ -920,17 +923,17 @@ CREATE TABLE IF NOT EXISTS ios_download_log (
     duration_ms INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP NULL,
-    INDEX idx_user_created (user_id, created_at),
-    INDEX idx_source_id (source, source_id),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE SET NULL
 );
+CREATE INDEX IF NOT EXISTS ios_download_log_idx_user_created ON ios_download_log (user_id, created_at);
+CREATE INDEX IF NOT EXISTS ios_download_log_idx_source_id ON ios_download_log (source, source_id);
 
 -- Streaming-side counterpart to ios_download_log: one row per
 -- streaming-URL-resolution attempt (/api/stream, /api/stream/proxy) — a
 -- track being played, not downloaded, so "status"/"error_message" describe
 -- whether yt-dlp/the extractor produced a playable URL, not a downloaded file.
 CREATE TABLE IF NOT EXISTS ios_stream_log (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     user_id VARCHAR(36) NULL,
     source VARCHAR(20) NOT NULL,
     source_id VARCHAR(280) NOT NULL,
@@ -940,10 +943,10 @@ CREATE TABLE IF NOT EXISTS ios_stream_log (
     duration_ms INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP NULL,
-    INDEX idx_user_created (user_id, created_at),
-    INDEX idx_source_id (source, source_id),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE SET NULL
 );
+CREATE INDEX IF NOT EXISTS ios_stream_log_idx_user_created ON ios_stream_log (user_id, created_at);
+CREATE INDEX IF NOT EXISTS ios_stream_log_idx_source_id ON ios_stream_log (source, source_id);
 
 -- ---------------------------------------------------------------------------
 -- Social Ecosystem: profiles, friends, presence (2026-07-18)
@@ -971,7 +974,7 @@ CREATE TABLE IF NOT EXISTS ios_social_profiles (
     sub_accent_hex VARCHAR(7) NULL,
     share_now_playing BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
@@ -979,7 +982,7 @@ CREATE TABLE IF NOT EXISTS ios_social_profiles (
 -- as ios_users.avatar_data (see POST/GET /user/avatar), just scoped to the
 -- social profile instead of the core account. NULL means "no banner set";
 -- the profile header falls back to a plain main/sub accent gradient.
-ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS banner_data MEDIUMBLOB NULL;
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS banner_data BYTEA NULL;
 
 -- Profile customization additions (Feature: profile-customization-2,
 -- 2026-07-21): pronouns/status say a little more about a person than just
@@ -1017,9 +1020,9 @@ CREATE TABLE IF NOT EXISTS ios_social_pinned_tracks (
     artist TEXT NULL,
     album TEXT NULL,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_pinned_user (user_id),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_social_pinned_tracks_idx_pinned_user ON ios_social_pinned_tracks (user_id);
 
 -- Friend requests. `status` moves pending -> accepted/declined/cancelled and
 -- is never deleted (keeps a simple audit trail / prevents immediate re-spam
@@ -1033,11 +1036,11 @@ CREATE TABLE IF NOT EXISTS ios_social_friend_requests (
     status VARCHAR(16) NOT NULL DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     responded_at TIMESTAMP NULL,
-    INDEX idx_freq_to (to_user_id, status),
-    INDEX idx_freq_from (from_user_id, status),
     FOREIGN KEY (from_user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
     FOREIGN KEY (to_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_social_friend_requests_idx_freq_to ON ios_social_friend_requests (to_user_id, status);
+CREATE INDEX IF NOT EXISTS ios_social_friend_requests_idx_freq_from ON ios_social_friend_requests (from_user_id, status);
 
 -- Friendships, stored as a symmetric pair of rows (A,B) + (B,A) on accept —
 -- a small denormalization that keeps every "who are my friends" /
@@ -1049,10 +1052,10 @@ CREATE TABLE IF NOT EXISTS ios_social_friends (
     friend_id VARCHAR(36) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, friend_id),
-    INDEX idx_friends_friend (friend_id),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
     FOREIGN KEY (friend_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_social_friends_idx_friends_friend ON ios_social_friends (friend_id);
 
 -- Basic abuse handling for the friends feature: a block is one-directional
 -- (user_id blocked blocked_id) but enforced both ways at query time (neither
@@ -1090,7 +1093,7 @@ CREATE TABLE IF NOT EXISTS ios_presence_state (
     now_playing_title VARCHAR(500) NULL,
     now_playing_artist VARCHAR(500) NULL,
     last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 
@@ -1109,10 +1112,10 @@ CREATE TABLE IF NOT EXISTS ios_social_profile_comments (
     author_user_id VARCHAR(36) NOT NULL,
     body VARCHAR(280) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_comments_profile (profile_user_id, created_at),
     FOREIGN KEY (profile_user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
     FOREIGN KEY (author_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_social_profile_comments_idx_comments_profile ON ios_social_profile_comments (profile_user_id, created_at);
 
 -- ---------------------------------------------------------------------------
 -- Friends tab expansion (Feature: friends-tab-expansion, 2026-07-21) — new
@@ -1137,7 +1140,7 @@ CREATE TABLE IF NOT EXISTS ios_social_friend_nicknames (
     user_id VARCHAR(36) NOT NULL,
     friend_id VARCHAR(36) NOT NULL,
     nickname VARCHAR(60) NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, friend_id),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
     FOREIGN KEY (friend_id) REFERENCES ios_users(id) ON DELETE CASCADE
@@ -1154,11 +1157,11 @@ CREATE TABLE IF NOT EXISTS ios_social_friend_tags (
     friend_id VARCHAR(36) NOT NULL,
     tag_name VARCHAR(40) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_friend_tag (user_id, friend_id, tag_name),
-    INDEX idx_friend_tags_user (user_id, tag_name),
+    CONSTRAINT uq_friend_tag UNIQUE (user_id, friend_id, tag_name),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
     FOREIGN KEY (friend_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_social_friend_tags_idx_friend_tags_user ON ios_social_friend_tags (user_id, tag_name);
 
 -- ---------------------------------------------------------------------------
 -- Profile customization additions (Feature: profile-customization-3,
@@ -1205,11 +1208,11 @@ CREATE TABLE IF NOT EXISTS ios_social_profile_views (
     profile_user_id VARCHAR(36) NOT NULL,
     viewer_user_id VARCHAR(36) NOT NULL,
     viewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_profile_views_profile (profile_user_id, viewed_at),
-    INDEX idx_profile_views_pair (profile_user_id, viewer_user_id, viewed_at),
     FOREIGN KEY (profile_user_id) REFERENCES ios_users(id) ON DELETE CASCADE,
     FOREIGN KEY (viewer_user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS ios_social_profile_views_idx_profile_views_profile ON ios_social_profile_views (profile_user_id, viewed_at);
+CREATE INDEX IF NOT EXISTS ios_social_profile_views_idx_profile_views_pair ON ios_social_profile_views (profile_user_id, viewer_user_id, viewed_at);
 
 -- Feature: pending-download folder routing (2026-07-19). The job that
 -- created a pending download already knows which local folder it's destined
@@ -1221,3 +1224,114 @@ CREATE TABLE IF NOT EXISTS ios_social_profile_views (
 -- chosen destination. NULL means "use the default download folder", same
 -- convention TrackedPlaylist.destinationFolder itself already uses.
 ALTER TABLE ios_pending_downloads ADD COLUMN IF NOT EXISTS destination_folder VARCHAR(255) NULL;
+
+-- ---------------------------------------------------------------------------
+-- MySQL -> PostgreSQL migration (2026-07): "ON UPDATE CURRENT_TIMESTAMP"
+-- replacement triggers
+-- ---------------------------------------------------------------------------
+--
+-- MySQL auto-touches a column declared "... ON UPDATE CURRENT_TIMESTAMP" on
+-- every UPDATE to the row, with no equivalent column-level clause in
+-- PostgreSQL. Rather than auditing every UPDATE/upsert call site in main.py
+-- to see whether it already sets the timestamp itself, one small trigger per
+-- distinct column name reproduces the original MySQL behavior exactly for
+-- every table that used the clause (grouped below by column name):
+--   updated_at:          ios_user_playlists, ios_user_settings,
+--                        ios_user_settings_expanded, ios_playback_state,
+--                        ios_listen_rooms, ios_scrobble_links,
+--                        ios_discord_webhooks, ios_discord_rpc_config,
+--                        ios_user_folder_backups, ios_social_profiles,
+--                        ios_presence_state, ios_social_friend_nicknames
+--   last_downloaded_at:  ios_download_history
+--   cached_at:           ios_lyrics_cache, ios_artist_bio_cache
+--   scanned_at:          ios_duplicate_scan_cache
+--   generated_at:        ios_weekly_mix_cache
+-- CREATE OR REPLACE + a DROP TRIGGER IF EXISTS before each CREATE TRIGGER
+-- keeps this whole block idempotent/re-runnable, same as every CREATE TABLE
+-- IF NOT EXISTS / ADD COLUMN IF NOT EXISTS statement above.
+
+CREATE OR REPLACE FUNCTION ios_touch_updated_at() RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at := CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION ios_touch_last_downloaded_at() RETURNS TRIGGER AS $$
+BEGIN
+    NEW.last_downloaded_at := CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION ios_touch_cached_at() RETURNS TRIGGER AS $$
+BEGIN
+    NEW.cached_at := CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION ios_touch_scanned_at() RETURNS TRIGGER AS $$
+BEGIN
+    NEW.scanned_at := CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION ios_touch_generated_at() RETURNS TRIGGER AS $$
+BEGIN
+    NEW.generated_at := CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_touch_updated_at ON ios_user_playlists;
+CREATE TRIGGER trg_touch_updated_at BEFORE UPDATE ON ios_user_playlists FOR EACH ROW EXECUTE FUNCTION ios_touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_touch_updated_at ON ios_user_settings;
+CREATE TRIGGER trg_touch_updated_at BEFORE UPDATE ON ios_user_settings FOR EACH ROW EXECUTE FUNCTION ios_touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_touch_updated_at ON ios_user_settings_expanded;
+CREATE TRIGGER trg_touch_updated_at BEFORE UPDATE ON ios_user_settings_expanded FOR EACH ROW EXECUTE FUNCTION ios_touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_touch_updated_at ON ios_playback_state;
+CREATE TRIGGER trg_touch_updated_at BEFORE UPDATE ON ios_playback_state FOR EACH ROW EXECUTE FUNCTION ios_touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_touch_updated_at ON ios_listen_rooms;
+CREATE TRIGGER trg_touch_updated_at BEFORE UPDATE ON ios_listen_rooms FOR EACH ROW EXECUTE FUNCTION ios_touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_touch_updated_at ON ios_scrobble_links;
+CREATE TRIGGER trg_touch_updated_at BEFORE UPDATE ON ios_scrobble_links FOR EACH ROW EXECUTE FUNCTION ios_touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_touch_updated_at ON ios_discord_webhooks;
+CREATE TRIGGER trg_touch_updated_at BEFORE UPDATE ON ios_discord_webhooks FOR EACH ROW EXECUTE FUNCTION ios_touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_touch_updated_at ON ios_discord_rpc_config;
+CREATE TRIGGER trg_touch_updated_at BEFORE UPDATE ON ios_discord_rpc_config FOR EACH ROW EXECUTE FUNCTION ios_touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_touch_updated_at ON ios_user_folder_backups;
+CREATE TRIGGER trg_touch_updated_at BEFORE UPDATE ON ios_user_folder_backups FOR EACH ROW EXECUTE FUNCTION ios_touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_touch_updated_at ON ios_social_profiles;
+CREATE TRIGGER trg_touch_updated_at BEFORE UPDATE ON ios_social_profiles FOR EACH ROW EXECUTE FUNCTION ios_touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_touch_updated_at ON ios_presence_state;
+CREATE TRIGGER trg_touch_updated_at BEFORE UPDATE ON ios_presence_state FOR EACH ROW EXECUTE FUNCTION ios_touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_touch_updated_at ON ios_social_friend_nicknames;
+CREATE TRIGGER trg_touch_updated_at BEFORE UPDATE ON ios_social_friend_nicknames FOR EACH ROW EXECUTE FUNCTION ios_touch_updated_at();
+
+DROP TRIGGER IF EXISTS trg_touch_last_downloaded_at ON ios_download_history;
+CREATE TRIGGER trg_touch_last_downloaded_at BEFORE UPDATE ON ios_download_history FOR EACH ROW EXECUTE FUNCTION ios_touch_last_downloaded_at();
+
+DROP TRIGGER IF EXISTS trg_touch_cached_at ON ios_lyrics_cache;
+CREATE TRIGGER trg_touch_cached_at BEFORE UPDATE ON ios_lyrics_cache FOR EACH ROW EXECUTE FUNCTION ios_touch_cached_at();
+
+DROP TRIGGER IF EXISTS trg_touch_cached_at ON ios_artist_bio_cache;
+CREATE TRIGGER trg_touch_cached_at BEFORE UPDATE ON ios_artist_bio_cache FOR EACH ROW EXECUTE FUNCTION ios_touch_cached_at();
+
+DROP TRIGGER IF EXISTS trg_touch_scanned_at ON ios_duplicate_scan_cache;
+CREATE TRIGGER trg_touch_scanned_at BEFORE UPDATE ON ios_duplicate_scan_cache FOR EACH ROW EXECUTE FUNCTION ios_touch_scanned_at();
+
+DROP TRIGGER IF EXISTS trg_touch_generated_at ON ios_weekly_mix_cache;
+CREATE TRIGGER trg_touch_generated_at BEFORE UPDATE ON ios_weekly_mix_cache FOR EACH ROW EXECUTE FUNCTION ios_touch_generated_at();

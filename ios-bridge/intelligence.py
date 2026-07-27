@@ -265,10 +265,14 @@ async def record_suggestion(task: str, user_id: str, input_data: dict, ai_result
             async with conn.cursor() as cur:
                 await cur.execute(
                     "INSERT INTO ios_aria_memory (user_id, task, input_json, ai_result_json) "
-                    "VALUES (%s, %s, %s, %s)",
+                    "VALUES (%s, %s, %s, %s) RETURNING id",
                     (user_id, task, json.dumps(input_data), json.dumps(ai_result)),
                 )
-                return cur.lastrowid
+                # psycopg2/aiopg cursors have no `.lastrowid` (that's a
+                # MySQL/aiomysql-ism) — RETURNING id above is the Postgres
+                # equivalent way to get an auto-generated id back.
+                row = await cur.fetchone()
+                return row[0] if row else None
     except Exception:
         logger.exception("failed to record ios_aria_memory suggestion for task %s", task)
         return None
@@ -315,7 +319,7 @@ async def get_user_taste_profile(user_id: str) -> dict:
 
     Play history is weighted by recency and engagement rather than a flat
     play count: a play from last week counts more than one from a year ago
-    (exponential half-life via TIMESTAMPDIFF), and a play the user actually
+    (exponential half-life via EXTRACT(EPOCH FROM ...)), and a play the user actually
     sat through (listen_seconds) counts more than one skipped almost
     immediately — both columns already exist on ios_play_history and were
     previously unused, so a skim-and-skip artist no longer outweighs one the
@@ -334,7 +338,7 @@ async def get_user_taste_profile(user_id: str) -> dict:
                 # play can't dominate) * recency decay (halves every 30 days).
                 await cur.execute(
                     "SELECT artist, "
-                    "SUM(LEAST(listen_seconds, 600) * POWER(0.5, TIMESTAMPDIFF(HOUR, played_at, NOW()) / 720.0)) AS weight "
+                    "SUM(LEAST(listen_seconds, 600) * POWER(0.5, (EXTRACT(EPOCH FROM (NOW() - played_at)) / 3600.0) / 720.0)) AS weight "
                     "FROM ios_play_history "
                     "WHERE user_id = %s AND artist IS NOT NULL AND artist != '' "
                     "GROUP BY artist ORDER BY weight DESC LIMIT 15",

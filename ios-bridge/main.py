@@ -40,7 +40,7 @@ import aioapns
 import firebase_admin
 from firebase_admin import credentials as fcm_credentials
 from firebase_admin import messaging as fcm_messaging
-import pymysql
+import psycopg2
 import pyotp
 import yt_dlp
 
@@ -71,6 +71,22 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("ios-bridge")
+
+
+async def _executemany(cur, query: str, rows) -> None:
+    """Replacement for aiomysql's cursor.executemany(), which aiopg's
+    psycopg2-backed cursor does not support at all ("executemany cannot be
+    used in asynchronous mode" — a hard driver limitation of psycopg2's
+    async connection mode, not a SQL-dialect difference). Every batch-insert
+    call site in this file used to pass one query + a list of row tuples to
+    a single executemany() call; this just issues one execute() per row
+    instead, which is fully equivalent (if less network-round-trip-efficient
+    — acceptable for this app's batch sizes, which top out at ~100 rows for
+    the client log ingestion endpoint and are typically far smaller
+    elsewhere)."""
+    for row in rows:
+        await cur.execute(query, row)
+
 
 # ---------------------------------------------------------------------------
 # Config
@@ -479,7 +495,7 @@ async def _claim_pending_download(job_id: str, user_id: Optional[str]) -> Option
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await conn.begin()
+            await cur.execute("BEGIN")
             try:
                 await cur.execute(
                     "SELECT file_path, media_type, filename FROM ios_pending_downloads "
@@ -492,9 +508,9 @@ async def _claim_pending_download(job_id: str, user_id: Optional[str]) -> Option
                         "DELETE FROM ios_pending_downloads WHERE job_id = %s AND user_id = %s",
                         (job_id, user_id),
                     )
-                await conn.commit()
+                await cur.execute("COMMIT")
             except Exception:
-                await conn.rollback()
+                await cur.execute("ROLLBACK")
                 raise
     if not row:
         return None
@@ -521,13 +537,13 @@ async def _sweep_stale_pending_downloads() -> None:
             async with conn.cursor() as cur:
                 await cur.execute(
                     "SELECT job_id, file_path FROM ios_pending_downloads "
-                    "WHERE created_at < NOW() - INTERVAL %s DAY",
+                    "WHERE created_at < NOW() - make_interval(days => %s)",
                     (_PENDING_DOWNLOAD_MAX_AGE_DAYS,),
                 )
                 rows = await cur.fetchall()
                 if rows:
                     await cur.execute(
-                        "DELETE FROM ios_pending_downloads WHERE created_at < NOW() - INTERVAL %s DAY",
+                        "DELETE FROM ios_pending_downloads WHERE created_at < NOW() - make_interval(days => %s)",
                         (_PENDING_DOWNLOAD_MAX_AGE_DAYS,),
                     )
     except Exception as exc:
@@ -630,7 +646,7 @@ async def _app_logs_janitor() -> None:
             async with pool.acquire() as conn:
                 async with conn.cursor() as cur:
                     deleted = await cur.execute(
-                        "DELETE FROM ios_app_logs WHERE created_at < NOW() - INTERVAL %s DAY",
+                        "DELETE FROM ios_app_logs WHERE created_at < NOW() - make_interval(days => %s)",
                         (_APP_LOGS_RETENTION_DAYS,),
                     )
             if deleted:
@@ -655,7 +671,7 @@ async def _event_log_janitor() -> None:
             async with pool.acquire() as conn:
                 async with conn.cursor() as cur:
                     deleted = await cur.execute(
-                        "DELETE FROM ios_app_event_log WHERE created_at < NOW() - INTERVAL %s DAY",
+                        "DELETE FROM ios_app_event_log WHERE created_at < NOW() - make_interval(days => %s)",
                         (_EVENT_LOG_RETENTION_DAYS,),
                     )
             if deleted:
@@ -1297,13 +1313,13 @@ async def _record_download_history(
                 INSERT INTO ios_download_history
                     (id, user_id, source, source_id, title, artist, thumbnail_url, duration_seconds, format)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    title = VALUES(title),
-                    artist = VALUES(artist),
-                    thumbnail_url = VALUES(thumbnail_url),
-                    duration_seconds = VALUES(duration_seconds),
-                    format = VALUES(format),
-                    download_count = download_count + 1,
+                ON CONFLICT (user_id, source, source_id) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    artist = EXCLUDED.artist,
+                    thumbnail_url = EXCLUDED.thumbnail_url,
+                    duration_seconds = EXCLUDED.duration_seconds,
+                    format = EXCLUDED.format,
+                    download_count = ios_download_history.download_count + 1,
                     last_downloaded_at = CURRENT_TIMESTAMP
                 """,
                 (str(uuid.uuid4()), user_id, source, source_id, title, artist, thumbnail_url, duration_seconds, format),
@@ -4692,7 +4708,7 @@ async def intelligence_metadata_resolve(
         async with conn.cursor() as cur:
             await cur.execute(
                 "INSERT INTO ios_intelligence_cache (task, cache_key, result_json) VALUES (%s, %s, %s) "
-                "ON DUPLICATE KEY UPDATE result_json = VALUES(result_json)",
+                "ON CONFLICT (task, cache_key) DO UPDATE SET result_json = EXCLUDED.result_json",
                 ("metadata_resolve", cache_key, json.dumps(result)),
             )
 
@@ -4836,7 +4852,7 @@ async def put_expanded_settings(request: Request, user: dict = Depends(get_curre
             await cur.execute(
                 f"INSERT INTO ios_user_settings_expanded (user_id, {', '.join(updates)}) "
                 f"VALUES (%s, {', '.join(['%s'] * len(updates))}) "
-                f"ON DUPLICATE KEY UPDATE {set_clause}",
+                f"ON CONFLICT (user_id) DO UPDATE SET {set_clause}",
                 [user["sub"]] + list(updates.values()) + list(updates.values()),
             )
     # Log which settings keys changed, not their values — some expanded
@@ -5127,8 +5143,8 @@ async def add_favorite(
                 """
                 INSERT INTO ios_user_favorites (user_id, song_id, title, artist, album)
                 VALUES (%s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE title = VALUES(title), artist = VALUES(artist),
-                    album = VALUES(album)
+                ON CONFLICT (user_id, song_id) DO UPDATE SET title = EXCLUDED.title, artist = EXCLUDED.artist,
+                    album = EXCLUDED.album
                 """,
                 (user_id, body.song_id, body.title, body.artist, body.album),
             )
@@ -5159,31 +5175,34 @@ async def remove_favorite(
 # ---------------------------------------------------------------------------
 
 
-# InnoDB deadlock / lock-wait-timeout errnos — retrying is MySQL's own
-# documented response to these, not a bug workaround: the transaction that
-# loses a deadlock is rolled back automatically and is safe to just re-run.
-_DEADLOCK_ERRNOS = {1213, 1205}
+# Postgres SQLSTATEs for a transient deadlock / serialization failure —
+# retrying is Postgres's own documented response to these, not a bug
+# workaround: the transaction that loses a deadlock (or that a concurrent
+# serializable transaction conflicts with) is rolled back automatically and
+# is safe to just re-run. (Was InnoDB errnos 1213/1205 under MySQL/aiomysql —
+# psycopg2/aiopg instead raise typed exceptions carrying a `pgcode`.)
+_DEADLOCK_PGCODES = {"40P01", "40001"}
 
 
 async def _retry_on_deadlock(operation, max_attempts: int = 3):
     """Runs `operation` (a zero-arg async callable doing the DB write),
-    retrying on a transient deadlock/lock-wait-timeout. A burst of
+    retrying on a transient deadlock/serialization-failure. A burst of
     concurrent single-statement writes to the same user's rows — e.g. two
     /user/library/inventory syncs (or a sync racing a large playlist
-    import's dedup writes) landing at once — can deadlock in InnoDB even
-    under autocommit with no explicit transaction spanning them, since a
-    bulk DELETE's gap locks and a concurrent bulk INSERT's range locks can
-    still be acquired in conflicting orders. Previously unhandled, that
+    import's dedup writes) landing at once — can deadlock even under
+    autocommit with no explicit transaction spanning them, since a bulk
+    DELETE's row locks and a concurrent bulk INSERT's locks can still be
+    acquired in conflicting orders. Previously unhandled under MySQL, that
     surfaced as a raw 500 (pymysql.err.OperationalError 1213) instead of
     just quietly succeeding on retry."""
     for attempt in range(1, max_attempts + 1):
         try:
             return await operation()
-        except pymysql.err.OperationalError as exc:
-            errno = exc.args[0] if exc.args else None
-            if errno in _DEADLOCK_ERRNOS and attempt < max_attempts:
+        except psycopg2.Error as exc:
+            pgcode = getattr(exc, "pgcode", None)
+            if pgcode in _DEADLOCK_PGCODES and attempt < max_attempts:
                 logger.warning(
-                    "_retry_on_deadlock: attempt %d/%d hit errno %s — retrying", attempt, max_attempts, errno
+                    "_retry_on_deadlock: attempt %d/%d hit pgcode %s — retrying", attempt, max_attempts, pgcode
                 )
                 await asyncio.sleep(0.05 * attempt)
                 continue
@@ -5210,8 +5229,9 @@ async def upload_library_inventory(
             async with conn.cursor() as cur:
                 await cur.execute("DELETE FROM ios_user_library_inventory WHERE user_id = %s", (user_id,))
                 if ids:
-                    await cur.executemany(
-                        "INSERT IGNORE INTO ios_user_library_inventory (user_id, source_id) VALUES (%s, %s)",
+                    await _executemany(cur, 
+                        "INSERT INTO ios_user_library_inventory (user_id, source_id) VALUES (%s, %s) "
+                        "ON CONFLICT (user_id, source_id) DO NOTHING",
                         [(user_id, sid) for sid in ids],
                     )
 
@@ -5387,7 +5407,7 @@ async def _save_duplicate_scan_cache(user_id: str, result: dict) -> None:
                 """
                 INSERT INTO ios_duplicate_scan_cache (user_id, groups_json)
                 VALUES (%s, %s)
-                ON DUPLICATE KEY UPDATE groups_json = VALUES(groups_json), scanned_at = NOW()
+                ON CONFLICT (user_id) DO UPDATE SET groups_json = EXCLUDED.groups_json, scanned_at = NOW()
                 """,
                 (user_id, json.dumps(result)),
             )
@@ -5454,7 +5474,7 @@ async def _duplicate_scan_loop() -> None:
                         SELECT m.user_id
                         FROM ios_user_music_metadata m
                         LEFT JOIN ios_duplicate_scan_cache c ON c.user_id = m.user_id
-                        WHERE c.user_id IS NULL OR c.scanned_at < NOW() - INTERVAL %s HOUR
+                        WHERE c.user_id IS NULL OR c.scanned_at < NOW() - make_interval(hours => %s)
                         GROUP BY m.user_id
                         ORDER BY MIN(c.scanned_at) IS NULL DESC, MIN(c.scanned_at) ASC
                         LIMIT 1
@@ -5778,13 +5798,13 @@ async def get_on_this_day(payload: dict = Depends(get_current_user)):
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                SELECT track_url, title, artist, played_at, YEAR(played_at) AS play_year
+                SELECT track_url, title, artist, played_at, EXTRACT(YEAR FROM played_at)::int AS play_year
                 FROM ios_play_history
                 WHERE user_id = %s
                   AND track_url IS NOT NULL AND track_url != ''
-                  AND MONTH(played_at) = MONTH(CURDATE())
-                  AND DAY(played_at) = DAY(CURDATE())
-                  AND YEAR(played_at) < YEAR(CURDATE())
+                  AND EXTRACT(MONTH FROM played_at) = EXTRACT(MONTH FROM CURRENT_DATE)
+                  AND EXTRACT(DAY FROM played_at) = EXTRACT(DAY FROM CURRENT_DATE)
+                  AND EXTRACT(YEAR FROM played_at) < EXTRACT(YEAR FROM CURRENT_DATE)
                 ORDER BY played_at DESC
                 """,
                 (user_id,),
@@ -5910,7 +5930,7 @@ async def get_artist_bio(
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT bio_json, found FROM ios_artist_bio_cache "
-                "WHERE artist_name = %s AND cached_at > NOW() - INTERVAL %s DAY",
+                "WHERE artist_name = %s AND cached_at > NOW() - make_interval(days => %s)",
                 (cache_key, _ARTIST_BIO_CACHE_TTL_DAYS),
             )
             row = await cur.fetchone()
@@ -5946,7 +5966,7 @@ async def get_artist_bio(
         async with conn.cursor() as cur:
             await cur.execute(
                 "INSERT INTO ios_artist_bio_cache (artist_name, bio_json, found) VALUES (%s, %s, %s) "
-                "ON DUPLICATE KEY UPDATE bio_json = VALUES(bio_json), found = VALUES(found), cached_at = NOW()",
+                "ON CONFLICT (artist_name) DO UPDATE SET bio_json = EXCLUDED.bio_json, found = EXCLUDED.found, cached_at = NOW()",
                 (cache_key, json.dumps(result), found),
             )
 
@@ -6002,10 +6022,10 @@ async def update_settings(
                 INSERT INTO ios_user_settings
                     (user_id, audio_settings_json, track_audio_settings_json, theme_color)
                 VALUES (%s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    audio_settings_json = IF(%s IS NULL, audio_settings_json, %s),
-                    track_audio_settings_json = IF(%s IS NULL, track_audio_settings_json, %s),
-                    theme_color = IF(%s IS NULL, theme_color, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    audio_settings_json = CASE WHEN %s IS NULL THEN ios_user_settings.audio_settings_json ELSE %s END,
+                    track_audio_settings_json = CASE WHEN %s IS NULL THEN ios_user_settings.track_audio_settings_json ELSE %s END,
+                    theme_color = CASE WHEN %s IS NULL THEN ios_user_settings.theme_color ELSE %s END
                 """,
                 (
                     user_id,
@@ -6190,18 +6210,18 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
     favorites = snapshot.get("favorites") or []
     playlists = snapshot.get("playlists") or []
 
-    # ON DUPLICATE KEY UPDATE on both inserts below — same fix as
+    # ON CONFLICT ... DO UPDATE on both inserts below — same fix as
     # sync_push's identical favorites/playlists upsert (a repeated song_id/
     # playlist id within one snapshot must not abort the restore after the
     # DELETE above has already committed, per autocommit).
     await cur.execute("DELETE FROM ios_user_favorites WHERE user_id = %s", (user_id,))
     if favorites:
-        await cur.executemany(
+        await _executemany(cur, 
             """
             INSERT INTO ios_user_favorites (user_id, song_id, title, artist, album)
             VALUES (%s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                title = VALUES(title), artist = VALUES(artist), album = VALUES(album)
+            ON CONFLICT (user_id, song_id) DO UPDATE SET
+                title = EXCLUDED.title, artist = EXCLUDED.artist, album = EXCLUDED.album
             """,
             [
                 (user_id, fav.get("song_id"), fav.get("title"), fav.get("artist"), fav.get("album"))
@@ -6211,12 +6231,12 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
 
     await cur.execute("DELETE FROM ios_user_playlists WHERE user_id = %s", (user_id,))
     if playlists:
-        await cur.executemany(
+        await _executemany(cur, 
             """
             INSERT INTO ios_user_playlists (id, user_id, name, description)
             VALUES (%s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                name = VALUES(name), description = VALUES(description)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name, description = EXCLUDED.description
             """,
             [
                 (pl.get("id") or str(uuid.uuid4()), user_id, pl.get("name"), pl.get("description"))
@@ -6239,7 +6259,7 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
                     track.get("position") if track.get("position") is not None else idx,
                 ))
         if all_track_rows:
-            await cur.executemany(
+            await _executemany(cur, 
                 """
                 INSERT INTO ios_playlist_tracks
                     (id, playlist_id, track_url, local_song_id, title, artist, album,
@@ -6261,7 +6281,7 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
              play_history_json, smart_playlists_json, tracked_playlists_json,
              bookmarks_json, bpm_by_source_track_id_json)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE
+        ON CONFLICT (user_id) DO UPDATE SET
             audio_settings_json = %s,
             track_audio_settings_json = %s,
             theme_color = %s,
@@ -6315,7 +6335,7 @@ async def _apply_sync_snapshot(cur, user_id: str, snapshot: dict) -> None:
             snapshot.get("tracked_playlists_json"),
             snapshot.get("bookmarks_json"),
             snapshot.get("bpm_by_source_track_id_json"),
-            # ON DUPLICATE KEY UPDATE values
+            # ON CONFLICT ... DO UPDATE values
             snapshot.get("audio_settings_json"),
             snapshot.get("track_audio_settings_json"),
             snapshot.get("theme_color") or "#EC4079",
@@ -6406,7 +6426,7 @@ async def sync_push(
                 f"{len(body.favorites)} favorites, {len(body.playlists)} playlists",
             )
 
-            # Replace favorites — batch upsert. ON DUPLICATE KEY UPDATE guards
+            # Replace favorites — batch upsert. ON CONFLICT ... DO UPDATE guards
             # against `body.favorites` containing the same song_id twice (seen
             # in production: pymysql.err.IntegrityError 1062 on the PRIMARY
             # key (user_id, song_id)) — since autocommit is on, the DELETE
@@ -6417,12 +6437,12 @@ async def sync_push(
                 "DELETE FROM ios_user_favorites WHERE user_id = %s", (user_id,)
             )
             if body.favorites:
-                await cur.executemany(
+                await _executemany(cur, 
                     """
                     INSERT INTO ios_user_favorites (user_id, song_id, title, artist, album)
                     VALUES (%s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        title = VALUES(title), artist = VALUES(artist), album = VALUES(album)
+                    ON CONFLICT (user_id, song_id) DO UPDATE SET
+                        title = EXCLUDED.title, artist = EXCLUDED.artist, album = EXCLUDED.album
                     """,
                     [
                         (user_id, fav.song_id, fav.title, fav.artist, fav.album)
@@ -6431,20 +6451,20 @@ async def sync_push(
                 )
 
             # Replace playlists — batch insert playlists then all tracks in one
-            # shot. ON DUPLICATE KEY UPDATE for the same reason as favorites
+            # shot. ON CONFLICT ... DO UPDATE for the same reason as favorites
             # above — a repeated playlist id within one push must not abort
             # the whole sync after the DELETE has already committed.
             await cur.execute(
                 "DELETE FROM ios_user_playlists WHERE user_id = %s", (user_id,)
             )
             if body.playlists:
-                await cur.executemany(
+                await _executemany(cur, 
                     """
                     INSERT INTO ios_user_playlists (id, user_id, name, description, folder, tags_json)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        name = VALUES(name), description = VALUES(description),
-                        folder = VALUES(folder), tags_json = VALUES(tags_json)
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = EXCLUDED.name, description = EXCLUDED.description,
+                        folder = EXCLUDED.folder, tags_json = EXCLUDED.tags_json
                     """,
                     [
                         (pl.id or str(uuid.uuid4()), user_id, pl.name, pl.description,
@@ -6469,7 +6489,7 @@ async def sync_push(
                             track.position if track.position is not None else idx,
                         ))
                 if all_track_rows:
-                    await cur.executemany(
+                    await _executemany(cur, 
                         """
                         INSERT INTO ios_playlist_tracks
                             (id, playlist_id, track_url, local_song_id, title, artist, album,
@@ -6479,7 +6499,7 @@ async def sync_push(
                         all_track_rows,
                     )
 
-            # Update settings — additive fields use IF(%s IS NULL, col, %s) so a
+            # Update settings — additive fields use CASE WHEN %s IS NULL THEN ios_user_settings.col ELSE %s END so a
             # client that doesn't yet send a given field (older app version)
             # never clobbers what's already stored server-side.
             await cur.execute(
@@ -6494,32 +6514,32 @@ async def sync_push(
                      play_history_json, smart_playlists_json, tracked_playlists_json,
                      bookmarks_json, bpm_by_source_track_id_json)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    audio_settings_json = IF(%s IS NULL, audio_settings_json, %s),
-                    track_audio_settings_json = IF(%s IS NULL, track_audio_settings_json, %s),
-                    theme_color = IF(%s IS NULL, theme_color, %s),
-                    vinyl_disc_enabled = IF(%s IS NULL, vinyl_disc_enabled, %s),
-                    show_queue_preview = IF(%s IS NULL, show_queue_preview, %s),
-                    songs_per_row = IF(%s IS NULL, songs_per_row, %s),
-                    albums_per_row = IF(%s IS NULL, albums_per_row, %s),
-                    bg_animation = IF(%s IS NULL, bg_animation, %s),
-                    bg_opacity = IF(%s IS NULL, bg_opacity, %s),
-                    bg_enabled = IF(%s IS NULL, bg_enabled, %s),
-                    bg_blur_radius = IF(%s IS NULL, bg_blur_radius, %s),
-                    bg_shuffle_interval = IF(%s IS NULL, bg_shuffle_interval, %s),
-                    preferred_audio_format = IF(%s IS NULL, preferred_audio_format, %s),
-                    download_path = IF(%s IS NULL, download_path, %s),
-                    car_mode_enabled = IF(%s IS NULL, car_mode_enabled, %s),
-                    library_artists_columns = IF(%s IS NULL, library_artists_columns, %s),
-                    now_playing_artwork_style = IF(%s IS NULL, now_playing_artwork_style, %s),
-                    now_playing_seeker_style = IF(%s IS NULL, now_playing_seeker_style, %s),
-                    earned_badges_json = IF(%s IS NULL, earned_badges_json, %s),
-                    extra_settings_json = IF(%s IS NULL, extra_settings_json, %s),
-                    play_history_json = IF(%s IS NULL, play_history_json, %s),
-                    smart_playlists_json = IF(%s IS NULL, smart_playlists_json, %s),
-                    tracked_playlists_json = IF(%s IS NULL, tracked_playlists_json, %s),
-                    bookmarks_json = IF(%s IS NULL, bookmarks_json, %s),
-                    bpm_by_source_track_id_json = IF(%s IS NULL, bpm_by_source_track_id_json, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    audio_settings_json = CASE WHEN %s IS NULL THEN ios_user_settings.audio_settings_json ELSE %s END,
+                    track_audio_settings_json = CASE WHEN %s IS NULL THEN ios_user_settings.track_audio_settings_json ELSE %s END,
+                    theme_color = CASE WHEN %s IS NULL THEN ios_user_settings.theme_color ELSE %s END,
+                    vinyl_disc_enabled = CASE WHEN %s IS NULL THEN ios_user_settings.vinyl_disc_enabled ELSE %s END,
+                    show_queue_preview = CASE WHEN %s IS NULL THEN ios_user_settings.show_queue_preview ELSE %s END,
+                    songs_per_row = CASE WHEN %s IS NULL THEN ios_user_settings.songs_per_row ELSE %s END,
+                    albums_per_row = CASE WHEN %s IS NULL THEN ios_user_settings.albums_per_row ELSE %s END,
+                    bg_animation = CASE WHEN %s IS NULL THEN ios_user_settings.bg_animation ELSE %s END,
+                    bg_opacity = CASE WHEN %s IS NULL THEN ios_user_settings.bg_opacity ELSE %s END,
+                    bg_enabled = CASE WHEN %s IS NULL THEN ios_user_settings.bg_enabled ELSE %s END,
+                    bg_blur_radius = CASE WHEN %s IS NULL THEN ios_user_settings.bg_blur_radius ELSE %s END,
+                    bg_shuffle_interval = CASE WHEN %s IS NULL THEN ios_user_settings.bg_shuffle_interval ELSE %s END,
+                    preferred_audio_format = CASE WHEN %s IS NULL THEN ios_user_settings.preferred_audio_format ELSE %s END,
+                    download_path = CASE WHEN %s IS NULL THEN ios_user_settings.download_path ELSE %s END,
+                    car_mode_enabled = CASE WHEN %s IS NULL THEN ios_user_settings.car_mode_enabled ELSE %s END,
+                    library_artists_columns = CASE WHEN %s IS NULL THEN ios_user_settings.library_artists_columns ELSE %s END,
+                    now_playing_artwork_style = CASE WHEN %s IS NULL THEN ios_user_settings.now_playing_artwork_style ELSE %s END,
+                    now_playing_seeker_style = CASE WHEN %s IS NULL THEN ios_user_settings.now_playing_seeker_style ELSE %s END,
+                    earned_badges_json = CASE WHEN %s IS NULL THEN ios_user_settings.earned_badges_json ELSE %s END,
+                    extra_settings_json = CASE WHEN %s IS NULL THEN ios_user_settings.extra_settings_json ELSE %s END,
+                    play_history_json = CASE WHEN %s IS NULL THEN ios_user_settings.play_history_json ELSE %s END,
+                    smart_playlists_json = CASE WHEN %s IS NULL THEN ios_user_settings.smart_playlists_json ELSE %s END,
+                    tracked_playlists_json = CASE WHEN %s IS NULL THEN ios_user_settings.tracked_playlists_json ELSE %s END,
+                    bookmarks_json = CASE WHEN %s IS NULL THEN ios_user_settings.bookmarks_json ELSE %s END,
+                    bpm_by_source_track_id_json = CASE WHEN %s IS NULL THEN ios_user_settings.bpm_by_source_track_id_json ELSE %s END
                 """,
                 (
                     user_id,
@@ -6548,7 +6568,7 @@ async def sync_push(
                     body.tracked_playlists_json,
                     body.bookmarks_json,
                     body.bpm_by_source_track_id_json,
-                    # ON DUPLICATE KEY UPDATE values (IF %s IS NULL, ..., %s)
+                    # ON CONFLICT ... DO UPDATE values (IF %s IS NULL, ..., %s)
                     body.audio_settings_json, body.audio_settings_json,
                     body.track_audio_settings_json, body.track_audio_settings_json,
                     body.theme_color, body.theme_color,
@@ -6591,8 +6611,8 @@ async def list_backups(payload: dict = Depends(get_current_user)):
             await cur.execute(
                 """
                 SELECT id, reason, created_at,
-                       JSON_LENGTH(JSON_EXTRACT(snapshot_json, '$.favorites')) AS favorite_count,
-                       JSON_LENGTH(JSON_EXTRACT(snapshot_json, '$.playlists')) AS playlist_count
+                       jsonb_array_length((snapshot_json::jsonb) -> 'favorites') AS favorite_count,
+                       jsonb_array_length((snapshot_json::jsonb) -> 'playlists') AS playlist_count
                 FROM ios_user_backups
                 WHERE user_id = %s
                 ORDER BY created_at DESC
@@ -6684,7 +6704,7 @@ async def push_folder_backups(
                 "DELETE FROM ios_user_folder_backups WHERE user_id = %s", (user_id,)
             )
             if body.folders:
-                await cur.executemany(
+                await _executemany(cur, 
                     """
                     INSERT INTO ios_user_folder_backups (id, user_id, folder_path, track_filenames_json)
                     VALUES (%s, %s, %s, %s)
@@ -6803,7 +6823,7 @@ async def social_discover(
                 FROM ios_play_history h
                 JOIN ios_users u ON u.id = h.user_id
                 WHERE u.share_listening_activity = TRUE AND u.is_active = TRUE
-                  AND h.played_at >= NOW() - INTERVAL %s DAY
+                  AND h.played_at >= NOW() - make_interval(days => %s)
                   AND h.title IS NOT NULL AND h.title != ''
                 GROUP BY h.title, h.artist
                 ORDER BY play_count DESC, listener_count DESC
@@ -6931,7 +6951,7 @@ async def trending_by_energy(
                 FROM ios_play_history h
                 JOIN ios_users u ON u.id = h.user_id
                 WHERE u.share_listening_activity = TRUE AND u.is_active = TRUE
-                  AND h.played_at >= NOW() - INTERVAL %s DAY
+                  AND h.played_at >= NOW() - make_interval(days => %s)
                   AND h.title IS NOT NULL AND h.title != ''
                   AND h.bpm IS NOT NULL
                 GROUP BY h.title, h.artist
@@ -7692,7 +7712,7 @@ async def get_download_history(
                     SELECT source, source_id, title, artist, thumbnail_url, duration_seconds,
                            format, download_count, last_downloaded_at
                     FROM ios_download_history
-                    WHERE user_id = %s AND (title LIKE %s OR artist LIKE %s)
+                    WHERE user_id = %s AND (title ILIKE %s OR artist ILIKE %s)
                     ORDER BY last_downloaded_at DESC
                     LIMIT %s
                     """,
@@ -7805,9 +7825,9 @@ async def search_user_music(
 ):
     """Fast, relevance-ranked search over the user's uploaded music library,
     querying the already-populated `ios_user_music_metadata` table via a
-    MariaDB FULLTEXT index — unlike /user/music's `search` param, which walks
+    PostgreSQL full-text (tsvector/GIN) index — unlike /user/music's `search` param, which walks
     the whole filesystem and runs ffprobe on every file on every request.
-    Falls back to a LIKE scan when FULLTEXT natural-language mode returns
+    Falls back to an ILIKE scan when the full-text search returns
     nothing, since it ignores short words/stopwords that a plain substring
     search would still match (e.g. a one-word title)."""
     user_id = user["sub"]
@@ -7820,8 +7840,12 @@ async def search_user_music(
                        has_artwork, bpm, musical_key
                 FROM ios_user_music_metadata
                 WHERE user_id = %s
-                  AND MATCH(title, artist, album) AGAINST (%s IN NATURAL LANGUAGE MODE)
-                ORDER BY MATCH(title, artist, album) AGAINST (%s IN NATURAL LANGUAGE MODE) DESC
+                  AND to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(artist, '') || ' ' || COALESCE(album, ''))
+                      @@ plainto_tsquery('english', %s)
+                ORDER BY ts_rank(
+                    to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(artist, '') || ' ' || COALESCE(album, '')),
+                    plainto_tsquery('english', %s)
+                ) DESC
                 LIMIT %s
                 """,
                 (user_id, q, q, limit),
@@ -7835,7 +7859,7 @@ async def search_user_music(
                     SELECT id, filename, title, artist, album, genre, duration_seconds,
                            has_artwork, bpm, musical_key
                     FROM ios_user_music_metadata
-                    WHERE user_id = %s AND (title LIKE %s OR artist LIKE %s OR album LIKE %s)
+                    WHERE user_id = %s AND (title ILIKE %s OR artist ILIKE %s OR album ILIKE %s)
                     LIMIT %s
                     """,
                     (user_id, like_q, like_q, like_q, limit),
@@ -8021,23 +8045,23 @@ async def upload_user_music(
                          sample_rate, mime_type, has_artwork, loudness_lufs, bpm, musical_key,
                          waveform_json, relative_path)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        filename = VALUES(filename),
-                        relative_path = VALUES(relative_path),
-                        title = IF(VALUES(title) IS NULL, title, VALUES(title)),
-                        artist = IF(VALUES(artist) IS NULL, artist, VALUES(artist)),
-                        album = IF(VALUES(album) IS NULL, album, VALUES(album)),
-                        genre = IF(VALUES(genre) IS NULL, genre, VALUES(genre)),
-                        year = IF(VALUES(year) IS NULL, year, VALUES(year)),
-                        duration_seconds = IF(VALUES(duration_seconds) IS NULL, duration_seconds, VALUES(duration_seconds)),
-                        file_size_bytes = VALUES(file_size_bytes),
-                        bitrate = IF(VALUES(bitrate) IS NULL, bitrate, VALUES(bitrate)),
-                        sample_rate = IF(VALUES(sample_rate) IS NULL, sample_rate, VALUES(sample_rate)),
-                        mime_type = VALUES(mime_type),
-                        loudness_lufs = IF(VALUES(loudness_lufs) IS NULL, loudness_lufs, VALUES(loudness_lufs)),
-                        bpm = IF(VALUES(bpm) IS NULL, bpm, VALUES(bpm)),
-                        musical_key = IF(VALUES(musical_key) IS NULL, musical_key, VALUES(musical_key)),
-                        waveform_json = IF(VALUES(waveform_json) IS NULL, waveform_json, VALUES(waveform_json))
+                    ON CONFLICT (id) DO UPDATE SET
+                        filename = EXCLUDED.filename,
+                        relative_path = EXCLUDED.relative_path,
+                        title = CASE WHEN EXCLUDED.title IS NULL THEN ios_user_music_metadata.title ELSE EXCLUDED.title END,
+                        artist = CASE WHEN EXCLUDED.artist IS NULL THEN ios_user_music_metadata.artist ELSE EXCLUDED.artist END,
+                        album = CASE WHEN EXCLUDED.album IS NULL THEN ios_user_music_metadata.album ELSE EXCLUDED.album END,
+                        genre = CASE WHEN EXCLUDED.genre IS NULL THEN ios_user_music_metadata.genre ELSE EXCLUDED.genre END,
+                        year = CASE WHEN EXCLUDED.year IS NULL THEN ios_user_music_metadata.year ELSE EXCLUDED.year END,
+                        duration_seconds = CASE WHEN EXCLUDED.duration_seconds IS NULL THEN ios_user_music_metadata.duration_seconds ELSE EXCLUDED.duration_seconds END,
+                        file_size_bytes = EXCLUDED.file_size_bytes,
+                        bitrate = CASE WHEN EXCLUDED.bitrate IS NULL THEN ios_user_music_metadata.bitrate ELSE EXCLUDED.bitrate END,
+                        sample_rate = CASE WHEN EXCLUDED.sample_rate IS NULL THEN ios_user_music_metadata.sample_rate ELSE EXCLUDED.sample_rate END,
+                        mime_type = EXCLUDED.mime_type,
+                        loudness_lufs = CASE WHEN EXCLUDED.loudness_lufs IS NULL THEN ios_user_music_metadata.loudness_lufs ELSE EXCLUDED.loudness_lufs END,
+                        bpm = CASE WHEN EXCLUDED.bpm IS NULL THEN ios_user_music_metadata.bpm ELSE EXCLUDED.bpm END,
+                        musical_key = CASE WHEN EXCLUDED.musical_key IS NULL THEN ios_user_music_metadata.musical_key ELSE EXCLUDED.musical_key END,
+                        waveform_json = CASE WHEN EXCLUDED.waveform_json IS NULL THEN ios_user_music_metadata.waveform_json ELSE EXCLUDED.waveform_json END
                     """,
                     (
                         content_hash,
@@ -8449,10 +8473,10 @@ async def backfill_user_music_metadata(
                 await cur.execute(
                     """
                     UPDATE ios_user_music_metadata
-                    SET loudness_lufs = IF(loudness_lufs IS NULL, %s, loudness_lufs),
-                        bpm = IF(bpm IS NULL, %s, bpm),
-                        musical_key = IF(musical_key IS NULL, %s, musical_key),
-                        waveform_json = IF(waveform_json IS NULL, %s, waveform_json)
+                    SET loudness_lufs = CASE WHEN loudness_lufs IS NULL THEN %s ELSE loudness_lufs END,
+                        bpm = CASE WHEN bpm IS NULL THEN %s ELSE bpm END,
+                        musical_key = CASE WHEN musical_key IS NULL THEN %s ELSE musical_key END,
+                        waveform_json = CASE WHEN waveform_json IS NULL THEN %s ELSE waveform_json END
                     WHERE id = %s AND user_id = %s
                     """,
                     (loudness_lufs, bpm, musical_key, waveform_json, metadata_id, user_id),
@@ -8605,7 +8629,7 @@ async def _generate_weekly_mix_core(user_id: str) -> list[dict]:
                 """
                 SELECT artist, COUNT(*) AS plays
                 FROM ios_play_history
-                WHERE user_id = %s AND played_at >= NOW() - INTERVAL 90 DAY
+                WHERE user_id = %s AND played_at >= NOW() - INTERVAL '90 days'
                   AND artist IS NOT NULL AND artist != ''
                 GROUP BY artist
                 ORDER BY plays DESC
@@ -8627,7 +8651,7 @@ async def _generate_weekly_mix_core(user_id: str) -> list[dict]:
                     SELECT id, title, artist, album, bpm, musical_key, relative_path, has_artwork
                     FROM ios_user_music_metadata
                     WHERE user_id = %s AND artist IN ({placeholders}) AND relative_path IS NOT NULL
-                    ORDER BY RAND()
+                    ORDER BY RANDOM()
                     LIMIT %s
                     """,
                     (user_id, *top_artists, _WEEKLY_MIX_SIZE),
@@ -8643,7 +8667,7 @@ async def _generate_weekly_mix_core(user_id: str) -> list[dict]:
                 await cur.execute(
                     "SELECT id, title, artist, album, bpm, musical_key, relative_path, has_artwork "
                     "FROM ios_user_music_metadata "
-                    "WHERE user_id = %s AND relative_path IS NOT NULL ORDER BY RAND() LIMIT %s",
+                    "WHERE user_id = %s AND relative_path IS NOT NULL ORDER BY RANDOM() LIMIT %s",
                     (user_id, _WEEKLY_MIX_SIZE),
                 )
                 for r in await cur.fetchall():
@@ -8695,7 +8719,7 @@ async def _save_weekly_mix_cache(user_id: str, tracks: list[dict]) -> None:
                 """
                 INSERT INTO ios_weekly_mix_cache (user_id, track_ids_json)
                 VALUES (%s, %s)
-                ON DUPLICATE KEY UPDATE track_ids_json = VALUES(track_ids_json), generated_at = NOW()
+                ON CONFLICT (user_id) DO UPDATE SET track_ids_json = EXCLUDED.track_ids_json, generated_at = NOW()
                 """,
                 (user_id, json.dumps(tracks)),
             )
@@ -8719,7 +8743,7 @@ async def _weekly_mix_loop() -> None:
                         SELECT m.user_id
                         FROM ios_user_music_metadata m
                         LEFT JOIN ios_weekly_mix_cache c ON c.user_id = m.user_id
-                        WHERE c.user_id IS NULL OR c.generated_at < NOW() - INTERVAL %s DAY
+                        WHERE c.user_id IS NULL OR c.generated_at < NOW() - make_interval(days => %s)
                         GROUP BY m.user_id
                         ORDER BY MIN(c.generated_at) IS NULL DESC, MIN(c.generated_at) ASC
                         LIMIT 1
@@ -9000,10 +9024,10 @@ async def get_lyrics(
                     """
                     INSERT INTO ios_lyrics_cache (id, title, artist, synced_lyrics, plain_lyrics, found)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        synced_lyrics = IF(is_user_submitted, synced_lyrics, VALUES(synced_lyrics)),
-                        plain_lyrics = IF(is_user_submitted, plain_lyrics, VALUES(plain_lyrics)),
-                        found = IF(is_user_submitted, found, VALUES(found))
+                    ON CONFLICT (id) DO UPDATE SET
+                        synced_lyrics = CASE WHEN ios_lyrics_cache.is_user_submitted THEN ios_lyrics_cache.synced_lyrics ELSE EXCLUDED.synced_lyrics END,
+                        plain_lyrics = CASE WHEN ios_lyrics_cache.is_user_submitted THEN ios_lyrics_cache.plain_lyrics ELSE EXCLUDED.plain_lyrics END,
+                        found = CASE WHEN ios_lyrics_cache.is_user_submitted THEN ios_lyrics_cache.found ELSE EXCLUDED.found END
                     """,
                     (
                         cache_id, title, artist,
@@ -9044,9 +9068,9 @@ async def submit_lyrics_correction(request: Request, body: LyricsCorrectionReque
                 """
                 INSERT INTO ios_lyrics_cache (id, title, artist, synced_lyrics, plain_lyrics, found, is_user_submitted)
                 VALUES (%s, %s, %s, %s, %s, TRUE, TRUE)
-                ON DUPLICATE KEY UPDATE
-                    synced_lyrics = VALUES(synced_lyrics),
-                    plain_lyrics = VALUES(plain_lyrics),
+                ON CONFLICT (id) DO UPDATE SET
+                    synced_lyrics = EXCLUDED.synced_lyrics,
+                    plain_lyrics = EXCLUDED.plain_lyrics,
                     found = TRUE,
                     is_user_submitted = TRUE
                 """,
@@ -9059,7 +9083,7 @@ async def submit_lyrics_correction(request: Request, body: LyricsCorrectionReque
 # Feature: search my library by lyrics — find a song from a remembered lyric
 # snippet instead of title/artist. Built on the existing shared lyrics cache
 # (ios_lyrics_cache is keyed by title+artist, not per-user, so warming it for
-# one user's library benefits every user's search) plus a FULLTEXT index over
+# one user's library benefits every user's search) plus a full-text GIN index over
 # its lyric text (see schema.sql).
 # ---------------------------------------------------------------------------
 
@@ -9067,7 +9091,7 @@ async def submit_lyrics_correction(request: Request, body: LyricsCorrectionReque
 def _lyrics_snippet(lyrics: str, query_lower: str, max_length: int = 200) -> str:
     """Returns a short excerpt of *lyrics* centered on the first line matching
     *query_lower* verbatim, or just the first non-empty line if nothing
-    matches exactly (MySQL/MariaDB FULLTEXT NATURAL LANGUAGE MODE can match on
+    matches exactly (Postgres's plainto_tsquery full-text search can match on
     stemmed/partial terms that don't appear verbatim in any single line)."""
     lines = [line.strip() for line in lyrics.splitlines() if line.strip()]
     for line in lines:
@@ -9115,10 +9139,10 @@ async def _fetch_and_cache_lyrics(title: str, artist: str, duration: Optional[in
                     """
                     INSERT INTO ios_lyrics_cache (id, title, artist, synced_lyrics, plain_lyrics, found)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        synced_lyrics = IF(is_user_submitted, synced_lyrics, VALUES(synced_lyrics)),
-                        plain_lyrics = IF(is_user_submitted, plain_lyrics, VALUES(plain_lyrics)),
-                        found = IF(is_user_submitted, found, VALUES(found))
+                    ON CONFLICT (id) DO UPDATE SET
+                        synced_lyrics = CASE WHEN ios_lyrics_cache.is_user_submitted THEN ios_lyrics_cache.synced_lyrics ELSE EXCLUDED.synced_lyrics END,
+                        plain_lyrics = CASE WHEN ios_lyrics_cache.is_user_submitted THEN ios_lyrics_cache.plain_lyrics ELSE EXCLUDED.plain_lyrics END,
+                        found = CASE WHEN ios_lyrics_cache.is_user_submitted THEN ios_lyrics_cache.found ELSE EXCLUDED.found END
                     """,
                     (
                         cache_id, title, artist,
@@ -9185,10 +9209,10 @@ async def search_lyrics(
     remembered lyric snippet instead of a title/artist. Only searches entries
     the bridge has already cached (see /user/lyrics/prefetch to warm the
     cache for a whole library) with actual lyric text (found = TRUE). Note:
-    MySQL/MariaDB's default FULLTEXT NATURAL LANGUAGE MODE ignores very short
+    Postgres's 'english' text-search configuration ignores very short
     words and common stopwords, so a 2-3 letter or extremely common query may
     return no matches even if the phrase is present verbatim — a known
-    FULLTEXT limitation, not a bug in this endpoint."""
+    full-text-search limitation, not a bug in this endpoint."""
     await check_auth(request)
 
     pool = await get_pool()
@@ -9197,10 +9221,14 @@ async def search_lyrics(
             await cur.execute(
                 """
                 SELECT title, artist, plain_lyrics,
-                       MATCH(title, artist, plain_lyrics) AGAINST (%s IN NATURAL LANGUAGE MODE) AS relevance
+                       ts_rank(
+                           to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(artist, '') || ' ' || COALESCE(plain_lyrics, '')),
+                           plainto_tsquery('english', %s)
+                       ) AS relevance
                 FROM ios_lyrics_cache
                 WHERE found = TRUE AND plain_lyrics IS NOT NULL
-                  AND MATCH(title, artist, plain_lyrics) AGAINST (%s IN NATURAL LANGUAGE MODE)
+                  AND to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(artist, '') || ' ' || COALESCE(plain_lyrics, ''))
+                      @@ plainto_tsquery('english', %s)
                 ORDER BY relevance DESC
                 LIMIT %s
                 """,
@@ -9314,11 +9342,11 @@ async def update_playback_state(
                 INSERT INTO ios_playback_state
                     (user_id, song_id, title, artist, track_url, source, position_seconds, duration_seconds, is_playing, bpm)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    song_id = VALUES(song_id), title = VALUES(title), artist = VALUES(artist),
-                    track_url = VALUES(track_url), source = VALUES(source),
-                    position_seconds = VALUES(position_seconds), duration_seconds = VALUES(duration_seconds),
-                    is_playing = VALUES(is_playing), bpm = VALUES(bpm)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    song_id = EXCLUDED.song_id, title = EXCLUDED.title, artist = EXCLUDED.artist,
+                    track_url = EXCLUDED.track_url, source = EXCLUDED.source,
+                    position_seconds = EXCLUDED.position_seconds, duration_seconds = EXCLUDED.duration_seconds,
+                    is_playing = EXCLUDED.is_playing, bpm = EXCLUDED.bpm
                 """,
                 (
                     user_id, body.song_id, body.title, body.artist, body.track_url,
@@ -9615,9 +9643,9 @@ async def vote_room_queue_item(room_code: str, item_id: str, payload: dict = Dep
             await cur.execute(
                 """
                 UPDATE ios_room_queue q
-                JOIN ios_listen_rooms r ON r.id = q.room_id
-                SET q.votes = q.votes + 1
-                WHERE q.id = %s AND r.room_code = %s
+                SET votes = q.votes + 1
+                FROM ios_listen_rooms r
+                WHERE r.id = q.room_id AND q.id = %s AND r.room_code = %s
                 """,
                 (item_id, room_code.upper()),
             )
@@ -9800,7 +9828,7 @@ async def _poll_due_subscriptions() -> None:
                 SELECT id, user_id, channel_url, channel_name, last_video_id, channel_id,
                        notifications_muted
                 FROM ios_artist_subscriptions
-                WHERE last_checked_at IS NULL OR last_checked_at < NOW() - INTERVAL %s HOUR
+                WHERE last_checked_at IS NULL OR last_checked_at < NOW() - make_interval(hours => %s)
                 ORDER BY last_checked_at IS NULL DESC, last_checked_at ASC
                 LIMIT %s
                 """,
@@ -9833,7 +9861,7 @@ async def _poll_due_tracked_playlists() -> None:
                 FROM ios_user_playlists p
                 LEFT JOIN ios_playlist_tracks t ON t.playlist_id = p.id
                 WHERE p.source_url IS NOT NULL
-                  AND (p.source_checked_at IS NULL OR p.source_checked_at < NOW() - INTERVAL %s HOUR)
+                  AND (p.source_checked_at IS NULL OR p.source_checked_at < NOW() - make_interval(hours => %s))
                 GROUP BY p.id, p.user_id, p.source_url
                 ORDER BY p.source_checked_at IS NULL DESC, p.source_checked_at ASC
                 LIMIT %s
@@ -9873,7 +9901,7 @@ async def get_weekly_stats(payload: dict = Depends(get_current_user)):
                 """
                 SELECT DATE(played_at) AS day, COUNT(*) AS plays, COALESCE(SUM(listen_seconds), 0) AS seconds
                 FROM ios_play_history
-                WHERE user_id = %s AND played_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                WHERE user_id = %s AND played_at >= (CURRENT_DATE - INTERVAL '6 days')
                 GROUP BY DATE(played_at)
                 ORDER BY day ASC
                 """,
@@ -9905,13 +9933,13 @@ async def get_library_duplicates(payload: dict = Depends(get_current_user)):
                 """
                 SELECT LOWER(TRIM(t.title)) AS norm_title, LOWER(TRIM(COALESCE(t.artist, ''))) AS norm_artist,
                        COUNT(*) AS occurrences,
-                       GROUP_CONCAT(DISTINCT p.name SEPARATOR ', ') AS playlists,
+                       STRING_AGG(DISTINCT p.name, ', ') AS playlists,
                        MIN(t.title) AS title, MIN(t.artist) AS artist
                 FROM ios_playlist_tracks t
                 JOIN ios_user_playlists p ON p.id = t.playlist_id
                 WHERE p.user_id = %s AND t.title IS NOT NULL AND t.title != ''
                 GROUP BY norm_title, norm_artist
-                HAVING occurrences > 1
+                HAVING COUNT(*) > 1
                 ORDER BY occurrences DESC
                 LIMIT 100
                 """,
@@ -10140,11 +10168,19 @@ async def ingest_logs(request: Request):
             pool = await get_pool()
             async with pool.acquire() as conn:
                 async with conn.cursor() as cur:
-                    await cur.executemany(
-                        "INSERT IGNORE INTO ios_app_logs "
+                    await _executemany(cur, 
+                        "INSERT INTO ios_app_logs "
                         "(level, category, message, file, line, timestamp, extra, "
                         "device_model, os_version, app_version, user_id) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                        # ios_app_logs has no unique constraint (id is a
+                        # server-generated identity column, never supplied
+                        # here), so a conflict can never actually occur —
+                        # ON CONFLICT DO NOTHING with no target is the
+                        # closest faithful translation of MySQL's INSERT
+                        # IGNORE (which was defensive boilerplate here, not
+                        # covering a real expected duplicate-key case).
+                        "ON CONFLICT DO NOTHING",
                         rows,
                     )
     except Exception:
@@ -10371,7 +10407,7 @@ async def _send_push_best_effort(
             pool = await get_pool()
             async with pool.acquire() as conn:
                 async with conn.cursor() as cur:
-                    await cur.executemany(
+                    await _executemany(cur, 
                         "DELETE FROM ios_push_tokens WHERE device_token = %s",
                         [(t,) for t in dead_tokens],
                     )
@@ -11261,8 +11297,8 @@ async def list_subscriptions(payload: dict = Depends(get_current_user)):
                        MIN(h.discovered_at) AS first_seen,
                        MAX(h.discovered_at) AS last_seen,
                        CASE WHEN MAX(h.discovered_at) IS NOT NULL
-                            THEN TIMESTAMPDIFF(DAY, MAX(h.discovered_at), NOW())
-                            ELSE TIMESTAMPDIFF(DAY, s.created_at, NOW())
+                            THEN EXTRACT(DAY FROM (NOW() - MAX(h.discovered_at)))::int
+                            ELSE EXTRACT(DAY FROM (NOW() - s.created_at))::int
                        END AS days_since_activity
                 FROM ios_artist_subscriptions s
                 LEFT JOIN ios_subscription_upload_history h ON h.subscription_id = s.id
@@ -11662,7 +11698,7 @@ async def add_collaborator(
 
             await cur.execute(
                 "INSERT INTO ios_playlist_collaborators (playlist_id, user_id, role) "
-                "VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE role = VALUES(role)",
+                "VALUES (%s, %s, %s) ON CONFLICT (playlist_id, user_id) DO UPDATE SET role = EXCLUDED.role",
                 (playlist_id, target_id, body.role),
             )
             await _create_notification(
@@ -11853,7 +11889,7 @@ async def replace_queue(body: ReplaceQueueRequest, payload: dict = Depends(get_c
                      t.artist, t.album, t.duration_seconds or 0)
                     for idx, t in enumerate(body.tracks)
                 ]
-                await cur.executemany(
+                await _executemany(cur, 
                     """
                     INSERT INTO ios_user_queue
                         (id, user_id, position, local_song_id, track_url, title, artist, album, duration_seconds)
@@ -11923,13 +11959,13 @@ async def update_scrobble_links(body: ScrobbleLinkRequest, payload: dict = Depen
                     (user_id, lastfm_session_key, lastfm_username, listenbrainz_token,
                      librefm_session_key, librefm_username, enabled)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    lastfm_session_key = IF(VALUES(lastfm_session_key) IS NULL, lastfm_session_key, VALUES(lastfm_session_key)),
-                    lastfm_username = IF(VALUES(lastfm_username) IS NULL, lastfm_username, VALUES(lastfm_username)),
-                    listenbrainz_token = IF(VALUES(listenbrainz_token) IS NULL, listenbrainz_token, VALUES(listenbrainz_token)),
-                    librefm_session_key = IF(VALUES(librefm_session_key) IS NULL, librefm_session_key, VALUES(librefm_session_key)),
-                    librefm_username = IF(VALUES(librefm_username) IS NULL, librefm_username, VALUES(librefm_username)),
-                    enabled = VALUES(enabled)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    lastfm_session_key = CASE WHEN EXCLUDED.lastfm_session_key IS NULL THEN ios_scrobble_links.lastfm_session_key ELSE EXCLUDED.lastfm_session_key END,
+                    lastfm_username = CASE WHEN EXCLUDED.lastfm_username IS NULL THEN ios_scrobble_links.lastfm_username ELSE EXCLUDED.lastfm_username END,
+                    listenbrainz_token = CASE WHEN EXCLUDED.listenbrainz_token IS NULL THEN ios_scrobble_links.listenbrainz_token ELSE EXCLUDED.listenbrainz_token END,
+                    librefm_session_key = CASE WHEN EXCLUDED.librefm_session_key IS NULL THEN ios_scrobble_links.librefm_session_key ELSE EXCLUDED.librefm_session_key END,
+                    librefm_username = CASE WHEN EXCLUDED.librefm_username IS NULL THEN ios_scrobble_links.librefm_username ELSE EXCLUDED.librefm_username END,
+                    enabled = EXCLUDED.enabled
                 """,
                 (user_id, body.lastfm_session_key, body.lastfm_username, body.listenbrainz_token,
                  body.librefm_session_key, body.librefm_username, enabled),
@@ -12025,9 +12061,9 @@ async def lastfm_link_session(body: LastfmLinkRequest, payload: dict = Depends(g
                 """
                 INSERT INTO ios_scrobble_links (user_id, lastfm_session_key, lastfm_username, enabled)
                 VALUES (%s, %s, %s, TRUE)
-                ON DUPLICATE KEY UPDATE
-                    lastfm_session_key = VALUES(lastfm_session_key),
-                    lastfm_username = VALUES(lastfm_username)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    lastfm_session_key = EXCLUDED.lastfm_session_key,
+                    lastfm_username = EXCLUDED.lastfm_username
                 """,
                 (user_id, session_key, username),
             )
@@ -12082,9 +12118,9 @@ async def librefm_link_session(body: LastfmLinkRequest, payload: dict = Depends(
                 """
                 INSERT INTO ios_scrobble_links (user_id, librefm_session_key, librefm_username, enabled)
                 VALUES (%s, %s, %s, TRUE)
-                ON DUPLICATE KEY UPDATE
-                    librefm_session_key = VALUES(librefm_session_key),
-                    librefm_username = VALUES(librefm_username)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    librefm_session_key = EXCLUDED.librefm_session_key,
+                    librefm_username = EXCLUDED.librefm_username
                 """,
                 (user_id, session_key, username),
             )
@@ -12119,7 +12155,7 @@ async def get_achievements(payload: dict = Depends(get_current_user)):
             play_dates = [r[0] for r in await cur.fetchall()]
 
             await cur.execute(
-                "SELECT HOUR(played_at), COUNT(*) FROM ios_play_history WHERE user_id = %s GROUP BY HOUR(played_at)",
+                "SELECT EXTRACT(HOUR FROM played_at)::int, COUNT(*) FROM ios_play_history WHERE user_id = %s GROUP BY EXTRACT(HOUR FROM played_at)",
                 (user_id,),
             )
             hour_counts = dict(await cur.fetchall())
@@ -12243,7 +12279,7 @@ async def search_trending(
                 """
                 SELECT query, COUNT(*) AS hits
                 FROM ios_search_log
-                WHERE searched_at >= NOW() - INTERVAL %s DAY
+                WHERE searched_at >= NOW() - make_interval(days => %s)
                 GROUP BY query
                 ORDER BY hits DESC, MAX(searched_at) DESC
                 LIMIT %s
@@ -12270,7 +12306,7 @@ async def search_suggestions(
                 """
                 SELECT query, COUNT(*) AS hits
                 FROM ios_search_log
-                WHERE query LIKE %s
+                WHERE query ILIKE %s
                 GROUP BY query
                 ORDER BY hits DESC
                 LIMIT %s
@@ -12321,7 +12357,7 @@ async def register_push_token(body: PushTokenRequest, payload: dict = Depends(ge
         async with conn.cursor() as cur:
             await cur.execute(
                 "INSERT INTO ios_push_tokens (user_id, device_token, platform) VALUES (%s, %s, %s) "
-                "ON DUPLICATE KEY UPDATE platform = VALUES(platform)",
+                "ON CONFLICT (user_id, device_token) DO UPDATE SET platform = EXCLUDED.platform",
                 (user_id, body.device_token, body.platform),
             )
     asyncio.create_task(log_event("push", "push_token_registered", user_id=user_id,
@@ -12455,7 +12491,7 @@ async def set_discord_webhook(body: DiscordWebhookRequest, payload: dict = Depen
             if body.webhook_url is not None:
                 await cur.execute(
                     "INSERT INTO ios_discord_webhooks (user_id, webhook_url, enabled) VALUES (%s, %s, %s) "
-                    "ON DUPLICATE KEY UPDATE webhook_url = VALUES(webhook_url), enabled = VALUES(enabled)",
+                    "ON CONFLICT (user_id) DO UPDATE SET webhook_url = EXCLUDED.webhook_url, enabled = EXCLUDED.enabled",
                     (user_id, body.webhook_url, body.enabled),
                 )
             else:
@@ -12515,7 +12551,7 @@ async def set_youtube_api_key(body: YoutubeApiKeyRequest, payload: dict = Depend
         async with conn.cursor() as cur:
             await cur.execute(
                 "INSERT INTO ios_user_settings (user_id, youtube_api_key) VALUES (%s, %s) "
-                "ON DUPLICATE KEY UPDATE youtube_api_key = VALUES(youtube_api_key)",
+                "ON CONFLICT (user_id) DO UPDATE SET youtube_api_key = EXCLUDED.youtube_api_key",
                 (user_id, body.api_key),
             )
     await log_event("settings", "youtube_api_key_set", user_id=user_id)
@@ -12571,7 +12607,7 @@ async def set_acoustid_api_key(body: AcoustIDApiKeyRequest, payload: dict = Depe
         async with conn.cursor() as cur:
             await cur.execute(
                 "INSERT INTO ios_user_settings (user_id, acoustid_api_key) VALUES (%s, %s) "
-                "ON DUPLICATE KEY UPDATE acoustid_api_key = VALUES(acoustid_api_key)",
+                "ON CONFLICT (user_id) DO UPDATE SET acoustid_api_key = EXCLUDED.acoustid_api_key",
                 (user_id, body.api_key),
             )
     await log_event("settings", "acoustid_api_key_set", user_id=user_id)
@@ -12854,7 +12890,7 @@ async def set_ytdlp_cookies(body: YtdlpCookiesUploadRequest, payload: dict = Dep
             await cur.execute(
                 "INSERT INTO ios_user_settings (user_id, ytdlp_cookies, ytdlp_cookies_updated_at) "
                 "VALUES (%s, %s, CURRENT_TIMESTAMP) "
-                "ON DUPLICATE KEY UPDATE ytdlp_cookies = VALUES(ytdlp_cookies), "
+                "ON CONFLICT (user_id) DO UPDATE SET ytdlp_cookies = EXCLUDED.ytdlp_cookies, "
                 "ytdlp_cookies_updated_at = CURRENT_TIMESTAMP",
                 (user_id, text),
             )
@@ -12964,9 +13000,9 @@ async def set_discord_rpc_config(body: DiscordRpcConfigRequest, payload: dict = 
             await cur.execute(
                 "INSERT INTO ios_discord_rpc_config (user_id, discord_client_id, large_image, small_image, show_buttons, enabled) "
                 "VALUES (%s, %s, %s, %s, %s, %s) "
-                "ON DUPLICATE KEY UPDATE discord_client_id = VALUES(discord_client_id), "
-                "large_image = VALUES(large_image), small_image = VALUES(small_image), "
-                "show_buttons = VALUES(show_buttons), enabled = VALUES(enabled)",
+                "ON CONFLICT (user_id) DO UPDATE SET discord_client_id = EXCLUDED.discord_client_id, "
+                "large_image = EXCLUDED.large_image, small_image = EXCLUDED.small_image, "
+                "show_buttons = EXCLUDED.show_buttons, enabled = EXCLUDED.enabled",
                 (user_id, body.discord_client_id, body.large_image, body.small_image, body.show_buttons, body.enabled),
             )
     await log_event("settings", "discord_rpc_config_set", user_id=user_id, detail={"enabled": body.enabled})
@@ -13236,19 +13272,19 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
                      show_visitor_stats, show_listening_stats)
                 VALUES (%s, %s, %s, %s, COALESCE(%s, TRUE), %s, %s, %s, COALESCE(%s, 'none'), COALESCE(%s, FALSE), COALESCE(%s, TRUE),
                         COALESCE(%s, TRUE), COALESCE(%s, FALSE))
-                ON DUPLICATE KEY UPDATE
-                    bio = COALESCE(VALUES(bio), bio),
-                    main_accent_hex = COALESCE(VALUES(main_accent_hex), main_accent_hex),
-                    sub_accent_hex = COALESCE(VALUES(sub_accent_hex), sub_accent_hex),
-                    share_now_playing = COALESCE(%s, share_now_playing),
-                    pronouns = COALESCE(VALUES(pronouns), pronouns),
-                    status_emoji = COALESCE(VALUES(status_emoji), status_emoji),
-                    status_text = COALESCE(VALUES(status_text), status_text),
-                    avatar_frame = COALESCE(%s, avatar_frame),
-                    show_top_genres = COALESCE(%s, show_top_genres),
-                    show_guestbook = COALESCE(%s, show_guestbook),
-                    show_visitor_stats = COALESCE(%s, show_visitor_stats),
-                    show_listening_stats = COALESCE(%s, show_listening_stats)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    bio = COALESCE(EXCLUDED.bio, ios_social_profiles.bio),
+                    main_accent_hex = COALESCE(EXCLUDED.main_accent_hex, ios_social_profiles.main_accent_hex),
+                    sub_accent_hex = COALESCE(EXCLUDED.sub_accent_hex, ios_social_profiles.sub_accent_hex),
+                    share_now_playing = COALESCE(%s, ios_social_profiles.share_now_playing),
+                    pronouns = COALESCE(EXCLUDED.pronouns, ios_social_profiles.pronouns),
+                    status_emoji = COALESCE(EXCLUDED.status_emoji, ios_social_profiles.status_emoji),
+                    status_text = COALESCE(EXCLUDED.status_text, ios_social_profiles.status_text),
+                    avatar_frame = COALESCE(%s, ios_social_profiles.avatar_frame),
+                    show_top_genres = COALESCE(%s, ios_social_profiles.show_top_genres),
+                    show_guestbook = COALESCE(%s, ios_social_profiles.show_guestbook),
+                    show_visitor_stats = COALESCE(%s, ios_social_profiles.show_visitor_stats),
+                    show_listening_stats = COALESCE(%s, ios_social_profiles.show_listening_stats)
                 """,
                 (
                     user_id, body.bio, main_hex, sub_hex, body.share_now_playing,
@@ -13288,7 +13324,7 @@ async def upload_profile_banner(request: Request, payload: dict = Depends(get_cu
                 """
                 INSERT INTO ios_social_profiles (user_id, banner_data)
                 VALUES (%s, %s)
-                ON DUPLICATE KEY UPDATE banner_data = VALUES(banner_data)
+                ON CONFLICT (user_id) DO UPDATE SET banner_data = EXCLUDED.banner_data
                 """,
                 (user_id, body),
             )
@@ -13338,7 +13374,7 @@ async def set_pinned_tracks(body: PinnedTracksUpdate, payload: dict = Depends(ge
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await conn.begin()
+            await cur.execute("BEGIN")
             try:
                 await cur.execute("DELETE FROM ios_social_pinned_tracks WHERE user_id = %s", (user_id,))
                 for i, t in enumerate(body.tracks):
@@ -13350,9 +13386,9 @@ async def set_pinned_tracks(body: PinnedTracksUpdate, payload: dict = Depends(ge
                         """,
                         (str(uuid.uuid4()), user_id, i, t.source_track_id, t.track_url, t.title, t.artist, t.album),
                     )
-                await conn.commit()
+                await cur.execute("COMMIT")
             except Exception:
-                await conn.rollback()
+                await cur.execute("ROLLBACK")
                 raise
     return {"ok": True}
 
@@ -13479,7 +13515,7 @@ async def search_social_users(
                 FROM ios_users u
                 WHERE u.is_active = TRUE
                   AND u.id != %s
-                  AND u.username LIKE %s
+                  AND u.username ILIKE %s
                   AND NOT EXISTS (
                       SELECT 1 FROM ios_social_blocks b
                       WHERE (b.user_id = %s AND b.blocked_id = u.id)
@@ -13578,7 +13614,7 @@ async def _respond_to_request(request_id: str, caller_id: str, new_status: str) 
                 if caller_id != to_id:
                     raise HTTPException(status_code=403, detail="Only the recipient can respond to this request")
 
-            await conn.begin()
+            await cur.execute("BEGIN")
             try:
                 await cur.execute(
                     "UPDATE ios_social_friend_requests SET status = %s, responded_at = NOW() WHERE id = %s",
@@ -13586,7 +13622,8 @@ async def _respond_to_request(request_id: str, caller_id: str, new_status: str) 
                 )
                 if new_status == "accepted":
                     await cur.execute(
-                        "INSERT IGNORE INTO ios_social_friends (user_id, friend_id) VALUES (%s, %s), (%s, %s)",
+                        "INSERT INTO ios_social_friends (user_id, friend_id) VALUES (%s, %s), (%s, %s) "
+                        "ON CONFLICT (user_id, friend_id) DO NOTHING",
                         (from_id, to_id, to_id, from_id),
                     )
                     # Tell the original sender their request was accepted —
@@ -13601,9 +13638,9 @@ async def _respond_to_request(request_id: str, caller_id: str, new_status: str) 
                         f"{accepter_name} accepted your friend request",
                         {"user_id": to_id},
                     )
-                await conn.commit()
+                await cur.execute("COMMIT")
             except Exception:
-                await conn.rollback()
+                await cur.execute("ROLLBACK")
                 raise
 
 
@@ -13737,10 +13774,11 @@ async def block_user(user_id: str, payload: dict = Depends(get_current_user)):
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await conn.begin()
+            await cur.execute("BEGIN")
             try:
                 await cur.execute(
-                    "INSERT IGNORE INTO ios_social_blocks (user_id, blocked_id) VALUES (%s, %s)",
+                    "INSERT INTO ios_social_blocks (user_id, blocked_id) VALUES (%s, %s) "
+                    "ON CONFLICT (user_id, blocked_id) DO NOTHING",
                     (caller_id, user_id),
                 )
                 # Blocking tears down any existing friendship/pending request
@@ -13757,9 +13795,9 @@ async def block_user(user_id: str, payload: dict = Depends(get_current_user)):
                     """,
                     (caller_id, user_id, user_id, caller_id),
                 )
-                await conn.commit()
+                await cur.execute("COMMIT")
             except Exception:
-                await conn.rollback()
+                await cur.execute("ROLLBACK")
                 raise
     return {"ok": True}
 
@@ -13878,11 +13916,11 @@ async def update_presence(body: PresenceUpdate, payload: dict = Depends(get_curr
                 INSERT INTO ios_presence_state
                     (user_id, is_online, is_playing, now_playing_title, now_playing_artist, last_seen_at)
                 VALUES (%s, %s, %s, %s, %s, NOW())
-                ON DUPLICATE KEY UPDATE
-                    is_online = VALUES(is_online),
-                    is_playing = VALUES(is_playing),
-                    now_playing_title = VALUES(now_playing_title),
-                    now_playing_artist = VALUES(now_playing_artist),
+                ON CONFLICT (user_id) DO UPDATE SET
+                    is_online = EXCLUDED.is_online,
+                    is_playing = EXCLUDED.is_playing,
+                    now_playing_title = EXCLUDED.now_playing_title,
+                    now_playing_artist = EXCLUDED.now_playing_artist,
                     last_seen_at = NOW()
                 """,
                 (
@@ -14303,7 +14341,7 @@ async def set_friend_nickname(friend_id: str, body: FriendNicknameUpdate, payloa
                     """
                     INSERT INTO ios_social_friend_nicknames (user_id, friend_id, nickname)
                     VALUES (%s, %s, %s)
-                    ON DUPLICATE KEY UPDATE nickname = VALUES(nickname)
+                    ON CONFLICT (user_id, friend_id) DO UPDATE SET nickname = EXCLUDED.nickname
                     """,
                     (user_id, friend_id, nickname),
                 )
@@ -14349,7 +14387,8 @@ async def add_friend_tag(friend_id: str, body: FriendTagCreate, payload: dict = 
             if (await cur.fetchone())[0] >= 10:
                 raise HTTPException(status_code=400, detail="A friend can have at most 10 tags")
             await cur.execute(
-                "INSERT IGNORE INTO ios_social_friend_tags (id, user_id, friend_id, tag_name) VALUES (%s, %s, %s, %s)",
+                "INSERT INTO ios_social_friend_tags (id, user_id, friend_id, tag_name) VALUES (%s, %s, %s, %s) "
+                "ON CONFLICT (user_id, friend_id, tag_name) DO NOTHING",
                 (str(uuid.uuid4()), user_id, friend_id, tag_name),
             )
     return {"ok": True}
@@ -14394,7 +14433,7 @@ async def friends_leaderboard(
                 JOIN ios_users u ON u.id = h.user_id
                 LEFT JOIN ios_social_profiles sp ON sp.user_id = u.id
                 WHERE h.user_id IN ({placeholders}) AND u.is_active = TRUE
-                  AND h.played_at >= NOW() - INTERVAL %s DAY
+                  AND h.played_at >= NOW() - make_interval(days => %s)
                   AND COALESCE(sp.share_now_playing, TRUE) = TRUE
                 GROUP BY u.id, u.username, u.display_name, u.avatar_url
                 ORDER BY play_count DESC
@@ -14592,7 +14631,7 @@ async def _record_profile_view(profile_user_id: str, viewer_user_id: str) -> Non
             async with conn.cursor() as cur:
                 await cur.execute(
                     "SELECT 1 FROM ios_social_profile_views WHERE profile_user_id = %s AND viewer_user_id = %s "
-                    "AND viewed_at > NOW() - INTERVAL 30 MINUTE LIMIT 1",
+                    "AND viewed_at > NOW() - INTERVAL '30 minutes' LIMIT 1",
                     (profile_user_id, viewer_user_id),
                 )
                 if await cur.fetchone():
@@ -14697,7 +14736,7 @@ async def set_featured_playlist(body: FeaturedPlaylistUpdate, payload: dict = De
                 """
                 INSERT INTO ios_social_profiles (user_id, featured_playlist_id)
                 VALUES (%s, %s)
-                ON DUPLICATE KEY UPDATE featured_playlist_id = VALUES(featured_playlist_id)
+                ON CONFLICT (user_id) DO UPDATE SET featured_playlist_id = EXCLUDED.featured_playlist_id
                 """,
                 (user_id, body.playlist_id),
             )
@@ -14740,8 +14779,8 @@ async def recently_played_together(user_id: str, payload: dict = Depends(get_cur
                   ON LOWER(TRIM(a.title)) = LOWER(TRIM(b.title))
                  AND LOWER(TRIM(COALESCE(a.artist, ''))) = LOWER(TRIM(COALESCE(b.artist, '')))
                 WHERE a.user_id = %s AND b.user_id = %s
-                  AND a.played_at > NOW() - INTERVAL 30 DAY
-                  AND b.played_at > NOW() - INTERVAL 30 DAY
+                  AND a.played_at > NOW() - INTERVAL '30 days'
+                  AND b.played_at > NOW() - INTERVAL '30 days'
                 GROUP BY LOWER(TRIM(a.title)), LOWER(TRIM(COALESCE(a.artist, '')))
                 ORDER BY GREATEST(MAX(a.played_at), MAX(b.played_at)) DESC
                 LIMIT 8

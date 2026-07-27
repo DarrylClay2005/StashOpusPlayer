@@ -1,4 +1,4 @@
-import aiomysql
+import aiopg
 import json
 import logging
 import os
@@ -6,23 +6,38 @@ import pathlib
 
 logger = logging.getLogger("ios-bridge.db")
 
+# aiopg wraps psycopg2 and keeps the same %s-placeholder /
+# cursor.execute()/fetchone()/fetchall() API aiomysql used, which is why this
+# migration (MariaDB/MySQL -> PostgreSQL) swaps the driver here instead of
+# rewriting every one of main.py's ~1150 SQL call sites for asyncpg's
+# incompatible $1/$2 placeholders and row-object API. Postgres uses `dbname`
+# (not `db`) and has no per-connection `charset` param (encoding is UTF-8 by
+# default / set server-side), and the default port is 5432.
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "127.0.0.1"),
-    "port": int(os.getenv("DB_PORT", "3306")),
+    "port": int(os.getenv("DB_PORT", "5432")),
     "user": os.getenv("DB_USER", "botuser"),
     "password": os.getenv("DB_PASSWORD", "bot_logins"),
-    "db": os.getenv("DB_NAME", "discord_music_gws"),
-    "charset": "utf8mb4",
-    "autocommit": True,
+    "dbname": os.getenv("DB_NAME", "discord_music_gws"),
 }
 
-_pool: aiomysql.Pool | None = None
+_pool: aiopg.Pool | None = None
 
 
-async def get_pool() -> aiomysql.Pool:
+async def get_pool() -> aiopg.Pool:
     global _pool
     if _pool is None:
-        _pool = await aiomysql.create_pool(**DB_CONFIG, minsize=1, maxsize=10)
+        # aiopg connections default to autocommit=True (verified against the
+        # real driver), matching aiomysql's explicit autocommit=True this
+        # pool used to pass — every plain cur.execute() below still commits
+        # immediately with no code changes needed at the ~1150 call sites
+        # elsewhere in the app. init_db() below is the one place that needs
+        # a real multi-statement transaction, which it gets via explicit
+        # BEGIN/COMMIT/ROLLBACK statements rather than driver-level
+        # conn.begin()/commit()/rollback() — psycopg2/aiopg connections
+        # raise "commit cannot be used in asynchronous mode" if you call
+        # conn.commit()/rollback() directly instead of issuing the SQL.
+        _pool = await aiopg.create_pool(**DB_CONFIG, minsize=1, maxsize=10)
     return _pool
 
 
@@ -43,6 +58,45 @@ def _strip_sql_comments(sql: str) -> str:
     return "\n".join(lines)
 
 
+def _split_sql_statements(sql: str) -> list[str]:
+    """Splits *sql* on `;`, except for semicolons inside a `$$ ... $$`
+    dollar-quoted block.
+
+    Postgres trigger functions (see the `ios_touch_*` functions/triggers at
+    the end of schema.sql) are plpgsql bodies quoted with `$$ ... $$` and are
+    themselves full of statement-terminating semicolons (`NEW.x := ...;`,
+    `RETURN NEW;`) — a plain `sql.split(";")` chops a function body into
+    fragments and feeds Postgres invalid partial statements (or, worse, an
+    "unterminated dollar-quoted string" error) instead of the one
+    CREATE FUNCTION statement it actually is. This mirrors
+    `_strip_sql_comments`'s exact rationale (a schema this simple stays
+    splittable by a punctuation character, as long as that one character's
+    occurrences *inside* something else are excluded first) but for `$$`
+    blocks instead of `--` comments.
+    """
+    statements: list[str] = []
+    buf: list[str] = []
+    in_dollar_quote = False
+    i = 0
+    n = len(sql)
+    while i < n:
+        if sql[i : i + 2] == "$$":
+            in_dollar_quote = not in_dollar_quote
+            buf.append("$$")
+            i += 2
+            continue
+        ch = sql[i]
+        if ch == ";" and not in_dollar_quote:
+            statements.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    if buf:
+        statements.append("".join(buf))
+    return statements
+
+
 async def init_db():
     """Create iOS-specific tables if they don't exist, wrapped in a transaction."""
     pool = await get_pool()
@@ -50,15 +104,15 @@ async def init_db():
     sql = _strip_sql_comments(raw)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await conn.begin()
+            await cur.execute("BEGIN")
             try:
-                for stmt in sql.split(";"):
+                for stmt in _split_sql_statements(sql):
                     stmt = stmt.strip()
                     if stmt:
                         await cur.execute(stmt)
-                await conn.commit()
+                await cur.execute("COMMIT")
             except Exception:
-                await conn.rollback()
+                await cur.execute("ROLLBACK")
                 logger.exception("init_db failed; rolled back schema migration")
                 raise
 
