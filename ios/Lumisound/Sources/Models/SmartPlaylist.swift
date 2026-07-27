@@ -196,7 +196,7 @@ struct SmartPlaylist: Codable, Identifiable, Equatable {
             let isFav = favorites.contains(song.id)
             return rule.op == .isTrue ? isFav : !isFav
         case .source:
-            return sourceValue(of: song) == rule.source
+            return Self.sourceValue(of: song) == rule.source
         }
     }
 
