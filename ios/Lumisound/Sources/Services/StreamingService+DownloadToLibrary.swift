@@ -366,10 +366,9 @@ extension StreamingService {
                     appWarn("downloadToLibrary: job failed with gateway error \(status.code ?? 0) for \"\(track.title)\" — will retry", category: "network")
                     throw StreamingError.incompleteDownload
                 case 422:
-                    // Bridge-confirmed "this specific track can't be extracted" (currently:
-                    // auto-generated YouTube Topic-channel content blocked across every
-                    // yt-dlp client) — a specific, non-retryable, user-actionable reason
-                    // rather than a generic failure. See _is_topic_channel_video in main.py.
+                    // Bridge-confirmed "this specific track can't be extracted" — a
+                    // specific, non-retryable, user-actionable reason rather than a
+                    // generic failure.
                     let detail = status.detail ?? "This track can't be downloaded due to a YouTube content restriction."
                     appWarn("downloadToLibrary: unavailable for \"\(track.title)\": \(detail)", category: "network")
                     throw StreamingError.serverDetail(detail)
