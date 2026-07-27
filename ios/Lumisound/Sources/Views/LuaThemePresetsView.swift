@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - LuaThemePresetsView
 //
@@ -11,6 +12,10 @@ import SwiftUI
 struct LuaThemePresetsView: View {
     @ObservedObject private var engine = LuaThemeEngine.shared
     @State private var refreshToken = UUID()
+    @State private var userPresets: [URL] = LuaThemeEngine.shared.userPresetScripts()
+    @State private var showImportSheet = false
+    @State private var importText = ""
+    @State private var importName = ""
 
     var body: some View {
         List {
@@ -36,6 +41,21 @@ struct LuaThemePresetsView: View {
                 }
             } header: {
                 sectionHeader("Presets")
+            }
+            .listRowBackground(AppTheme.surface)
+
+            Section {
+                if userPresets.isEmpty {
+                    Text("No imported presets yet. Tap Import above to paste one someone shared with you.")
+                        .font(AppTheme.bodyFont(size: 13))
+                        .foregroundStyle(AppTheme.textSecondary)
+                } else {
+                    ForEach(userPresets, id: \.self) { url in
+                        userPresetRow(url)
+                    }
+                }
+            } header: {
+                sectionHeader("Imported (Community)")
             }
             .listRowBackground(AppTheme.surface)
 
@@ -68,6 +88,103 @@ struct LuaThemePresetsView: View {
         .background(Color.clear.ignoresSafeArea())
         .navigationTitle("Lua Theme Presets")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    importText = UIPasteboard.general.string ?? ""
+                    importName = ""
+                    showImportSheet = true
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
+                }
+            }
+        }
+        .sheet(isPresented: $showImportSheet) {
+            importSheet
+        }
+    }
+
+    private func userPresetRow(_ url: URL) -> some View {
+        let isActive = engine.activeUserScriptURL == url
+        let name = url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " ").capitalized
+
+        return Button {
+            let ok = engine.applyUserScript(at: url)
+            refreshToken = UUID()
+            if ok {
+                ToastCenter.shared.show("Applied \u{201C}\(name)\u{201D}", category: .success, icon: "square.and.arrow.down")
+            } else {
+                ToastCenter.shared.show(engine.lastError ?? "Couldn't apply that preset", category: .error, icon: "exclamationmark.triangle.fill")
+            }
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text(url.lastPathComponent)
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                Spacer()
+                if isActive {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .swipeActions {
+            Button(role: .destructive) {
+                engine.deleteUserPreset(at: url)
+                userPresets = engine.userPresetScripts()
+                refreshToken = UUID()
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
+
+    private var importSheet: some View {
+        NavigationStack {
+            Form {
+                Section("Preset Name") {
+                    TextField("e.g. my_theme", text: $importName)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                Section("Lua Source") {
+                    TextEditor(text: $importText)
+                        .font(.system(.footnote, design: .monospaced))
+                        .frame(minHeight: 220)
+                }
+                Section {
+                    Text("Paste a preset script someone shared with you — it must set a global `theme` table (see any bundled preset for the exact shape).")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+            .navigationTitle("Import Theme Preset")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showImportSheet = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Import") {
+                        do {
+                            let name = importName.trimmingCharacters(in: .whitespaces)
+                            try engine.importUserPreset(source: importText, suggestedName: name.isEmpty ? "custom_theme" : name)
+                            userPresets = engine.userPresetScripts()
+                            showImportSheet = false
+                            ToastCenter.shared.show("Imported preset", category: .success, icon: "square.and.arrow.down")
+                        } catch {
+                            ToastCenter.shared.show("Couldn't import preset: \(error.localizedDescription)", category: .error, icon: "exclamationmark.triangle.fill")
+                        }
+                    }
+                    .disabled(importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
     }
 
     private func presetRow(_ preset: LuaPreset) -> some View {

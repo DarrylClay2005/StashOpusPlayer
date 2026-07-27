@@ -5,6 +5,7 @@ import UIKit
 
 struct EffectsView: View {
     @EnvironmentObject private var player: AudioPlayerManager
+    @State private var showLuaEffects = false
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 5)
     private let selectHaptic = UISelectionFeedbackGenerator()
@@ -42,10 +43,31 @@ struct EffectsView: View {
             if player.audioSettings.activeEffectID == "8d" {
                 EightDSpeedControl()
             }
+
+            Button {
+                showLuaEffects = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "scroll")
+                    Text("Scripted Effects (Lua)")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(AppTheme.dynamicAccent)
+            }
+            .padding(.top, 4)
         }
         .onAppear {
             selectHaptic.prepare()
             successHaptic.prepare()
+        }
+        .sheet(isPresented: $showLuaEffects) {
+            NavigationStack {
+                LuaEffectScriptsView()
+                    .environmentObject(player)
+            }
         }
     }
 }

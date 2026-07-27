@@ -301,6 +301,13 @@ extension SettingsView {
                 .padding(.leading, 16)
             }
 
+            NavigationLink {
+                LuaVisualizerScriptsView()
+            } label: {
+                Label("Scripted Visualizer (Lua)", systemImage: "waveform.path.ecg.rectangle")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+
             // Night Mode — gentle dynamic range compression, distinct from the
             // always-on peak limiter. Off by default; opt-in for late-night
             // low-volume listening.

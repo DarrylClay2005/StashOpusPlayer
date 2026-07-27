@@ -75,4 +75,13 @@ theme = {
     pin_favorites_first = true,
     library_default_columns = 2,
   },
+  layout = {
+    -- Opens straight into the Sound panel with the EQ pre-expanded — this
+    -- preset's whole identity is "loud", so its Now Playing screen should
+    -- open ready to push the mix, not on the plain transport controls.
+    default_panel = "Sound",
+    default_display_mode = "artwork",
+    show_queue_preview = true,
+    eq_expanded_by_default = true,
+  },
 }

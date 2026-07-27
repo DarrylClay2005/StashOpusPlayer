@@ -129,14 +129,34 @@ struct SmartPlaylist: Codable, Identifiable, Equatable {
     var rules: [SmartRule] = []
     var limit: Int = 0        // 0 = unlimited
     var sort: SmartSort = .titleAsc
+    /// Optional Lua predicate applied ON TOP OF `rules` (an additional AND
+    /// condition), for logic the fixed field/operator grid above can't
+    /// express — arbitrary boolean/string/math logic across every field at
+    /// once. `nil`/empty for the overwhelming majority of playlists that
+    /// don't need it; optional (rather than a non-optional default) so
+    /// playlists persisted before this field existed still decode fine (see
+    /// `queueSource` on `Song` for the identical reasoning). The script must
+    /// define `function matches(song) ... end` — see
+    /// `LuaSmartPlaylistEngine` for the exact fields `song` carries.
+    var luaScript: String? = nil
 
     // MARK: Evaluation
 
-    /// Returns the songs from `songs` that satisfy this playlist's rules, sorted
-    /// and limited. `favorites` is `LibraryManager.favoriteSongIDs`.
+    /// Returns the songs from `songs` that satisfy this playlist's rules
+    /// (and, if set, its Lua predicate), sorted and limited. `favorites` is
+    /// `LibraryManager.favoriteSongIDs`.
     @MainActor
     func evaluate(over songs: [Song], favorites: Set<String>) -> [Song] {
-        let filtered = songs.filter { matches($0, favorites: favorites) }
+        var filtered = songs.filter { matches($0, favorites: favorites) }
+        if let luaScript, !luaScript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // A script that fails to run (bad syntax, threw, …) leaves the
+            // native-rules-only result alone rather than silently emptying
+            // the playlist — `nil` specifically means "couldn't evaluate",
+            // as opposed to a real empty match set (`[]`).
+            if let allowedIDs = LuaSmartPlaylistEngine.filterSongIDs(script: luaScript, songs: filtered, favorites: favorites) {
+                filtered = filtered.filter { allowedIDs.contains($0.id) }
+            }
+        }
         let sorted = sortSongs(filtered)
         if limit > 0 { return Array(sorted.prefix(limit)) }
         return sorted
@@ -210,7 +230,10 @@ struct SmartPlaylist: Codable, Identifiable, Equatable {
         }
     }
 
-    private func sourceValue(of song: Song) -> SmartSource {
+    /// Also used by `LuaSmartPlaylistEngine` to fill in a song's `source`
+    /// fact for scripts — `static` since it depends only on `song`, not any
+    /// playlist state.
+    static func sourceValue(of song: Song) -> SmartSource {
         guard let s = song.sourceTrackID?.lowercased() else { return .local }
         if s.hasPrefix("youtube") { return .youtube }
         if s.hasPrefix("soundcloud") { return .soundcloud }

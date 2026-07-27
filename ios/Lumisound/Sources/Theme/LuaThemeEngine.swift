@@ -34,8 +34,22 @@ final class LuaThemeEngine: ObservableObject {
     /// silently.
     @Published private(set) var lastError: String?
 
+    /// The currently-applied USER-imported preset's file URL, if any —
+    /// mutually exclusive with `activePresetID` (applying one clears the
+    /// other). See "Community preset sharing" below.
+    @Published private(set) var activeUserScriptURL: URL?
+
+    /// The raw accent hex string from whichever preset (bundled or user) is
+    /// currently active, `nil` if none — read directly off the resolved
+    /// `LuaThemeConfig` rather than round-tripped back out of the `Color`/
+    /// `UIColor` `saveAccentColor(_:)` archives into UserDefaults, so
+    /// `PhoneWatchSync` can mirror it to the watch without a lossy
+    /// Color->hex conversion.
+    @Published private(set) var activeAccentHex: String?
+
     private enum Keys {
         static let activePreset = "lua_active_preset"
+        static let activeUserScriptPath = "lua_active_user_script_path"
     }
 
     private init() {
@@ -46,6 +60,11 @@ final class LuaThemeEngine: ObservableObject {
             // reproducible even if something else in Settings wrote to one
             // of the same keys in between launches.
             apply(preset, persist: false)
+        } else if let path = UserDefaults.standard.string(forKey: Keys.activeUserScriptPath) {
+            let url = URL(fileURLWithPath: path)
+            if FileManager.default.fileExists(atPath: url.path) {
+                applyUserScript(at: url, persist: false)
+            }
         }
     }
 
@@ -59,9 +78,84 @@ final class LuaThemeEngine: ObservableObject {
             let config = try resolve(preset)
             applyToAppTheme(config)
             activePresetID = preset.rawValue
+            activeUserScriptURL = nil
+            activeAccentHex = config.colors.accent
             lastError = nil
             if persist {
                 UserDefaults.standard.set(preset.rawValue, forKey: Keys.activePreset)
+                UserDefaults.standard.removeObject(forKey: Keys.activeUserScriptPath)
+            }
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
+    // MARK: - Community preset sharing
+    //
+    // A bundled `LuaPreset` is one of the fixed 10 baked into the app; a
+    // USER preset is any other `.lua` script (pasted from a friend, saved
+    // from a file, or hand-written) living under `userPresetsDirectory`.
+    // Both run through the exact same `theme` table contract, so a shared
+    // preset is indistinguishable from a bundled one once applied.
+
+    private static let userPresetsSubdirectory = "LuaThemePresets"
+
+    /// Documents/LuaThemePresets — where imported/community theme scripts
+    /// live, created lazily on first import.
+    static var userPresetsDirectory: URL {
+        LuaUserScriptLibrary.directory(named: userPresetsSubdirectory)
+    }
+
+    /// User-imported theme preset scripts, alongside the bundled `LuaPreset` enum.
+    func userPresetScripts() -> [URL] {
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: Self.userPresetsDirectory, includingPropertiesForKeys: nil) else { return [] }
+        return urls.filter { $0.pathExtension.lowercased() == "lua" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    /// Imports preset script source text (pasted from a friend, or read from
+    /// a file picked in the Files app) into the user presets directory.
+    @discardableResult
+    func importUserPreset(source: String, suggestedName: String) throws -> URL {
+        let dir = Self.userPresetsDirectory
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let safeName = suggestedName.components(separatedBy: CharacterSet.alphanumerics.inverted).joined(separator: "_").lowercased()
+        let base = safeName.isEmpty ? "custom_theme" : safeName
+        var candidate = dir.appendingPathComponent("\(base).lua")
+        var suffix = 1
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = dir.appendingPathComponent("\(base)_\(suffix).lua")
+            suffix += 1
+        }
+        try source.write(to: candidate, atomically: true, encoding: .utf8)
+        return candidate
+    }
+
+    func deleteUserPreset(at url: URL) {
+        try? FileManager.default.removeItem(at: url)
+        if activeUserScriptURL == url { clearPreset() }
+    }
+
+    /// Runs and applies a user-imported preset script — same contract as a
+    /// bundled one (assigns a global `theme` table), but read straight off
+    /// disk instead of from the app bundle.
+    @discardableResult
+    func applyUserScript(at url: URL, persist: Bool = true) -> Bool {
+        do {
+            guard let source = try? String(contentsOf: url, encoding: .utf8) else {
+                throw LuaThemeEngineError.scriptNotFound(url.lastPathComponent)
+            }
+            let wrapped = source + "\nreturn json.encode(theme)\n"
+            let config = try LuaJSONBridge.run(wrapped, chunkName: url.lastPathComponent, as: LuaThemeConfig.self)
+            applyToAppTheme(config)
+            activePresetID = nil
+            activeUserScriptURL = url
+            activeAccentHex = config.colors.accent
+            lastError = nil
+            if persist {
+                UserDefaults.standard.set(url.path, forKey: Keys.activeUserScriptPath)
+                UserDefaults.standard.removeObject(forKey: Keys.activePreset)
             }
             return true
         } catch {
@@ -79,7 +173,10 @@ final class LuaThemeEngine: ObservableObject {
     /// those wholesale.
     func clearPreset() {
         UserDefaults.standard.removeObject(forKey: Keys.activePreset)
+        UserDefaults.standard.removeObject(forKey: Keys.activeUserScriptPath)
         activePresetID = nil
+        activeUserScriptURL = nil
+        activeAccentHex = nil
         lastError = nil
         AppTheme.resetCustomBackgroundOverride()
         AppTheme.resetLayoutScales()
@@ -179,6 +276,18 @@ final class LuaThemeEngine: ObservableObject {
         d.set(config.hooks.libraryDefaultSort, forKey: "library_songs_sort")
         d.set(config.hooks.pinFavoritesFirst, forKey: "lua_pin_favorites_first")
         d.set(config.hooks.libraryDefaultColumns, forKey: "library_songs_columns")
+
+        // Now Playing layout (see NowPlayingView.swift's `selectedPanel`/
+        // `displayMode`/`showEQ` initial-value reads). Absent for presets
+        // that don't set a `layout` table — those three keys are simply
+        // left untouched, so NowPlayingView's own hardcoded fallback
+        // (Controls / artwork / EQ expanded) applies exactly as before.
+        if let layout = config.layout {
+            d.set(layout.defaultPanel, forKey: "lua_layout_default_panel")
+            d.set(layout.defaultDisplayMode, forKey: "lua_layout_default_display_mode")
+            d.set(layout.showQueuePreview, forKey: "nowPlaying_showQueuePreview")
+            d.set(layout.eqExpandedByDefault, forKey: "lua_layout_eq_expanded")
+        }
     }
 }
 
@@ -268,12 +377,29 @@ struct LuaThemeConfig: Codable, Equatable {
         var libraryDefaultColumns: Int
     }
 
+    /// Now Playing screen layout — which panel/hero mode it opens to and
+    /// whether a couple of its sections start expanded. `nil` for any
+    /// preset (all 10 bundled ones, and any community script written before
+    /// this existed) that doesn't set a `layout` table — decodes to `nil`
+    /// automatically since this property is `Optional`, rather than failing
+    /// the whole preset's decode over one missing table.
+    struct Layout: Codable, Equatable {
+        /// One of `NowPlayingPanel`'s rawValues: "Controls" | "Sound" |
+        /// "Queue" | "Lyrics" | "Marks".
+        var defaultPanel: String
+        /// One of `NowPlayingDisplayMode`'s rawValues: "artwork" | "lyrics".
+        var defaultDisplayMode: String
+        var showQueuePreview: Bool
+        var eqExpandedByDefault: Bool
+    }
+
     var meta: Meta
     var colors: Colors
     var style: Style
     var glass: Glass
     var flags: Flags
     var hooks: Hooks
+    var layout: Layout?
 }
 
 // MARK: - LuaPreset

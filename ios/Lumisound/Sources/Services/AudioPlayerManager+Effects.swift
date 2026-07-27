@@ -37,9 +37,14 @@ extension AudioPlayerManager {
     /// playback began. Called after the engine starts so CADisplayLink effects actually run.
     func reapplyActiveEffect() {
         let effectID = audioSettings.activeEffectID
-        guard !effectID.isEmpty, effectID != "none",
-              let effect = AudioEffectsService.allEffects.first(where: { $0.id == effectID })
-        else { return }
+        guard !effectID.isEmpty, effectID != "none" else { return }
+        let effect: AudioEffect?
+        if let ref = LuaEffectEngine.scriptRef(forEffectID: effectID) {
+            effect = try? LuaEffectEngine.resolve(ref)
+        } else {
+            effect = AudioEffectsService.allEffects.first(where: { $0.id == effectID })
+        }
+        guard let effect else { return }
         switch effect.specialMode.type {
         case .rotation:
             if !is8DActive { start8DRotation(hz: effect.specialMode.hz) }

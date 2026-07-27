@@ -285,7 +285,16 @@ enum StreamingError: LocalizedError {
         case .timeout:
             return "Stream URL fetch timed out. Try again."
         case .notFound(let title):
-            return "Could not find a stream URL for \"\(title)\"."
+            // A handful of videos genuinely go unavailable (removed,
+            // region-locked, a real Content-ID takedown) independent of
+            // channel type — not necessarily an app bug, and not
+            // necessarily permanent. See the removed
+            // isBlockedTopicChannelTrack/_is_topic_channel_video special
+            // case this replaced: that treated every auto-generated
+            // "Topic" channel track as permanently blocked, which stopped
+            // being true once yt-dlp's player-client fallback started
+            // handling them like any other video.
+            return "Could not find a stream URL for \"\(title)\". It may be temporarily unavailable — try again later."
         case .serverDetail(let detail):
             return detail
         case .httpError(let code):

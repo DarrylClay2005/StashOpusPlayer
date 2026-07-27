@@ -75,4 +75,12 @@ theme = {
     pin_favorites_first = true,
     library_default_columns = 2,
   },
+  layout = {
+    -- Opens straight into the full-size synced lyrics view — a bright,
+    -- high-energy preset reads better sing-along-first than artwork-first.
+    default_panel = "Controls",
+    default_display_mode = "lyrics",
+    show_queue_preview = true,
+    eq_expanded_by_default = false,
+  },
 }

@@ -100,7 +100,10 @@ struct NowPlayingView: View {
     @State var showPlaybackControls = true
     @State var showABRepeat = false
     @State var showEffects = false
-    @State var showEQ = true
+    // A Lua theme preset's `layout.eq_expanded_by_default` (see
+    // `LuaThemeEngine`) can override this initial value; absent that, this
+    // matches the pre-existing hardcoded `true`.
+    @State var showEQ = UserDefaults.standard.object(forKey: "lua_layout_eq_expanded") as? Bool ?? true
     @State var showLyrics = false
     @State var showLyricsSyncEditor = false
     // Bumped after add/remove so the view re-reads BookmarkStore (which
@@ -125,7 +128,15 @@ struct NowPlayingView: View {
     // 2026-07 redesign — hero card display mode (artwork vs. full lyrics),
     // live artwork-derived palette (only sampled when the selected custom
     // style opts into `dynamicColorExtraction`), and overflow-menu sheets.
-    @State var displayMode: NowPlayingDisplayMode = .artwork
+    // Falls back to `.artwork` (the pre-existing hardcoded default) unless a
+    // Lua theme preset's `layout.default_display_mode` says otherwise.
+    @State var displayMode: NowPlayingDisplayMode = {
+        if let raw = UserDefaults.standard.string(forKey: "lua_layout_default_display_mode"),
+           let mode = NowPlayingDisplayMode(rawValue: raw) {
+            return mode
+        }
+        return .artwork
+    }()
     @State var extractedPalette: ArtworkPalette?
 
     var selectedBuiltinStyle: NowPlayingArtworkStyle? {
@@ -220,7 +231,15 @@ struct NowPlayingView: View {
     let heartHaptic = UIImpactFeedbackGenerator(style: .soft)
     let selectHaptic = UISelectionFeedbackGenerator()
 
-    @State var selectedPanel: NowPlayingPanel = .controls
+    // Falls back to `.controls` (the pre-existing hardcoded default) unless
+    // a Lua theme preset's `layout.default_panel` says otherwise.
+    @State var selectedPanel: NowPlayingPanel = {
+        if let raw = UserDefaults.standard.string(forKey: "lua_layout_default_panel"),
+           let panel = NowPlayingPanel(rawValue: raw) {
+            return panel
+        }
+        return .controls
+    }()
     @Namespace var panelPickerNamespace
 
     var body: some View {

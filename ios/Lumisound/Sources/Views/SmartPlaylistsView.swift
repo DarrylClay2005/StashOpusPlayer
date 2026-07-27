@@ -140,6 +140,25 @@ struct SmartPlaylistEditorView: View {
                     Stepper(draft.limit == 0 ? "Limit: Unlimited" : "Limit: \(draft.limit)",
                             value: $draft.limit, in: 0...1000, step: 10)
                 }
+
+                Section {
+                    TextEditor(text: Binding(
+                        get: { draft.luaScript ?? "" },
+                        set: { draft.luaScript = $0.isEmpty ? nil : $0 }
+                    ))
+                    .font(.system(.footnote, design: .monospaced))
+                    .frame(minHeight: 140)
+
+                    Button {
+                        draft.luaScript = Self.exampleLuaScript
+                    } label: {
+                        Label("Insert Example", systemImage: "wand.and.stars")
+                    }
+                } header: {
+                    Text("Advanced: Lua Rule (optional)")
+                } footer: {
+                    Text("Applied ON TOP OF the rules above. Define `function matches(song) ... end` — `song` carries title, artist, album, genre, year, duration, bpm, favorite, source, play_count, days_since_played, days_since_added.")
+                }
             }
             .navigationTitle("Smart Playlist")
             .navigationBarTitleDisplayMode(.inline)
@@ -159,6 +178,14 @@ struct SmartPlaylistEditorView: View {
             }
         }
     }
+
+    private static let exampleLuaScript = """
+    function matches(song)
+        -- Workout mix: upbeat and not something already on heavy rotation.
+        return song.bpm ~= nil and song.bpm >= 120
+            and song.play_count < 20
+    end
+    """
 
     @ViewBuilder
     private func ruleEditor(_ i: Int) -> some View {

@@ -50,6 +50,7 @@ struct WatchNowPlayingView: View {
                     in: 0...max(player.duration, 1)
                 )
                 .frame(height: 14)
+                .tint(connectivity.accentColor)
             }
 
             HStack(spacing: 14) {
@@ -58,6 +59,7 @@ struct WatchNowPlayingView: View {
                 transportButton("forward.fill") { next() }
             }
             .padding(.top, 2)
+            .tint(connectivity.accentColor)
 
             if !isStandalone && !connectivity.reachable {
                 Text("Open Lumisound on iPhone")
