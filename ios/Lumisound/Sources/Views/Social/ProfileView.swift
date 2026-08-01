@@ -57,6 +57,7 @@ struct ProfileView: View {
     /// right before Save, making Save look like it did nothing.
     @State private var hasLoadedProfile = false
     @State private var hasLoadedBanner = false
+    @State private var hasLoadedAvatar = false
 
     private var mainAccentColor: Color { SocialAccentPalette.color(for: mainAccentHex) ?? AppTheme.dynamicAccent }
     private var subAccentColor: Color { SocialAccentPalette.color(for: subAccentHex) ?? AppTheme.accentSoft }
@@ -597,6 +598,21 @@ struct ProfileView: View {
                     guard let userId = account.currentUser?.id else { return }
                     bannerImage = await SocialService.loadBanner(userId: userId)
                     hasLoadedBanner = true
+                }
+            }
+            // Avatar is otherwise only (re)fetched from app-launch/login/
+            // pull-sync call sites (see AccountService+PublicAPI.swift,
+            // LumisoundApp.swift), not on navigating to this tab. That's
+            // normally fine since `account.avatarImage` is shared app-wide
+            // state, but landing on Profile before that app-launch fetch has
+            // resolved (e.g. a fast tap right after opening the app) showed
+            // nothing/stale-cache until some unrelated later event happened
+            // to refresh it — this makes sure Profile always kicks its own
+            // fetch too instead of depending on that timing.
+            if !hasLoadedAvatar {
+                Task {
+                    await account.loadAvatar()
+                    hasLoadedAvatar = true
                 }
             }
         }

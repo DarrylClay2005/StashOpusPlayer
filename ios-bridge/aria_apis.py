@@ -12,10 +12,17 @@ request that wanted it.
 """
 
 import logging
+import pathlib
 
-from db import get_pool
+from db import _lua, get_pool
 
 logger = logging.getLogger("ios-bridge.aria_apis")
+
+# Row-shaping logic ported to Lua — see lua/aria_shaping.lua. Reuses db.py's
+# already-initialized Lua runtime rather than starting a second one.
+_aria_shaping = _lua.execute(
+    pathlib.Path(__file__).parent.joinpath("lua", "aria_shaping.lua").read_text()
+)
 
 
 async def get_library_genre_snapshot(user_id: str, limit: int = 10) -> list[str]:
@@ -38,7 +45,9 @@ async def get_library_genre_snapshot(user_id: str, limit: int = 10) -> list[str]
                     "GROUP BY genre ORDER BY n DESC LIMIT %s",
                     (user_id, limit),
                 )
-                return [row[0] for row in await cur.fetchall()]
+                rows = await cur.fetchall()
+                lua_rows = _lua.table_from([_lua.table_from(row) for row in rows])
+                return list(_aria_shaping.genre_snapshot(lua_rows).values())
     except Exception:
         logger.exception("get_library_genre_snapshot failed for user %s", user_id)
         return []
@@ -62,7 +71,10 @@ async def get_playlist_context(user_id: str, limit: int = 10) -> list[dict]:
                     "GROUP BY p.id, p.name ORDER BY p.updated_at DESC LIMIT %s",
                     (user_id, limit),
                 )
-                return [{"name": row[0], "track_count": row[1]} for row in await cur.fetchall()]
+                rows = await cur.fetchall()
+                lua_rows = _lua.table_from([_lua.table_from(row) for row in rows])
+                lua_result = _aria_shaping.playlist_context(lua_rows)
+                return [dict(entry.items()) for entry in lua_result.values()]
     except Exception:
         logger.exception("get_playlist_context failed for user %s", user_id)
         return []

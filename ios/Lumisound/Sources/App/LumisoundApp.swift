@@ -36,6 +36,7 @@ struct LumisoundApp: App {
         // from a View's .task/.onAppear. See BackgroundRefreshService's docs
         // for what this actually does (and doesn't) guarantee.
         BackgroundRefreshService.register()
+        LumisoundTrackVaultService.register()
     }
 
     var body: some Scene {
@@ -85,6 +86,13 @@ struct LumisoundApp: App {
             .onChange(of: scenePhase) { phase in
                 if phase == .background {
                     appLock.lock()
+                    // In-app fallback for the track-vault backfill (in
+                    // addition to the BGProcessingTask scheduled above) —
+                    // BGProcessingTask timing isn't guaranteed (see
+                    // BackgroundRefreshService's docs on the same caveat),
+                    // so this makes real progress on every backgrounding
+                    // instead of only whenever iOS decides to run the task.
+                    Task { await LumisoundTrackVaultService.runBackfill() }
                 } else if phase == .active {
                     // Catch-all safety net for background downloads: covers
                     // both "silent push never arrived" (Apple doesn't
@@ -221,6 +229,7 @@ struct LumisoundApp: App {
                     // Queue the periodic background check (subscriptions +
                     // tracked playlists) — see BackgroundRefreshService.
                     BackgroundRefreshService.scheduleNext()
+                    LumisoundTrackVaultService.scheduleNext()
                 }
                 .onAppear {
                     bgService.loadSettings()

@@ -103,20 +103,28 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
             // cut off at its edge.
             .overlay(alignment: .bottomLeading) {
                 ZStack(alignment: .bottomTrailing) {
-                    AvatarFrameOverlay(style: AvatarFrameStyle.from(avatarFrame), diameter: 84, mainTint: mainAccent, subTint: subAccent)
-                    avatar
-                        .frame(width: 84, height: 84)
-                        .clipShape(Circle())
-                        // Was a plain `AppTheme.background`-colored ring —
-                        // purely a cutout border with zero connection to the
-                        // profile's own chosen accent. Whenever a banner
-                        // image is set (the common case, and this user's
-                        // case specifically), the banner covers the
-                        // main/sub gradient below entirely, so this ring
-                        // was the *only* place `mainAccent` could show up
-                        // in the header at all — and it wasn't using it.
-                        .overlay(Circle().stroke(mainAccent, lineWidth: 4))
-                        .shadow(color: .black.opacity(0.28), radius: 6, x: 0, y: 3)
+                    // Frame decoration and avatar must be centered on each
+                    // other regardless of the frame's own (larger) size —
+                    // nested in their own default-aligned ZStack rather than
+                    // sharing the outer .bottomTrailing alignment, which used
+                    // to pin their bottom-trailing corners together instead
+                    // and visibly offset every frame preset from the avatar.
+                    ZStack {
+                        AvatarFrameOverlay(style: AvatarFrameStyle.from(avatarFrame), diameter: 84, mainTint: mainAccent, subTint: subAccent)
+                        avatar
+                            .frame(width: 84, height: 84)
+                            .clipShape(Circle())
+                            // Was a plain `AppTheme.background`-colored ring —
+                            // purely a cutout border with zero connection to the
+                            // profile's own chosen accent. Whenever a banner
+                            // image is set (the common case, and this user's
+                            // case specifically), the banner covers the
+                            // main/sub gradient below entirely, so this ring
+                            // was the *only* place `mainAccent` could show up
+                            // in the header at all — and it wasn't using it.
+                            .overlay(Circle().stroke(mainAccent, lineWidth: 4))
+                            .shadow(color: .black.opacity(0.28), radius: 6, x: 0, y: 3)
+                    }
                     if let isOnline {
                         Circle()
                             .fill(isOnline ? AppTheme.success : AppTheme.textSecondary.opacity(0.5))

@@ -57,9 +57,9 @@ extension AccountService {
             return
         }
 
-        guard data.count <= 5_242_880 else {
-            appWarn("uploadAvatarData: GIF exceeds 5MB limit (\(data.count / 1024)KB)", category: "account")
-            errorMessage = "GIF avatars must be under 5MB."
+        guard data.count <= 15_728_640 else {
+            appWarn("uploadAvatarData: GIF exceeds 15MB limit (\(data.count / 1024)KB)", category: "account")
+            errorMessage = "GIF avatars must be under 15MB."
             return
         }
         guard let animated = await UIImage.gifImageAsync(data: data) else {

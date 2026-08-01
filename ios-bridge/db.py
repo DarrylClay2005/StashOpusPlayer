@@ -4,7 +4,21 @@ import logging
 import os
 import pathlib
 
+from lupa import LuaRuntime
+
 logger = logging.getLogger("ios-bridge.db")
+
+# Embedded Lua runtime for business logic that's been ported to Lua (starting
+# with the schema SQL-splitting helpers below) — mirrors how the iOS client
+# already embeds Lua (LuaSwift) for its own scripting layer, moving pieces of
+# server logic onto the same language over time rather than in one large
+# rewrite. sql_split.lua ends with `return M`, so executing its source
+# directly yields that module table, exposing strip_sql_comments /
+# split_sql_statements as regular callables from Python.
+_lua = LuaRuntime(unpack_returned_tuples=True)
+_sql_split = _lua.execute(
+    pathlib.Path(__file__).parent.joinpath("lua", "sql_split.lua").read_text()
+)
 
 # aiopg wraps psycopg2 and keeps the same %s-placeholder /
 # cursor.execute()/fetchone()/fetchall() API aiomysql used, which is why this
@@ -43,58 +57,17 @@ async def get_pool() -> aiopg.Pool:
 
 def _strip_sql_comments(sql: str) -> str:
     """Removes `--` line comments before the statements are split on `;`.
-
-    The schema is split naively on `;`, so a semicolon *inside* a comment
-    (e.g. "Never echoed back to clients; see ...") used to slice a comment in
-    half and feed the trailing fragment to the DB as bogus SQL — crashing
-    startup. Stripping everything from `--` to end-of-line first makes the
-    splitter immune to punctuation in comments. (`--` only ever introduces a
-    comment in this DDL-only schema; it never appears inside a string literal.)
-    """
-    lines: list[str] = []
-    for line in sql.splitlines():
-        idx = line.find("--")
-        lines.append(line[:idx] if idx != -1 else line)
-    return "\n".join(lines)
+    Implemented in Lua — see lua/sql_split.lua for the full rationale."""
+    return _sql_split.strip_sql_comments(sql)
 
 
 def _split_sql_statements(sql: str) -> list[str]:
     """Splits *sql* on `;`, except for semicolons inside a `$$ ... $$`
-    dollar-quoted block.
-
-    Postgres trigger functions (see the `ios_touch_*` functions/triggers at
-    the end of schema.sql) are plpgsql bodies quoted with `$$ ... $$` and are
-    themselves full of statement-terminating semicolons (`NEW.x := ...;`,
-    `RETURN NEW;`) — a plain `sql.split(";")` chops a function body into
-    fragments and feeds Postgres invalid partial statements (or, worse, an
-    "unterminated dollar-quoted string" error) instead of the one
-    CREATE FUNCTION statement it actually is. This mirrors
-    `_strip_sql_comments`'s exact rationale (a schema this simple stays
-    splittable by a punctuation character, as long as that one character's
-    occurrences *inside* something else are excluded first) but for `$$`
-    blocks instead of `--` comments.
-    """
-    statements: list[str] = []
-    buf: list[str] = []
-    in_dollar_quote = False
-    i = 0
-    n = len(sql)
-    while i < n:
-        if sql[i : i + 2] == "$$":
-            in_dollar_quote = not in_dollar_quote
-            buf.append("$$")
-            i += 2
-            continue
-        ch = sql[i]
-        if ch == ";" and not in_dollar_quote:
-            statements.append("".join(buf))
-            buf = []
-        else:
-            buf.append(ch)
-        i += 1
-    if buf:
-        statements.append("".join(buf))
-    return statements
+    dollar-quoted block. Implemented in Lua — see lua/sql_split.lua for the
+    full rationale. Lua tables are 1-indexed and come back from lupa as a
+    table object, not a Python list, so callers get a proper list here."""
+    lua_statements = _sql_split.split_sql_statements(sql)
+    return list(lua_statements.values())
 
 
 async def init_db():

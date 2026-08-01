@@ -129,6 +129,7 @@ extension StreamingService {
                     let elapsed = Date().timeIntervalSince(attemptStart)
                     appLog("downloadToLibrary: succeeded via direct CDN fetch for \"\(track.title)\" in \(String(format: "%.2f", elapsed))s", category: "network")
                     DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
+                    LumisoundTrackVaultService.tagNewDownload(fileURL: destURL, trackID: track.sourceTrackID, sourceURL: track.youtubeURL)
                     return destURL
                 } catch {
                     let elapsed = Date().timeIntervalSince(attemptStart)
@@ -141,6 +142,7 @@ extension StreamingService {
                 let elapsed = Date().timeIntervalSince(relayStart)
                 appLog("downloadToLibrary: succeeded via server relay for \"\(track.title)\" in \(String(format: "%.2f", elapsed))s", category: "network")
                 DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
+                LumisoundTrackVaultService.tagNewDownload(fileURL: destURL, trackID: track.sourceTrackID, sourceURL: track.youtubeURL)
                 return destURL
             } catch {
                 let elapsed = Date().timeIntervalSince(relayStart)
@@ -232,6 +234,7 @@ extension StreamingService {
                     appLog("downloadToLibrary: succeeded for \"\(track.title)\" on attempt \(attempt)/\(maxAttempts)", category: "network")
                 }
                 DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
+                LumisoundTrackVaultService.tagNewDownload(fileURL: destURL, trackID: track.sourceTrackID, sourceURL: track.youtubeURL)
                 return destURL
             } catch let error as StreamingError {
                 switch error {

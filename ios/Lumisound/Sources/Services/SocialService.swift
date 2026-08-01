@@ -115,8 +115,8 @@ final class SocialService: ObservableObject {
     func uploadBannerData(_ data: Data) async {
         guard let account, account.isLoggedIn else { return }
         if isGIFData(data) {
-            guard data.count <= 5_242_880 else {
-                errorMessage = "GIF banners must be under 5MB."
+            guard data.count <= 15_728_640 else {
+                errorMessage = "GIF banners must be under 15MB."
                 return
             }
             await sendBanner(data, contentType: "image/gif", account: account)
@@ -126,8 +126,8 @@ final class SocialService: ObservableObject {
             appWarn("uploadBannerData: could not decode/encode image data", category: "social")
             return
         }
-        guard jpeg.count <= 2_097_152 else {
-            errorMessage = "Banner must be under 2MB."
+        guard jpeg.count <= 15_728_640 else {
+            errorMessage = "Banner must be under 15MB."
             return
         }
         await sendBanner(jpeg, contentType: "image/jpeg", account: account)

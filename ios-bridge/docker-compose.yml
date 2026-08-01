@@ -67,14 +67,19 @@ services:
       # Off (no calls made) when unset.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - PORT=8002
-      # Dedicated MariaDB credentials for the Lumisound iOS app
-      - DB_HOST=127.0.0.1
-      - DB_PORT=3306
-      - DB_USER=stash
-      - DB_PASSWORD=player
-      - DB_NAME=discord_music_gws
+      # PostgreSQL credentials for the Lumisound iOS app (migrated from
+      # MariaDB — see db.py). Point DB_HOST at wherever Postgres actually
+      # runs (a separate host-level service/container; this compose file
+      # doesn't define one). Override via a .env file or the host
+      # environment; these are just local-dev-friendly defaults matching
+      # db.py's own fallbacks.
+      - DB_HOST=${DB_HOST:-127.0.0.1}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-botuser}
+      - DB_PASSWORD=${DB_PASSWORD:-bot_logins}
+      - DB_NAME=${DB_NAME:-discord_music_gws}
       # JWT secret for account tokens
-      - IOS_JWT_SECRET=${IOS_JWT_SECRET:-stash-opus-player-jwt-secret-2026}
+      - IOS_JWT_SECRET=${IOS_JWT_SECRET:?set IOS_JWT_SECRET in .env before deploying}
       # Optional: set SERVER_MUSIC_DIR to a path inside the container to enable
       # the server music library feature. Mount your music directory as a volume.
       # Example: SERVER_MUSIC_DIR=/music  (then add: - /your/music:/music:ro)

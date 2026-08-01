@@ -322,7 +322,22 @@ _ARIA2_DOWNLOADER_ARGS = [
 # route is advertised but dead/blackholed before falling back to IPv4;
 # --socket-timeout bounds a single stalled connection attempt instead of
 # silently eating the whole per-call timeout further up the stack.
-_YTDLP_NETWORK_ARGS = ["-4", "--socket-timeout", "10"]
+# As of mid-2026 yt-dlp's default player-client fallback order puts
+# `android_vr` first, but that client has become erratic upstream (see
+# yt-dlp/yt-dlp#16150): it frequently returns ONLY itag 18 (360p, muxed,
+# no standalone audio-only stream), which starves `-f "bestaudio/..."`
+# selection of anything to pick and is the most likely cause of downloads
+# failing again after bd3ab019 removed the old blanket Topic-channel block —
+# that fix was correct (the block was stale), but it also removed the only
+# code path that gave a clear diagnostic, so these failures now just look
+# like generic "could not download" errors. Explicitly pin a client order
+# that puts more reliable clients first and keeps android_vr only as a last
+# resort; tv/web_safari serve full adaptive (audio-only) formats and work
+# with the POT provider below.
+_YTDLP_NETWORK_ARGS = [
+    "-4", "--socket-timeout", "10",
+    "--extractor-args", "youtube:player_client=tv,web_safari,ios,android_vr",
+]
 
 # Optional: base URL of a running bgutil-ytdlp-pot-provider POT server
 # (github.com/Brainicism/bgutil-ytdlp-pot-provider). YouTube's "proof of
@@ -2416,6 +2431,13 @@ def _ytdlp_auth_failure_reason(stderr: bytes) -> Optional[str]:
         return "This video is private."
     if "sign in" in text and "login" in text:
         return "This video requires you to be signed in. Upload your YouTube cookies in Settings."
+    if "requested format is not available" in text or "no video formats found" in text:
+        # Most often hit when every player client in our fallback list (see
+        # _YTDLP_NETWORK_ARGS) failed to expose a separate audio-only stream
+        # for this video — historically the erratic `android_vr` client
+        # returning only itag 18. Logged distinctly so it's not confused with
+        # a genuinely unavailable/removed video.
+        return "YouTube didn't expose a compatible audio stream for this track right now. This is usually temporary — try again in a bit."
     return None
 
 
@@ -4716,19 +4738,15 @@ def _is_gif_bytes(body: bytes) -> bool:
 
 @app.post("/user/avatar")
 async def upload_avatar(request: Request, user: dict = Depends(get_current_user)):
-    """Upload a profile picture as JPEG bytes (max 1MB), or as a GIF (max 5MB —
-    animated avatars run larger than a compressed JPEG still, but this is not
-    the multi-hundred-MB territory the app's other MEDIUMBLOB columns need to
-    guard against). GIF support added for the Social Ecosystem feature's
-    animated-avatar requirement; JPEG behavior/limit is unchanged."""
+    """Upload a profile picture as JPEG or GIF bytes (max 15MB either way)."""
     body = await request.body()
     is_gif = _is_gif_bytes(body)
     if is_gif:
-        if len(body) > 5_242_880:  # 5MB limit for animated avatars
-            raise HTTPException(status_code=413, detail="GIF avatar must be under 5MB")
+        if len(body) > 15_728_640:  # 15MB limit for animated avatars
+            raise HTTPException(status_code=413, detail="GIF avatar must be under 15MB")
     else:
-        if len(body) > 1_048_576:  # 1MB limit
-            raise HTTPException(status_code=413, detail="Avatar must be under 1MB")
+        if len(body) > 15_728_640:  # 15MB limit
+            raise HTTPException(status_code=413, detail="Avatar must be under 15MB")
         if not body.startswith(b"\xff\xd8\xff"):  # JPEG magic bytes (SOI + APPn/marker)
             raise HTTPException(status_code=400, detail="Avatar must be a JPEG or GIF image")
     pool = await get_pool()
@@ -13261,19 +13279,17 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
 async def upload_profile_banner(request: Request, payload: dict = Depends(get_current_user)):
     """Upload a profile banner image — same JPEG/GIF-sniffed-bytes pattern as
     POST /user/avatar, just written to ios_social_profiles.banner_data
-    instead of ios_users.avatar_data. A banner is wider/more detailed than an
-    avatar so gets a somewhat larger JPEG ceiling (2MB vs 1MB); the GIF limit
-    stays the same 5MB. Upserts the profile row (a user may not have one yet
-    if this is the first thing they ever customize)."""
+    instead of ios_users.avatar_data. Upserts the profile row (a user may not
+    have one yet if this is the first thing they ever customize)."""
     user_id = payload["sub"]
     body = await request.body()
     is_gif = _is_gif_bytes(body)
     if is_gif:
-        if len(body) > 5_242_880:
-            raise HTTPException(status_code=413, detail="GIF banner must be under 5MB")
+        if len(body) > 15_728_640:
+            raise HTTPException(status_code=413, detail="GIF banner must be under 15MB")
     else:
-        if len(body) > 2_097_152:
-            raise HTTPException(status_code=413, detail="Banner must be under 2MB")
+        if len(body) > 15_728_640:
+            raise HTTPException(status_code=413, detail="Banner must be under 15MB")
         if not body.startswith(b"\xff\xd8\xff"):
             raise HTTPException(status_code=400, detail="Banner must be a JPEG or GIF image")
 
