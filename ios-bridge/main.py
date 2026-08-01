@@ -322,22 +322,24 @@ _ARIA2_DOWNLOADER_ARGS = [
 # route is advertised but dead/blackholed before falling back to IPv4;
 # --socket-timeout bounds a single stalled connection attempt instead of
 # silently eating the whole per-call timeout further up the stack.
-# As of mid-2026 yt-dlp's default player-client fallback order puts
-# `android_vr` first, but that client has become erratic upstream (see
-# yt-dlp/yt-dlp#16150): it frequently returns ONLY itag 18 (360p, muxed,
-# no standalone audio-only stream), which starves `-f "bestaudio/..."`
-# selection of anything to pick and is the most likely cause of downloads
-# failing again after bd3ab019 removed the old blanket Topic-channel block —
-# that fix was correct (the block was stale), but it also removed the only
-# code path that gave a clear diagnostic, so these failures now just look
-# like generic "could not download" errors. Explicitly pin a client order
-# that puts more reliable clients first and keeps android_vr only as a last
-# resort; tv/web_safari serve full adaptive (audio-only) formats and work
-# with the POT provider below.
-_YTDLP_NETWORK_ARGS = [
-    "-4", "--socket-timeout", "10",
-    "--extractor-args", "youtube:player_client=tv,web_safari,ios,android_vr",
-]
+# A prior version of this pinned an explicit multi-client fallback
+# (`youtube:player_client=tv,web_safari,ios,android_vr`) to work around
+# yt-dlp/yt-dlp#16150 (android_vr occasionally returning only itag 18).
+# That backfired: an EXPLICIT player_client list makes yt-dlp query every
+# listed client's player API up front to build the merged formats list —
+# it does not stop at the first client that works — so every single
+# download paid for 3-4x the network round-trips it actually needed.
+# Verified directly against this deployment's own failures: a real
+# "Portal Soundtrack" track that was timing out at 140s with the 4-client
+# list (all 4 concurrent download slots timing out together — consistent
+# with the shared POT provider/network getting hammered by 4x the normal
+# request volume) downloaded correctly in ~3s with android_vr alone,
+# which also correctly returned proper adaptive audio formats (not the
+# itag-18-only failure mode) for the Topic-channel video that motivated
+# the original change. Left at yt-dlp's own default client selection —
+# still not the same as before bd3ab019 (that commit's actual fix, the
+# removed blanket Topic-channel block, is independent of this setting).
+_YTDLP_NETWORK_ARGS = ["-4", "--socket-timeout", "10"]
 
 # Optional: base URL of a running bgutil-ytdlp-pot-provider POT server
 # (github.com/Brainicism/bgutil-ytdlp-pot-provider). YouTube's "proof of
