@@ -72,9 +72,13 @@ extension LibraryManager {
         let sourceID = "\(track.source):\(track.id)"
         let fm = FileManager.default
         if allSongs.contains(where: { song in
-            guard song.sourceTrackID == sourceID else { return false }
-            guard let url = song.url else { return false }
-            return fm.fileExists(atPath: url.path)
+            guard let url = song.url, fm.fileExists(atPath: url.path) else { return false }
+            if song.sourceTrackID == sourceID { return true }
+            // Same LumisoundTrackVault fallback as `localSourceIDs()` — only
+            // consulted for songs with no plaintext sourceTrackID, so this
+            // doesn't change behavior for the common already-tagged case.
+            guard song.sourceTrackID == nil || song.sourceTrackID?.isEmpty == true else { return false }
+            return LumisoundTrackTagger.readTag(fileURL: url)?.trackID == sourceID
         }) {
             return true
         }
@@ -93,8 +97,22 @@ extension LibraryManager {
     /// Precomputed set of every locally-imported song's `sourceTrackID`
     /// ("source:id"), for O(1) membership checks — pairs with
     /// `importedIdentityIndex()` in `hasLocalCopy(of:localSourceIDs:identityIndex:)`.
+    /// Every source ID this library already has a copy of, from EITHER the
+    /// `Song.sourceTrackID` field (the plaintext `LUMISOUND_ID` container
+    /// tag) or, for songs where that field is empty/missing, the
+    /// LumisoundTrackVault xattr tag (see LumisoundTrackTagger) — a second,
+    /// extension-agnostic signal that survives even for the container
+    /// types/re-encodes where the plaintext tag doesn't round-trip. Feeds
+    /// the auto-download pre-filter (`hasLocalCopy`), so recovering an
+    /// identity match here directly means fewer wasted "download it again,
+    /// then discover it's a duplicate" round-trips for TrackedPlaylistStore.
     func localSourceIDs() -> Set<String> {
-        Set(allSongs.compactMap { $0.sourceTrackID })
+        var ids = Set(allSongs.compactMap { $0.sourceTrackID })
+        for song in allSongs where song.sourceTrackID == nil || song.sourceTrackID?.isEmpty == true {
+            guard let url = song.url, let tag = LumisoundTrackTagger.readTag(fileURL: url) else { continue }
+            ids.insert(tag.trackID)
+        }
+        return ids
     }
 
     /// O(1)-per-track variant of `hasLocalCopy(of:)` for checking MANY tracks

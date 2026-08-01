@@ -153,6 +153,21 @@ final class TrackedPlaylistStore: ObservableObject {
     /// instead of leaving 3 of the bridge's 4 slots idle the whole time.
     private static let autoDownloadConcurrency = 4
 
+    /// Guards against concurrent `runAutoDownloads` calls — it's triggered
+    /// from two independent, uncoordinated sites (app launch/foreground in
+    /// LumisoundApp.swift, and BackgroundRefreshService's BGAppRefreshTask
+    /// handler), and `minInterval`/`lastAutoCheck` alone doesn't prevent
+    /// overlap between them: `lastAutoCheck` is only updated (via
+    /// `markAutoChecked`) after a playlist's full download batch completes,
+    /// so two calls that start close together (e.g. app opened right as a
+    /// background refresh fires) both see the same playlist as "due", both
+    /// scan and compute their own `toGet` before either has downloaded
+    /// anything, and both attempt the same "new" tracks in parallel. The
+    /// per-download dedupe check in `downloadToLibrary` still catches and
+    /// skips the actual write, but not before wasting a network round-trip
+    /// and a yt-dlp job on the bridge for every track duplicated this way.
+    private var isRunningAutoDownloads = false
+
     /// For each auto-download playlist not checked in the last `minInterval`,
     /// resolves it and downloads any tracks the user doesn't already have
     /// (deduped via `LibraryManager.hasLocalCopy`). Safe to call on launch /
@@ -170,6 +185,10 @@ final class TrackedPlaylistStore: ObservableObject {
     func runAutoDownloads(streaming: StreamingService,
                           library: LibraryManager,
                           minInterval: TimeInterval = 5 * 60) async {
+        guard !isRunningAutoDownloads else { return }
+        isRunningAutoDownloads = true
+        defer { isRunningAutoDownloads = false }
+
         let now = Date()
         let due = playlists.filter { pl in
             guard pl.isAutoDownload else { return false }

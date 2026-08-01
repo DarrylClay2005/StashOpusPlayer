@@ -206,10 +206,24 @@ final class DuplicateFinderService: ObservableObject {
         var consumed = Set<String>()
 
         // First pass: group by shared source track ID (most reliable signal —
-        // same exact upstream track downloaded more than once).
+        // same exact upstream track downloaded more than once). Falls back to
+        // the encrypted LumisoundTrackVault xattr tag (see
+        // LumisoundTrackTagger) when `sourceTrackID` itself is missing —
+        // that field is populated from the plaintext `LUMISOUND_ID`
+        // container-metadata tag at scan time, which for a handful of older
+        // downloads/re-encodes/container types never got embedded (or got
+        // stripped by an external tool that touched the file), whereas the
+        // vault tag is a separate xattr independent of the audio container
+        // and its format/extension (m4a/mp3/opus/webm/wav all carry it the
+        // same way), so it can recover an identity match this pass would
+        // otherwise silently miss entirely for that song.
         var bySourceID: [String: [Song]] = [:]
         for song in songs {
-            guard let sourceID = song.sourceTrackID, !sourceID.isEmpty else { continue }
+            var sourceID = song.sourceTrackID
+            if sourceID == nil || sourceID?.isEmpty == true, let url = song.url {
+                sourceID = LumisoundTrackTagger.readTag(fileURL: url)?.trackID
+            }
+            guard let sourceID, !sourceID.isEmpty else { continue }
             bySourceID[sourceID, default: []].append(song)
         }
         for (_, group) in bySourceID where group.count > 1 {
