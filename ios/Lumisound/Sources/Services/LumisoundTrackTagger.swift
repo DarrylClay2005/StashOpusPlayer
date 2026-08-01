@@ -56,4 +56,18 @@ enum LumisoundTrackTagger {
     static func isTagged(fileURL: URL) -> Bool {
         getxattr(fileURL.path, attributeName, nil, 0, 0, 0) > 0
     }
+
+    /// True only if `fileURL` is tagged AND the tag's `trackID` actually
+    /// matches `expectedTrackID` — not just "some tag is present." Added
+    /// after a real bug shipped: `runBackfill()` used to write `Song.id`
+    /// (an internal path-derived identifier) as `trackID` instead of the
+    /// real `sourceTrackID`, so every track tagged through that path before
+    /// the fix carries a value dedup can never match against. `isTagged`
+    /// alone can't detect that — those tracks show up as "already tagged"
+    /// forever, silently keeping the wrong value. Backfill now checks THIS
+    /// instead, so a stale/wrong tag gets treated the same as a missing one
+    /// and overwritten with the correct value.
+    static func needsTagging(fileURL: URL, expectedTrackID: String) -> Bool {
+        readTag(fileURL: fileURL)?.trackID != expectedTrackID
+    }
 }

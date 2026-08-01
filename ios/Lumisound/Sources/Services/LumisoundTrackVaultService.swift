@@ -109,7 +109,12 @@ enum LumisoundTrackVaultService {
                 // source — nothing meaningful to encrypt/reinject for these.
                 return false
             }
-            return !LumisoundTrackTagger.isTagged(fileURL: url)
+            // needsTagging (not isTagged) — catches both untagged files AND
+            // ones carrying the wrong value from the Song.id/sourceTrackID
+            // mixup bug (see LumisoundTrackTagger.needsTagging), so those
+            // get silently repaired here instead of being skipped forever
+            // for already "having a tag."
+            return LumisoundTrackTagger.needsTagging(fileURL: url, expectedTrackID: sourceTrackID)
         }
         guard !candidates.isEmpty else { return }
 
@@ -117,19 +122,33 @@ enum LumisoundTrackVaultService {
             LumisoundTrackVaultEngine.filterSongIDs(script: script, songs: candidates, favorites: library.favoriteSongIDs)
         }
 
-        appLog("LumisoundTrackVaultService: backfilling \(candidates.count) untagged track(s)", category: "background")
+        appLog("LumisoundTrackVaultService: backfilling \(candidates.count) untagged/mistagged track(s)", category: "background")
 
         var tagged = 0
         for (index, song) in candidates.enumerated() {
             if Task.isCancelled { break }
             if let allowedIDs, !allowedIDs.contains(song.id) { continue }
             guard let url = song.url, let sourceTrackID = song.sourceTrackID else { continue }
-            // sourceTrackID is "source:id" (see Song.sourceTrackID / the
-            // bridge's LUMISOUND_ID) — the source URL itself isn't stored on
-            // Song today, so the sourceTrackID is what gets encrypted; a
-            // future enhancement could thread the original youtubeURL
-            // through from StreamTrack if a stronger guarantee is needed.
-            if LumisoundTrackTagger.tag(fileURL: url, trackID: song.id, sourceURL: sourceTrackID) {
+            // BUG FIXED (2026-08): this used to pass `song.id` — an internal,
+            // path-derived identifier like "local:Imported Music/.../track.m4a"
+            // — as `trackID`, instead of `sourceTrackID` ("source:id", e.g.
+            // "youtube:aqGXCQ_5WOc"). Every consumer of this tag (duplicate
+            // detection's vault fallback, hasLocalCopy/localSourceIDs) compares
+            // the decrypted trackID against a real sourceTrackID, so the wrong
+            // value meant the fallback could never match anything — silently
+            // defeating the whole point of tagging tracks whose sourceTrackID
+            // field itself is empty (the well-known m4a LUMISOUND_ID-embedding
+            // gap — see DownloadLedgerStore's doc comment), which is exactly
+            // the set of tracks that actually needed this fallback to work.
+            // Reconstruct a real watch URL for youtube-sourced tracks (the
+            // only source we can deterministically rebuild one for from just
+            // the video ID); other sources have no equivalent today, so this
+            // stays empty for them — that only affects the informational
+            // sourceURL field, not trackID, which is the one dedup relies on.
+            let sourceURL = sourceTrackID.hasPrefix("youtube:")
+                ? "https://www.youtube.com/watch?v=\(sourceTrackID.dropFirst("youtube:".count))"
+                : ""
+            if LumisoundTrackTagger.tag(fileURL: url, trackID: sourceTrackID, sourceURL: sourceURL) {
                 tagged += 1
             }
             if (index + 1) % batchSize == 0 {
