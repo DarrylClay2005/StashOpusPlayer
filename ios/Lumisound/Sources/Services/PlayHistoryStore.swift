@@ -68,6 +68,17 @@ final class PlayHistoryStore {
         if changed { save() }
     }
 
+    /// Migrates a play-history entry to a new key — used when a song's
+    /// stable ID changes as a side effect of an in-place file rename (e.g.
+    /// `LumisoundExclusiveExtensionService`'s extension conversion), so play
+    /// count/last-played survive the rename instead of silently resetting.
+    func rekey(from oldID: String, to newID: String) {
+        guard oldID != newID, let entry = entries[oldID] else { return }
+        entries[newID] = entry
+        entries[oldID] = nil
+        save()
+    }
+
     /// Removes history for songs no longer in the library, so the store
     /// doesn't grow forever with entries for deleted/renamed files. Safe to
     /// call periodically (e.g. after a library scan) with the current set

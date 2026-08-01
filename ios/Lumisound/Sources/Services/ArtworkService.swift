@@ -264,7 +264,7 @@ final class ArtworkService {
             }
 
             // For local video files, extract the first frame as artwork.
-            if Self.videoExtensions.contains(url.pathExtension.lowercased()) {
+            if Self.videoExtensions.contains(LumisoundExclusiveExtensionService.effectiveExtension(for: url)) {
                 appLog("Artwork: extracting video frame for \"\(song.displayName)\"", category: "artwork")
                 if let image = await extractVideoFrame(url: url) {
                     return persistFullArtwork(image, forKey: key)

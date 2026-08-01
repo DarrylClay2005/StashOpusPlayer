@@ -8,8 +8,8 @@ extension Song {
     /// `AudioFormatDetails.inspect`, which does the real (file-opening)
     /// lossless check for the one-shot Now Playing format detail sheet.
     var isKnownLosslessContainer: Bool {
-        guard let ext = url?.pathExtension.lowercased() else { return false }
-        return ["flac", "wav", "aiff", "aif", "alac"].contains(ext)
+        guard let url else { return false }
+        return ["flac", "wav", "aiff", "aif", "alac"].contains(LumisoundExclusiveExtensionService.effectiveExtension(for: url))
     }
 
     /// True when the scanned sample rate exceeds standard CD/streaming
@@ -24,8 +24,9 @@ extension Song {
     /// or `nil` if the song has no resolvable file extension (e.g. an
     /// Apple Music library item with no local URL).
     var formatTag: String? {
-        guard let ext = url?.pathExtension, !ext.isEmpty else { return nil }
-        return ext.uppercased()
+        guard let url else { return nil }
+        let ext = LumisoundExclusiveExtensionService.effectiveExtension(for: url)
+        return ext.isEmpty ? nil : ext.uppercased()
     }
 
     /// Containers `AudioPlayerManager` can only play via the AVPlayer
@@ -34,7 +35,7 @@ extension Song {
     /// apply to these. Mirrors the extension check in
     /// `AudioPlayerManager+Scheduling.swift`'s `scheduleCurrent`.
     var usesCompatibilityFallbackFormat: Bool {
-        guard let ext = url?.pathExtension.lowercased() else { return false }
-        return ["opus", "webm", "ogg"].contains(ext)
+        guard let url else { return false }
+        return ["opus", "webm", "ogg"].contains(LumisoundExclusiveExtensionService.effectiveExtension(for: url))
     }
 }

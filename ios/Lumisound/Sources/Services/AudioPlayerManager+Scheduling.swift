@@ -100,7 +100,10 @@ extension AudioPlayerManager {
 
         // Opus/WebM/OGG containers may not be natively supported by AVAudioFile.
         // Route through AudioEncoderService which tries native open first, then exports to M4A.
-        let fileExt = url.pathExtension.lowercased()
+        // `effectiveExtension` (not raw `pathExtension`) so this still routes correctly
+        // for a track already converted to the Lumisound-exclusive extension — its real
+        // container format lives one level in, under the outer ".lms".
+        let fileExt = LumisoundExclusiveExtensionService.effectiveExtension(for: url)
         if ["opus", "webm", "ogg"].contains(fileExt) {
             Task { await transcodeAndSchedule(url: url, startTime: startTime) }
             return

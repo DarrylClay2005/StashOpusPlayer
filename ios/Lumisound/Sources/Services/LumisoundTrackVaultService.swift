@@ -22,6 +22,17 @@ enum LumisoundTrackVaultService {
     /// between chunks keeps a long backfill from monopolizing the run loop.
     private static let batchSize = 40
 
+    /// How often the extension-conversion pass runs while the app is in the
+    /// foreground. iOS gives no way to guarantee an exact background
+    /// cadence — BGProcessingTask's `earliestBeginDate` is only a floor, not
+    /// a promise (see `scheduleNext`'s doc comment) — so a genuine 5-minute
+    /// check is only achievable while the app is actually open; this loop is
+    /// the primary driver, with the BGProcessingTask backfill (§ below)
+    /// picking up the same work opportunistically whenever iOS actually
+    /// runs it in the background.
+    private static let extensionConversionInterval: UInt64 = 5 * 60 * 1_000_000_000
+    private static var extensionConversionLoop: Task<Void, Never>?
+
     static func register() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) { task in
             guard let processingTask = task as? BGProcessingTask else {
@@ -48,10 +59,30 @@ enum LumisoundTrackVaultService {
         scheduleNext()
         let work = Task {
             await runBackfill()
+            await runExtensionConversionPass()
             task.setTaskCompleted(success: true)
         }
         task.expirationHandler = {
             work.cancel()
+        }
+    }
+
+    /// Starts the foreground 5-minute repeating extension-conversion check.
+    /// Idempotent — safe to call from every `.onAppear`/`.task` site that
+    /// might race at launch, since a second call while the loop is already
+    /// running is a no-op. Call once from app launch; the loop keeps firing
+    /// for as long as the process is alive (it isn't tied to scenePhase —
+    /// `Task.sleep` just doesn't advance while the app is suspended, so it
+    /// naturally resumes on the next tick after returning to the
+    /// foreground rather than needing its own scenePhase observer).
+    static func startFiveMinuteForegroundLoop() {
+        guard extensionConversionLoop == nil else { return }
+        extensionConversionLoop = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: extensionConversionInterval)
+                guard !Task.isCancelled else { break }
+                await runExtensionConversionPass()
+            }
         }
     }
 
@@ -106,6 +137,42 @@ enum LumisoundTrackVaultService {
             }
         }
         appLog("LumisoundTrackVaultService: tagged \(tagged)/\(candidates.count) track(s)", category: "background")
+    }
+
+    /// Renames every vault-tagged track that isn't already converted to the
+    /// Lumisound-exclusive extension (see `LumisoundExclusiveExtensionService`),
+    /// re-keying favorites/playlists/play-history as it goes (see
+    /// `LibraryManager.convertToLumisoundExclusiveExtension`). Runs on the
+    /// same 5-minute foreground loop as the rest of this pipeline, plus
+    /// whenever the BGProcessingTask backfill above actually gets to run.
+    /// Only tagged tracks are eligible, so this always runs strictly after
+    /// tagging has had a chance to catch up — a just-downloaded track gets
+    /// tagged immediately (`tagNewDownload`) but its extension conversion
+    /// waits for the next pass, same as backfilled-tag tracks do.
+    @MainActor
+    static func runExtensionConversionPass() async {
+        guard let library = LibraryManager.shared else { return }
+        let currentlyPlayingID = AudioPlayerManager.shared?.currentSong?.id
+
+        let candidates = library.importedSongs.filter { song in
+            guard let url = song.url else { return false }
+            return !LumisoundExclusiveExtensionService.isConverted(url) && LumisoundTrackTagger.isTagged(fileURL: url)
+        }
+        guard !candidates.isEmpty else { return }
+
+        var converted = 0
+        for (index, song) in candidates.enumerated() {
+            if Task.isCancelled { break }
+            if library.convertToLumisoundExclusiveExtension(songID: song.id, currentlyPlayingID: currentlyPlayingID) {
+                converted += 1
+            }
+            if (index + 1) % batchSize == 0 {
+                await Task.yield()
+            }
+        }
+        if converted > 0 {
+            appLog("LumisoundTrackVaultService: converted \(converted)/\(candidates.count) track(s) to the Lumisound-exclusive extension", category: "background")
+        }
     }
 
     /// Optional user-authored policy script — no bundled/picker UI for this

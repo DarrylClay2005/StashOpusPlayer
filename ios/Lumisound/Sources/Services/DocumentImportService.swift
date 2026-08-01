@@ -59,7 +59,8 @@ struct DocumentImportService {
     static let supportedExtensions: Set<String> = [
         "mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "mp4", "opus",
         "m4v", "mov",  // video containers with audio tracks
-        "webm", "ogg"  // yt-dlp can fall back to these containers for /api/download
+        "webm", "ogg", // yt-dlp can fall back to these containers for /api/download
+        LumisoundExclusiveExtensionService.marker  // "lms" — converted tracks, see that type
     ]
     private var supportedExtensions: Set<String> { Self.supportedExtensions }
 
@@ -263,7 +264,11 @@ struct DocumentImportService {
 
         // Opus/Ogg files: AVFoundation does not parse Vorbis comments from the Ogg container.
         // As a fallback, read the OpusTags packet directly from the binary file.
-        let fileExt = url.pathExtension.lowercased()
+        // `effectiveExtension` (not raw `pathExtension`) so this still recognizes the
+        // real container format for a file already converted to the Lumisound-exclusive
+        // extension (see LumisoundExclusiveExtensionService) — its outer ".lms" alone
+        // would otherwise look like neither opus/ogg nor a known video container.
+        let fileExt = LumisoundExclusiveExtensionService.effectiveExtension(for: url)
         let opusExtensions: Set<String> = ["opus", "ogg"]
         if opusExtensions.contains(fileExt), title == url.deletingPathExtension().lastPathComponent {
             let vorbis = Self.readVorbisComments(url: url)
@@ -429,7 +434,7 @@ struct DocumentImportService {
             }
         }
 
-        let fileExt = url.pathExtension.lowercased()
+        let fileExt = LumisoundExclusiveExtensionService.effectiveExtension(for: url)
         let opusExtensions: Set<String> = ["opus", "ogg"]
         if opusExtensions.contains(fileExt), title == url.deletingPathExtension().lastPathComponent {
             let vorbis = Self.readVorbisComments(url: url)

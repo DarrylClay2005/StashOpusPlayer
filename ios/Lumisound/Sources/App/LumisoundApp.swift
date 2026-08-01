@@ -92,7 +92,10 @@ struct LumisoundApp: App {
                     // BackgroundRefreshService's docs on the same caveat),
                     // so this makes real progress on every backgrounding
                     // instead of only whenever iOS decides to run the task.
-                    Task { await LumisoundTrackVaultService.runBackfill() }
+                    Task {
+                        await LumisoundTrackVaultService.runBackfill()
+                        await LumisoundTrackVaultService.runExtensionConversionPass()
+                    }
                 } else if phase == .active {
                     // Catch-all safety net for background downloads: covers
                     // both "silent push never arrived" (Apple doesn't
@@ -105,6 +108,11 @@ struct LumisoundApp: App {
             .task {
                     // Configure background logger (idempotent — safe if .task fires multiple times)
                     AppLogger.shared.configure(bridgeURL: streaming.bridgeURL)
+
+                    // Genuine 5-minute foreground check for tracks ready to
+                    // convert to the Lumisound-exclusive extension — idempotent,
+                    // safe to call every time this .task re-fires.
+                    LumisoundTrackVaultService.startFiveMinuteForegroundLoop()
 
                     // Restore audio settings — player must be configured before any resume.
                     player.restoreDefaultAudioSettings(PersistenceService.shared.loadAudioSettings() ?? AudioSettings())

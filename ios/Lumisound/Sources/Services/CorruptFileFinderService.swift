@@ -124,7 +124,8 @@ final class CorruptFileFinderService: ObservableObject {
 
     private static let audioExtensions: Set<String> = [
         "mp3", "m4a", "aac", "flac", "wav", "aiff", "aif",
-        "ogg", "opus", "wma", "caf", "alac", "mp4", "webm"
+        "ogg", "opus", "wma", "caf", "alac", "mp4", "webm",
+        LumisoundExclusiveExtensionService.marker  // "lms" — converted tracks, see that type
     ]
 
     nonisolated static func scanDirectory(_ directory: URL) -> [CorruptFileEntry] {
