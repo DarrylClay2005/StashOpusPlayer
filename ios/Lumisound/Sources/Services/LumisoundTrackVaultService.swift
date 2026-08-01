@@ -154,6 +154,17 @@ enum LumisoundTrackVaultService {
         guard let library = LibraryManager.shared else { return }
         let currentlyPlayingID = AudioPlayerManager.shared?.currentSong?.id
 
+        // Logged unconditionally (not just on success) — this pass previously
+        // logged nothing at all when it converted zero tracks, which made a
+        // real bug (candidates always empty, or every conversion silently
+        // failing) indistinguishable from "nothing to do yet" in the field.
+        let totalImported = library.importedSongs.count
+        let taggedNotConverted = library.importedSongs.filter { song in
+            guard let url = song.url else { return false }
+            return LumisoundTrackTagger.isTagged(fileURL: url) && !LumisoundExclusiveExtensionService.isConverted(url)
+        }.count
+        appLog("LumisoundTrackVaultService: conversion pass — \(totalImported) imported, \(taggedNotConverted) tagged-not-converted, currentlyPlaying=\(currentlyPlayingID ?? "nil")", category: "background")
+
         let candidates = library.importedSongs.filter { song in
             guard let url = song.url else { return false }
             return !LumisoundExclusiveExtensionService.isConverted(url) && LumisoundTrackTagger.isTagged(fileURL: url)
@@ -161,18 +172,19 @@ enum LumisoundTrackVaultService {
         guard !candidates.isEmpty else { return }
 
         var converted = 0
+        var failedSongIDs: [String] = []
         for (index, song) in candidates.enumerated() {
             if Task.isCancelled { break }
             if library.convertToLumisoundExclusiveExtension(songID: song.id, currentlyPlayingID: currentlyPlayingID) {
                 converted += 1
+            } else if failedSongIDs.count < 5 {
+                failedSongIDs.append(song.id)
             }
             if (index + 1) % batchSize == 0 {
                 await Task.yield()
             }
         }
-        if converted > 0 {
-            appLog("LumisoundTrackVaultService: converted \(converted)/\(candidates.count) track(s) to the Lumisound-exclusive extension", category: "background")
-        }
+        appLog("LumisoundTrackVaultService: converted \(converted)/\(candidates.count) track(s) to the Lumisound-exclusive extension" + (failedSongIDs.isEmpty ? "" : "; sample failures: \(failedSongIDs)"), category: "background")
     }
 
     /// Optional user-authored policy script — no bundled/picker UI for this

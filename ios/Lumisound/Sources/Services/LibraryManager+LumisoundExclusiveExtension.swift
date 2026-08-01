@@ -17,16 +17,36 @@ extension LibraryManager {
     ///     it's simply picked up on a later pass once it's no longer playing.
     @discardableResult
     func convertToLumisoundExclusiveExtension(songID: String, currentlyPlayingID: String?) -> Bool {
-        guard songID != currentlyPlayingID,
-              let index = importedSongs.firstIndex(where: { $0.id == songID }),
-              let oldURL = importedSongs[index].url,
-              oldURL.isFileURL,
-              !LumisoundExclusiveExtensionService.isConverted(oldURL),
-              LumisoundTrackTagger.isTagged(fileURL: oldURL)
-        else { return false }
+        // Split out of one big `guard` (temporarily, for field diagnosis —
+        // see the session that added this comment) so a failure logs WHICH
+        // condition tripped instead of the earlier silent `return false`
+        // making "never converts anything" indistinguishable from "nothing
+        // eligible yet" in the field.
+        guard songID != currentlyPlayingID else {
+            appWarn("convertToLumisoundExclusiveExtension: skipped \(songID) — currently playing", category: "background")
+            return false
+        }
+        guard let index = importedSongs.firstIndex(where: { $0.id == songID }) else {
+            appWarn("convertToLumisoundExclusiveExtension: skipped \(songID) — not found in importedSongs", category: "background")
+            return false
+        }
+        guard let oldURL = importedSongs[index].url, oldURL.isFileURL else {
+            appWarn("convertToLumisoundExclusiveExtension: skipped \(songID) — no local file URL", category: "background")
+            return false
+        }
+        guard !LumisoundExclusiveExtensionService.isConverted(oldURL) else {
+            return false // already converted — not a failure, just nothing to do
+        }
+        guard LumisoundTrackTagger.isTagged(fileURL: oldURL) else {
+            appWarn("convertToLumisoundExclusiveExtension: skipped \(songID) at \(oldURL.lastPathComponent) — isTagged() false at convert time", category: "background")
+            return false
+        }
 
         let oldSong = importedSongs[index]
-        guard let newURL = LumisoundExclusiveExtensionService.convert(fileURL: oldURL) else { return false }
+        guard let newURL = LumisoundExclusiveExtensionService.convert(fileURL: oldURL) else {
+            appWarn("convertToLumisoundExclusiveExtension: rename failed for \(songID) at \(oldURL.lastPathComponent)", category: "background")
+            return false
+        }
 
         let newID = ScanCacheService.documentsRelativePath(for: newURL).map { "local:\($0)" } ?? oldSong.id
         let newSong = Song(
