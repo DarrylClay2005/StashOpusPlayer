@@ -63,7 +63,18 @@ extension NowPlayingView {
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
-            .padding(.bottom, 32)
+            // `CustomTabBar` is composited above every tab's own content via
+            // `.safeAreaInset` on ContentView's outer Group (see its own doc
+            // comment) — that inset only reserves space automatically for
+            // screens that explicitly add a matching bottom inset/padding
+            // themselves (MiniPlayerBar already does, see its doc comment).
+            // NowPlayingView never did, so its own bottom controls/action
+            // pills rendered flush to the true safe area, directly under
+            // where the pill-shaped tab bar sits on top and intercepts
+            // touches meant for this screen. Reserving the same
+            // `CustomTabBar.totalHeight` here keeps this screen's content
+            // clear of it, consistent with every other tab.
+            .padding(.bottom, 32 + CustomTabBar.totalHeight)
         }
         .navigationTitle("Now Playing")
         .navigationBarTitleDisplayMode(.inline)

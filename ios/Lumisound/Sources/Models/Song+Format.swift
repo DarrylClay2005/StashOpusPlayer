@@ -22,11 +22,19 @@ extension Song {
 
     /// Short uppercase format tag for display (e.g. "FLAC", "MP3", "M4A"),
     /// or `nil` if the song has no resolvable file extension (e.g. an
-    /// Apple Music library item with no local URL).
+    /// Apple Music library item with no local URL). Prefixed "LMS " for a
+    /// track already converted to the Lumisound-exclusive extension (e.g.
+    /// "LMS OPUS", "LMS M4A") — `effectiveExtension` alone recovers the
+    /// real container for every other format-dependent decision in the app,
+    /// but silently doing the same here would hide the one place a user can
+    /// actually SEE that a track has gone through the vault/conversion
+    /// pipeline, which is the entire point of exposing it as "exclusive."
     var formatTag: String? {
         guard let url else { return nil }
         let ext = LumisoundExclusiveExtensionService.effectiveExtension(for: url)
-        return ext.isEmpty ? nil : ext.uppercased()
+        guard !ext.isEmpty else { return nil }
+        let prefix = LumisoundExclusiveExtensionService.isConverted(url) ? "LMS " : ""
+        return prefix + ext.uppercased()
     }
 
     /// Containers `AudioPlayerManager` can only play via the AVPlayer
