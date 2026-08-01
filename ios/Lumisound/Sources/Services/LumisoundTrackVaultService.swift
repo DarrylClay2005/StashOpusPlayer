@@ -158,12 +158,28 @@ enum LumisoundTrackVaultService {
         // logged nothing at all when it converted zero tracks, which made a
         // real bug (candidates always empty, or every conversion silently
         // failing) indistinguishable from "nothing to do yet" in the field.
-        let totalImported = library.importedSongs.count
-        let taggedNotConverted = library.importedSongs.filter { song in
-            guard let url = song.url else { return false }
-            return LumisoundTrackTagger.isTagged(fileURL: url) && !LumisoundExclusiveExtensionService.isConverted(url)
-        }.count
-        appLog("LumisoundTrackVaultService: conversion pass — \(totalImported) imported, \(taggedNotConverted) tagged-not-converted, currentlyPlaying=\(currentlyPlayingID ?? "nil")", category: "background")
+        // Broken out by extension AND by tagged-vs-converted specifically —
+        // "0 tagged-not-converted" is ambiguous on its own (could mean
+        // "already all converted" OR "never got tagged in the first place",
+        // e.g. if only one container format's downloads were actually
+        // reaching tagNewDownload) — this makes that distinguishable.
+        var extBreakdown: [String: (total: Int, tagged: Int, converted: Int)] = [:]
+        for song in library.importedSongs {
+            guard let url = song.url else { continue }
+            let ext = LumisoundExclusiveExtensionService.effectiveExtension(for: url)
+            var entry = extBreakdown[ext] ?? (0, 0, 0)
+            entry.total += 1
+            if LumisoundExclusiveExtensionService.isConverted(url) {
+                entry.converted += 1
+            } else if LumisoundTrackTagger.isTagged(fileURL: url) {
+                entry.tagged += 1
+            }
+            extBreakdown[ext] = entry
+        }
+        let breakdownText = extBreakdown.sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value.total)tot/\($0.value.tagged)tagged-not-converted/\($0.value.converted)converted" }
+            .joined(separator: ", ")
+        appLog("LumisoundTrackVaultService: conversion pass — \(library.importedSongs.count) imported [\(breakdownText)], currentlyPlaying=\(currentlyPlayingID ?? "nil")", category: "background")
 
         let candidates = library.importedSongs.filter { song in
             guard let url = song.url else { return false }
