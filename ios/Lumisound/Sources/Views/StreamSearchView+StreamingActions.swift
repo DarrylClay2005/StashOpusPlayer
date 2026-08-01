@@ -194,10 +194,11 @@ extension StreamSearchView {
         downloadAllDone = 0
         downloadAllTotal = tracks.count
 
-        // Matches the bridge's yt-dlp process semaphore (_YTDLP_SEMAPHORE = 4) so the
+        // Matches the bridge's yt-dlp process semaphore (_YTDLP_SEMAPHORE) so the
         // client keeps it saturated without piling up extra jobs that just sit
         // "pending" behind the semaphore (each holding its own /tmp/dl_* dir).
-        let maxConcurrent = 4
+        // Dropped 4 -> 2 (2026-08) — see TrackedPlaylistStore.autoDownloadConcurrency.
+        let maxConcurrent = 2
 
         Task { @MainActor in
             // Make sure `library.allSongs` reflects every file on disk — including

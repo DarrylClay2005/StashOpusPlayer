@@ -278,7 +278,16 @@ _FFPROBE_CACHE = _FfprobeCache(_ffprobe_cache_path)
 # "HTTP 502" download failures for every in-flight request. Lower this instead of
 # the memory limit — the iOS client's "Download All" already queues more requests
 # than this and just waits its turn.
-_YTDLP_SEMAPHORE = asyncio.Semaphore(4)  # max 4 concurrent yt-dlp processes
+#
+# 2026-08: dropped 4 -> 2 after the same symptom recurred — this HOST (not
+# just this container) runs 15+ other 512MB-capped containers (Discord music
+# bots, Lavalink, etc.) on a single 7GB box that was observed with swap
+# nearly full and steady swap-in/out traffic even at rest. Raising this
+# container's own cgroup limit wouldn't help (the host has no spare RAM to
+# grant it) and risks destabilizing the other co-located services instead;
+# halving peak concurrent yt-dlp+ffmpeg+aria2+deno subprocess count is the
+# lever that's actually available here, same as the original 10->4 cut.
+_YTDLP_SEMAPHORE = asyncio.Semaphore(2)  # max 2 concurrent yt-dlp processes
 
 # Formats other than m4a/best require yt-dlp to transcode after downloading
 # (`-x --audio-format ...`), which is CPU-bound ffmpeg work rather than the

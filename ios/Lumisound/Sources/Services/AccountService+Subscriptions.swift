@@ -179,11 +179,13 @@ extension AccountService {
     }
 
     /// Auto-download concurrency cap — mirrors `TrackedPlaylistStore`'s own
-    /// constant (which mirrors the bridge's `_YTDLP_SEMAPHORE(4)`): the
-    /// bridge already caps itself at 4 concurrent yt-dlp processes GLOBALLY,
-    /// so sending 4 at once (instead of 1) is what actually lets this client
-    /// reach that existing server-side capacity.
-    private static let subscriptionAutoDownloadConcurrency = 4
+    /// constant (which mirrors the bridge's `_YTDLP_SEMAPHORE`): the
+    /// bridge already caps itself at that many concurrent yt-dlp processes
+    /// GLOBALLY, so sending that many at once (instead of 1) is what
+    /// actually lets this client reach that existing server-side capacity.
+    /// Dropped 4 -> 2 alongside _YTDLP_SEMAPHORE — see TrackedPlaylistStore's
+    /// matching constant for why.
+    private static let subscriptionAutoDownloadConcurrency = 2
 
     /// Downloads `tracks` into the library for one auto-download-enabled
     /// subscription, deduping against what's already there and running up to

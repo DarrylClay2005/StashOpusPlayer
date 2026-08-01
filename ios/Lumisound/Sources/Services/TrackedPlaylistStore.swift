@@ -146,12 +146,16 @@ final class TrackedPlaylistStore: ObservableObject {
     /// Tracks in flight at once during a single playlist's auto-download
     /// pass (see `runAutoDownloads`). Matches the bridge's own
     /// `_YTDLP_SEMAPHORE` (main.py) exactly — the bridge already caps
-    /// itself at 4 concurrent yt-dlp processes GLOBALLY, across every user
-    /// and every request path, so anything this client sends beyond 4 just
-    /// queues there harmlessly. Sending 4 at once (instead of 1) is what
-    /// actually lets this client reach that existing server-side capacity
-    /// instead of leaving 3 of the bridge's 4 slots idle the whole time.
-    private static let autoDownloadConcurrency = 4
+    /// itself at this many concurrent yt-dlp processes GLOBALLY, across
+    /// every user and every request path, so anything this client sends
+    /// beyond that just queues there harmlessly. Sending this many at once
+    /// (instead of 1) is what actually lets this client reach that existing
+    /// server-side capacity instead of leaving slots idle the whole time.
+    /// Dropped 4 -> 2 alongside _YTDLP_SEMAPHORE (2026-08): the bridge's
+    /// host runs many other memory-capped containers on one small box, and
+    /// 4-way concurrency was enough to push it into swapping/timing out
+    /// under a burst of several playlists downloading at once.
+    private static let autoDownloadConcurrency = 2
 
     /// Guards against concurrent `runAutoDownloads` calls — it's triggered
     /// from two independent, uncoordinated sites (app launch/foreground in

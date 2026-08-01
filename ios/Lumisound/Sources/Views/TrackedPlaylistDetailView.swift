@@ -313,8 +313,9 @@ struct TrackedPlaylistDetailView: View {
         let dir = destinationDir
         let folderName = destinationFolderName
 
-        // Bounded concurrency matching the bridge's yt-dlp semaphore (4).
-        let maxConcurrent = 4
+        // Bounded concurrency matching the bridge's yt-dlp semaphore.
+        // Dropped 4 -> 2 (2026-08) — see TrackedPlaylistStore.autoDownloadConcurrency.
+        let maxConcurrent = 2
         var nextIndex = 0
         var failed = 0
         var blockedCount = 0
