@@ -79,17 +79,20 @@ struct PublicProfileView: View {
     /// since this is your own screen showing your own state, not a
     /// broadcast to someone else); server-provided, privacy-gated presence
     /// for an actual visitor.
-    private var displayedNowPlaying: (title: String, artist: String?, song: Song?)? {
+    private var displayedNowPlaying: (title: String, artist: String?, song: Song?, artworkURL: URL?)? {
         if isSelfPreview {
             guard let song = player.currentSong, player.isPlaying else { return nil }
-            return (song.title, song.artist.isEmpty ? nil : song.artist, song)
+            return (song.title, song.artist.isEmpty ? nil : song.artist, song, nil)
         }
         guard presence?.online == true, presence?.isPlaying == true,
               let title = presence?.nowPlayingTitle else { return nil }
-        // No `song` for a visitor's view — the server-side presence payload
-        // doesn't carry artwork today (see NowPlayingActivityRow's own doc
-        // comment), so this always falls back to the placeholder icon there.
-        return (title, presence?.nowPlayingArtist, nil)
+        // No `song` for a visitor's view (only this device's own local
+        // player state has one) — but the presence payload does carry a
+        // best-effort artwork URL now (see SocialPresence.nowPlayingArtworkURL),
+        // so NowPlayingActivityRow still shows real artwork via AsyncImage
+        // instead of always falling back to the placeholder icon.
+        let artworkURL = presence?.nowPlayingArtworkURL.flatMap(URL.init(string:))
+        return (title, presence?.nowPlayingArtist, nil, artworkURL)
     }
 
     /// An incoming pending request FROM this user, if any.
@@ -146,7 +149,7 @@ struct PublicProfileView: View {
 
                         if let nowPlaying = displayedNowPlaying {
                             ProfileInfoCard(title: "Listening To", icon: "waveform", tint: mainAccentColor) {
-                                NowPlayingActivityRow(title: nowPlaying.title, artist: nowPlaying.artist, tint: mainAccentColor, song: nowPlaying.song)
+                                NowPlayingActivityRow(title: nowPlaying.title, artist: nowPlaying.artist, tint: mainAccentColor, song: nowPlaying.song, artworkURL: nowPlaying.artworkURL)
                             }
                         }
 

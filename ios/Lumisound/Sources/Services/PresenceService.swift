@@ -82,13 +82,19 @@ final class PresenceService: ObservableObject {
             let is_playing: Bool
             let now_playing_title: String?
             let now_playing_artist: String?
+            let now_playing_artwork_url: String?
             let going_offline: Bool = false
         }
         let song = player.currentSong
         let body = Body(
             is_playing: player.isPlaying && song != nil,
             now_playing_title: song?.title,
-            now_playing_artist: (song?.artist.isEmpty ?? true) ? nil : song?.artist
+            now_playing_artist: (song?.artist.isEmpty ?? true) ? nil : song?.artist,
+            // Deterministic from sourceTrackID alone — no file I/O, no
+            // network fetch here (see Song.youtubeThumbnailURL). `nil` for
+            // non-YouTube sources/local imports, same as title/artist are
+            // `nil` while nothing's playing.
+            now_playing_artwork_url: song?.youtubeThumbnailURL?.absoluteString
         )
         do {
             _ = try await account.makeRequest("/api/social/presence", method: "POST", body: body)

@@ -298,17 +298,23 @@ struct SocialPresence: Decodable, Identifiable, Equatable {
     let isPlaying: Bool
     let nowPlayingTitle: String?
     let nowPlayingArtist: String?
+    /// Remote thumbnail URL for the currently-playing track, when the
+    /// reporting device could cheaply derive one (see
+    /// PresenceService.sendHeartbeat) — `nil` for purely-local imports or
+    /// while nothing's playing, same as the title/artist fields.
+    let nowPlayingArtworkURL: String?
     let lastSeenAt: String?
 
     var id: String { userId }
 
     enum CodingKeys: String, CodingKey {
-        case userId           = "user_id"
+        case userId              = "user_id"
         case online
-        case isPlaying        = "is_playing"
-        case nowPlayingTitle  = "now_playing_title"
-        case nowPlayingArtist = "now_playing_artist"
-        case lastSeenAt       = "last_seen_at"
+        case isPlaying           = "is_playing"
+        case nowPlayingTitle     = "now_playing_title"
+        case nowPlayingArtist    = "now_playing_artist"
+        case nowPlayingArtworkURL = "now_playing_artwork_url"
+        case lastSeenAt          = "last_seen_at"
     }
 }
 

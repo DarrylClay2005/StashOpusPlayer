@@ -13112,6 +13112,12 @@ class PresenceUpdate(BaseModel):
     is_playing: bool = False
     now_playing_title: Optional[str] = None
     now_playing_artist: Optional[str] = None
+    # Remote artwork URL for the currently-playing track (e.g. YouTube's
+    # i.ytimg.com thumbnail CDN), sent client-side only when one is cheaply
+    # derivable (see PresenceService.sendHeartbeat) — purely-local imports
+    # with no remote source have no URL to send and this stays None for
+    # them, same as now_playing_title/artist do for a paused/idle player.
+    now_playing_artwork_url: Optional[str] = None
     # Best-effort signal sent from AppDelegate/scene-phase background hooks —
     # when true, this heartbeat marks the user offline immediately instead of
     # waiting for last_seen_at to go stale.
@@ -13890,18 +13896,19 @@ async def update_presence(body: PresenceUpdate, payload: dict = Depends(get_curr
             await cur.execute(
                 """
                 INSERT INTO ios_presence_state
-                    (user_id, is_online, is_playing, now_playing_title, now_playing_artist, last_seen_at)
-                VALUES (%s, %s, %s, %s, %s, NOW())
+                    (user_id, is_online, is_playing, now_playing_title, now_playing_artist, now_playing_artwork_url, last_seen_at)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (user_id) DO UPDATE SET
                     is_online = EXCLUDED.is_online,
                     is_playing = EXCLUDED.is_playing,
                     now_playing_title = EXCLUDED.now_playing_title,
                     now_playing_artist = EXCLUDED.now_playing_artist,
+                    now_playing_artwork_url = EXCLUDED.now_playing_artwork_url,
                     last_seen_at = NOW()
                 """,
                 (
                     user_id, not body.going_offline, body.is_playing and not body.going_offline,
-                    body.now_playing_title, body.now_playing_artist,
+                    body.now_playing_title, body.now_playing_artist, body.now_playing_artwork_url,
                 ),
             )
     return {"ok": True}
@@ -13914,7 +13921,7 @@ async def _fetch_presence_rows(cur, user_ids: list[str]) -> dict:
     await cur.execute(
         f"""
         SELECT p.user_id, p.is_online, p.is_playing, p.now_playing_title, p.now_playing_artist,
-               p.last_seen_at, COALESCE(sp.share_now_playing, TRUE)
+               p.now_playing_artwork_url, p.last_seen_at, COALESCE(sp.share_now_playing, TRUE)
         FROM ios_presence_state p
         LEFT JOIN ios_social_profiles sp ON sp.user_id = p.user_id
         WHERE p.user_id IN ({placeholders})
@@ -13925,16 +13932,18 @@ async def _fetch_presence_rows(cur, user_ids: list[str]) -> dict:
     now = datetime.now(timezone.utc)
     result = {}
     for r in rows:
-        uid, is_online, is_playing, title, artist, last_seen, share_now_playing = r
+        uid, is_online, is_playing, title, artist, artwork_url, last_seen, share_now_playing = r
         last_seen_utc = last_seen.replace(tzinfo=timezone.utc) if last_seen and last_seen.tzinfo is None else last_seen
         fresh = bool(last_seen_utc) and (now - last_seen_utc).total_seconds() <= _SOCIAL_PRESENCE_FRESH_SECONDS
         online = bool(is_online) and fresh
+        shareable = online and share_now_playing
         result[uid] = {
             "user_id": uid,
             "online": online,
             "is_playing": bool(is_playing) and online and bool(share_now_playing),
-            "now_playing_title": title if (online and share_now_playing) else None,
-            "now_playing_artist": artist if (online and share_now_playing) else None,
+            "now_playing_title": title if shareable else None,
+            "now_playing_artist": artist if shareable else None,
+            "now_playing_artwork_url": artwork_url if shareable else None,
             "last_seen_at": last_seen.isoformat() if last_seen else None,
         }
     return result
@@ -13960,7 +13969,8 @@ async def get_friends_presence(payload: dict = Depends(get_current_user)):
         "presence": [
             presence_by_id.get(fid, {
                 "user_id": fid, "online": False, "is_playing": False,
-                "now_playing_title": None, "now_playing_artist": None, "last_seen_at": None,
+                "now_playing_title": None, "now_playing_artist": None,
+                "now_playing_artwork_url": None, "last_seen_at": None,
             })
             for fid in friend_ids
         ]
@@ -13978,7 +13988,8 @@ async def get_user_presence(user_id: str, payload: dict = Depends(get_current_us
             presence_by_id = await _fetch_presence_rows(cur, [user_id])
     return presence_by_id.get(user_id, {
         "user_id": user_id, "online": False, "is_playing": False,
-        "now_playing_title": None, "now_playing_artist": None, "last_seen_at": None,
+        "now_playing_title": None, "now_playing_artist": None,
+        "now_playing_artwork_url": None, "last_seen_at": None,
     })
 
 

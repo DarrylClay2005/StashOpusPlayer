@@ -1092,6 +1092,7 @@ CREATE TABLE IF NOT EXISTS ios_presence_state (
     is_playing BOOLEAN NOT NULL DEFAULT FALSE,
     now_playing_title VARCHAR(500) NULL,
     now_playing_artist VARCHAR(500) NULL,
+    now_playing_artwork_url VARCHAR(500) NULL,
     last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
@@ -1224,6 +1225,15 @@ CREATE INDEX IF NOT EXISTS ios_social_profile_views_idx_profile_views_pair ON io
 -- chosen destination. NULL means "use the default download folder", same
 -- convention TrackedPlaylist.destinationFolder itself already uses.
 ALTER TABLE ios_pending_downloads ADD COLUMN IF NOT EXISTS destination_folder VARCHAR(255) NULL;
+
+-- Presence "Listening To" artwork (Feature: presence-artwork, 2026-08) — the
+-- friends/public-profile "Listening To" card previously only had
+-- title/artist for a friend's presence (no artwork at all), so it always
+-- fell back to a generic placeholder icon even though the owner's own
+-- device knows a real thumbnail URL for most tracks (YouTube's CDN). NULL
+-- for purely-local imports with no derivable remote thumbnail, same as
+-- now_playing_title/artist are NULL while nothing is playing.
+ALTER TABLE ios_presence_state ADD COLUMN IF NOT EXISTS now_playing_artwork_url VARCHAR(500) NULL;
 
 -- ---------------------------------------------------------------------------
 -- MySQL -> PostgreSQL migration (2026-07): "ON UPDATE CURRENT_TIMESTAMP"

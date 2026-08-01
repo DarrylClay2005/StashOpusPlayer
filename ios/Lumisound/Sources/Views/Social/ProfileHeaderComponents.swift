@@ -274,17 +274,36 @@ struct NowPlayingActivityRow: View {
     let tint: Color
     /// The actual `Song` being played, when known — lets this row show real
     /// artwork via `ArtworkThumbnail` instead of a generic note icon. Only
-    /// available on the owner's own profile (`player.currentSong`); a
-    /// friend's presence is fetched from the bridge as plain title/artist
-    /// strings with no artwork reference, so their card still falls back to
-    /// the icon.
+    /// available on the owner's own profile (`player.currentSong`).
     var song: Song? = nil
+    /// Remote thumbnail URL from a friend's/visitor's `SocialPresence` (see
+    /// `now_playing_artwork_url` — PresenceService.sendHeartbeat derives it
+    /// from the reporting device's own `Song.youtubeThumbnailURL`). Only
+    /// consulted when `song` is nil, since a locally-known `Song` always has
+    /// a better (cached, possibly non-YouTube, possibly higher-res) source.
+    var artworkURL: URL? = nil
 
     var body: some View {
         HStack(spacing: 10) {
             if let song {
                 ArtworkThumbnail(song: song, size: 40)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else if let artworkURL {
+                AsyncImage(url: artworkURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    default:
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(tint.opacity(0.2))
+                            Image(systemName: "music.note")
+                                .foregroundStyle(tint)
+                        }
+                    }
+                }
+                .frame(width: 40, height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             } else {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)

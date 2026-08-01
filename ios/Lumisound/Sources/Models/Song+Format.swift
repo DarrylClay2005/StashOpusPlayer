@@ -46,4 +46,21 @@ extension Song {
         guard let url else { return false }
         return ["opus", "webm", "ogg"].contains(LumisoundExclusiveExtensionService.effectiveExtension(for: url))
     }
+
+    /// Deterministic YouTube thumbnail URL derived from `sourceTrackID`
+    /// alone (no network/file I/O), for the handful of places that need a
+    /// cheap best-effort artwork URL rather than the real (possibly higher-
+    /// res, possibly non-YouTube) one — e.g. presence heartbeats, which
+    /// can't afford to read/decode a cached image file on every 45s tick.
+    /// `hqdefault.jpg` is virtually always present for a real video, unlike
+    /// `maxresdefault.jpg`. Mirrors the same fallback already duplicated in
+    /// `ArtworkService.swift`, `StreamingService+DownloadToLibrary.swift`,
+    /// and `StreamingService+PendingDownloads.swift`. `nil` for anything not
+    /// sourced from YouTube (SoundCloud/Bandcamp downloads, local imports).
+    var youtubeThumbnailURL: URL? {
+        guard let sourceTrackID, sourceTrackID.hasPrefix("youtube:") else { return nil }
+        let videoID = String(sourceTrackID.dropFirst("youtube:".count))
+        guard !videoID.isEmpty else { return nil }
+        return URL(string: "https://i.ytimg.com/vi/\(videoID)/hqdefault.jpg")
+    }
 }
