@@ -3,17 +3,28 @@ import Foundation
 
 // MARK: - LumisoundTrackVaultService
 //
-// Drives the "reinject encrypted Lumisound metadata into every track" pipeline:
+// Drives the "reinject encrypted Lumisound metadata into every track, then
+// re-encode it into the Lumisound-exclusive format" pipeline, for the WHOLE
+// local library — downloaded tracks and plain local imports alike (widened
+// 2026-08; previously local imports were skipped entirely and could never
+// get re-encoded):
 //  1. Tags newly-completed downloads immediately (`tagNewDownload`, called
 //     right after a file lands on disk — see StreamingService+DownloadToLibrary).
-//  2. Backfills the rest of the existing library in small batches via a
-//     `BGProcessingTask` (longer-running/lower-priority than
-//     `BackgroundRefreshService`'s `BGAppRefreshTask`, appropriate for a bulk
-//     one-time-per-track sweep rather than a periodic check), plus an
-//     in-app fallback pass so the backfill also makes progress for users who
-//     rarely background the app long enough for BGProcessingTask to fire —
-//     the same real-world caveat BackgroundRefreshService documents: iOS, not
-//     this code, decides if/when a submitted request actually runs.
+//  2. Backfills the rest of the existing library — including tracks the
+//     user imported locally rather than downloaded through the app — in
+//     small batches via a `BGProcessingTask` (longer-running/lower-priority
+//     than `BackgroundRefreshService`'s `BGAppRefreshTask`, appropriate for
+//     a bulk one-time-per-track sweep rather than a periodic check), plus
+//     an in-app fallback pass so the backfill also makes progress for users
+//     who rarely background the app long enough for BGProcessingTask to
+//     fire — the same real-world caveat BackgroundRefreshService documents:
+//     iOS, not this code, decides if/when a submitted request actually runs.
+//  3. Every 5 minutes in the foreground (`startFiveMinuteForegroundLoop`),
+//     plus whenever the BGProcessingTask above actually gets to run, forces
+//     a fresh sweep for anything tagged-but-not-yet-converted and re-encodes
+//     it (`runExtensionConversionPass`) — so a track that failed to convert
+//     on an earlier pass, or was just tagged by the backfill above, doesn't
+//     have to wait indefinitely.
 enum LumisoundTrackVaultService {
     static let taskIdentifier = "com.lumisound.ios.trackvault"
 
@@ -67,20 +78,29 @@ enum LumisoundTrackVaultService {
         }
     }
 
-    /// Starts the foreground 5-minute repeating extension-conversion check.
-    /// Idempotent — safe to call from every `.onAppear`/`.task` site that
-    /// might race at launch, since a second call while the loop is already
-    /// running is a no-op. Call once from app launch; the loop keeps firing
-    /// for as long as the process is alive (it isn't tied to scenePhase —
-    /// `Task.sleep` just doesn't advance while the app is suspended, so it
-    /// naturally resumes on the next tick after returning to the
-    /// foreground rather than needing its own scenePhase observer).
+    /// Starts the foreground 5-minute repeating check: tag anything on disk
+    /// that isn't tagged yet (`runBackfill`, covering plain local imports as
+    /// well as downloads — see that method), then re-encode anything tagged
+    /// but not yet converted (`runExtensionConversionPass`). Runs both every
+    /// tick (not just the conversion pass) so a freshly-imported local file
+    /// doesn't have to wait for the app to background before it's even
+    /// eligible for conversion — previously tagging only ran on backgrounding
+    /// (see LumisoundApp's scenePhase handler) while this loop only
+    /// converted, so a local import's first tag could be delayed well past
+    /// 5 minutes. Idempotent — safe to call from every `.onAppear`/`.task`
+    /// site that might race at launch, since a second call while the loop is
+    /// already running is a no-op. Call once from app launch; the loop keeps
+    /// firing for as long as the process is alive (it isn't tied to
+    /// scenePhase — `Task.sleep` just doesn't advance while the app is
+    /// suspended, so it naturally resumes on the next tick after returning
+    /// to the foreground rather than needing its own scenePhase observer).
     static func startFiveMinuteForegroundLoop() {
         guard extensionConversionLoop == nil else { return }
         extensionConversionLoop = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: extensionConversionInterval)
                 guard !Task.isCancelled else { break }
+                await runBackfill()
                 await runExtensionConversionPass()
             }
         }
@@ -94,27 +114,28 @@ enum LumisoundTrackVaultService {
         LumisoundTrackTagger.tag(fileURL: fileURL, trackID: trackID, sourceURL: sourceURL)
     }
 
-    /// Sweeps the local library for downloaded (non-purely-local-import)
-    /// tracks that don't have the tag yet and tags them. Safe to call
-    /// repeatedly/concurrently-ish since `isTagged` makes every unit of work
-    /// idempotent; also called as an in-app fallback (e.g. app entering
-    /// background) since BGProcessingTask timing is not guaranteed.
+    /// Sweeps the ENTIRE local library — downloaded tracks and plain local
+    /// imports alike — for anything that doesn't have the tag yet and tags
+    /// it. Widened (2026-08) from downloaded-only: the exclusive-extension
+    /// re-encode pass only ever picks up tagged tracks, so a track's local
+    /// origin used to mean it would never get swept into the re-encode
+    /// pipeline at all. Safe to call repeatedly/concurrently-ish since
+    /// `isTagged`/`needsTagging` make every unit of work idempotent; also
+    /// called as an in-app fallback (e.g. app entering background) since
+    /// BGProcessingTask timing is not guaranteed.
     @MainActor
     static func runBackfill() async {
         guard let library = LibraryManager.shared else { return }
 
         let candidates = library.importedSongs.filter { song in
-            guard let url = song.url, let sourceTrackID = song.sourceTrackID, !sourceTrackID.isEmpty else {
-                // No on-disk file, or a purely local import with no known
-                // source — nothing meaningful to encrypt/reinject for these.
-                return false
-            }
+            guard let url = song.url else { return false }
+            let expectedTrackID = expectedTrackID(for: song)
             // needsTagging (not isTagged) — catches both untagged files AND
             // ones carrying the wrong value from the Song.id/sourceTrackID
             // mixup bug (see LumisoundTrackTagger.needsTagging), so those
             // get silently repaired here instead of being skipped forever
             // for already "having a tag."
-            return LumisoundTrackTagger.needsTagging(fileURL: url, expectedTrackID: sourceTrackID)
+            return LumisoundTrackTagger.needsTagging(fileURL: url, expectedTrackID: expectedTrackID)
         }
         guard !candidates.isEmpty else { return }
 
@@ -128,27 +149,25 @@ enum LumisoundTrackVaultService {
         for (index, song) in candidates.enumerated() {
             if Task.isCancelled { break }
             if let allowedIDs, !allowedIDs.contains(song.id) { continue }
-            guard let url = song.url, let sourceTrackID = song.sourceTrackID else { continue }
+            guard let url = song.url else { continue }
             // BUG FIXED (2026-08): this used to pass `song.id` — an internal,
             // path-derived identifier like "local:Imported Music/.../track.m4a"
             // — as `trackID`, instead of `sourceTrackID` ("source:id", e.g.
-            // "youtube:aqGXCQ_5WOc"). Every consumer of this tag (duplicate
-            // detection's vault fallback, hasLocalCopy/localSourceIDs) compares
-            // the decrypted trackID against a real sourceTrackID, so the wrong
-            // value meant the fallback could never match anything — silently
-            // defeating the whole point of tagging tracks whose sourceTrackID
-            // field itself is empty (the well-known m4a LUMISOUND_ID-embedding
-            // gap — see DownloadLedgerStore's doc comment), which is exactly
-            // the set of tracks that actually needed this fallback to work.
-            // Reconstruct a real watch URL for youtube-sourced tracks (the
-            // only source we can deterministically rebuild one for from just
-            // the video ID); other sources have no equivalent today, so this
-            // stays empty for them — that only affects the informational
-            // sourceURL field, not trackID, which is the one dedup relies on.
-            let sourceURL = sourceTrackID.hasPrefix("youtube:")
-                ? "https://www.youtube.com/watch?v=\(sourceTrackID.dropFirst("youtube:".count))"
+            // "youtube:aqGXCQ_5WOc"), for DOWNLOADED tracks specifically.
+            // Every consumer of this tag (duplicate detection's vault
+            // fallback, hasLocalCopy/localSourceIDs) compares the decrypted
+            // trackID against a real sourceTrackID, so the wrong value meant
+            // the fallback could never match anything for those tracks.
+            // `expectedTrackID(for:)` below still uses the real
+            // sourceTrackID whenever one exists — it only falls back to
+            // song.id for plain local imports that never had a
+            // sourceTrackID to begin with, so there's no real ID for a
+            // future re-download to mismatch against.
+            let trackID = expectedTrackID(for: song)
+            let sourceURL = trackID.hasPrefix("youtube:")
+                ? "https://www.youtube.com/watch?v=\(trackID.dropFirst("youtube:".count))"
                 : ""
-            if LumisoundTrackTagger.tag(fileURL: url, trackID: sourceTrackID, sourceURL: sourceURL) {
+            if LumisoundTrackTagger.tag(fileURL: url, trackID: trackID, sourceURL: sourceURL) {
                 tagged += 1
             }
             if (index + 1) % batchSize == 0 {
@@ -156,6 +175,19 @@ enum LumisoundTrackVaultService {
             }
         }
         appLog("LumisoundTrackVaultService: tagged \(tagged)/\(candidates.count) track(s)", category: "background")
+    }
+
+    /// The trackID a song's vault tag should carry: its real
+    /// `sourceTrackID` when it has one (a downloaded/streamed track), or its
+    /// own `id` for a plain local import with no known source — giving
+    /// every on-disk track SOME expected value so the re-encode pass below
+    /// can pick it up, without ever inventing a fake `source:id`-shaped
+    /// value that could collide with a real one.
+    private static func expectedTrackID(for song: Song) -> String {
+        if let sourceTrackID = song.sourceTrackID, !sourceTrackID.isEmpty {
+            return sourceTrackID
+        }
+        return song.id
     }
 
     /// Re-encodes every vault-tagged track that isn't already converted into

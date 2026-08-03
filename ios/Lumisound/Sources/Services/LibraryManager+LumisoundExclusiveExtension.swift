@@ -11,8 +11,9 @@ extension LibraryManager {
     /// and the download ledger's filename record all get updated in the
     /// same pass. Skips:
     ///   - songs that aren't imported/local (no `url`), already converted,
-    ///     or not vault-tagged (only confirmed Lumisound-sourced downloads
-    ///     are eligible — see `LumisoundTrackVaultService`)
+    ///     or not vault-tagged yet (every on-disk track — downloaded or
+    ///     plain local import — becomes eligible once
+    ///     `LumisoundTrackVaultService.runBackfill` tags it)
     ///   - the currently-playing song, since replacing a file out from
     ///     under an open `AVAudioFile`/`AVPlayerItem` risks interrupting
     ///     playback; it's simply picked up on a later pass once it's no
