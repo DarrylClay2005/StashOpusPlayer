@@ -2,29 +2,35 @@ import Foundation
 
 // MARK: - LumisoundExclusiveExtensionService
 //
-// Renames an already-downloaded, already-vault-tagged track's file to carry
-// a Lumisound-exclusive extension on disk — the last, most visible layer of
-// the "this track belongs to Lumisound" pipeline started by
-// LumisoundTrackVault/LumisoundTrackTagger (the encrypted xattr metadata).
+// Finishes the "this track belongs to Lumisound" pipeline started by
+// LumisoundTrackVault/LumisoundTrackTagger (the encrypted xattr metadata):
+// actually re-encodes an already-downloaded, already-vault-tagged track's
+// audio into a fresh AAC .m4a container (real bytes rewritten via
+// `AudioEncoderService.convertPermanently`, not merely a file rename) and
+// appends a Lumisound-exclusive marker extension on top of that.
 //
-// The marker is appended as an OUTER extension rather than replacing the
-// real one (e.g. "Song.m4a" -> "Song.m4a.lms"), not stripped/renamed away:
+// The marker is appended as an OUTER extension on top of the real one
+// (e.g. "Song.opus" -> "Song.m4a.lms"), not stripped/renamed away:
 //   - `url.pathExtension` is genuinely ".lms" — no other app, share sheet,
 //     or file browser has any type association for it, which is the whole
 //     point ("exclusive").
-//   - The REAL container format is still recoverable in O(1), no file I/O,
-//     by unwrapping one more path-extension level (`effectiveExtension`
-//     below). Every place in this codebase that branches on file extension
-//     to make a format-dependent decision (playback routing for opus/webm/
-//     ogg, the lossless/format-tag badges, Vorbis-comment parsing, video
-//     frame artwork extraction, the corruption scanner's/library scan's
-//     "is this an audio file" gate) was updated this session to call
-//     `effectiveExtension(for:)` instead of raw `pathExtension` — see git
-//     history for the full list. A single flat rename (replacing the real
-//     extension outright) would have silently broken every one of those,
-//     since they'd have no way left to recover the real container type
-//     without decrypting the vault payload on every check — expensive and
-//     wrong for hot UI paths like list-row rendering.
+//   - The REAL (post-re-encode) container format is still recoverable in
+//     O(1), no file I/O, by unwrapping one more path-extension level
+//     (`effectiveExtension` below). Every place in this codebase that
+//     branches on file extension to make a format-dependent decision
+//     (playback routing for opus/webm/ogg, the lossless/format-tag badges,
+//     Vorbis-comment parsing, video frame artwork extraction, the
+//     corruption scanner's/library scan's "is this an audio file" gate)
+//     calls `effectiveExtension(for:)` instead of raw `pathExtension` — see
+//     git history for the full list.
+//
+// Re-encoding (rather than a pure rename) is the point of this pass, not
+// just the marker: every converted track ends up as AAC .m4a, which plays
+// back via AVAudioFile's native Tier 1 path in `AudioEncoderService`
+// instead of needing the opus/webm compatibility fallback on every play —
+// and, unlike a bare rename, a copy of the file with the marker stripped
+// off can't just be handed to another app/service and decoded as the
+// original container.
 enum LumisoundExclusiveExtensionService {
     static let marker = "lms"
 
@@ -42,26 +48,29 @@ enum LumisoundExclusiveExtensionService {
         url.pathExtension.lowercased() == marker
     }
 
-    /// Renames `fileURL` in place to append the marker extension. Pure
-    /// filesystem rename — never touches the file's bytes, so the real
-    /// audio container/codec is completely unchanged, and extended
-    /// attributes (the LumisoundTrackVault tag) survive intact since
-    /// they're attached to the inode, not the path, and this never crosses
-    /// a volume boundary. Returns the new URL, or `nil` if `fileURL` is
-    /// already converted, the destination somehow already exists, or the
-    /// rename fails (logged, never thrown — this is always called from a
-    /// best-effort background pass).
-    static func convert(fileURL: URL) -> URL? {
+    /// Re-encodes `fileURL`'s audio into a fresh AAC .m4a file at
+    /// `<original-name>.m4a.lms` (real bytes rewritten by
+    /// `AudioEncoderService.convertPermanently`, confirmed playable before
+    /// the original is removed) and returns the new URL — or `nil` if
+    /// `fileURL` is already converted, the destination somehow already
+    /// exists, or the re-encode fails (logged, never thrown — this is
+    /// always called from a best-effort background pass). Extended
+    /// attributes (the LumisoundTrackVault tag) are re-applied by the
+    /// caller after this returns, since a re-encode produces a brand new
+    /// inode rather than preserving the original's xattrs the way a rename
+    /// would have.
+    static func convert(fileURL: URL) async -> URL? {
         guard !isConverted(fileURL) else { return nil }
-        let newURL = fileURL.appendingPathExtension(marker)
+        let newURL = fileURL.deletingPathExtension()
+            .appendingPathExtension("m4a")
+            .appendingPathExtension(marker)
         let fm = FileManager.default
         guard !fm.fileExists(atPath: newURL.path) else { return nil }
-        do {
-            try fm.moveItem(at: fileURL, to: newURL)
-            return newURL
-        } catch {
-            appWarn("LumisoundExclusiveExtensionService: rename failed for \(fileURL.lastPathComponent): \(error.localizedDescription)", category: "background")
+        guard await AudioEncoderService.shared.convertPermanently(fileURL, to: newURL) else {
+            appWarn("LumisoundExclusiveExtensionService: re-encode failed for \(fileURL.lastPathComponent)", category: "background")
             return nil
         }
+        try? fm.removeItem(at: fileURL)
+        return newURL
     }
 }

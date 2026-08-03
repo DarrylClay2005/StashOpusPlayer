@@ -1,22 +1,24 @@
 import Foundation
 
 extension LibraryManager {
-    /// Converts a single already-vault-tagged imported song's file to carry
-    /// the Lumisound-exclusive extension (see `LumisoundExclusiveExtensionService`),
-    /// then re-keys every store that references the song by its old,
-    /// path-derived ID (`DocumentImportService`'s `"local:\(relative path)"`
-    /// scheme — the ID changes because the path changes) so nothing silently
-    /// disconnects from the rename: favorites, playlists, play history, and
-    /// the download ledger's filename record all get updated in the same
-    /// pass. Skips:
+    /// Re-encodes a single already-vault-tagged imported song's file into
+    /// the Lumisound-exclusive AAC container (see
+    /// `LumisoundExclusiveExtensionService`), then re-keys every store that
+    /// references the song by its old, path-derived ID
+    /// (`DocumentImportService`'s `"local:\(relative path)"` scheme — the ID
+    /// changes because the path/extension changes) so nothing silently
+    /// disconnects from the conversion: favorites, playlists, play history,
+    /// and the download ledger's filename record all get updated in the
+    /// same pass. Skips:
     ///   - songs that aren't imported/local (no `url`), already converted,
     ///     or not vault-tagged (only confirmed Lumisound-sourced downloads
     ///     are eligible — see `LumisoundTrackVaultService`)
-    ///   - the currently-playing song, since renaming a file out from under
-    ///     an open `AVAudioFile`/`AVPlayerItem` risks interrupting playback;
-    ///     it's simply picked up on a later pass once it's no longer playing.
+    ///   - the currently-playing song, since replacing a file out from
+    ///     under an open `AVAudioFile`/`AVPlayerItem` risks interrupting
+    ///     playback; it's simply picked up on a later pass once it's no
+    ///     longer playing.
     @discardableResult
-    func convertToLumisoundExclusiveExtension(songID: String, currentlyPlayingID: String?) -> Bool {
+    func convertToLumisoundExclusiveExtension(songID: String, currentlyPlayingID: String?) async -> Bool {
         // Split out of one big `guard` (temporarily, for field diagnosis —
         // see the session that added this comment) so a failure logs WHICH
         // condition tripped instead of the earlier silent `return false`
@@ -37,16 +39,24 @@ extension LibraryManager {
         guard !LumisoundExclusiveExtensionService.isConverted(oldURL) else {
             return false // already converted — not a failure, just nothing to do
         }
-        guard LumisoundTrackTagger.isTagged(fileURL: oldURL) else {
-            appWarn("convertToLumisoundExclusiveExtension: skipped \(songID) at \(oldURL.lastPathComponent) — isTagged() false at convert time", category: "background")
+        guard let existingTag = LumisoundTrackTagger.readTag(fileURL: oldURL) else {
+            appWarn("convertToLumisoundExclusiveExtension: skipped \(songID) at \(oldURL.lastPathComponent) — no readable vault tag at convert time", category: "background")
             return false
         }
 
         let oldSong = importedSongs[index]
-        guard let newURL = LumisoundExclusiveExtensionService.convert(fileURL: oldURL) else {
-            appWarn("convertToLumisoundExclusiveExtension: rename failed for \(songID) at \(oldURL.lastPathComponent)", category: "background")
+        guard let newURL = await LumisoundExclusiveExtensionService.convert(fileURL: oldURL) else {
+            appWarn("convertToLumisoundExclusiveExtension: re-encode failed for \(songID) at \(oldURL.lastPathComponent)", category: "background")
             return false
         }
+        // Re-encoding writes a brand new inode (unlike the old rename-only
+        // path), so the xattr vault tag doesn't carry over automatically —
+        // re-apply it here using the tag we read off the original file
+        // before it was replaced, otherwise every converted track would
+        // silently lose the dedup fallback tag (see LibraryManager+
+        // DuplicateDetection.swift / DuplicateFinderService.swift), which is
+        // the exact class of bug fixed for sourceTrackID mixups elsewhere.
+        LumisoundTrackTagger.tag(fileURL: newURL, trackID: existingTag.trackID, sourceURL: existingTag.sourceURL)
 
         let newID = ScanCacheService.documentsRelativePath(for: newURL).map { "local:\($0)" } ?? oldSong.id
         let newSong = Song(

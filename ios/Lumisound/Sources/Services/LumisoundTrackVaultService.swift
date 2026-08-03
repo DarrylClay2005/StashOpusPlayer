@@ -158,9 +158,10 @@ enum LumisoundTrackVaultService {
         appLog("LumisoundTrackVaultService: tagged \(tagged)/\(candidates.count) track(s)", category: "background")
     }
 
-    /// Renames every vault-tagged track that isn't already converted to the
-    /// Lumisound-exclusive extension (see `LumisoundExclusiveExtensionService`),
-    /// re-keying favorites/playlists/play-history as it goes (see
+    /// Re-encodes every vault-tagged track that isn't already converted into
+    /// the Lumisound-exclusive AAC container (see
+    /// `LumisoundExclusiveExtensionService`), re-keying favorites/playlists/
+    /// play-history as it goes (see
     /// `LibraryManager.convertToLumisoundExclusiveExtension`). Runs on the
     /// same 5-minute foreground loop as the rest of this pipeline, plus
     /// whenever the BGProcessingTask backfill above actually gets to run.
@@ -210,7 +211,7 @@ enum LumisoundTrackVaultService {
         var failedSongIDs: [String] = []
         for (index, song) in candidates.enumerated() {
             if Task.isCancelled { break }
-            if library.convertToLumisoundExclusiveExtension(songID: song.id, currentlyPlayingID: currentlyPlayingID) {
+            if await library.convertToLumisoundExclusiveExtension(songID: song.id, currentlyPlayingID: currentlyPlayingID) {
                 converted += 1
             } else if failedSongIDs.count < 5 {
                 failedSongIDs.append(song.id)
