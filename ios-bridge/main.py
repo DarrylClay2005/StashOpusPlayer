@@ -2915,6 +2915,24 @@ async def download_relay(
     return StreamingResponse(_body(), status_code=status_code, headers=passthrough, media_type=media_type)
 
 
+def _ytdlp_generic_failure_summary(stderr: bytes) -> str:
+    """Fallback for when `_ytdlp_auth_failure_reason` doesn't recognize the
+    failure -- the generic "Could not download track" string that used to be
+    the ONLY thing stored in ios_download_log.error_message for these threw
+    away the real reason (yt-dlp's actual stderr was already captured for
+    the container log line right above this call, just never persisted
+    anywhere the Admin Dashboard's Recent Errors/Download Jobs views could
+    show it). Pulls the last `ERROR:` line yt-dlp printed, which is almost
+    always the actually-useful one buried under warnings/progress noise."""
+    text = stderr.decode(errors="replace").strip()
+    if not text:
+        return "Could not download track"
+    error_lines = [line.strip() for line in text.splitlines() if line.strip().startswith("ERROR:")]
+    summary = error_lines[-1] if error_lines else text.splitlines()[-1].strip()
+    summary = summary[len("ERROR:"):].strip() if summary.startswith("ERROR:") else summary
+    return summary[:300] if summary else "Could not download track"
+
+
 def _ytdlp_auth_failure_reason(stderr: bytes) -> Optional[str]:
     """Maps common yt-dlp stderr failure signatures to a user-facing reason —
     lets /api/stream and /api/download surface "upload your cookies" instead
@@ -3394,7 +3412,7 @@ async def _do_download_job(
             )
             shutil.rmtree(tmp_dir, ignore_errors=True)
             if attempt == max_attempts:
-                detail = _ytdlp_auth_failure_reason(last_stderr) or "Could not download track"
+                detail = _ytdlp_auth_failure_reason(last_stderr) or _ytdlp_generic_failure_summary(last_stderr)
                 raise HTTPException(status_code=404, detail=detail)
             continue
         logger.info(
