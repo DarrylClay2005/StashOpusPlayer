@@ -649,7 +649,8 @@ extension StreamingService {
             title: track.title,
             artist: track.artist,
             album: nil,
-            sourceTrackID: sourceTrackID
+            sourceTrackID: sourceTrackID,
+            thumbnailURL: track.thumbnailURL
         )
         let finalRawURL = taggedURL ?? rawFileURL
         if taggedURL != nil {

@@ -68,7 +68,22 @@ extension LibraryManager {
             duration: oldSong.duration,
             url: newURL,
             persistentID: oldSong.persistentID,
-            artworkCacheKey: newURL.lastPathComponent,
+            // Preserve the PRE-conversion cache key rather than resetting it
+            // to the new (post-conversion) filename — every downloaded
+            // track's artwork is already cached under its original filename
+            // by `prefetchArtworkWithFallback` at download time (or, for a
+            // streamed-origin Song, under its literal thumbnail URL). Since
+            // this conversion happens to essentially every track eventually,
+            // resetting the key here orphaned that already-successfully-
+            // cached artwork on disk every single time, forcing a full
+            // re-fetch through ArtworkService's fallback chain — which,
+            // for a track whose embedded LUMISOUND_THUMBNAIL tag/artwork
+            // also didn't survive re-encoding (see AudioEncoderService's
+            // metadata-carry-over fix and the repair migration below), had
+            // nothing left to fall back to and permanently showed no
+            // artwork. Falls back to the new filename only when there was
+            // no prior key at all (nothing to lose by keying fresh).
+            artworkCacheKey: oldSong.artworkCacheKey ?? newURL.lastPathComponent,
             trackNumber: oldSong.trackNumber,
             year: oldSong.year,
             genre: oldSong.genre,
@@ -136,11 +151,28 @@ extension LibraryManager {
             return false
         }
 
+        // Reconstructs the same deterministic YouTube thumbnail URL
+        // ArtworkService's own runtime fallback uses (ArtworkService.
+        // loadArtwork's `sourceTrackID.hasPrefix("youtube:")` branch) — an
+        // embedded LUMISOUND_THUMBNAIL tag is a second, permanent path back
+        // to it that doesn't depend on the disk artwork cache still holding
+        // the right entry under the right key (see the artworkCacheKey fix
+        // in convertToLumisoundExclusiveExtension above for the bug this
+        // guards against).
+        var thumbnailURL: String?
+        if tag.trackID.hasPrefix("youtube:") {
+            let videoID = String(tag.trackID.dropFirst("youtube:".count))
+            if !videoID.isEmpty {
+                thumbnailURL = "https://i.ytimg.com/vi/\(videoID)/hqdefault.jpg"
+            }
+        }
+
         // AudioTagWriter verifies its own output is genuinely readable
         // before returning non-nil (see its doc comment) — a non-nil
         // `repairedURL` here is safe to treat as the new truth for `url`.
         guard let repairedURL = await AudioTagWriter.tag(
-            fileAt: url, title: song.title, artist: song.artist, album: song.album, sourceTrackID: tag.trackID
+            fileAt: url, title: song.title, artist: song.artist, album: song.album,
+            sourceTrackID: tag.trackID, thumbnailURL: thumbnailURL
         ) else {
             appWarn("repairEmbeddedMetadata: tag-write failed for \(songID) at \(url.lastPathComponent)", category: "background")
             return false

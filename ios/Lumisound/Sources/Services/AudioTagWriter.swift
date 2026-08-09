@@ -25,7 +25,8 @@ enum AudioTagWriter {
         title: String?,
         artist: String?,
         album: String?,
-        sourceTrackID: String
+        sourceTrackID: String,
+        thumbnailURL: String? = nil
     ) async -> URL? {
         let startTime = Date()
         let outURL = url.deletingLastPathComponent()
@@ -41,7 +42,7 @@ enum AudioTagWriter {
         session.outputFileType = .m4a
         session.outputURL = outURL
         session.metadata = buildMetadataItems(
-            title: title, artist: artist, album: album, sourceTrackID: sourceTrackID
+            title: title, artist: artist, album: album, sourceTrackID: sourceTrackID, thumbnailURL: thumbnailURL
         )
 
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -85,7 +86,7 @@ enum AudioTagWriter {
     }
 
     private static func buildMetadataItems(
-        title: String?, artist: String?, album: String?, sourceTrackID: String
+        title: String?, artist: String?, album: String?, sourceTrackID: String, thumbnailURL: String? = nil
     ) -> [AVMetadataItem] {
         var items: [AVMetadataItem] = []
 
@@ -114,6 +115,22 @@ enum AudioTagWriter {
         idItem.key = "LUMISOUND_ID" as NSString
         idItem.value = sourceTrackID as NSString
         items.append(idItem)
+
+        // Same purpose as the server's own `LUMISOUND_THUMBNAIL` tag (see
+        // main.py's tag_cmd) — ArtworkService.fetchEmbeddedThumbnailURL
+        // reads this back as a recovery path when a track's cache-keyed
+        // artwork ever goes missing (cache cleared, cache-format-version
+        // purge, ...). Written here too so on-device tagging (this app's
+        // relay-download path, and the repair migration for tracks whose
+        // embedded metadata got wiped by an old re-encode bug) closes the
+        // same gap the server-side job-based download path already covers.
+        if let thumbnailURL, !thumbnailURL.isEmpty {
+            let thumbItem = AVMutableMetadataItem()
+            thumbItem.keySpace = .quickTimeMetadata
+            thumbItem.key = "LUMISOUND_THUMBNAIL" as NSString
+            thumbItem.value = thumbnailURL as NSString
+            items.append(thumbItem)
+        }
 
         return items
     }
