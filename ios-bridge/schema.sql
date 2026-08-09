@@ -1362,3 +1362,37 @@ CREATE TRIGGER trg_touch_generated_at BEFORE UPDATE ON ios_weekly_mix_cache FOR 
 -- already exist, no new table needed.
 ALTER TABLE ios_push_tokens ADD COLUMN IF NOT EXISTS device_name VARCHAR(100) NULL;
 ALTER TABLE ios_push_tokens ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+-- Podcast support (Feature: podcasts) -- a genuinely new content type, not
+-- covered by any existing table. Episodes are NOT cached/mirrored here --
+-- /user/podcasts/episodes fetches and parses the RSS feed live on every
+-- call, since podcast feeds are small and this avoids a whole sync/
+-- staleness story for something the source already serves fresh. Only
+-- subscriptions (which feed to follow) and per-episode resume position
+-- need to persist.
+CREATE TABLE IF NOT EXISTS ios_podcast_subscriptions (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    feed_url TEXT NOT NULL,
+    title TEXT,
+    artwork_url TEXT,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ios_podcast_subscriptions_user_feed UNIQUE (user_id, feed_url),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ios_podcast_subscriptions_idx_user ON ios_podcast_subscriptions (user_id);
+
+-- guid is the RSS <guid> (or the enclosure URL when a feed omits guid) --
+-- stable per episode even though episodes aren't stored anywhere else here.
+CREATE TABLE IF NOT EXISTS ios_podcast_episode_progress (
+    user_id VARCHAR(36) NOT NULL,
+    feed_url TEXT NOT NULL,
+    episode_guid VARCHAR(500) NOT NULL,
+    title TEXT,
+    position_seconds DOUBLE PRECISION DEFAULT 0,
+    duration_seconds DOUBLE PRECISION DEFAULT 0,
+    completed BOOLEAN DEFAULT FALSE,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, feed_url, episode_guid),
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);

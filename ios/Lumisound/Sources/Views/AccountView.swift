@@ -258,6 +258,11 @@ struct AccountView: View {
                             .foregroundStyle(AppTheme.textPrimary)
                     }
 
+                    NavigationLink(destination: PodcastsView()) {
+                        Label("Podcasts", systemImage: "mic.square")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+
                     NavigationLink(destination: AchievementsView()) {
                         Label("Achievements", systemImage: "trophy")
                             .foregroundStyle(AppTheme.textPrimary)

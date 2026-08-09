@@ -19,10 +19,12 @@ import tempfile
 import time
 import urllib.request
 import uuid
+import xml.etree.ElementTree as ET
 import zipfile
 from collections import defaultdict
 from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Optional
 from urllib.parse import urlencode, urlsplit
 import urllib.error
@@ -15598,6 +15600,233 @@ async def gif_trending(
     """Trending GIFs — shown before the user types a search query, same
     "browse before you search" UX GIPHY's own picker uses."""
     return {"results": await _giphy_request("trending", {"limit": limit, "offset": offset})}
+
+
+# ---------------------------------------------------------------------------
+# Podcasts (Feature: podcasts) -- a genuinely new content type, not a
+# variation on the music-download pipeline. Episodes are fetched and parsed
+# live from each feed's RSS on every /episodes call rather than cached
+# server-side (see schema.sql's comment on ios_podcast_subscriptions) --
+# only which feeds a user follows, and per-episode resume position, persist.
+# ---------------------------------------------------------------------------
+
+_ITUNES_NS = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+
+
+class PodcastSubscribeRequest(BaseModel):
+    feed_url: str
+
+
+class PodcastEpisodeProgressRequest(BaseModel):
+    feed_url: str
+    episode_guid: str
+    title: Optional[str] = None
+    position_seconds: float = 0
+    duration_seconds: float = 0
+    completed: bool = False
+
+
+def _fetch_podcast_feed_sync(feed_url: str) -> ET.Element:
+    """Synchronous RSS fetch + parse -- call via asyncio.to_thread. Caller
+    MUST have already awaited _reject_ssrf_targets(feed_url); this function
+    doesn't re-check it, same division of responsibility as every other
+    "sync helper does the I/O, the async endpoint does the guard" pair in
+    this file."""
+    req = urllib.request.Request(feed_url, headers={"User-Agent": "Lumisound-Bridge/1.0"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        raw = resp.read()
+    root = ET.fromstring(raw)
+    channel = root.find("channel")
+    if channel is None:
+        raise ValueError("Not a valid RSS feed (no <channel>)")
+    return channel
+
+
+def _parse_podcast_channel_meta(channel: ET.Element) -> dict:
+    title = (channel.findtext("title") or "").strip()
+    artwork = None
+    image_el = channel.find("image")
+    if image_el is not None:
+        artwork = (image_el.findtext("url") or "").strip() or None
+    if not artwork:
+        itunes_image = channel.find(f"{_ITUNES_NS}image")
+        if itunes_image is not None:
+            artwork = itunes_image.get("href")
+    return {"title": title or None, "artwork_url": artwork}
+
+
+def _parse_podcast_episodes(channel: ET.Element, limit: int) -> list[dict]:
+    episodes: list[dict] = []
+    for item in channel.findall("item")[:limit]:
+        enclosure = item.find("enclosure")
+        audio_url = enclosure.get("url") if enclosure is not None else None
+        if not audio_url:
+            continue  # not a playable episode (some feeds mix in text-only items)
+
+        guid = (item.findtext("guid") or "").strip() or audio_url
+        duration_raw = (item.findtext(f"{_ITUNES_NS}duration") or "").strip()
+        duration_seconds = _parse_itunes_duration(duration_raw)
+
+        published_at = None
+        pub_date_raw = item.findtext("pubDate")
+        if pub_date_raw:
+            try:
+                published_at = parsedate_to_datetime(pub_date_raw).isoformat()
+            except (TypeError, ValueError):
+                published_at = None
+
+        episodes.append({
+            "guid": guid,
+            "title": (item.findtext("title") or "").strip(),
+            "description": (item.findtext("description") or item.findtext(f"{_ITUNES_NS}summary") or "").strip(),
+            "audio_url": audio_url,
+            "duration_seconds": duration_seconds,
+            "published_at": published_at,
+        })
+    return episodes
+
+
+def _parse_itunes_duration(raw: str) -> Optional[int]:
+    """iTunes `<itunes:duration>` is either a plain seconds count or
+    HH:MM:SS / MM:SS."""
+    if not raw:
+        return None
+    if raw.isdigit():
+        return int(raw)
+    parts = raw.split(":")
+    try:
+        parts_int = [int(p) for p in parts]
+    except ValueError:
+        return None
+    seconds = 0
+    for part in parts_int:
+        seconds = seconds * 60 + part
+    return seconds
+
+
+@app.post("/user/podcasts/subscriptions", status_code=201)
+async def subscribe_podcast(body: PodcastSubscribeRequest, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    await _reject_ssrf_targets(body.feed_url)
+    try:
+        channel = await asyncio.to_thread(_fetch_podcast_feed_sync, body.feed_url)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Couldn't read that feed: {exc}")
+    meta = _parse_podcast_channel_meta(channel)
+
+    sub_id = str(uuid.uuid4())
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_podcast_subscriptions (id, user_id, feed_url, title, artwork_url) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "ON CONFLICT (user_id, feed_url) DO UPDATE SET title = EXCLUDED.title, artwork_url = EXCLUDED.artwork_url "
+                "RETURNING id, feed_url, title, artwork_url, added_at",
+                (sub_id, user_id, body.feed_url, meta["title"], meta["artwork_url"]),
+            )
+            row = await cur.fetchone()
+    return {
+        "id": row[0], "feed_url": row[1], "title": row[2], "artwork_url": row[3],
+        "added_at": row[4].isoformat() if row[4] else None,
+    }
+
+
+@app.get("/user/podcasts/subscriptions")
+async def list_podcast_subscriptions(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, feed_url, title, artwork_url, added_at FROM ios_podcast_subscriptions "
+                "WHERE user_id = %s ORDER BY added_at DESC",
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+    return [
+        {"id": r[0], "feed_url": r[1], "title": r[2], "artwork_url": r[3], "added_at": r[4].isoformat() if r[4] else None}
+        for r in rows
+    ]
+
+
+@app.delete("/user/podcasts/subscriptions/{subscription_id}", status_code=204)
+async def unsubscribe_podcast(subscription_id: str, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM ios_podcast_subscriptions WHERE id = %s AND user_id = %s",
+                (subscription_id, user_id),
+            )
+
+
+@app.get("/user/podcasts/episodes")
+async def get_podcast_episodes(
+    feed_url: str = Query(...),
+    limit: int = Query(50, ge=1, le=200),
+    payload: dict = Depends(get_current_user),
+):
+    await _reject_ssrf_targets(feed_url)
+    try:
+        channel = await asyncio.to_thread(_fetch_podcast_feed_sync, feed_url)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Couldn't read that feed: {exc}")
+    return _parse_podcast_episodes(channel, limit)
+
+
+@app.put("/user/podcasts/episode-progress", status_code=204)
+async def update_podcast_episode_progress(
+    body: PodcastEpisodeProgressRequest,
+    payload: dict = Depends(get_current_user),
+):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_podcast_episode_progress
+                    (user_id, feed_url, episode_guid, title, position_seconds, duration_seconds, completed)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id, feed_url, episode_guid) DO UPDATE SET
+                    title = EXCLUDED.title, position_seconds = EXCLUDED.position_seconds,
+                    duration_seconds = EXCLUDED.duration_seconds, completed = EXCLUDED.completed,
+                    updated_at = NOW()
+                """,
+                (
+                    user_id, body.feed_url, body.episode_guid, body.title,
+                    body.position_seconds, body.duration_seconds, body.completed,
+                ),
+            )
+
+
+@app.get("/user/podcasts/episode-progress")
+async def get_podcast_episode_progress(
+    feed_url: str = Query(...),
+    payload: dict = Depends(get_current_user),
+):
+    """Returns every tracked episode position for `feed_url` -- the client
+    merges this with the live episode list (title/audio_url/etc. from
+    /episodes) by `episode_guid` to show "in progress"/"completed" state."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT episode_guid, position_seconds, duration_seconds, completed, updated_at "
+                "FROM ios_podcast_episode_progress WHERE user_id = %s AND feed_url = %s",
+                (user_id, feed_url),
+            )
+            rows = await cur.fetchall()
+    return [
+        {
+            "episode_guid": r[0], "position_seconds": r[1], "duration_seconds": r[2],
+            "completed": r[3], "updated_at": r[4].isoformat() if r[4] else None,
+        }
+        for r in rows
+    ]
 
 
 # ---------------------------------------------------------------------------

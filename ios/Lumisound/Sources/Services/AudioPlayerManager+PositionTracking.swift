@@ -67,6 +67,29 @@ extension AudioPlayerManager {
             isPlaying: isPlaying,
             bpm: currentSong.flatMap { $0.bpm ?? bpmCache[$0.id] }
         )
+        pushPodcastProgressIfNeeded()
+    }
+
+    /// Podcast episodes (see PodcastEpisodesView) are constructed as a plain
+    /// `Song` with `genre = "Podcast"` and `album` repurposed to carry the
+    /// episode's feed URL — `Song` has no dedicated podcast fields, and
+    /// adding one would touch every `Song` call site/decoder for a value
+    /// only this one flow needs. `id` is the episode's stable RSS guid.
+    /// Same 5s-during-playback cadence as the music playback-state push
+    /// above, piggybacking on the same timer tick rather than a second one.
+    private func pushPodcastProgressIfNeeded() {
+        guard let song = currentSong, song.genre == "Podcast", !song.album.isEmpty else { return }
+        let completed = duration > 0 && position >= duration - 5
+        Task {
+            await AccountService.shared?.updatePodcastEpisodeProgress(
+                feedURL: song.album,
+                episodeGuid: song.id,
+                title: song.title,
+                position: position,
+                duration: duration,
+                completed: completed
+            )
+        }
     }
 
     /// Logs the current track to `/user/history` (`AccountService.logPlay`)

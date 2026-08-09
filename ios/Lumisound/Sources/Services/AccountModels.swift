@@ -939,3 +939,55 @@ struct RegisteredDevice: Codable, Identifiable {
         case lastSeenAt = "last_seen_at"
     }
 }
+
+// MARK: - Podcasts
+
+struct PodcastSubscription: Codable, Identifiable {
+    let id: String
+    let feedURL: String
+    let title: String?
+    let artworkURL: String?
+    let addedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case feedURL = "feed_url"
+        case title
+        case artworkURL = "artwork_url"
+        case addedAt = "added_at"
+    }
+}
+
+struct PodcastEpisode: Codable, Identifiable {
+    let guid: String
+    let title: String
+    let description: String
+    let audioURL: String
+    let durationSeconds: Int?
+    let publishedAt: String?
+
+    var id: String { guid }
+
+    enum CodingKeys: String, CodingKey {
+        case guid, title, description
+        case audioURL = "audio_url"
+        case durationSeconds = "duration_seconds"
+        case publishedAt = "published_at"
+    }
+}
+
+struct PodcastEpisodeProgress: Codable {
+    let episodeGuid: String
+    let positionSeconds: Double
+    let durationSeconds: Double
+    let completed: Bool
+    let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case episodeGuid = "episode_guid"
+        case positionSeconds = "position_seconds"
+        case durationSeconds = "duration_seconds"
+        case completed
+        case updatedAt = "updated_at"
+    }
+}
