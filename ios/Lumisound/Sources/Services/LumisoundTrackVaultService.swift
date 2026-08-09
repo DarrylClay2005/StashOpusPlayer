@@ -257,24 +257,31 @@ enum LumisoundTrackVaultService {
         appLog("LumisoundTrackVaultService: converted \(converted)/\(candidates.count) track(s) to the Lumisound-exclusive extension" + (failedSongIDs.isEmpty ? "" : "; sample failures: \(failedSongIDs)"), category: "background")
     }
 
-    /// One-time repair for tracks converted by the pre-fix version of
-    /// `AudioEncoderService`, which re-encoded audio without carrying
-    /// title/artist/album/`LUMISOUND_ID` metadata forward — every track
-    /// converted before that fix shipped is stuck permanently "converted"
-    /// (so `runExtensionConversionPass` above will never look at it again)
-    /// but with a stripped, tag-less file on disk. Runs once per install
-    /// (`_metadataRepairMigrationKey` guard, same shape as any other
-    /// one-time migration), scanning every already-converted track and
-    /// re-embedding what's missing via
-    /// `LibraryManager.repairEmbeddedMetadata`. Checking
-    /// `hasEmbeddedSourceTag` is an async AVAsset metadata load per file —
-    /// not free — which is exactly why this is gated to run once rather
-    /// than every 5-minute pass like the rest of this pipeline.
-    private static let metadataRepairMigrationKey = "lumisoundTrackVault.metadataRepairMigration.v1.done"
+    /// Repair pass for tracks that ended up "converted" (see
+    /// `LumisoundExclusiveExtensionService.isConverted`) but missing their
+    /// embedded title/artist/album/`LUMISOUND_ID` — a track in this state
+    /// is stuck permanently: `runExtensionConversionPass` above only ever
+    /// looks at NOT-yet-converted tracks, so nothing else in this pipeline
+    /// will ever revisit it. Originally written as a strict one-time
+    /// migration for tracks converted before the AudioEncoderService fix
+    /// that stopped this from happening going forward — changed to a
+    /// periodic (`_metadataRepairMigrationInterval`) re-check instead of
+    /// permanently-once after confirming (from real device files) that
+    /// freshly-converted tracks could still come out tag-less even on a
+    /// build that includes that fix. Whatever the exact remaining cause
+    /// turns out to be, a strictly one-time repair pass means any track
+    /// that hits it AFTER the one run completes is broken forever with no
+    /// self-healing — same reasoning as this pipeline's other passes.
+    /// Checking `hasEmbeddedSourceTag` is an async AVAsset metadata load
+    /// per file — not free — which is why this still isn't folded into the
+    /// plain 5-minute loop like the rest of this pipeline.
+    private static let metadataRepairMigrationLastRunKey = "lumisoundTrackVault.metadataRepairMigration.lastRun"
+    private static let metadataRepairMigrationInterval: TimeInterval = 24 * 60 * 60
 
     @MainActor
     static func runMetadataRepairMigrationIfNeeded() async {
-        guard !UserDefaults.standard.bool(forKey: metadataRepairMigrationKey) else { return }
+        let lastRun = UserDefaults.standard.double(forKey: metadataRepairMigrationLastRunKey)
+        guard Date().timeIntervalSince1970 - lastRun >= metadataRepairMigrationInterval else { return }
         guard let library = LibraryManager.shared else { return }
         let currentlyPlayingID = AudioPlayerManager.shared?.currentSong?.id
 
@@ -283,7 +290,7 @@ enum LumisoundTrackVaultService {
             acc[song.id] = url
         }
         guard !convertedURLsByID.isEmpty else {
-            UserDefaults.standard.set(true, forKey: metadataRepairMigrationKey)
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: metadataRepairMigrationLastRunKey)
             return
         }
 
@@ -322,7 +329,7 @@ enum LumisoundTrackVaultService {
 
         guard !idsNeedingRepair.isEmpty else {
             appLog("LumisoundTrackVaultService: metadata repair migration — nothing to repair", category: "background")
-            UserDefaults.standard.set(true, forKey: metadataRepairMigrationKey)
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: metadataRepairMigrationLastRunKey)
             return
         }
         appLog("LumisoundTrackVaultService: metadata repair migration — \(idsNeedingRepair.count) track(s) need repair", category: "background")
@@ -351,13 +358,14 @@ enum LumisoundTrackVaultService {
         }
 
         appLog("LumisoundTrackVaultService: metadata repair migration — repaired \(repaired)/\(idsNeedingRepair.count) track(s)", category: "background")
-        // Only marked done once every converted track either already had
-        // its tag or was successfully repaired this pass — anything left
-        // unresolved (currently playing, or a repair that failed) means
-        // this stays unset so a later pass retries it. hasEmbeddedSourceTag
+        // Only advances lastRun once every converted track either already
+        // had its tag or was successfully repaired this pass — anything
+        // left unresolved (currently playing, or a repair that failed)
+        // means this stays due so the very next periodic tick retries it
+        // instead of waiting out the full interval. hasEmbeddedSourceTag
         // makes re-running cheap: already-fixed tracks are skipped instantly.
         if allResolved {
-            UserDefaults.standard.set(true, forKey: metadataRepairMigrationKey)
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: metadataRepairMigrationLastRunKey)
         }
     }
 

@@ -153,9 +153,19 @@ jobs:
           APP=$(find build/Lumisound.xcarchive -name "*.app" | head -1)
           if [ -z "$APP" ]; then
             echo "::error::Archive did not produce a .app bundle"
+            echo "--- Full xcodebuild log (build failed, tail -20 above was insufficient) ---"
+            cat /tmp/xcodebuild.log
             exit 1
           fi
           echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+
+      - name: Upload full xcodebuild log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: /tmp/xcodebuild.log
+          retention-days: 14
 
       # actool is only needed for unsigned builds: the full Xcode pipeline
       # compiles asset catalogs automatically when signing is enabled.
