@@ -123,8 +123,10 @@ actor BPMAnalyzerService {
 
     /// Decodes the first `maxSeconds` of `url`'s audio track to mono 16-bit PCM
     /// at `sampleRate`. Returns `nil` if the file has no audio track or can't
-    /// be opened by `AVAssetReader`.
-    private static func decodeMono(url: URL, sampleRate: Double, maxSeconds: Double) async -> [Int16]? {
+    /// be opened by `AVAssetReader`. Internal (not `private`) since
+    /// `PitchContourService` (hum-to-search) reuses this exact decode path
+    /// rather than duplicating its own `AVAssetReader` boilerplate.
+    static func decodeMono(url: URL, sampleRate: Double, maxSeconds: Double) async -> [Int16]? {
         let asset = AVURLAsset(url: url)
         guard let tracks = try? await asset.loadTracks(withMediaType: .audio),
               let track = tracks.first,

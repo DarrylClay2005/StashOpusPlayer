@@ -148,6 +148,10 @@
          a Face ID device, even though Touch ID/passcode need no such key. -->
     <key>NSFaceIDUsageDescription</key>
     <string>Lumisound can use Face ID to lock the app, since it syncs your playlists and listening history to your account.</string>
+    <!-- Required by AVAudioRecorder (Hum to Search) — omitting this crashes
+         the app the first time recording is attempted. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Lumisound records a short hum to find a matching song already in your library.</string>
 
     <!-- Status bar -->
     <key>UIStatusBarStyle</key>
