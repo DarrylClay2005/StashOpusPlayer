@@ -71,6 +71,7 @@ enum LumisoundTrackVaultService {
         let work = Task {
             await runBackfill()
             await runExtensionConversionPass()
+            await runMetadataRepairMigrationIfNeeded()
             task.setTaskCompleted(success: true)
         }
         task.expirationHandler = {
@@ -102,6 +103,7 @@ enum LumisoundTrackVaultService {
                 guard !Task.isCancelled else { break }
                 await runBackfill()
                 await runExtensionConversionPass()
+                await runMetadataRepairMigrationIfNeeded()
             }
         }
     }
@@ -253,6 +255,110 @@ enum LumisoundTrackVaultService {
             }
         }
         appLog("LumisoundTrackVaultService: converted \(converted)/\(candidates.count) track(s) to the Lumisound-exclusive extension" + (failedSongIDs.isEmpty ? "" : "; sample failures: \(failedSongIDs)"), category: "background")
+    }
+
+    /// One-time repair for tracks converted by the pre-fix version of
+    /// `AudioEncoderService`, which re-encoded audio without carrying
+    /// title/artist/album/`LUMISOUND_ID` metadata forward — every track
+    /// converted before that fix shipped is stuck permanently "converted"
+    /// (so `runExtensionConversionPass` above will never look at it again)
+    /// but with a stripped, tag-less file on disk. Runs once per install
+    /// (`_metadataRepairMigrationKey` guard, same shape as any other
+    /// one-time migration), scanning every already-converted track and
+    /// re-embedding what's missing via
+    /// `LibraryManager.repairEmbeddedMetadata`. Checking
+    /// `hasEmbeddedSourceTag` is an async AVAsset metadata load per file —
+    /// not free — which is exactly why this is gated to run once rather
+    /// than every 5-minute pass like the rest of this pipeline.
+    private static let metadataRepairMigrationKey = "lumisoundTrackVault.metadataRepairMigration.v1.done"
+
+    @MainActor
+    static func runMetadataRepairMigrationIfNeeded() async {
+        guard !UserDefaults.standard.bool(forKey: metadataRepairMigrationKey) else { return }
+        guard let library = LibraryManager.shared else { return }
+        let currentlyPlayingID = AudioPlayerManager.shared?.currentSong?.id
+
+        let convertedURLsByID: [String: URL] = library.importedSongs.reduce(into: [:]) { acc, song in
+            guard let url = song.url, LumisoundExclusiveExtensionService.isConverted(url) else { return }
+            acc[song.id] = url
+        }
+        guard !convertedURLsByID.isEmpty else {
+            UserDefaults.standard.set(true, forKey: metadataRepairMigrationKey)
+            return
+        }
+
+        appLog("LumisoundTrackVaultService: metadata repair migration — checking \(convertedURLsByID.count) already-converted track(s)", category: "background")
+
+        // Check phase: `hasEmbeddedSourceTag` for every already-converted
+        // track, run concurrently off the main actor — after this fix, the
+        // overwhelming majority of a library will already have its tag
+        // (only tracks converted before this migration shipped don't), so
+        // this scan itself is the expensive part and must not run as a
+        // sequential main-actor loop (that's exactly the pattern that made
+        // this migration a lag source when it was first written).
+        let idsNeedingRepair: [String] = await Task.detached(priority: .utility) {
+            await withTaskGroup(of: String?.self) { group in
+                var needsRepair: [String] = []
+                var pending = 0
+                let maxConcurrent = 8
+                var iterator = convertedURLsByID.makeIterator()
+
+                func launchNext() {
+                    guard let (id, url) = iterator.next() else { return }
+                    pending += 1
+                    group.addTask {
+                        await LumisoundExclusiveExtensionService.hasEmbeddedSourceTag(fileURL: url) ? nil : id
+                    }
+                }
+                while pending < maxConcurrent { launchNext() }
+                for await result in group {
+                    pending -= 1
+                    if let result { needsRepair.append(result) }
+                    launchNext()
+                }
+                return needsRepair
+            }
+        }.value
+
+        guard !idsNeedingRepair.isEmpty else {
+            appLog("LumisoundTrackVaultService: metadata repair migration — nothing to repair", category: "background")
+            UserDefaults.standard.set(true, forKey: metadataRepairMigrationKey)
+            return
+        }
+        appLog("LumisoundTrackVaultService: metadata repair migration — \(idsNeedingRepair.count) track(s) need repair", category: "background")
+
+        // Repair phase: comparatively rare (only tracks actually missing
+        // the tag) and each repair is a real file write, so this part stays
+        // sequential on the main actor like every other mutating pass in
+        // this pipeline — but it's operating on a small subset now, not the
+        // whole library.
+        var repaired = 0
+        var allResolved = true
+        for (index, id) in idsNeedingRepair.enumerated() {
+            if Task.isCancelled { allResolved = false; break }
+            if id == currentlyPlayingID {
+                allResolved = false
+                continue
+            }
+            if await library.repairEmbeddedMetadata(songID: id, currentlyPlayingID: currentlyPlayingID) {
+                repaired += 1
+            } else {
+                allResolved = false
+            }
+            if (index + 1) % batchSize == 0 {
+                await Task.yield()
+            }
+        }
+
+        appLog("LumisoundTrackVaultService: metadata repair migration — repaired \(repaired)/\(idsNeedingRepair.count) track(s)", category: "background")
+        // Only marked done once every converted track either already had
+        // its tag or was successfully repaired this pass — anything left
+        // unresolved (currently playing, or a repair that failed) means
+        // this stays unset so a later pass retries it. hasEmbeddedSourceTag
+        // makes re-running cheap: already-fixed tracks are skipped instantly.
+        if allResolved {
+            UserDefaults.standard.set(true, forKey: metadataRepairMigrationKey)
+        }
     }
 
     /// Optional user-authored policy script — no bundled/picker UI for this

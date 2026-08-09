@@ -34,6 +34,38 @@ enum LuaJSONBridge {
     /// typically `return json.encode(someTable)`) and decodes that JSON as
     /// `T`. `convertFromSnakeCase` matches the convention every bundled Lua
     /// script here uses for table keys (`eq_bands`, `pitch_semitones`, …).
+    /// Escapes `s` as a Lua double-quoted string literal, safe to splice
+    /// directly into generated Lua source. Every engine that injects
+    /// JSON-encoded, externally-sourced data (song titles/artists — which can
+    /// contain arbitrary text, e.g. from a YouTube uploader) into a harness
+    /// script MUST route it through this rather than a raw `[==[ ... ]==]`
+    /// long-bracket literal: a long bracket's closing sequence is a fixed,
+    /// guessable string, so any field value containing it terminates the
+    /// literal early and lets the rest of that value execute as Lua source
+    /// in the harness's own scope. A quoted literal has no naturally
+    /// occurring terminator — every byte that could end the string early
+    /// (`"`, `\`) or that Lua would otherwise mis-tokenize is escaped.
+    static func quotedLuaString(_ s: String) -> String {
+        var out = "\""
+        out.reserveCapacity(s.utf8.count + 2)
+        for scalar in s.unicodeScalars {
+            switch scalar {
+            case "\"": out += "\\\""
+            case "\\": out += "\\\\"
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            default:
+                if scalar.value < 0x20 || scalar.value == 0x7F {
+                    out += "\\\(scalar.value)"
+                } else {
+                    out.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        out += "\""
+        return out
+    }
+
     static func run<T: Decodable>(
         _ source: String,
         chunkName: String,

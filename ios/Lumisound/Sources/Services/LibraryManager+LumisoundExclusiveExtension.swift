@@ -109,4 +109,55 @@ extension LibraryManager {
         rebuildAllSongs()
         return true
     }
+
+    /// Repairs a single ALREADY-converted track whose embedded
+    /// `LUMISOUND_ID`/title/artist/album went missing — the bug fixed in
+    /// `AudioEncoderService`'s re-encode paths not carrying source metadata
+    /// forward (they now do; this repairs files converted before that fix).
+    /// Re-embeds title/artist/album plus a reconstructed `LUMISOUND_ID` (the
+    /// trackID recovered from the vault xattr tag, which DID survive the
+    /// original conversion) via a fast passthrough remux (`AudioTagWriter`,
+    /// no audio re-decode), replacing the file IN PLACE at its existing URL
+    /// — unlike `convertToLumisoundExclusiveExtension`, the filename/
+    /// extension don't change here, so no re-keying of favorites/playlists/
+    /// play history is needed. Returns `false` (not an error) when there's
+    /// nothing to do: not converted, not local, no vault tag to recover a
+    /// trackID from, or the currently-playing song.
+    @discardableResult
+    func repairEmbeddedMetadata(songID: String, currentlyPlayingID: String?) async -> Bool {
+        guard songID != currentlyPlayingID else { return false }
+        guard let index = importedSongs.firstIndex(where: { $0.id == songID }) else { return false }
+        let song = importedSongs[index]
+        guard let url = song.url, url.isFileURL, LumisoundExclusiveExtensionService.isConverted(url) else {
+            return false
+        }
+        guard let tag = LumisoundTrackTagger.readTag(fileURL: url), !tag.trackID.isEmpty else {
+            appWarn("repairEmbeddedMetadata: skipped \(songID) at \(url.lastPathComponent) — no readable vault tag to recover a trackID from", category: "background")
+            return false
+        }
+
+        guard let repairedURL = await AudioTagWriter.tag(
+            fileAt: url, title: song.title, artist: song.artist, album: song.album, sourceTrackID: tag.trackID
+        ) else {
+            appWarn("repairEmbeddedMetadata: tag-write failed for \(songID) at \(url.lastPathComponent)", category: "background")
+            return false
+        }
+
+        do {
+            _ = try FileManager.default.replaceItemAt(url, withItemAt: repairedURL)
+        } catch {
+            appWarn("repairEmbeddedMetadata: replaceItemAt failed for \(songID): \(error.localizedDescription)", category: "background")
+            try? FileManager.default.removeItem(at: repairedURL)
+            return false
+        }
+        // replaceItemAt (like the AudioTagWriter export before it) produces
+        // a new inode, so the xattr vault tag doesn't carry over for free —
+        // re-apply it, same as convertToLumisoundExclusiveExtension does.
+        LumisoundTrackTagger.tag(fileURL: url, trackID: tag.trackID, sourceURL: tag.sourceURL)
+        if let stamp = ScanCacheService.fileStamp(for: url) {
+            ScanCacheService.shared.store(song: song, for: url, stamp: stamp)
+            ScanCacheService.shared.persist()
+        }
+        return true
+    }
 }

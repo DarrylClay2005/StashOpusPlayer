@@ -75,7 +75,34 @@ struct SongsTab: View {
     /// `songs`, sorted per `sortOrder` — every place `songs` used to be
     /// rendered/played/shuffled/prefetched now goes through this instead, so
     /// "Play" starts from the top of whatever order is currently showing.
-    private var sortedSongs: [Song] {
+    ///
+    /// Backed by `sortedSongsCache` (recomputed only when a real dependency
+    /// changes — see `recomputeSortedSongs`/the `.onChange` modifiers on
+    /// `body`), not derived inline. This is referenced from ~8 separate
+    /// places across this view's several computed subviews (the action
+    /// header, both the list and grid bodies, prefetch bounds, entrance-
+    /// animation triggers, …) — as a plain computed property recomputing a
+    /// full O(n log n) sort (plus, with "Most Played" selected, two
+    /// `PlayHistoryStore` lookups per comparison) EVERY time any of those
+    /// read it, a single `body` evaluation for a several-thousand-song
+    /// library was paying for the same sort many times over, on every
+    /// render — including every keystroke while the search field above is
+    /// focused. Caching cuts that to one recompute per actual change.
+    ///
+    /// `sortedSongsCache` is `nil` (not `[]`) until the first `.onAppear`
+    /// populates it — falling straight back to a live compute in that gap
+    /// (rather than showing an empty list) matters because the very first
+    /// `body` evaluation renders the list/grid content synchronously, before
+    /// any `.onAppear`/`.onChange` modifier has had a chance to run.
+    private var sortedSongs: [Song] { sortedSongsCache ?? computeSortedSongs() }
+
+    @State private var sortedSongsCache: [Song]? = nil
+
+    private func recomputeSortedSongs() {
+        sortedSongsCache = computeSortedSongs()
+    }
+
+    private func computeSortedSongs() -> [Song] {
         let base: [Song]
         switch sortOrder {
         case .title:
@@ -332,6 +359,16 @@ struct SongsTab: View {
                 }
             }
         }
+        // Keeps `sortedSongsCache` (see `sortedSongs`) current — every
+        // modifier below that reads `sortedSongs` relies on one of these
+        // having already run first, which holds true here since SwiftUI
+        // fires same-event `.onAppear`/`.onChange` modifiers on one view in
+        // the order they're attached.
+        .onAppear { recomputeSortedSongs() }
+        .onChange(of: songs) { _ in recomputeSortedSongs() }
+        .onChange(of: sortOrderRaw) { _ in recomputeSortedSongs() }
+        .onChange(of: pinFavoritesFirst) { _ in recomputeSortedSongs() }
+        .onChange(of: library.favoriteSongIDs) { _ in recomputeSortedSongs() }
         .onAppear {
             // Warm the first 30 songs' artwork at background priority so
             // rows/cells have images ready before the user scrolls to them.

@@ -111,11 +111,16 @@ final class LibraryManager: ObservableObject {
         Self.shared = self
         favoriteSongIDs = persistence.loadFavorites()
         playlists = persistence.loadPlaylists()
-        // Show last session's library immediately — see `loadPersistedSnapshot`.
-        // The real scans below always run afterward and overwrite this with
-        // fresh data; this just removes the "empty list for several seconds"
+        // Show last session's library moments after launch — see
+        // `loadPersistedSnapshot`. Fired as a Task (not awaited here) since
+        // `init` runs before SwiftUI's first frame — awaiting inline would
+        // block that frame on the file read/decode, freezing the launch
+        // screen's animations for exactly as long as this took, which is
+        // the bug `loadPersistedSnapshot` was rewritten to fix. The real
+        // scans below always run afterward and overwrite this with fresh
+        // data; this just removes the "empty list for several seconds"
         // window for users with big libraries (1000+ songs).
-        loadPersistedSnapshot()
+        Task { [weak self] in await self?.loadPersistedSnapshot() }
         // Re-scan local documents whenever the app returns to the foreground so
         // that files the user added via the Files app while Lumisound was
         // backgrounded are picked up without requiring a manual refresh.

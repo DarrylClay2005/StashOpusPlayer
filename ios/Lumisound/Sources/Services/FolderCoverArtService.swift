@@ -34,9 +34,22 @@ final class FolderCoverArtService: ObservableObject {
     /// Stable, filesystem-safe key for `folderURL` — a raw path can't be used
     /// directly as a filename (slashes, length limits), and `String.hashValue`
     /// isn't guaranteed stable across launches (Swift randomizes its seed), so
-    /// this hashes the standardized path with SHA-256 instead.
+    /// this hashes a path with SHA-256 instead.
+    ///
+    /// Hashes the Documents-RELATIVE path (`ScanCacheService
+    /// .documentsRelativePath`), not the folder's absolute path — the app's
+    /// sandbox container UUID (the `/var/mobile/Containers/Data/Application/
+    /// <UUID>/...` prefix of every absolute path) changes across reinstalls
+    /// and can also be reassigned by iOS after a device restore/migration
+    /// even without a reinstall. Hashing the absolute path meant every
+    /// stored cover's lookup key silently stopped matching its folder the
+    /// next time that happened — the cover file was still sitting on disk,
+    /// just unreachable under its old digest, so custom folder covers
+    /// appeared to randomly vanish. Falls back to the absolute path only
+    /// for a folder genuinely outside Documents (shouldn't happen for a
+    /// local library folder, but keeps this from ever returning empty).
     private func key(for folderURL: URL) -> String {
-        let path = folderURL.standardizedFileURL.path
+        let path = ScanCacheService.documentsRelativePath(for: folderURL) ?? folderURL.standardizedFileURL.path
         let digest = SHA256.hash(data: Data(path.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }

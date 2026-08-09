@@ -43,10 +43,10 @@ struct SettingsView: View {
     @AppStorage("ytdlp_throttle_seconds") var ytdlpThrottleSeconds: Int = 5
     /// Parallel DASH fragments (yt-dlp -N). Bridge default is 4 (was 1) — a
     /// meaningful download speedup for fragmented/DASH audio at negligible
-    /// memory cost. Matches the bridge's own Query(4, ...) default in
+    /// memory cost. Matches the bridge's own Query(8, ...) default in
     /// /api/download so the displayed value here is honest about what
     /// actually happens when this is left untouched.
-    @AppStorage("ytdlp_concurrent_fragments") var ytdlpConcurrentFragments: Int = 4
+    @AppStorage("ytdlp_concurrent_fragments") var ytdlpConcurrentFragments: Int = 8
 
     // MARK: YouTube API Key Validation / Exposure Check State
 

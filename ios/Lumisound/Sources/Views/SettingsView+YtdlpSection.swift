@@ -40,7 +40,7 @@ extension SettingsView {
                             .foregroundStyle(AppTheme.textSecondary)
                     }
                 }
-                Stepper(value: $ytdlpConcurrentFragments, in: 1...8, step: 1) {
+                Stepper(value: $ytdlpConcurrentFragments, in: 1...16, step: 1) {
                     HStack {
                         Label("Parallel Fragments", systemImage: "hare")
                             .foregroundStyle(AppTheme.textPrimary)

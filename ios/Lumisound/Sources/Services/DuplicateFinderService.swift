@@ -319,7 +319,45 @@ final class DuplicateFinderService: ObservableObject {
                 guard !key.isEmpty, key != "|" else { continue }
                 byTitleArtist[key, default: []].append(song)
             }
-            for (_, matched) in byTitleArtist where matched.count > 1 {
+
+            // Near-match merge: an exact normalized-key match already caught
+            // the common case above, but a typo, an extra/missing word, or
+            // punctuation `normalize` doesn't strip (e.g. "Song Title" vs.
+            // "Song Titel", or "DJ Snake" vs. "DJ  Snake" surviving as
+            // distinct keys) would otherwise sit in two separate singleton
+            // groups and never surface as a duplicate at all. Union any two
+            // keys whose titles are a close edit-distance match AND whose
+            // artists match exactly — artist is still required verbatim so
+            // this doesn't start pairing unrelated songs that merely have
+            // similarly-spelled titles.
+            let keys = Array(byTitleArtist.keys)
+            var parent: [String: String] = [:]
+            for key in keys { parent[key] = key }
+            func find(_ x: String) -> String {
+                var x = x
+                while let p = parent[x], p != x { x = p }
+                return x
+            }
+            func union(_ a: String, _ b: String) {
+                let ra = find(a), rb = find(b)
+                if ra != rb { parent[ra] = rb }
+            }
+            for i in 0..<keys.count {
+                let partsI = keys[i].split(separator: "|", maxSplits: 1)
+                guard partsI.count == 2 else { continue }
+                for j in (i + 1)..<keys.count {
+                    let partsJ = keys[j].split(separator: "|", maxSplits: 1)
+                    guard partsJ.count == 2, partsI[1] == partsJ[1] else { continue }
+                    if isNearMatch(String(partsI[0]), String(partsJ[0])) {
+                        union(keys[i], keys[j])
+                    }
+                }
+            }
+            var byRootKey: [String: [Song]] = [:]
+            for key in keys {
+                byRootKey[find(key), default: []].append(contentsOf: byTitleArtist[key] ?? [])
+            }
+            for (_, matched) in byRootKey where matched.count > 1 {
                 groups.append(DuplicateGroup(id: UUID(), songs: matched, reason: .sameTitleAndArtist))
                 fallbackGroupCount += 1
             }
@@ -345,16 +383,25 @@ final class DuplicateFinderService: ObservableObject {
         let sorted = songs.sorted { $0.duration < $1.duration }
         var clusters: [[Song]] = []
         var current: [Song] = []
-        var clusterStart: TimeInterval?
+        var previousDuration: TimeInterval?
 
+        // Compares each song to the PREVIOUS song in sorted order, not a
+        // fixed cluster-start — a fixed start under-clusters any gradually
+        // drifting chain of durations. E.g. with tolerance 2s: 120, 121.9,
+        // 123.8 are each within tolerance of their neighbor, but 123.8 is
+        // 3.8s from 120, so comparing against a fixed start would wrongly
+        // split this into [120, 121.9] and [123.8] — two clusters that
+        // never get compared to each other — even though 121.9 and 123.8
+        // are themselves within tolerance and could be the same track
+        // trimmed slightly differently. A sliding comparison keeps the
+        // whole drifting chain in one cluster.
         for song in sorted {
-            if let start = clusterStart, song.duration - start > durationTolerance {
+            if let previous = previousDuration, song.duration - previous > durationTolerance {
                 clusters.append(current)
                 current = []
-                clusterStart = nil
             }
-            if clusterStart == nil { clusterStart = song.duration }
             current.append(song)
+            previousDuration = song.duration
         }
         if !current.isEmpty { clusters.append(current) }
         return clusters
@@ -460,6 +507,50 @@ final class DuplicateFinderService: ObservableObject {
             .filter { !$0.isEmpty }
             .sorted()
         return parts.joined(separator: " ")
+    }
+
+    /// True if `a` and `b` are close enough (Levenshtein edit distance,
+    /// scaled to length so short and long titles use proportionally
+    /// different tolerances) to be the same title with a typo or minor
+    /// formatting difference `normalize` didn't already collapse — used only
+    /// as a secondary merge on top of the exact-match fallback pass, and
+    /// only ever applied within a duration cluster that ALSO requires an
+    /// exact artist match, so it can't by itself pair two unrelated songs.
+    nonisolated private static func isNearMatch(_ a: String, _ b: String) -> Bool {
+        guard a != b else { return true }
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        // Cheap reject before paying for the O(n*m) distance computation:
+        // titles whose lengths differ by more than the max tolerance we'd
+        // ever allow can't possibly pass.
+        let maxLen = max(a.count, b.count)
+        guard abs(a.count - b.count) <= 3 else { return false }
+        let distance = levenshteinDistance(a, b)
+        // Scaled threshold: ~15% of the longer title's length, floored at 1
+        // (so single-character titles still require an exact match) and
+        // capped at 3 (so two genuinely different long titles that happen
+        // to share most characters don't get merged).
+        let threshold = min(3, max(1, Int(Double(maxLen) * 0.15)))
+        return distance <= threshold
+    }
+
+    nonisolated private static func levenshteinDistance(_ a: String, _ b: String) -> Int {
+        let aChars = Array(a), bChars = Array(b)
+        if aChars.isEmpty { return bChars.count }
+        if bChars.isEmpty { return aChars.count }
+        var previous = Array(0...bChars.count)
+        var current = [Int](repeating: 0, count: bChars.count + 1)
+        for i in 1...aChars.count {
+            current[0] = i
+            for j in 1...bChars.count {
+                if aChars[i - 1] == bChars[j - 1] {
+                    current[j] = previous[j - 1]
+                } else {
+                    current[j] = 1 + min(previous[j - 1], previous[j], current[j - 1])
+                }
+            }
+            previous = current
+        }
+        return previous[bChars.count]
     }
 }
 

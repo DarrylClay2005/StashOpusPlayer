@@ -87,6 +87,24 @@ extension StreamingService {
             return provisionalDestURL
         }
 
+        // Cross-process in-flight guard — everything above only catches a
+        // track that's ALREADY on disk (or already recorded as such). It
+        // does nothing for two downloads of the same sourceTrackID that
+        // start within moments of each other and are BOTH still in
+        // progress — the exact scenario `TrackedPlaylistStore
+        // .runAutoDownloads`'s own doc comment describes (a background
+        // refresh task and a foreground launch, often two separate process
+        // instances, both seeing the same track as "missing" before either
+        // has written it to disk). Claim this sourceTrackID before doing
+        // any real network work; if something else already holds it,
+        // there's a download for this exact track in flight elsewhere —
+        // skip rather than duplicate it.
+        guard DownloadLedgerStore.shared.beginDownload(sourceTrackID: sourceTrackID) else {
+            appLog("downloadToLibrary: skipping \"\(track.title)\" — another download of \(sourceTrackID) is already in flight", category: "network")
+            throw StreamingError.alreadyInFlight
+        }
+        defer { DownloadLedgerStore.shared.endDownload(sourceTrackID: sourceTrackID) }
+
         // Faster transports, tried before the job-based /api/download flow below —
         // each is best-effort and falls straight through to the proven job-based
         // path on ANY failure, so worst case behavior is unchanged from before
@@ -188,9 +206,9 @@ extension StreamingService {
         if throttle != 5 {
             queryItems.append(URLQueryItem(name: "throttle_seconds", value: String(max(0, min(60, throttle)))))
         }
-        let concurrentFrags = UserDefaults.standard.object(forKey: "ytdlp_concurrent_fragments") as? Int ?? 4
+        let concurrentFrags = UserDefaults.standard.object(forKey: "ytdlp_concurrent_fragments") as? Int ?? 8
         appLog("downloadToLibrary: job-based /api/download for \"\(track.title)\" [fmt: \(fmt), aria2: \(aria2Enabled), throttle: \(throttle)s, concurrentFrags: \(concurrentFrags)]", category: "network")
-        if concurrentFrags != 4 {
+        if concurrentFrags != 8 {
             queryItems.append(URLQueryItem(name: "concurrent_fragments", value: String(max(1, min(16, concurrentFrags)))))
         }
         // Defense-in-depth: also tell the bridge what the client already has, so

@@ -62,23 +62,71 @@ final class AudioEncoderService {
     /// caller-provided permanent location rather than the pruned temp cache,
     /// and always re-encodes rather than checking for a native-open
     /// pass-through — the caller already knows this file needs converting.
-    /// Uses the same AAC-export path as `transcodeForPlayback`'s tier 3: the
-    /// source is already lossy, so there's no benefit to the heavier
-    /// lossless (ALAC) tier for a one-time compatibility fix. Returns `true`
-    /// once `destinationURL` exists and is confirmed playable.
+    /// Tries the same AAC-export path as `transcodeForPlayback`'s tier 3
+    /// first (cheapest — the source is already lossy, so there's no quality
+    /// benefit to the heavier decode/re-encode tier). `AVAssetExportSession`
+    /// is pickier about input containers than `AVAssetReader` though (this
+    /// was previously the ONLY tier permanent conversion tried, so any file
+    /// it choked on — a real-world case for some Opus-in-WebM downloads —
+    /// silently stayed unconverted forever, retried every 5-minute pass with
+    /// the same failure): falls back to the AVAssetReader/AVAssetWriter
+    /// decode-then-AAC-encode path `transcodeForPlayback`'s tier 2 already
+    /// proves works for these same containers, before giving up. Returns
+    /// `true` once `destinationURL` exists and is confirmed playable.
     func convertPermanently(_ url: URL, to destinationURL: URL) async -> Bool {
         try? FileManager.default.removeItem(at: destinationURL)
-        guard let result = await aacExport(url, to: destinationURL) else { return false }
-        return (try? AVAudioFile(forReading: result)) != nil
+        if let result = await aacExport(url, to: destinationURL),
+           (try? AVAudioFile(forReading: result)) != nil {
+            return true
+        }
+        try? FileManager.default.removeItem(at: destinationURL)
+        guard await decodeAndReencode(url, to: destinationURL, settings: Self.aacSettings) else { return false }
+        return (try? AVAudioFile(forReading: destinationURL)) != nil
     }
 
     // MARK: - Lossless decode via AVAssetReader + AVAssetWriter
 
+    private static let alacSettings: [String: Any] = [
+        AVFormatIDKey:            kAudioFormatAppleLossless,
+        AVSampleRateKey:          48000.0,
+        AVNumberOfChannelsKey:    2,
+        AVEncoderBitDepthHintKey: 16
+    ]
+
+    private static let aacSettings: [String: Any] = [
+        AVFormatIDKey:           kAudioFormatMPEG4AAC,
+        AVSampleRateKey:         48000.0,
+        AVNumberOfChannelsKey:   2,
+        AVEncoderBitRateKey:     256_000
+    ]
+
     private func losslessTranscode(_ url: URL, to outURL: URL) async -> Bool {
+        await decodeAndReencode(url, to: outURL, settings: Self.alacSettings)
+    }
+
+    /// Decodes `url`'s audio to PCM via `AVAssetReader` and re-encodes it
+    /// straight to `outURL` with `settings` via `AVAssetWriter` — the
+    /// shared engine behind both the lossless (ALAC) playback-cache tier and
+    /// the AAC fallback tier of `convertPermanently`. `AVAssetReader` reads
+    /// container/codec combinations `AVAssetExportSession` sometimes
+    /// refuses, which is the whole reason this exists as a distinct path.
+    private func decodeAndReencode(_ url: URL, to outURL: URL, settings: [String: Any]) async -> Bool {
         let asset = AVURLAsset(url: url)
 
         guard let tracks = try? await asset.loadTracks(withMediaType: .audio),
               let track = tracks.first else { return false }
+
+        // `.metadata` (not `.commonMetadata`) — the full set of format-
+        // specific items, which is where a custom freeform atom like the
+        // bridge's `LUMISOUND_ID` tag lives. AVAssetWriter does NOT copy
+        // source metadata automatically; without explicitly reading and
+        // re-attaching it here, every track that goes through this decode/
+        // re-encode path (every WebM/Opus source AVAssetExportSession can't
+        // read directly) loses its title/artist/album AND its LUMISOUND_ID
+        // — silently defeating cross-device dedupe for exactly those files,
+        // despite LumisoundExclusiveExtensionService's header promising
+        // that tag "MUST stay plaintext/ffprobe-readable."
+        let sourceMetadata = (try? await asset.load(.metadata)) ?? []
 
         guard let reader = try? AVAssetReader(asset: asset) else { return false }
 
@@ -96,15 +144,9 @@ final class AudioEncoderService {
         guard reader.canAdd(readerOut) else { return false }
         reader.add(readerOut)
 
-        // Re-compress with ALAC — lossless integer compression of the PCM above
         guard let writer = try? AVAssetWriter(outputURL: outURL, fileType: .m4a) else { return false }
-        let alacSettings: [String: Any] = [
-            AVFormatIDKey:            kAudioFormatAppleLossless,
-            AVSampleRateKey:          48000.0,
-            AVNumberOfChannelsKey:    2,
-            AVEncoderBitDepthHintKey: 16
-        ]
-        let writerIn = AVAssetWriterInput(mediaType: .audio, outputSettings: alacSettings)
+        writer.metadata = sourceMetadata
+        let writerIn = AVAssetWriterInput(mediaType: .audio, outputSettings: settings)
         writerIn.expectsMediaDataInRealTime = false
         guard writer.canAdd(writerIn) else { return false }
         writer.add(writerIn)
@@ -150,6 +192,13 @@ final class AudioEncoderService {
         }
         session.outputFileType = .m4a
         session.outputURL      = outURL
+        // AVAssetExportSession does NOT carry source metadata over to the
+        // output file unless explicitly told to — leaving `.metadata` unset
+        // (the previous behavior here) silently strips title/artist/album
+        // and, critically, the bridge's plaintext LUMISOUND_ID tag that
+        // cross-device dedupe depends on. See the matching comment in
+        // `decodeAndReencode`.
+        session.metadata = (try? await asset.load(.metadata)) ?? []
 
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             session.exportAsynchronously { cont.resume() }

@@ -62,11 +62,11 @@ enum LuaSmartPlaylistEngine {
             return nil
         }
 
-        // Long-bracket string literal (`[==[ ... ]==]`) rather than a quoted
-        // string so nothing in the JSON payload (quotes, backslashes) needs
-        // escaping for Lua's benefit.
+        // Quoted (not long-bracket) so a song title/artist that happens to
+        // contain a long-bracket close sequence can't break out of the
+        // literal and run as Lua source — see LuaJSONBridge.quotedLuaString.
         let harness = """
-        local songs = json.decode([==[\(factsJSON)]==])
+        local songs = json.decode(\(LuaJSONBridge.quotedLuaString(factsJSON)))
         local matched = {}
         for i = 1, #songs do
             local ok, result = pcall(matches, songs[i])

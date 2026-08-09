@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 // MARK: - LumisoundExclusiveExtensionService
@@ -72,5 +73,25 @@ enum LumisoundExclusiveExtensionService {
         }
         try? fm.removeItem(at: fileURL)
         return newURL
+    }
+
+    /// True if `fileURL` has a readable, embedded `LUMISOUND_ID`-style
+    /// metadata item (the same case-insensitive substring check
+    /// `DocumentImportService.refreshTags`/`makeSong` use to find it).
+    /// Exists to detect files converted by the pre-fix version of
+    /// `convert(fileURL:)`/`AudioEncoderService`, which re-encoded audio
+    /// via `AVAssetExportSession`/`AVAssetWriter` without ever setting
+    /// `.metadata` on the session/writer — silently dropping title/artist/
+    /// album AND this tag from every converted file despite this very
+    /// file's header promising it "MUST stay plaintext/ffprobe-readable".
+    /// See `LumisoundTrackVaultService`'s one-time repair migration.
+    static func hasEmbeddedSourceTag(fileURL: URL) async -> Bool {
+        let asset = AVURLAsset(url: fileURL)
+        guard let items = try? await asset.load(.metadata) else { return false }
+        return items.contains { item in
+            let idRaw = item.identifier?.rawValue.lowercased() ?? ""
+            let keyRaw = (item.key as? String)?.lowercased() ?? ""
+            return idRaw.contains("lumisound_id") || keyRaw.contains("lumisound_id")
+        }
     }
 }

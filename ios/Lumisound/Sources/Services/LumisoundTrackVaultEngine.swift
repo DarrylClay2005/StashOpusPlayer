@@ -45,8 +45,11 @@ enum LumisoundTrackVaultEngine {
             return nil
         }
 
+        // Quoted (not long-bracket) so a track title/artist that happens to
+        // contain a long-bracket close sequence can't break out of the
+        // literal and run as Lua source — see LuaJSONBridge.quotedLuaString.
         let harness = """
-        local tracks = json.decode([==[\(factsJSON)]==])
+        local tracks = json.decode(\(LuaJSONBridge.quotedLuaString(factsJSON)))
         local matched = {}
         for i = 1, #tracks do
             local ok, result = pcall(should_tag, tracks[i])

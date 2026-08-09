@@ -80,15 +80,23 @@ extension LibraryManager {
             return result
         }.value
 
-        guard !candidates.isEmpty else { return }
-
         // Evict songs whose backing files no longer exist (e.g. moved by the user
-        // via Files app into an organised subfolder). Without this, the old path
-        // stays in existingURLs and the new path is never picked up as "new".
+        // via Files app into an organised subfolder, or the last local file was
+        // deleted outright). Runs even when `candidates` is empty — an early
+        // return before this point used to skip eviction entirely whenever the
+        // Documents tree had zero audio files left, leaving phantom entries for
+        // deleted tracks stuck in the library forever.
         let fm2 = FileManager.default
+        let countBeforeEviction = importedSongs.count
         importedSongs = importedSongs.filter { song in
             guard let url = song.url else { return false }
             return fm2.fileExists(atPath: url.path)
+        }
+        let evicted = countBeforeEviction != importedSongs.count
+
+        guard !candidates.isEmpty else {
+            if evicted { rebuildAllSongs() }
+            return
         }
 
         if force {

@@ -58,6 +58,10 @@ struct MySocialProfile: Decodable {
     let visitorCount: Int
     let recentVisitors: [ProfileVisitor]
     let featuredPlaylist: FeaturedPlaylist?
+    /// Feature: profile-customization-4 — how strongly the profile's
+    /// accent colors wash across the whole background (see
+    /// `ProfileAccentBackgroundGlow`). One of "subtle"/"normal"/"vivid"/"off".
+    let accentGlowIntensity: String
 
     enum CodingKeys: String, CodingKey {
         case userId          = "user_id"
@@ -82,6 +86,7 @@ struct MySocialProfile: Decodable {
         case visitorCount    = "visitor_count"
         case recentVisitors  = "recent_visitors"
         case featuredPlaylist = "featured_playlist"
+        case accentGlowIntensity = "accent_glow_intensity"
     }
 }
 
@@ -118,6 +123,8 @@ struct PublicSocialProfile: Decodable, Identifiable {
     /// owner — see the bridge's `_profile_visitor_stats` doc comment.
     let recentVisitors: [ProfileVisitor]
     let featuredPlaylist: FeaturedPlaylist?
+    /// Feature: profile-customization-4 — see `MySocialProfile`'s doc comment.
+    let accentGlowIntensity: String
 
     var id: String { userId }
 
@@ -144,6 +151,7 @@ struct PublicSocialProfile: Decodable, Identifiable {
         case visitorCount    = "visitor_count"
         case recentVisitors  = "recent_visitors"
         case featuredPlaylist = "featured_playlist"
+        case accentGlowIntensity = "accent_glow_intensity"
     }
 }
 

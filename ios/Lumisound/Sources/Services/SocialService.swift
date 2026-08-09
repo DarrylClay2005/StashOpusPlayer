@@ -58,7 +58,8 @@ final class SocialService: ObservableObject {
         bio: String? = nil, mainAccentHex: String? = nil, subAccentHex: String? = nil, shareNowPlaying: Bool? = nil,
         pronouns: String? = nil, statusEmoji: String? = nil, statusText: String? = nil, avatarFrame: String? = nil,
         showTopGenres: Bool? = nil, showGuestbook: Bool? = nil,
-        showVisitorStats: Bool? = nil, showListeningStats: Bool? = nil
+        showVisitorStats: Bool? = nil, showListeningStats: Bool? = nil,
+        accentGlowIntensity: String? = nil
     ) async {
         guard let account, account.isLoggedIn else { return }
         struct Body: Encodable {
@@ -74,6 +75,7 @@ final class SocialService: ObservableObject {
             let show_guestbook: Bool?
             let show_visitor_stats: Bool?
             let show_listening_stats: Bool?
+            let accent_glow_intensity: String?
         }
         do {
             _ = try await account.makeRequest(
@@ -82,7 +84,8 @@ final class SocialService: ObservableObject {
                     bio: bio, main_accent_hex: mainAccentHex, sub_accent_hex: subAccentHex, share_now_playing: shareNowPlaying,
                     pronouns: pronouns, status_emoji: statusEmoji, status_text: statusText, avatar_frame: avatarFrame,
                     show_top_genres: showTopGenres, show_guestbook: showGuestbook,
-                    show_visitor_stats: showVisitorStats, show_listening_stats: showListeningStats
+                    show_visitor_stats: showVisitorStats, show_listening_stats: showListeningStats,
+                    accent_glow_intensity: accentGlowIntensity
                 )
             )
             await fetchMyProfile()

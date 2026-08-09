@@ -336,7 +336,14 @@ struct LaunchView: View {
                 // small libraries (and so we're not sampling `isScanning` in the brief gap
                 // before LibraryView.onAppear has actually flipped it true), and a maximum
                 // cap so a stuck/never-starting scan can never trap the user here.
-                let minimumHold: UInt64 = 1_200_000_000   //  1.2 s
+                //
+                // Minimum raised 1.2s -> 6s: launch also kicks off several other
+                // async loads that don't feed `isScanning` at all (the account
+                // pull-sync, the persisted-snapshot restore, avatar/banner
+                // fetches) — a short hold could let the screen dismiss into a
+                // still-populating profile/library even once scanning itself
+                // reports done. 6s gives those a real chance to land first.
+                let minimumHold: UInt64 = 6_000_000_000   //  6.0 s
                 let maximumHold: UInt64 = 15_000_000_000  // 15.0 s
                 let pollInterval: UInt64 = 250_000_000    //  0.25 s
 

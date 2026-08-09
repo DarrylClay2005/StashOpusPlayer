@@ -105,10 +105,13 @@ struct PublicProfileView: View {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             Color.clear.ignoresSafeArea()
             if profile != nil {
-                ProfileAccentBackgroundGlow(mainAccent: mainAccentColor, subAccent: subAccentColor)
+                ProfileAccentBackgroundGlow(
+                    mainAccent: mainAccentColor, subAccent: subAccentColor,
+                    intensity: ProfileGlowIntensity.from(profile?.accentGlowIntensity)
+                )
             }
 
             if isLoading {

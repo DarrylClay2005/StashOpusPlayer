@@ -275,6 +275,10 @@ enum StreamingError: LocalizedError {
     /// the bridge's error `detail` field (e.g. "upload your YouTube cookies
     /// to play age-restricted videos") instead of a generic message.
     case serverDetail(String)
+    /// Another download of this exact sourceTrackID is already in flight
+    /// (see `DownloadLedgerStore.beginDownload`) — not a real failure, just
+    /// "don't duplicate work someone else already started."
+    case alreadyInFlight
 
     var errorDescription: String? {
         switch self {
@@ -314,6 +318,8 @@ enum StreamingError: LocalizedError {
             return "Download was incomplete. Please try again."
         case .corruptDownload:
             return "Downloaded file failed an integrity check. Please try again."
+        case .alreadyInFlight:
+            return "This track is already being downloaded."
         }
     }
 }

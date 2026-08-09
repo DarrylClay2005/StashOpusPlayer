@@ -187,29 +187,90 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
 /// `ZStack`, behind the scrollable content, on both `ProfileView` (own,
 /// editable) and `PublicProfileView` (another user's) so the effect is
 /// consistent everywhere a profile is shown.
+///
+/// BUG FIXED: both call sites wrapped this in a plain `ZStack { ... }` with
+/// no explicit alignment — `ZStack`'s default alignment is `.center`, so
+/// this fixed-height band was being centered vertically in the full screen
+/// instead of anchored to the top the way a top-to-bottom gradient (accent
+/// color at `startPoint: .top`) requires to read correctly. The visible
+/// result was a colored band floating in the middle of the screen with
+/// plain background above AND below it — neither the top (behind the
+/// banner, where the color should be strongest) nor the bottom actually
+/// showed any wash. Both call sites now pass `alignment: .top` to their
+/// `ZStack`. The gradient itself is also taller now with more, closer
+/// stops so the blend reaches further down the (often long, scrollable)
+/// profile content instead of cutting to fully transparent after a fixed
+/// 480pt, which — even with top alignment — would still have looked like
+/// color only near the very top and nothing for the rest of the page.
+/// Feature: profile-customization-4 — user-chosen strength for
+/// `ProfileAccentBackgroundGlow`'s wash, server-validated against this same
+/// allowlist (see main.py's `_valid_glow_intensity`). `multiplier` scales
+/// every stop's opacity uniformly rather than swapping in a whole separate
+/// stop list, so the color balance/falloff shape stays identical across
+/// intensities — only how strong it reads changes.
+enum ProfileGlowIntensity: String {
+    case off, subtle, normal, vivid
+
+    /// NOT `init(rawValue:)` — overloading the synthesized `init?(rawValue:
+    /// String)` with a second initializer differing only in the parameter
+    /// being `String?` is ambiguous-by-conversion at call sites that pass a
+    /// non-optional `String` (both become viable — the exact-match failable
+    /// one and this one via implicit optional-promotion — and Swift picks
+    /// the exact match), silently resolving to the WRONG (optional-
+    /// returning) initializer there instead of this one. A distinctly-named
+    /// static factory sidesteps the overload resolution entirely.
+    static func from(_ rawValue: String?) -> ProfileGlowIntensity {
+        ProfileGlowIntensity(rawValue: rawValue ?? "normal") ?? .normal
+    }
+
+    var multiplier: Double {
+        switch self {
+        case .off:     return 0
+        case .subtle:  return 0.55
+        case .normal:  return 1.0
+        case .vivid:   return 1.55
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .off:     return "Off"
+        case .subtle:  return "Subtle"
+        case .normal:  return "Normal"
+        case .vivid:   return "Vivid"
+        }
+    }
+}
+
 struct ProfileAccentBackgroundGlow: View {
     let mainAccent: Color
     let subAccent: Color
+    var intensity: ProfileGlowIntensity = .normal
 
     var body: some View {
-        LinearGradient(
-            colors: [
-                mainAccent.opacity(0.5),
-                subAccent.opacity(0.28),
-                subAccent.opacity(0.08),
-                .clear,
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .frame(maxWidth: .infinity)
-        .frame(height: 480)
+        let m = intensity.multiplier
+        GeometryReader { proxy in
+            LinearGradient(
+                colors: [
+                    mainAccent.opacity(0.55 * m),
+                    mainAccent.opacity(0.34 * m),
+                    subAccent.opacity(0.26 * m),
+                    subAccent.opacity(0.16 * m),
+                    subAccent.opacity(0.07 * m),
+                    .clear,
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(width: proxy.size.width, height: max(700, proxy.size.height * 0.85))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // Heavily blurred so this reads as an ambient color wash rather
         // than a hard-edged colored rectangle sitting behind the content —
         // the same "glow" treatment already used for the mini-player's
         // play button shadow and similar accent-colored chrome elsewhere.
         .blur(radius: 60)
-        .ignoresSafeArea(edges: .top)
+        .ignoresSafeArea()
         .allowsHitTesting(false)
     }
 }

@@ -19,19 +19,36 @@ extension LibraryManager {
         return caches.appendingPathComponent("library_snapshot_v1.json")
     }()
 
-    /// Reads the last-persisted library state synchronously so `allSongs` (and
-    /// the derived facet lists) are populated the instant `LibraryManager` is
+    /// Reads the last-persisted library state so `allSongs` (and the derived
+    /// facet lists) are populated moments after `LibraryManager` is
     /// constructed — before any scan has run. For a 1,100-song library the
     /// real scan can take many seconds; without this, the launch/library
     /// screens sit empty that whole time even though the user had a perfectly
     /// good library a moment ago. `scanMediaLibrary`/`scanLocalDocuments`/etc.
     /// always run after `init` and silently replace these values with fresh
     /// results once they complete (see `persistSnapshotIfSettled`).
-    func loadPersistedSnapshot() {
-        guard let data = try? Data(contentsOf: Self.snapshotURL),
-              let snapshot = try? JSONDecoder().decode(LibrarySnapshot.self, from: data),
-              !snapshot.songs.isEmpty
-        else { return }
+    ///
+    /// The file read + JSON decode — real work for a several-thousand-song
+    /// library — run off the main actor in a `Task.detached`; only the final
+    /// `@Published` assignment touches the main actor. This USED to run
+    /// fully synchronously and get called directly from `init()`, which
+    /// SwiftUI invokes (via `@StateObject`) before the very first frame can
+    /// render — for a big library, that synchronous decode was slow enough
+    /// to visibly freeze the launch screen's supposedly-continuous
+    /// animations for its duration, the opposite of the "instant" library
+    /// this feature exists to provide. Callers should fire this from a
+    /// `Task`, not await it inline where a blocked launch screen would
+    /// matter.
+    func loadPersistedSnapshot() async {
+        let url = Self.snapshotURL
+        let snapshot: LibrarySnapshot? = await Task.detached(priority: .userInitiated) {
+            guard let data = try? Data(contentsOf: url),
+                  let snapshot = try? JSONDecoder().decode(LibrarySnapshot.self, from: data),
+                  !snapshot.songs.isEmpty
+            else { return nil }
+            return snapshot
+        }.value
+        guard let snapshot else { return }
         allSongs = snapshot.songs
         artists = snapshot.artists
         albums = snapshot.albums

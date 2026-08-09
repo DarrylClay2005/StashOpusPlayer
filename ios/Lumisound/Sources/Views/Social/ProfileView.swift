@@ -18,6 +18,8 @@ struct ProfileView: View {
     @State private var draftBio: String = ""
     @State private var mainAccentHex: String? = nil
     @State private var subAccentHex: String? = nil
+    // MARK: Feature: profile-customization-4
+    @State private var accentGlowIntensity: String = "normal"
     @State private var shareNowPlaying: Bool = true
     @State private var pronouns: String = ""
     @State private var statusEmoji: String = ""
@@ -63,9 +65,12 @@ struct ProfileView: View {
     private var subAccentColor: Color { SocialAccentPalette.color(for: subAccentHex) ?? AppTheme.accentSoft }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             Color.clear.ignoresSafeArea()
-            ProfileAccentBackgroundGlow(mainAccent: mainAccentColor, subAccent: subAccentColor)
+            ProfileAccentBackgroundGlow(
+                mainAccent: mainAccentColor, subAccent: subAccentColor,
+                intensity: ProfileGlowIntensity.from(accentGlowIntensity)
+            )
 
             ScrollView {
                 VStack(spacing: 16) {
@@ -331,6 +336,21 @@ struct ProfileView: View {
                         Text("Main drives your profile's primary chrome; Sub drives secondary highlights — shown to anyone who visits your profile.")
                             .font(AppTheme.bodyFont(size: 12))
                             .foregroundStyle(AppTheme.textSecondary)
+
+                        // MARK: Background glow intensity — how strongly the
+                        // colors above wash across the WHOLE profile
+                        // background (see ProfileAccentBackgroundGlow),
+                        // Discord-style. Separate control from the colors
+                        // themselves so someone who likes their chosen
+                        // colors but finds the ambient wash too strong (or
+                        // too subtle) can dial it independently.
+                        Picker("Background Glow", selection: $accentGlowIntensity) {
+                            ForEach([ProfileGlowIntensity.off, .subtle, .normal, .vivid], id: \.rawValue) { option in
+                                Text(option.label).tag(option.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.top, 10)
                     }
 
                     // MARK: Avatar frame — purely cosmetic, client-rendered.
@@ -703,6 +723,7 @@ struct ProfileView: View {
         visitorCount = profile.visitorCount
         recentVisitors = profile.recentVisitors
         featuredPlaylist = profile.featuredPlaylist
+        accentGlowIntensity = profile.accentGlowIntensity
     }
 
     private func setPinnedSlot(_ slot: Int, track: PinnedTrack) {
@@ -736,7 +757,8 @@ struct ProfileView: View {
                 pronouns: trimmedPronouns,
                 statusEmoji: trimmedStatusEmoji,
                 statusText: trimmedStatusText,
-                avatarFrame: avatarFrame.rawValue
+                avatarFrame: avatarFrame.rawValue,
+                accentGlowIntensity: accentGlowIntensity
             )
             // Re-sync local @State from whatever the server actually persisted
             // (updateProfile() already refetches into social.myProfile) rather
