@@ -391,6 +391,14 @@ extension AudioPlayerManager {
             errorMessage = "Playback error: \(error.localizedDescription)"
             isPlaying = false
             appError("Transcoded-file scheduling failed for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
+            // errorMessage alone has no visible home outside StreamSearchView/
+            // Settings → Audio — see handleLoadFailure's matching comment.
+            // Neither skips nor retries here (unlike handleLoadFailure), so
+            // without this a failure on this path stalls playback completely
+            // with zero visible feedback from the Library/Playlists/Folders tabs.
+            if let name = currentSong?.displayName {
+                ToastCenter.shared.show("Couldn't play \"\(name)\"", category: .error, icon: "exclamationmark.triangle.fill")
+            }
         }
     }
 
@@ -526,6 +534,13 @@ extension AudioPlayerManager {
             errorMessage = "Could not load audio: \(error.localizedDescription)"
             isPlaying = false
             appError("Stream load failed for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
+            // See handleLoadFailure's matching comment — errorMessage alone
+            // isn't visible from the Library/Playlists/Folders tabs, and this
+            // path (unlike handleLoadFailure) doesn't skip or retry either,
+            // so without this a failed stream just silently stalls.
+            if let name = currentSong?.displayName {
+                ToastCenter.shared.show("Couldn't play \"\(name)\"", category: .error, icon: "exclamationmark.triangle.fill")
+            }
         }
     }
 

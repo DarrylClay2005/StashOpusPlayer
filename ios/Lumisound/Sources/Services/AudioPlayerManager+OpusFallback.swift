@@ -18,6 +18,18 @@ extension AudioPlayerManager {
         isPlaying = false
         errorMessage = userFacingMessage
 
+        // `errorMessage` only has a visible home on StreamSearchView and
+        // deep in Settings → Audio (see their `.onChange(of: player
+        // .errorMessage)` handlers) — playing from the Library/Playlists/
+        // Folders tabs (the primary way anyone plays their own downloaded
+        // music) surfaced NOTHING on a load failure: the track just
+        // silently skipped to whatever's next, which reads as "tapping a
+        // song plays a different one for no reason" rather than "this file
+        // is broken." ToastCenter is visible from every screen (mounted
+        // once in ContentView), so route the same failure there too, named
+        // to the actual track that failed rather than a bare generic
+        // message.
+        let failedTrackName = currentSong?.displayName
         let now = Date()
         recentLoadFailureTimestamps.append(now)
         recentLoadFailureTimestamps.removeAll { now.timeIntervalSince($0) > 5 }
@@ -26,10 +38,14 @@ extension AudioPlayerManager {
             recentLoadFailureTimestamps.removeAll()
             appError("Stopping playback after repeated track-load failures in a short window", category: "audio")
             errorMessage = "Playback stopped after repeated errors."
+            ToastCenter.shared.show("Playback stopped after repeated errors", category: .error, icon: "exclamationmark.triangle.fill")
             stop()
             return
         }
 
+        if let failedTrackName {
+            ToastCenter.shared.show("Couldn't play \"\(failedTrackName)\" — skipping", category: .error, icon: "exclamationmark.triangle.fill")
+        }
         skipToNext()
     }
 
