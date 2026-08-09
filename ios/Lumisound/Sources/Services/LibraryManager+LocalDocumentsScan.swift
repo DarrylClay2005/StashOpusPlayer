@@ -94,8 +94,25 @@ extension LibraryManager {
         }
         let evicted = countBeforeEviction != importedSongs.count
 
+        // One-time-per-occurrence retroactive cleanup: `cleanUpConversionOrphans`
+        // below only stops NEW duplicate pairs from being created going
+        // forward — it has nothing to say about pairs that already both got
+        // imported as separate importedSongs entries before this fix existed
+        // (each scan that created one only ever compared it against files,
+        // never against a sibling entry already sitting in the library).
+        // Sweeps every scan (cheap — pure in-memory comparison over already-
+        // loaded importedSongs, no disk I/O unless it actually finds a pair).
+        let mergedDuplicates = mergeExistingConversionDuplicates()
+
         guard !candidates.isEmpty else {
-            if evicted { rebuildAllSongs() }
+            if evicted || mergedDuplicates > 0 { rebuildAllSongs() }
+            return
+        }
+
+        let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
+        let (candidates, cleanedUpOrphans) = cleanUpConversionOrphans(among: candidates, existingURLs: existingURLs)
+        guard !candidates.isEmpty else {
+            if evicted || mergedDuplicates > 0 || cleanedUpOrphans > 0 { rebuildAllSongs() }
             return
         }
 
@@ -116,7 +133,6 @@ extension LibraryManager {
         }
 
         // Only process files we haven't seen before.
-        let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
         let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
         guard !newURLs.isEmpty else { return }
 
@@ -126,5 +142,98 @@ extension LibraryManager {
         importedSongs.append(contentsOf: newSongs)
         importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
         rebuildAllSongs()
+    }
+
+    /// Shared by every local-file scan path (Documents, watched folders,
+    /// a specific directory): drops — and deletes on disk — any candidate
+    /// that's a pre-conversion leftover, returning the cleaned candidate
+    /// list plus how many were removed.
+    ///
+    /// A file whose exclusive-extension conversion target (`<name>.m4a.lms`)
+    /// already exists — either already in the library (`existingURLs`), or
+    /// right alongside it in this same scan batch — means
+    /// `LumisoundExclusiveExtensionService.convert` re-encoded it
+    /// successfully but failed to delete the original source afterward (a
+    /// real, if rare, failure mode — see that function's doc comment).
+    /// Every scan path used to import this leftover as if it were a
+    /// genuinely separate file, which is exactly how "old file + .lms file,
+    /// both showing up as separate library entries" duplicates happened.
+    func cleanUpConversionOrphans(among candidates: [URL], existingURLs: Set<URL>) -> (candidates: [URL], cleanedUp: Int) {
+        let allKnownConvertedURLs = existingURLs.union(
+            candidates.filter { LumisoundExclusiveExtensionService.isConverted($0) }.map { $0.standardizedFileURL }
+        )
+        var remaining = candidates
+        var cleanedUp = 0
+        remaining.removeAll { candidate in
+            guard let target = LumisoundExclusiveExtensionService.expectedConvertedURL(for: candidate) else { return false }
+            guard allKnownConvertedURLs.contains(target.standardizedFileURL) else { return false }
+            try? FileManager.default.removeItem(at: candidate)
+            cleanedUp += 1
+            return true
+        }
+        if cleanedUp > 0 {
+            appLog("Local scan: cleaned up \(cleanedUp) pre-conversion leftover file(s) that already had a converted .lms counterpart", category: "library")
+        }
+        return (remaining, cleanedUp)
+    }
+
+    /// Retroactive counterpart to `cleanUpConversionOrphans` — that one only
+    /// stops a NEW duplicate pair from forming; this finds pairs that
+    /// already both made it into `importedSongs` as separate entries before
+    /// that fix existed (each import only ever compared a candidate file
+    /// against other FILES on disk, never against an existing library
+    /// entry that happens to be its own converted counterpart). For every
+    /// such pair, re-keys favorites/playlists/play-history from the old
+    /// (pre-conversion) entry's id to the surviving `.lms` entry's id —
+    /// same migration `LibraryManager.convertToLumisoundExclusiveExtension`
+    /// already does for a live conversion — then deletes the old file and
+    /// drops it from the library. Skips the currently-playing song (same
+    /// "don't replace a file out from under an open player" reasoning as
+    /// everywhere else in this pipeline); it's picked up on a later scan
+    /// once it's no longer playing. Returns how many pairs were merged.
+    @discardableResult
+    func mergeExistingConversionDuplicates() -> Int {
+        var convertedByTargetURL: [URL: Song] = [:]
+        for song in importedSongs {
+            guard let url = song.url, LumisoundExclusiveExtensionService.isConverted(url) else { continue }
+            convertedByTargetURL[url.standardizedFileURL] = song
+        }
+        guard !convertedByTargetURL.isEmpty else { return 0 }
+
+        let currentlyPlayingID = AudioPlayerManager.shared?.currentSong?.id
+        var merged = 0
+
+        for song in importedSongs {
+            guard let url = song.url, !LumisoundExclusiveExtensionService.isConverted(url) else { continue }
+            guard song.id != currentlyPlayingID else { continue }
+            guard let target = LumisoundExclusiveExtensionService.expectedConvertedURL(for: url) else { continue }
+            guard let survivor = convertedByTargetURL[target.standardizedFileURL] else { continue }
+
+            if favoriteSongIDs.contains(song.id) {
+                favoriteSongIDs.remove(song.id)
+                favoriteSongIDs.insert(survivor.id)
+                persistence.saveFavorites(favoriteSongIDs)
+            }
+            var playlistsChanged = false
+            for i in playlists.indices {
+                guard let pos = playlists[i].songIDs.firstIndex(of: song.id) else { continue }
+                playlists[i].songIDs[pos] = survivor.id
+                playlistsChanged = true
+            }
+            if playlistsChanged { persistence.savePlaylists(playlists) }
+            PlayHistoryStore.shared.rekey(from: song.id, to: survivor.id)
+            if let sourceTrackID = survivor.sourceTrackID, !sourceTrackID.isEmpty {
+                DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: target.lastPathComponent)
+            }
+
+            try? FileManager.default.removeItem(at: url)
+            importedSongs.removeAll { $0.id == song.id }
+            merged += 1
+        }
+
+        if merged > 0 {
+            appLog("Local scan: merged \(merged) existing pre-conversion/converted duplicate pair(s)", category: "library")
+        }
+        return merged
     }
 }

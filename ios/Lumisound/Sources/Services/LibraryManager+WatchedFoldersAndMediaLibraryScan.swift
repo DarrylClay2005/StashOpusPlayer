@@ -45,7 +45,8 @@ extension LibraryManager {
         guard !candidates.isEmpty else { return }
 
         let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
-        let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
+        let (cleanedCandidates, _) = cleanUpConversionOrphans(among: candidates, existingURLs: existingURLs)
+        let newURLs = cleanedCandidates.filter { !existingURLs.contains($0.standardizedFileURL) }
         guard !newURLs.isEmpty else { return }
 
         let newSongs = await resolveSongs(for: newURLs)
@@ -94,7 +95,8 @@ extension LibraryManager {
             guard !candidates.isEmpty else { return }
 
             let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
-            let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
+            let (cleanedCandidates, _) = cleanUpConversionOrphans(among: candidates, existingURLs: existingURLs)
+            let newURLs = cleanedCandidates.filter { !existingURLs.contains($0.standardizedFileURL) }
 
             // All files already in library — return silently.
             guard !newURLs.isEmpty else { return }

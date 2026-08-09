@@ -49,6 +49,18 @@ enum LumisoundExclusiveExtensionService {
         url.pathExtension.lowercased() == marker
     }
 
+    /// The `.m4a.lms` path `convert(fileURL:)` would (or did) write `url`'s
+    /// re-encode to — pure path math, no I/O. Exposed so callers (the local
+    /// documents scan) can recognize "this file already has a converted
+    /// counterpart" without duplicating the naming scheme. `nil` for a URL
+    /// that's already converted (nothing further to convert it to).
+    static func expectedConvertedURL(for url: URL) -> URL? {
+        guard !isConverted(url) else { return nil }
+        return url.deletingPathExtension()
+            .appendingPathExtension("m4a")
+            .appendingPathExtension(marker)
+    }
+
     /// Re-encodes `fileURL`'s audio into a fresh AAC .m4a file at
     /// `<original-name>.m4a.lms` (real bytes rewritten by
     /// `AudioEncoderService.convertPermanently`, confirmed playable before
@@ -61,17 +73,26 @@ enum LumisoundExclusiveExtensionService {
     /// inode rather than preserving the original's xattrs the way a rename
     /// would have.
     static func convert(fileURL: URL) async -> URL? {
-        guard !isConverted(fileURL) else { return nil }
-        let newURL = fileURL.deletingPathExtension()
-            .appendingPathExtension("m4a")
-            .appendingPathExtension(marker)
+        guard !isConverted(fileURL), let newURL = expectedConvertedURL(for: fileURL) else { return nil }
         let fm = FileManager.default
         guard !fm.fileExists(atPath: newURL.path) else { return nil }
         guard await AudioEncoderService.shared.convertPermanently(fileURL, to: newURL) else {
             appWarn("LumisoundExclusiveExtensionService: re-encode failed for \(fileURL.lastPathComponent)", category: "background")
             return nil
         }
-        try? fm.removeItem(at: fileURL)
+        // Best-effort, but no longer SILENTLY best-effort: if this fails
+        // (permissions, the file briefly busy, etc.), the old pre-conversion
+        // file is left behind on disk alongside the new .lms one — the next
+        // local documents scan used to re-import it as a brand new song,
+        // permanently duplicating every track that hit this. That scan now
+        // recognizes and cleans up exactly this leftover (see
+        // performLocalDocumentsScan), so this failing is self-healing rather
+        // than a permanent duplicate — but it's still worth knowing about.
+        do {
+            try fm.removeItem(at: fileURL)
+        } catch {
+            appWarn("LumisoundExclusiveExtensionService: could not remove pre-conversion file \(fileURL.lastPathComponent) after successful convert: \(error.localizedDescription)", category: "background")
+        }
         return newURL
     }
 
