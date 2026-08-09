@@ -15,6 +15,7 @@ struct PodcastEpisodesView: View {
 
     @EnvironmentObject private var account: AccountService
     @EnvironmentObject private var player: AudioPlayerManager
+    @ObservedObject private var downloads = PodcastDownloadManager.shared
 
     @State private var episodes: [PodcastEpisode] = []
     @State private var progress: [String: PodcastEpisodeProgress] = [:]
@@ -29,12 +30,16 @@ struct PodcastEpisodesView: View {
                     .foregroundStyle(AppTheme.textSecondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                // Not wrapped in an outer Button: episodeRow contains its
+                // own download/delete Button, and nesting a Button inside
+                // another Button's label is a known SwiftUI trap (the tap
+                // targets can conflict/swallow each other in a List row) --
+                // a tap gesture + explicit content shape on the row itself
+                // avoids that entirely while the inner button still works.
                 List(episodes) { episode in
-                    Button {
-                        play(episode)
-                    } label: {
-                        episodeRow(episode)
-                    }
+                    episodeRow(episode)
+                        .contentShape(Rectangle())
+                        .onTapGesture { play(episode) }
                 }
                 .listStyle(.plain)
             }
@@ -64,19 +69,50 @@ struct PodcastEpisodesView: View {
                     } else if let p = episodeProgress, p.positionSeconds > 5 {
                         Text("• In Progress")
                     }
+                    if downloads.isDownloaded(episode.guid) {
+                        Text("• Downloaded")
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(AppTheme.textSecondary)
             }
             Spacer()
+            downloadButton(for: episode)
             Image(systemName: "play.circle.fill")
                 .font(.system(size: 22))
                 .foregroundStyle(AppTheme.dynamicAccent)
         }
     }
 
+    @ViewBuilder
+    private func downloadButton(for episode: PodcastEpisode) -> some View {
+        if downloads.isDownloading(episode.guid) {
+            ProgressView()
+        } else if downloads.isDownloaded(episode.guid) {
+            Button {
+                downloads.deleteDownload(guid: episode.guid)
+            } label: {
+                Image(systemName: "trash.circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .buttonStyle(.plain)
+        } else {
+            Button {
+                downloads.download(episode: episode)
+            } label: {
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     private func play(_ episode: PodcastEpisode) {
-        guard let url = URL(string: episode.audioURL) else { return }
+        // Prefer the local download when available -- same audio, no
+        // network dependency to keep listening.
+        guard let url = downloads.localURL(for: episode.guid) ?? URL(string: episode.audioURL) else { return }
         let song = Song(
             id: episode.guid,
             title: episode.title,
