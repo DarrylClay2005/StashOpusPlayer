@@ -64,7 +64,11 @@ extension AccountService {
         do {
             let data = try await makeRequest("/user/queue")
             let items = try JSONDecoder().decode([QueueItem].self, from: data)
-            let songsByID = Dictionary(uniqueKeysWithValues: library.allSongs.map { ($0.id, $0) })
+            // uniquingKeysWith:, not uniqueKeysWithValues: — the latter traps
+            // (crashes) on any duplicate id, which `library.allSongs` isn't
+            // guaranteed to be free of (see the matching fix/comment in
+            // LibraryManager+SongRemoval.swift's rebuildAllSongs).
+            let songsByID = Dictionary(library.allSongs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             return items.compactMap { item -> Song? in
                 if let localID = item.localSongId, let song = songsByID[localID] {
                     return song

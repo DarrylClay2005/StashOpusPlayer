@@ -78,7 +78,11 @@ private struct SharedPlaylistDetailView: View {
 
     private var songs: [Song] {
         guard let detail else { return [] }
-        let songsByID = Dictionary(uniqueKeysWithValues: library.allSongs.map { ($0.id, $0) })
+        // uniquingKeysWith:, not uniqueKeysWithValues: — the latter traps
+        // (crashes) on any duplicate id, which `library.allSongs` isn't
+        // guaranteed to be free of (see the matching fix/comment in
+        // LibraryManager+SongRemoval.swift's rebuildAllSongs).
+        let songsByID = Dictionary(library.allSongs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return detail.tracks.compactMap { track -> Song? in
             if let localID = track.localSongId, let song = songsByID[localID] {
                 return song

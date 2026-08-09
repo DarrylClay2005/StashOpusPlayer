@@ -201,7 +201,21 @@ extension LibraryManager {
                 // `songs(inAlbum:)` / `songs(inGenre:)` / `songs(for playlist:)`
                 // never need to re-scan the full library per call — see the
                 // `songsBy*` property doc comments in LibraryManager.swift.
-                let byID = Dictionary(uniqueKeysWithValues: combined.map { ($0.id, $0) })
+                // NOT Dictionary(uniqueKeysWithValues:) — that variant TRAPS
+                // (fatal error, crashes the app) if any two songs share an
+                // id, which does happen: a race between the background
+                // vault-conversion pass (which assigns a track a new id/URL
+                // after re-encoding) and a concurrent local-documents scan
+                // discovering that same freshly-written file before the
+                // conversion pass finishes updating `importedSongs` can leave
+                // two array entries independently resolving to the same
+                // "local:<path>" id. `uniquingKeysWith:` keeps the first
+                // (the one already in `combined`'s stable sort order) and
+                // silently drops the duplicate instead of crashing — the
+                // dupe is transient (the next scan/conversion pass settles
+                // it) and duplicate-finder features exist for the case
+                // where it isn't.
+                let byID = Dictionary(combined.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 let byArtist = Dictionary(grouping: combined, by: \.artistName)
                 let byAlbum  = Dictionary(grouping: combined, by: \.groupableAlbumName)
                 let byGenre  = Dictionary(grouping: combined.filter { !$0.genre.isEmpty }, by: \.genre)
