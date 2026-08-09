@@ -919,6 +919,28 @@ struct AdminErrorLogEntry: Codable, Identifiable {
     }
 }
 
+/// One row from GET /admin/api/users — powers the Admin Dashboard's user
+/// management list (deactivate/reactivate/force-logout).
+struct AdminUser: Codable, Identifiable {
+    let id: String
+    let username: String
+    let email: String?
+    let createdAt: String?
+    let lastLogin: String?
+    let isActive: Bool
+    let activeSessions: Int
+    let isOperator: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, username, email
+        case createdAt = "created_at"
+        case lastLogin = "last_login"
+        case isActive = "is_active"
+        case activeSessions = "active_sessions"
+        case isOperator = "is_operator"
+    }
+}
+
 // MARK: - Cross-Device Playback Handoff
 
 /// One row from GET /user/devices (a push-token registration with display

@@ -37,6 +37,7 @@ final class AccountService: ObservableObject {
     @Published var adminOverview: AdminOverview? = nil
     @Published var adminDownloadJobs: [AdminDownloadJob] = []
     @Published var adminErrors: [AdminErrorLogEntry] = []
+    @Published var adminUsers: [AdminUser] = []
     @Published var hasDateOfBirth: Bool = false
 
     // MARK: Persisted token

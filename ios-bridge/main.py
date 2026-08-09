@@ -2283,6 +2283,85 @@ async def admin_errors(limit: int = Query(50, ge=1, le=200)):
     ]
 
 
+@app.get("/admin/api/users", dependencies=[Depends(check_admin_or_operator)])
+async def admin_users(limit: int = Query(200, ge=1, le=1000)):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT u.id, u.username, u.email, u.created_at, u.last_login, u.is_active,
+                       (SELECT COUNT(*) FROM ios_user_sessions s WHERE s.user_id = u.id AND s.expires_at > NOW()) AS active_sessions
+                FROM ios_users u
+                ORDER BY u.created_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = await cur.fetchall()
+    return [
+        {
+            "id": r[0], "username": r[1], "email": r[2],
+            "created_at": r[3].isoformat() if r[3] else None,
+            "last_login": r[4].isoformat() if r[4] else None,
+            "is_active": bool(r[5]), "active_sessions": r[6],
+            "is_operator": r[0] == OPERATOR_USER_ID,
+        }
+        for r in rows
+    ]
+
+
+@app.post("/admin/api/users/{user_id}/deactivate", dependencies=[Depends(check_admin_or_operator)])
+async def admin_deactivate_user(user_id: str):
+    if user_id == OPERATOR_USER_ID:
+        raise HTTPException(status_code=400, detail="Cannot deactivate the operator account")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("UPDATE ios_users SET is_active = FALSE WHERE id = %s", (user_id,))
+            await cur.execute("DELETE FROM ios_user_sessions WHERE user_id = %s", (user_id,))
+    await log_event("admin", "deactivate_user", user_id=user_id, message="deactivated by operator")
+    return {"status": "deactivated"}
+
+
+@app.post("/admin/api/users/{user_id}/reactivate", dependencies=[Depends(check_admin_or_operator)])
+async def admin_reactivate_user(user_id: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("UPDATE ios_users SET is_active = TRUE WHERE id = %s", (user_id,))
+    await log_event("admin", "reactivate_user", user_id=user_id, message="reactivated by operator")
+    return {"status": "reactivated"}
+
+
+@app.post("/admin/api/users/{user_id}/force-logout", dependencies=[Depends(check_admin_or_operator)])
+async def admin_force_logout_user(user_id: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM ios_user_sessions WHERE user_id = %s", (user_id,))
+    await log_event("admin", "force_logout_user", user_id=user_id, message="all sessions revoked by operator")
+    return {"status": "logged_out"}
+
+
+@app.delete("/admin/api/errors", dependencies=[Depends(check_admin_or_operator)])
+async def admin_clear_errors():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM ios_app_logs WHERE level = 'error'")
+    return {"status": "cleared"}
+
+
+@app.delete("/admin/api/download-jobs", dependencies=[Depends(check_admin_or_operator)])
+async def admin_clear_download_jobs():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM ios_download_log")
+    return {"status": "cleared"}
+
+
 _ADMIN_DASHBOARD_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ios-bridge Admin</title>

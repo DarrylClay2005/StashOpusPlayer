@@ -49,4 +49,93 @@ extension AccountService {
             errorMessage = error.localizedDescription
         }
     }
+
+    func fetchAdminUsers(limit: Int = 200) async {
+        guard isLoggedIn else { return }
+        do {
+            let data = try await makeRequest("/admin/api/users?limit=\(limit)")
+            adminUsers = try JSONDecoder().decode([AdminUser].self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    func deactivateAdminUser(id: String) async -> Bool {
+        guard isLoggedIn else { return false }
+        do {
+            _ = try await makeRequest("/admin/api/users/\(id)/deactivate", method: "POST")
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    @discardableResult
+    func reactivateAdminUser(id: String) async -> Bool {
+        guard isLoggedIn else { return false }
+        do {
+            _ = try await makeRequest("/admin/api/users/\(id)/reactivate", method: "POST")
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    @discardableResult
+    func forceLogoutAdminUser(id: String) async -> Bool {
+        guard isLoggedIn else { return false }
+        do {
+            _ = try await makeRequest("/admin/api/users/\(id)/force-logout", method: "POST")
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    @discardableResult
+    func clearAdminErrors() async -> Bool {
+        guard isLoggedIn else { return false }
+        do {
+            _ = try await makeRequest("/admin/api/errors", method: "DELETE")
+            adminErrors = []
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    @discardableResult
+    func clearAdminDownloadJobs() async -> Bool {
+        guard isLoggedIn else { return false }
+        do {
+            _ = try await makeRequest("/admin/api/download-jobs", method: "DELETE")
+            adminDownloadJobs = []
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
 }

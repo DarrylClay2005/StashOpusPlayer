@@ -21,6 +21,9 @@ struct AdminDashboardView: View {
 
     @EnvironmentObject private var account: AccountService
     @State private var isRefreshing = false
+    @State private var actioningUserID: String? = nil
+    @State private var showClearErrorsConfirm = false
+    @State private var showClearJobsConfirm = false
 
     var body: some View {
         Group {
@@ -58,7 +61,7 @@ struct AdminDashboardView: View {
                 }
             }
 
-            Section("Recent Download Jobs") {
+            Section {
                 if account.adminDownloadJobs.isEmpty {
                     Text("No jobs recorded.")
                         .foregroundStyle(AppTheme.textSecondary)
@@ -84,9 +87,29 @@ struct AdminDashboardView: View {
                         }
                     }
                 }
+            } header: {
+                Text("Recent Download Jobs")
+            } footer: {
+                if !account.adminDownloadJobs.isEmpty {
+                    Button("Clear Log", role: .destructive) { showClearJobsConfirm = true }
+                        .font(.caption)
+                }
             }
 
-            Section("Recent Errors") {
+            Section {
+                if account.adminUsers.isEmpty {
+                    Text("No users found.")
+                        .foregroundStyle(AppTheme.textSecondary)
+                } else {
+                    ForEach(account.adminUsers) { user in
+                        userRow(user)
+                    }
+                }
+            } header: {
+                Text("Users")
+            }
+
+            Section {
                 if account.adminErrors.isEmpty {
                     Text("No errors logged.")
                         .foregroundStyle(AppTheme.textSecondary)
@@ -110,9 +133,26 @@ struct AdminDashboardView: View {
                         }
                     }
                 }
+            } header: {
+                Text("Recent Errors")
+            } footer: {
+                if !account.adminErrors.isEmpty {
+                    Button("Clear Log", role: .destructive) { showClearErrorsConfirm = true }
+                        .font(.caption)
+                }
             }
         }
         .refreshable { await refresh() }
+        .confirmationDialog("Clear all error log entries?", isPresented: $showClearErrorsConfirm, titleVisibility: .visible) {
+            Button("Clear Errors", role: .destructive) {
+                Task { await account.clearAdminErrors() }
+            }
+        }
+        .confirmationDialog("Clear all download job history?", isPresented: $showClearJobsConfirm, titleVisibility: .visible) {
+            Button("Clear Jobs", role: .destructive) {
+                Task { await account.clearAdminDownloadJobs() }
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 if isRefreshing {
@@ -157,6 +197,63 @@ struct AdminDashboardView: View {
         .padding(.vertical, 4)
     }
 
+    @ViewBuilder
+    private func userRow(_ user: AdminUser) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(user.username)
+                    .font(.subheadline.weight(.medium))
+                if user.isOperator {
+                    Text("OPERATOR")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                }
+                Spacer()
+                if !user.isActive {
+                    Text("Deactivated")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.red)
+                }
+            }
+            Text([user.email, "\(user.activeSessions) active session(s)"].compactMap { $0 }.joined(separator: " — "))
+                .font(.caption2)
+                .foregroundStyle(AppTheme.textSecondary)
+
+            if !user.isOperator {
+                HStack(spacing: 16) {
+                    if actioningUserID == user.id {
+                        ProgressView()
+                    } else {
+                        if user.isActive {
+                            Button("Deactivate", role: .destructive) {
+                                performUserAction(user.id) { await account.deactivateAdminUser(id: user.id) }
+                            }
+                        } else {
+                            Button("Reactivate") {
+                                performUserAction(user.id) { await account.reactivateAdminUser(id: user.id) }
+                            }
+                        }
+                        Button("Force Logout") {
+                            performUserAction(user.id) { await account.forceLogoutAdminUser(id: user.id) }
+                        }
+                    }
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.dynamicAccent)
+            }
+        }
+    }
+
+    private func performUserAction(_ userID: String, _ action: @escaping () async -> Bool) {
+        actioningUserID = userID
+        Task {
+            _ = await action()
+            await account.fetchAdminUsers()
+            actioningUserID = nil
+        }
+    }
+
     private func statusPill(_ status: String) -> some View {
         let color: Color = status == "completed" ? .green : (status == "failed" || status == "error" ? .red : AppTheme.textSecondary)
         return Text(status.capitalized)
@@ -177,7 +274,8 @@ struct AdminDashboardView: View {
         async let overview: () = account.fetchAdminOverview()
         async let jobs: () = account.fetchAdminDownloadJobs()
         async let errors: () = account.fetchAdminErrors()
-        _ = await (overview, jobs, errors)
+        async let users: () = account.fetchAdminUsers()
+        _ = await (overview, jobs, errors, users)
         isRefreshing = false
     }
 }
