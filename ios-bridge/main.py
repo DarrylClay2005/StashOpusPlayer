@@ -287,7 +287,19 @@ _FFPROBE_CACHE = _FfprobeCache(_ffprobe_cache_path)
 # grant it) and risks destabilizing the other co-located services instead;
 # halving peak concurrent yt-dlp+ffmpeg+aria2+deno subprocess count is the
 # lever that's actually available here, same as the original 10->4 cut.
-_YTDLP_SEMAPHORE = asyncio.Semaphore(2)  # max 2 concurrent yt-dlp processes
+#
+# IMPORTANT: this cap bounds concurrent *processes* (RAM pressure on a
+# shared host), not per-download *bandwidth* — a faster upstream connection
+# (fiber, etc.) doesn't relax the constraint that made this get cut in the
+# first place, it only means each already-running download finishes faster.
+# The lever that actually spends extra bandwidth safely (more parallel
+# connections *within* each already-running yt-dlp/aria2 process, not more
+# whole processes) is `concurrent_fragments`/`-N` below — raised as part of
+# this same pass. Still exposed as YTDLP_MAX_CONCURRENT so this can be tuned
+# without a code change once/if the host's actual memory headroom is known
+# to be different from what's documented above; unset defaults to the safe,
+# already-proven-necessary value rather than silently reverting to 4.
+_YTDLP_SEMAPHORE = asyncio.Semaphore(int(os.getenv("YTDLP_MAX_CONCURRENT", "2")))
 
 # Formats other than m4a/best require yt-dlp to transcode after downloading
 # (`-x --audio-format ...`), which is CPU-bound ffmpeg work rather than the
@@ -295,8 +307,9 @@ _YTDLP_SEMAPHORE = asyncio.Semaphore(2)  # max 2 concurrent yt-dlp processes
 # concurrently — on top of the upload-analysis ffmpeg processes — saturates
 # the host and pushes jobs past _YTDLP_TIMEOUT_TRANSCODE even for short
 # tracks. Cap transcoding jobs to a smaller pool, acquired in addition to
-# _YTDLP_SEMAPHORE.
-_TRANSCODE_SEMAPHORE = asyncio.Semaphore(2)
+# _YTDLP_SEMAPHORE. CPU-bound like the download semaphore's RAM concern, so
+# it gets the same env-configurable treatment rather than a network-speed one.
+_TRANSCODE_SEMAPHORE = asyncio.Semaphore(int(os.getenv("YTDLP_MAX_TRANSCODE_CONCURRENT", "2")))
 
 # aria2c is enforced as yt-dlp's external downloader for every /api/download
 # (and the per-track segments yt-dlp fetches): -x/-s/-j open many parallel
@@ -350,21 +363,20 @@ _ARIA2_DOWNLOADER_ARGS = [
 # removed blanket Topic-channel block, is independent of this setting).
 _YTDLP_NETWORK_ARGS = ["-4", "--socket-timeout", "10"]
 
-# Optional: base URL of a running bgutil-ytdlp-pot-provider POT server
-# (github.com/Brainicism/bgutil-ytdlp-pot-provider). YouTube's "proof of
-# origin token" challenge has made cookie-less extraction progressively
-# slower and more failure-prone over time (this deployment already runs a
-# bgutil POT-server container, but nothing here queries it yet) — a POT
-# provider resolves the challenge without needing real account cookies,
-# and is the most likely fix for yt-dlp extraction/download times of
-# 70-100+ seconds per track (see the /api/download job-tracking comment
-# below for why that duration was treated as an accepted baseline rather
-# than something parameter-tunable). To actually enable this: (1) install
-# the `bgutil-ytdlp-pot-provider` pip plugin in this image, (2) make sure
-# the POT server's port is reachable from this container at the URL below
-# (its own compose service must publish/expose that port — this repo
-# doesn't manage that service's compose file), (3) set this env var.
-# Unset (default) leaves extraction exactly as it was — purely additive.
+# Base URL of the bgutil-ytdlp-pot-provider POT server
+# (github.com/Brainicism/bgutil-ytdlp-pot-provider), WIRED UP AND ENABLED BY
+# DEFAULT — docker-compose.yml runs the `bgutil-pot-provider` service and
+# sets this env var to its address (`http://127.0.0.1:4416`) unless
+# explicitly overridden, and the Dockerfile installs the matching
+# `bgutil-ytdlp-pot-provider` pip plugin. YouTube's "proof of origin token"
+# challenge has made cookie-less extraction progressively slower and more
+# failure-prone over time; a POT provider resolves it without needing real
+# account cookies, and is what actually fixed this deployment's
+# extraction/download times previously running 70-100+ seconds per track
+# (see the /api/download job-tracking comment below for that history).
+# Only unset (empty string) if the compose service is deliberately removed
+# or its port isn't reachable from this container — extraction still works
+# without it, just slower/less reliably, exactly as before this was added.
 YTDLP_POT_PROVIDER_URL: str = os.getenv("YTDLP_POT_PROVIDER_URL", "")
 if YTDLP_POT_PROVIDER_URL:
     _YTDLP_NETWORK_ARGS += [
@@ -387,14 +399,23 @@ _DOWNLOAD_JOBS: dict = {}
 _DOWNLOAD_JOB_MAX_AGE = 900  # seconds — sweep abandoned jobs/temp dirs after this
 
 
-def _truncate_filename_bytes(name: str, max_bytes: int = 100) -> str:
+def _truncate_filename_bytes(name: str, max_bytes: int = 240) -> str:
     """Truncates `name` to at most `max_bytes` UTF-8 bytes, without splitting a
-    multi-byte character in half. A plain `name[:100]` truncates by character
-    count, which is fine for ASCII titles but silently produces filenames far
-    over the filesystem's byte limit for titles that use 3-4-byte-per-char
-    Unicode (e.g. stylized "mathematical alphanumeric" fullwidth text some
-    tracks use) — ext4/most Linux filesystems reject any path component over
-    255 bytes with ENAMETOOLONG, which crashes the whole yt-dlp invocation."""
+    multi-byte character in half. A plain `name[:max_bytes]` truncates by
+    character count, which is fine for ASCII titles but silently produces
+    filenames far over the filesystem's byte limit for titles that use 3-4-
+    byte-per-char Unicode (e.g. stylized "mathematical alphanumeric" fullwidth
+    text some tracks use) — ext4/most Linux filesystems reject any path
+    component over 255 bytes with ENAMETOOLONG, which crashes the whole
+    yt-dlp invocation.
+
+    240 (not the previous 100) — 255 minus headroom for the longest
+    extension this bridge appends (".webm"/".opus"/".flac", 5 bytes) plus a
+    safety margin. 100 was truncating ordinary, non-pathological titles
+    (e.g. any "Artist - Song Title (Official Music Video) [Remastered]"-
+    length title, no exotic Unicode involved) well before the actual
+    filesystem limit was anywhere close, so downloaded files routinely
+    landed on disk under a visibly clipped name."""
     encoded = name.encode("utf-8")[:max_bytes]
     return encoded.decode("utf-8", errors="ignore")
 
@@ -931,9 +952,28 @@ def _account_token_user_id(request: Request) -> Optional[str]:
 YTDLP_USER_COOKIES_DIR = pathlib.Path(os.getenv("YTDLP_USER_COOKIES_DIR", "/app/.cache/yt-dlp/user-cookies"))
 
 
+# Short-TTL in-memory cache for _user_cookies_text — same shape/rationale
+# as _youtube_api_key_cache above. This runs on EVERY yt-dlp invocation
+# (search, resolve, and once per retry attempt inside the download job
+# loop — up to 3x for a single download), always paying a DB round trip for
+# cookie text that only changes when the user re-uploads cookies via
+# Settings. Caches the "no cookies uploaded" (None) result too, since most
+# users never configure this at all. Note this only covers the DB read —
+# `_user_cookies_file` below still re-materializes the file on every call
+# regardless (see its own doc comment on why that specific part stays
+# uncached), so a cached-but-still-correct text value always gets written
+# to disk fresh; nothing here risks serving a stale on-disk cookie file.
+_YTDLP_USER_COOKIES_CACHE_TTL = 300  # seconds
+_user_cookies_text_cache: dict[str, tuple[float, Optional[str]]] = {}
+
+
 async def _user_cookies_text(user_id: str) -> Optional[str]:
     """Returns the user's stored cookies.txt contents, or None if they
     haven't uploaded any."""
+    cached = _user_cookies_text_cache.get(user_id)
+    if cached is not None and time.monotonic() < cached[0]:
+        return cached[1]
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -942,7 +982,9 @@ async def _user_cookies_text(user_id: str) -> Optional[str]:
                 (user_id,),
             )
             row = await cur.fetchone()
-    return row[0] if row and row[0] else None
+    text = row[0] if row and row[0] else None
+    _user_cookies_text_cache[user_id] = (time.monotonic() + _YTDLP_USER_COOKIES_CACHE_TTL, text)
+    return text
 
 
 async def _user_cookies_file(user_id: Optional[str]) -> Optional[str]:
@@ -1021,7 +1063,7 @@ async def _run_ytdlp(*args: str, timeout: float = 30.0) -> list[dict]:
     Run yt-dlp with the given arguments.
     Returns a list of parsed JSON objects (one per stdout line).
     Raises asyncio.TimeoutError if the process exceeds *timeout* seconds.
-    Max 4 concurrent yt-dlp processes are allowed (semaphore).
+    Concurrency capped by _YTDLP_SEMAPHORE (YTDLP_MAX_CONCURRENT env, default 2).
     """
     cmd = ["yt-dlp", *_YTDLP_NETWORK_ARGS, *args]
     logger.info("Running: %s", " ".join(cmd))
@@ -1071,6 +1113,12 @@ def _strip_topic_suffix(name: str) -> str:
     if name.endswith(_TOPIC_CHANNEL_SUFFIX):
         return name[: -len(_TOPIC_CHANNEL_SUFFIX)].strip()
     return name
+
+
+# Matches "Artist - Song Title" (any dash style, en/em/hyphen) — see
+# _parse_track's use of this as an artist fallback when neither a real
+# YouTube-Music 'artist' tag nor a Topic-channel upload is available.
+_ARTIST_TITLE_SPLIT_RE = re.compile(r"^\s*(.+?)\s*[-–—]\s*(.+?)\s*$")
 
 
 def _pick_youtube_thumbnail(entry: dict, track_id: str) -> str:
@@ -1145,6 +1193,39 @@ def _parse_track(entry: dict, source: str) -> dict:
     )
     if is_topic_channel:
         artist = _strip_topic_suffix(artist)
+    elif not entry.get("artist"):
+        # Neither a real YouTube-Music 'artist' tag nor a Topic-channel
+        # upload (both trustworthy) — falling through to `uploader`/
+        # `channel` here means the "artist" is whatever channel posted the
+        # video, which for a huge fraction of real music uploads is a
+        # compilation/repost/label channel ("Trap Nation", "NoCopyrightSounds",
+        # "Monstercat", a random reaction channel, ...) rather than the
+        # actual performing artist — and since the client's online metadata
+        # enrichment (MetadataFetchService) only ever fills in fields that
+        # are EMPTY, a wrong-but-non-empty artist like that was permanent,
+        # never getting a second look. The video title itself overwhelmingly
+        # follows music YouTube's own "Artist - Song Title" convention
+        # regardless of which channel posted it — prefer that split when the
+        # title actually matches it; it's a far more specific signal than a
+        # generic upload channel. Title itself is left untouched (only
+        # `artist` is replaced) so nothing downstream that expects the
+        # original title (search matching, dedup normalization) is affected.
+        match = _ARTIST_TITLE_SPLIT_RE.match(title)
+        if match:
+            split_artist, split_track = match.group(1).strip(), match.group(2).strip()
+            # Sanity bound: a real "Artist - Title" split has a short-ish
+            # artist half — guards against the more extreme false-positive
+            # case (a long descriptive first clause that happens to contain
+            # a dash, e.g. "Full Interview And Behind The Scenes - Part 2").
+            # Not foolproof — a title like "Song Title - Remix" with no
+            # actual artist prefix still matches and would be mis-split —
+            # but on balance this is still a strict improvement: the
+            # channel-name fallback it replaces is wrong at least as often
+            # for any channel that isn't literally the artist's own,
+            # whereas "Artist - Title" is YouTube music culture's dominant
+            # title convention.
+            if split_artist and split_track and 0 < len(split_artist) <= 60 and len(split_track) >= 2:
+                artist = split_artist
 
     duration_raw = entry.get("duration") or 0
     try:
@@ -1415,9 +1496,26 @@ async def _log_stream_attempt(
         logger.exception("Failed to record ios_stream_log entry for %s:%s (status=%s)", source, source_id, status)
 
 
+# Short-TTL in-memory cache for _youtube_api_key_for_user — same shape as
+# intelligence.py's _taste_profile_cache. This is called on nearly every
+# search/resolve/subscription-check request (11 call sites), always paying
+# a full DB round trip for a value that changes only when a user explicitly
+# edits their YouTube API key in Settings — everywhere else it's a hot,
+# per-request repeat lookup of the same answer. Invalidated explicitly by
+# set_youtube_api_key/delete_youtube_api_key below (not just left to expire)
+# so a key change/removal takes effect on the very next request instead of
+# silently continuing to use the stale key for up to the TTL.
+_YOUTUBE_API_KEY_CACHE_TTL = 300  # seconds
+_youtube_api_key_cache: dict[str, tuple[float, str]] = {}
+
+
 async def _youtube_api_key_for_user(user_id: str) -> str:
     """Returns the user's personal YouTube Data API key if they've set one,
     otherwise falls back to the server-wide YOUTUBE_API_KEY env var."""
+    cached = _youtube_api_key_cache.get(user_id)
+    if cached is not None and time.monotonic() < cached[0]:
+        return cached[1]
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -1426,9 +1524,9 @@ async def _youtube_api_key_for_user(user_id: str) -> str:
                 (user_id,),
             )
             row = await cur.fetchone()
-    if row and row[0]:
-        return row[0]
-    return YOUTUBE_API_KEY
+    key = row[0] if row and row[0] else YOUTUBE_API_KEY
+    _youtube_api_key_cache[user_id] = (time.monotonic() + _YOUTUBE_API_KEY_CACHE_TTL, key)
+    return key
 
 
 def _youtube_data_api_get_raw(path: str, params: dict, api_key: str) -> tuple[int, dict]:
@@ -2596,11 +2694,14 @@ async def download_track(
                      "keeps the 5-15s anti-bot pacing. Client-controlled.",
     ),
     concurrent_fragments: int = Query(
-        4, ge=1, le=16,
+        8, ge=1, le=16,
         description="Parallel DASH fragment downloads (yt-dlp -N). >1 speeds up "
-                     "large downloads. Default 4 (was 1) — negligible memory cost "
-                     "per fragment buffer, meaningful speedup for fragmented/DASH "
-                     "audio. Client-controlled via Settings -> yt-dlp.",
+                     "large downloads. Default 8 (was 4, was 1) — this is a "
+                     "per-download connection-count knob, not an extra-process "
+                     "one, so it's the safe way to spend a fast (e.g. fiber) "
+                     "upstream connection without the RAM cost _YTDLP_SEMAPHORE "
+                     "guards against; negligible memory cost per fragment "
+                     "buffer. Client-controlled via Settings -> yt-dlp.",
     ),
 ):
     """
@@ -2684,7 +2785,7 @@ async def _run_download_job(
     account_token: str,
     use_aria2: bool = False,
     throttle_seconds: int = 5,
-    concurrent_fragments: int = 4,
+    concurrent_fragments: int = 8,
     destination_folder: Optional[str] = None,
 ) -> None:
     """
@@ -2755,7 +2856,7 @@ async def _do_download_job(
     user_id: Optional[str],
     use_aria2: bool = False,
     throttle_seconds: int = 5,
-    concurrent_fragments: int = 4,
+    concurrent_fragments: int = 8,
     destination_folder: Optional[str] = None,
 ) -> None:
     # Large playlists drive this endpoint hard via the iOS "Download All" pipeline,
@@ -2799,6 +2900,28 @@ async def _do_download_job(
         # Even when opted in, the FINAL attempt drops aria2 so a download is
         # never permanently stuck if aria2 itself is the failure cause.
         aria2_this_attempt = use_aria2 and attempt < max_attempts
+        # Auto-generated "Topic" channel uploads (and some other
+        # auto-generated/Content-ID audio) have a known yt-dlp quirk:
+        # whichever client yt-dlp's default selection logic picks first
+        # sometimes returns ONLY itag 18 (a low-quality muxed video+audio
+        # format, no separate audio-only stream) for these specifically,
+        # even though the SAME video has proper adaptive audio formats
+        # available — just not visible to that client. Every prior attempt
+        # here retried the byte-for-byte identical command, so a video
+        # hitting this failure mode failed all `max_attempts` tries
+        # identically instead of ever actually retrying with something
+        # different. `player_client=android_vr` was verified (see
+        # _YTDLP_NETWORK_ARGS's doc comment above) to reliably surface the
+        # proper adaptive formats for exactly this failure mode. Scoped to
+        # only the FINAL attempt — an explicit player_client list makes
+        # yt-dlp query every listed client up front (see that same doc
+        # comment for why that made every download 3-4x slower when it was
+        # applied blanket to every attempt), so this only pays that cost
+        # once real fallback is actually needed, not on the fast/common path.
+        client_override_args: list[str] = (
+            ["--extractor-args", "youtube:player_client=android_vr"]
+            if attempt == max_attempts else []
+        )
         # Client-configurable throttle (Settings → yt-dlp). throttle_seconds=0
         # disables the inter-request sleep for maximum speed (higher ban risk);
         # the default 5 keeps the previous 5–15s anti-bot pacing. concurrent_frags
@@ -2822,6 +2945,7 @@ async def _do_download_job(
         cmd = [
             "yt-dlp",
             *_YTDLP_NETWORK_ARGS,
+            *client_override_args,
             "--no-playlist",
             "--embed-metadata",
             "--embed-thumbnail",
@@ -3930,7 +4054,7 @@ async def _run_batch_download(job_id: str, links_path: pathlib.Path, music_dir: 
         # path, so a whole playlist shouldn't hinge on an aria2 subprocess
         # succeeding. This still gets multi-connection speed on both genuine
         # DASH fragments and single-URL progressive streams.
-        "-N", "4",
+        "-N", "8",
         "--http-chunk-size", "10M",
         "-P", str(music_dir),
         "-o", "%(title)s.%(ext)s",
@@ -12543,6 +12667,7 @@ async def set_youtube_api_key(body: YoutubeApiKeyRequest, payload: dict = Depend
                 "ON CONFLICT (user_id) DO UPDATE SET youtube_api_key = EXCLUDED.youtube_api_key",
                 (user_id, body.api_key),
             )
+    _youtube_api_key_cache.pop(user_id, None)
     await log_event("settings", "youtube_api_key_set", user_id=user_id)
     return {"status": "ok"}
 
@@ -12557,6 +12682,7 @@ async def delete_youtube_api_key(payload: dict = Depends(get_current_user)):
                 "UPDATE ios_user_settings SET youtube_api_key = NULL WHERE user_id = %s",
                 (user_id,),
             )
+    _youtube_api_key_cache.pop(user_id, None)
     await log_event("settings", "youtube_api_key_removed", user_id=user_id)
 
 
@@ -12886,6 +13012,7 @@ async def set_ytdlp_cookies(body: YtdlpCookiesUploadRequest, payload: dict = Dep
     # Drop any previously-materialized file so the very next download/stream
     # picks up this upload immediately instead of an up-to-2-min-stale copy.
     (YTDLP_USER_COOKIES_DIR / f"{user_id}.txt").unlink(missing_ok=True)
+    _user_cookies_text_cache.pop(user_id, None)
     return {"status": "ok"}
 
 
@@ -12901,6 +13028,7 @@ async def delete_ytdlp_cookies(payload: dict = Depends(get_current_user)):
                 (user_id,),
             )
     (YTDLP_USER_COOKIES_DIR / f"{user_id}.txt").unlink(missing_ok=True)
+    _user_cookies_text_cache.pop(user_id, None)
 
 
 @app.post("/user/ytdlp-cookies/validate")
@@ -13066,6 +13194,22 @@ def _valid_avatar_frame(value: Optional[str]) -> str:
     return lower
 
 
+# Feature: profile-customization-4 — how strongly the profile's main/sub
+# accent colors wash across the WHOLE background (ProfileAccentBackgroundGlow
+# client-side), not just the avatar/banner chrome. Same allowlist-not-free-
+# text validation precedent as avatar frames above.
+_VALID_GLOW_INTENSITIES = {"subtle", "normal", "vivid", "off"}
+
+
+def _valid_glow_intensity(value: Optional[str]) -> str:
+    if value is None:
+        return "normal"
+    lower = value.lower()
+    if lower not in _VALID_GLOW_INTENSITIES:
+        raise HTTPException(status_code=400, detail=f"Unrecognized glow intensity: {value}")
+    return lower
+
+
 async def _blocked_either_direction(cur, user_a: str, user_b: str) -> bool:
     await cur.execute(
         """
@@ -13100,6 +13244,8 @@ class SocialProfileUpdate(BaseModel):
     # show_top_genres). See _profile_visitor_stats / _compute_listening_streak.
     show_visitor_stats: Optional[bool] = None
     show_listening_stats: Optional[bool] = None
+    # Feature: profile-customization-4
+    accent_glow_intensity: Optional[str] = None
 
 
 class PinnedTrackIn(BaseModel):
@@ -13149,7 +13295,7 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
             await cur.execute(
                 "SELECT bio, main_accent_hex, sub_accent_hex, share_now_playing, "
                 "pronouns, status_emoji, status_text, avatar_frame, show_top_genres, show_guestbook, "
-                "show_visitor_stats, show_listening_stats, featured_playlist_id "
+                "show_visitor_stats, show_listening_stats, featured_playlist_id, accent_glow_intensity "
                 "FROM ios_social_profiles WHERE user_id = %s",
                 (user_id,),
             )
@@ -13214,6 +13360,7 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
         "visitor_count": visitor_stats["visitor_count"],
         "recent_visitors": visitor_stats["recent_visitors"],
         "featured_playlist": featured_playlist,
+        "accent_glow_intensity": (row[13] if row and row[13] else "normal"),
     }
 
 
@@ -13236,6 +13383,7 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
     # existing value the same way share_now_playing does below, not to the
     # literal string "none" every time it's left out of a partial PATCH.
     frame = _valid_avatar_frame(body.avatar_frame) if body.avatar_frame is not None else None
+    glow = _valid_glow_intensity(body.accent_glow_intensity) if body.accent_glow_intensity is not None else None
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -13264,9 +13412,9 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
                 INSERT INTO ios_social_profiles
                     (user_id, bio, main_accent_hex, sub_accent_hex, share_now_playing,
                      pronouns, status_emoji, status_text, avatar_frame, show_top_genres, show_guestbook,
-                     show_visitor_stats, show_listening_stats)
+                     show_visitor_stats, show_listening_stats, accent_glow_intensity)
                 VALUES (%s, %s, %s, %s, COALESCE(%s, TRUE), %s, %s, %s, COALESCE(%s, 'none'), COALESCE(%s, FALSE), COALESCE(%s, TRUE),
-                        COALESCE(%s, TRUE), COALESCE(%s, FALSE))
+                        COALESCE(%s, TRUE), COALESCE(%s, FALSE), COALESCE(%s, 'normal'))
                 ON CONFLICT (user_id) DO UPDATE SET
                     bio = COALESCE(EXCLUDED.bio, ios_social_profiles.bio),
                     main_accent_hex = COALESCE(EXCLUDED.main_accent_hex, ios_social_profiles.main_accent_hex),
@@ -13279,14 +13427,15 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
                     show_top_genres = COALESCE(%s, ios_social_profiles.show_top_genres),
                     show_guestbook = COALESCE(%s, ios_social_profiles.show_guestbook),
                     show_visitor_stats = COALESCE(%s, ios_social_profiles.show_visitor_stats),
-                    show_listening_stats = COALESCE(%s, ios_social_profiles.show_listening_stats)
+                    show_listening_stats = COALESCE(%s, ios_social_profiles.show_listening_stats),
+                    accent_glow_intensity = COALESCE(%s, ios_social_profiles.accent_glow_intensity)
                 """,
                 (
                     user_id, body.bio, main_hex, sub_hex, body.share_now_playing,
                     body.pronouns, body.status_emoji, body.status_text, frame,
-                    body.show_top_genres, body.show_guestbook, body.show_visitor_stats, body.show_listening_stats,
+                    body.show_top_genres, body.show_guestbook, body.show_visitor_stats, body.show_listening_stats, glow,
                     body.share_now_playing, frame, body.show_top_genres, body.show_guestbook,
-                    body.show_visitor_stats, body.show_listening_stats,
+                    body.show_visitor_stats, body.show_listening_stats, glow,
                 ),
             )
     return {"ok": True}
@@ -13410,7 +13559,7 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
             await cur.execute(
                 "SELECT bio, main_accent_hex, sub_accent_hex, pronouns, status_emoji, status_text, "
                 "avatar_frame, show_top_genres, show_guestbook, "
-                "show_visitor_stats, show_listening_stats, featured_playlist_id "
+                "show_visitor_stats, show_listening_stats, featured_playlist_id, accent_glow_intensity "
                 "FROM ios_social_profiles WHERE user_id = %s",
                 (user_id,),
             )
@@ -13487,6 +13636,7 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
         "visitor_count": visitor_stats["visitor_count"],
         "recent_visitors": visitor_stats["recent_visitors"],
         "featured_playlist": featured_playlist,
+        "accent_glow_intensity": (profile_row[12] if profile_row and profile_row[12] else "normal"),
     }
 
 
@@ -14579,8 +14729,21 @@ async def _compute_profile_badges(cur, user_id: str, member_since) -> list[dict]
         elif days >= 30:
             badges.append({"id": "veteran", "label": "1 Month+", "icon": "star.circle.fill", "tier": "bronze"})
 
-    await cur.execute("SELECT COUNT(*) FROM ios_play_history WHERE user_id = %s", (user_id,))
-    plays = (await cur.fetchone())[0]
+    # Was 5 separate round-trip COUNT(*) queries (plays, friends, comments,
+    # pinned — one per badge category) run sequentially on every profile
+    # load, on top of everything else get_public_social_profile already
+    # awaits one-at-a-time. Collapsed into one query via scalar subqueries —
+    # same 4 counts, same semantics, a single round trip instead of four.
+    await cur.execute(
+        "SELECT "
+        "(SELECT COUNT(*) FROM ios_play_history WHERE user_id = %s), "
+        "(SELECT COUNT(*) FROM ios_social_friends WHERE user_id = %s), "
+        "(SELECT COUNT(*) FROM ios_social_profile_comments WHERE profile_user_id = %s), "
+        "(SELECT COUNT(*) FROM ios_social_pinned_tracks WHERE user_id = %s)",
+        (user_id, user_id, user_id, user_id),
+    )
+    plays, friend_count, comments_received, pinned_count = await cur.fetchone()
+
     if plays >= 5000:
         badges.append({"id": "listener", "label": "5,000 Plays", "icon": "headphones", "tier": "gold"})
     elif plays >= 500:
@@ -14588,8 +14751,6 @@ async def _compute_profile_badges(cur, user_id: str, member_since) -> list[dict]
     elif plays >= 50:
         badges.append({"id": "listener", "label": "50 Plays", "icon": "headphones", "tier": "bronze"})
 
-    await cur.execute("SELECT COUNT(*) FROM ios_social_friends WHERE user_id = %s", (user_id,))
-    friend_count = (await cur.fetchone())[0]
     if friend_count >= 25:
         badges.append({"id": "social", "label": "25 Friends", "icon": "person.3.fill", "tier": "gold"})
     elif friend_count >= 10:
@@ -14597,10 +14758,6 @@ async def _compute_profile_badges(cur, user_id: str, member_since) -> list[dict]
     elif friend_count >= 3:
         badges.append({"id": "social", "label": "3 Friends", "icon": "person.3.fill", "tier": "bronze"})
 
-    await cur.execute(
-        "SELECT COUNT(*) FROM ios_social_profile_comments WHERE profile_user_id = %s", (user_id,)
-    )
-    comments_received = (await cur.fetchone())[0]
     if comments_received >= 25:
         badges.append({"id": "popular", "label": "25 Guestbook Notes", "icon": "bubble.left.and.bubble.right.fill", "tier": "gold"})
     elif comments_received >= 5:
@@ -14608,8 +14765,6 @@ async def _compute_profile_badges(cur, user_id: str, member_since) -> list[dict]
     elif comments_received >= 1:
         badges.append({"id": "popular", "label": "First Guestbook Note", "icon": "bubble.left.and.bubble.right.fill", "tier": "bronze"})
 
-    await cur.execute("SELECT COUNT(*) FROM ios_social_pinned_tracks WHERE user_id = %s", (user_id,))
-    pinned_count = (await cur.fetchone())[0]
     if pinned_count >= 5:
         badges.append({"id": "curator", "label": "Full Showcase", "icon": "pin.fill", "tier": "gold"})
 
@@ -14693,13 +14848,18 @@ async def _featured_playlist_payload(cur, playlist_id: Optional[str]) -> Optiona
     row = await cur.fetchone()
     if not row:
         return None
-    await cur.execute("SELECT COUNT(*) FROM ios_playlist_tracks WHERE playlist_id = %s", (playlist_id,))
-    track_count = (await cur.fetchone())[0]
+    # Was 2 round trips (a COUNT(*) for the total, then a separate
+    # LIMIT-3 SELECT for the preview) — COUNT(*) OVER() computes the total
+    # matching row count alongside each of the (up to 3) returned preview
+    # rows in one query, since the window function runs before LIMIT
+    # truncates the result set.
     await cur.execute(
-        "SELECT title, artist FROM ios_playlist_tracks WHERE playlist_id = %s ORDER BY position ASC LIMIT 3",
+        "SELECT title, artist, COUNT(*) OVER() AS total_count FROM ios_playlist_tracks "
+        "WHERE playlist_id = %s ORDER BY position ASC LIMIT 3",
         (playlist_id,),
     )
     preview_rows = await cur.fetchall()
+    track_count = preview_rows[0][2] if preview_rows else 0
     return {
         "id": row[0],
         "name": row[1],

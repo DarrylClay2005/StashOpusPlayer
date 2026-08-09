@@ -1195,6 +1195,14 @@ ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS show_visitor_stats BOOL
 ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS show_listening_stats BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS featured_playlist_id VARCHAR(36) NULL;
 
+-- Feature: profile-customization-4 — how strongly the profile's main/sub
+-- accent colors wash across the whole profile background client-side
+-- (ProfileAccentBackgroundGlow), independent of the accent colors
+-- themselves. One of 'subtle'/'normal'/'vivid'/'off', validated server-side
+-- via _valid_glow_intensity's allowlist (same "allowlist, not free text"
+-- precedent as avatar_frame) rather than trusted as arbitrary client input.
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS accent_glow_intensity VARCHAR(10) NOT NULL DEFAULT 'normal';
+
 -- Profile view log backing the visitor-stats feature. One row per (viewer,
 -- profile) visit, debounced server-side to at most one row per 30 minutes
 -- per pair (see main.py's _record_profile_view) so repeatedly reopening a
