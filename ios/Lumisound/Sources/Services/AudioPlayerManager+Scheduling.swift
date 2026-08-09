@@ -59,6 +59,7 @@ extension AudioPlayerManager {
     /// reset point for the AVPlayer load-failure circuit breaker (see `handleLoadFailure`).
     func resetReplayGainForNewTrack() {
         recentLoadFailureTimestamps.removeAll()
+        opusRetriedThisLoad = false
         replayGainLinearGain = 1.0
         // Every fresh (stop()+play()) schedule restarts the node's sample clock
         // at 0, so the gapless position baseline must reset too. The gapless

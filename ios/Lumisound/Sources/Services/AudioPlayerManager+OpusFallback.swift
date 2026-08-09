@@ -12,7 +12,7 @@ extension AudioPlayerManager {
     /// failures are arriving in a tight loop (4+ within 5 seconds — e.g. a stale stream URL that
     /// fails instantly and `repeatMode == .one`/`.all` keeps re-triggering the same failure),
     /// stops playback entirely instead of spinning forever.
-    func handleLoadFailure(message: String, userFacingMessage: String) {
+    func handleLoadFailure(message: String, userFacingMessage: String, retryURL: URL? = nil) {
         appError(message, category: "audio")
         tearDownOpusPlayer()
         isPlaying = false
@@ -40,6 +40,29 @@ extension AudioPlayerManager {
             errorMessage = "Playback stopped after repeated errors."
             ToastCenter.shared.show("Playback stopped after repeated errors", category: .error, icon: "exclamationmark.triangle.fill")
             stop()
+            return
+        }
+
+        // One automatic retry for remote streams only — a corrupt local file
+        // (also routed through this same handler, see scheduleWithOpusPlayer's
+        // callers) fails identically every time, but a bridge stream-proxy
+        // hiccup (yt-dlp extraction timeout, concurrency-slot contention —
+        // see YTDLP_MAX_CONCURRENT server-side) often succeeds seconds later.
+        if let retryURL, !retryURL.isFileURL, !opusRetriedThisLoad {
+            opusRetriedThisLoad = true
+            let retrySongID = currentSong?.id
+            let retryPosition = position
+            appWarn("Retrying stream load once after failure: \(retryURL.lastPathComponent)", category: "audio")
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard let self, self.currentSong?.id == retrySongID else { return }
+                // scheduleWithOpusPlayer only starts the player's rate if
+                // `isPlaying` is already true (the invariant its normal
+                // caller, playCurrent, sets up before scheduling) — this
+                // retry bypasses that caller, so it must set it itself.
+                self.isPlaying = true
+                self.scheduleWithOpusPlayer(url: retryURL, startTime: retryPosition)
+            }
             return
         }
 
@@ -141,12 +164,23 @@ extension AudioPlayerManager {
                     let detail = Self.describeLoadError(item.error)
                     self.handleLoadFailure(
                         message: "AVPlayer failed to load track — skipping. \(detail)",
-                        userFacingMessage: "Could not play this track."
+                        userFacingMessage: "Could not play this track.",
+                        retryURL: url
                     )
                 }
             } else if item.status == .readyToPlay {
                 Task { @MainActor [weak self] in
-                    self?.recentLoadFailureTimestamps.removeAll()
+                    guard let self else { return }
+                    self.recentLoadFailureTimestamps.removeAll()
+                    // A confirmed-good load means any FUTURE failure on this
+                    // track is a new, distinct problem worth its own retry —
+                    // not blocked by an earlier retry that already succeeded.
+                    self.opusRetriedThisLoad = false
+                    // Clears the banner a preceding failed attempt set (e.g.
+                    // a retry that then succeeded) — scheduleWithOpusPlayer
+                    // itself doesn't clear it the way playCurrent's other
+                    // scheduling paths do, since a retry calls it directly.
+                    self.errorMessage = nil
                 }
             }
         }
@@ -162,7 +196,8 @@ extension AudioPlayerManager {
                 guard let self else { return }
                 self.handleLoadFailure(
                     message: "AVPlayer playback failed — skipping. \(Self.describeLoadError(err))",
-                    userFacingMessage: "Playback error."
+                    userFacingMessage: "Playback error.",
+                    retryURL: url
                 )
             }
         }

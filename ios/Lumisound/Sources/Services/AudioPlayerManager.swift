@@ -355,6 +355,14 @@ final class AudioPlayerManager: ObservableObject {
     // If failures happen too fast for too long, stop playback instead of retrying.
     var recentLoadFailureTimestamps: [Date] = []
 
+    // Set once `handleLoadFailure` has already retried the *current* track's
+    // load once — a corrupt local file fails identically every time (retrying
+    // is pointless), but a remote stream (bridge stream-proxy hiccup,
+    // transient yt-dlp extraction error, brief concurrency-slot contention)
+    // often succeeds seconds later. Reset in `resetReplayGainForNewTrack`
+    // (i.e. only when a genuinely new track starts, not by the retry itself).
+    var opusRetriedThisLoad = false
+
     // AVPlayer fallback for containers (e.g. .opus) that AVAssetReader cannot decode.
     // When active, this player owns audio output instead of the AVAudioEngine nodes.
     var opusPlayer: AVPlayer?
