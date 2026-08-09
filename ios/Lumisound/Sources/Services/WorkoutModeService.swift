@@ -113,7 +113,11 @@ final class WorkoutModeService: ObservableObject {
             let clampedRatio = min(max(rawRatio, Self.speedClampRange.lowerBound), Self.speedClampRange.upperBound)
             await MainActor.run {
                 guard self.isActive else { return }
-                player.audioSettings.speed = clampedRatio
+                // AudioSettings.speed is Float (matches every playback
+                // tier's `.rate` property, itself Float) -- this pass's
+                // math stays in Double since CMPedometer/BPMAnalyzerService
+                // both hand back Double.
+                player.audioSettings.speed = Float(clampedRatio)
             }
         }
     }
