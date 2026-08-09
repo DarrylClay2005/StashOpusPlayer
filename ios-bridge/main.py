@@ -842,17 +842,52 @@ async def check_auth(request: Request) -> None:
 # Admin dashboard auth (operator-only)
 # ---------------------------------------------------------------------------
 
+# The one account allowed to see the in-app admin screen. Hardcoded (not an
+# env var / DB flag) deliberately -- this is a single-operator self-hosted
+# deployment, and a hardcoded literal here can't be silently changed by a
+# compromised DB row or a misconfigured env the way a "is_admin" column or
+# ADMIN_USER_ID env var could.
+OPERATOR_USER_ID = "ca8a4c53-5603-472e-9287-5fb879f28090"
 
-async def check_admin_auth(request: Request) -> None:
-    """Every /admin/* route requires this. Unset by default — the whole
-    /admin surface 503s until an operator explicitly opts in by setting
-    ADMIN_TOKEN, rather than silently sitting open with no auth on a fresh
+
+async def check_admin_or_operator(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_security),
+) -> None:
+    """Every /admin/* route requires this. Two independent paths in:
+      1. The operator's own logged-in JWT (sub == OPERATOR_USER_ID, with a
+         still-valid session row) -- what the in-app admin screen sends.
+         Tied to a real authenticated account rather than a bundled secret,
+         so nothing extractable from the app binary grants access on its
+         own the way embedding ADMIN_TOKEN in the client would have.
+      2. The separate ADMIN_TOKEN bearer secret -- what the standalone
+         /admin web dashboard uses, for access from outside the app
+         entirely (a browser, a monitoring script, ...).
+    Unset ADMIN_TOKEN + no operator JWT means the whole /admin surface
+    503s, rather than silently sitting open with no auth on a fresh
     deploy."""
+    if credentials:
+        payload = decode_token(credentials.credentials)
+        if payload and payload.get("sub") == OPERATOR_USER_ID:
+            token_id = payload.get("jti")
+            if not token_id:
+                return
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT 1 FROM ios_user_sessions WHERE token_id = %s AND expires_at > NOW()",
+                        (token_id,),
+                    )
+                    if await cur.fetchone():
+                        return
+            raise HTTPException(status_code=401, detail="Session has been revoked")
+
     if not ADMIN_TOKEN:
         raise HTTPException(status_code=503, detail="Admin dashboard not configured (set ADMIN_TOKEN)")
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer ") or auth_header[len("Bearer "):] != ADMIN_TOKEN:
-        raise HTTPException(status_code=401, detail="Invalid or missing admin token")
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
 
 # ---------------------------------------------------------------------------
@@ -2113,7 +2148,7 @@ async def health():
 # ---------------------------------------------------------------------------
 
 
-@app.get("/admin/api/overview", dependencies=[Depends(check_admin_auth)])
+@app.get("/admin/api/overview", dependencies=[Depends(check_admin_or_operator)])
 async def admin_overview():
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -2172,7 +2207,7 @@ async def admin_overview():
     }
 
 
-@app.get("/admin/api/download-jobs", dependencies=[Depends(check_admin_auth)])
+@app.get("/admin/api/download-jobs", dependencies=[Depends(check_admin_or_operator)])
 async def admin_download_jobs(limit: int = Query(50, ge=1, le=200)):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -2197,7 +2232,7 @@ async def admin_download_jobs(limit: int = Query(50, ge=1, le=200)):
     ]
 
 
-@app.get("/admin/api/errors", dependencies=[Depends(check_admin_auth)])
+@app.get("/admin/api/errors", dependencies=[Depends(check_admin_or_operator)])
 async def admin_errors(limit: int = Query(50, ge=1, le=200)):
     pool = await get_pool()
     async with pool.acquire() as conn:

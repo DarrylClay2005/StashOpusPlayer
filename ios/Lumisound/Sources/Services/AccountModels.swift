@@ -823,3 +823,98 @@ struct SyncTrack: Codable {
     }
 }
 
+
+// MARK: - Admin Dashboard
+
+/// GET /admin/api/overview — same data the standalone web dashboard shows
+/// (see main.py's _ADMIN_DASHBOARD_HTML), just consumed natively. Only
+/// reachable server-side by ADMIN_TOKEN or the hardcoded operator account's
+/// own JWT — see AdminDashboardView's own doc comment for the client-side
+/// half of that gate.
+struct AdminOverview: Codable {
+    let version: String
+    let ytDlpVersion: String
+    let userCount: Int
+    let musicFileCount: Int
+    let musicBytes: Int
+    let disk: DiskUsage?
+    let downloadJobs24h: [String: Int]
+    let recentErrorCount24h: Int
+    let concurrency: Concurrency
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case ytDlpVersion = "yt_dlp_version"
+        case userCount = "user_count"
+        case musicFileCount = "music_file_count"
+        case musicBytes = "music_bytes"
+        case disk
+        case downloadJobs24h = "download_jobs_24h"
+        case recentErrorCount24h = "recent_error_count_24h"
+        case concurrency
+    }
+
+    struct DiskUsage: Codable {
+        let totalBytes: Int64
+        let usedBytes: Int64
+        let freeBytes: Int64
+        enum CodingKeys: String, CodingKey {
+            case totalBytes = "total_bytes"
+            case usedBytes = "used_bytes"
+            case freeBytes = "free_bytes"
+        }
+    }
+
+    struct Concurrency: Codable {
+        let ytdlpMax: Int
+        let ytdlpAvailable: Int
+        let transcodeMax: Int
+        let transcodeAvailable: Int
+        enum CodingKeys: String, CodingKey {
+            case ytdlpMax = "ytdlp_max"
+            case ytdlpAvailable = "ytdlp_available"
+            case transcodeMax = "transcode_max"
+            case transcodeAvailable = "transcode_available"
+        }
+    }
+}
+
+/// One row from GET /admin/api/download-jobs (ios_download_log).
+struct AdminDownloadJob: Codable, Identifiable {
+    let id: Int
+    let source: String
+    let sourceId: String
+    let title: String?
+    let status: String
+    let errorMessage: String?
+    let durationMs: Int?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, source, status
+        case sourceId = "source_id"
+        case title
+        case errorMessage = "error_message"
+        case durationMs = "duration_ms"
+        case createdAt = "created_at"
+    }
+}
+
+/// One row from GET /admin/api/errors (ios_app_logs, level='error').
+struct AdminErrorLogEntry: Codable, Identifiable {
+    let category: String
+    let message: String
+    let file: String?
+    let line: Int?
+    let timestamp: String?
+    let appVersion: String?
+    let osVersion: String?
+
+    var id: String { "\(timestamp ?? "")-\(category)-\(message.prefix(40))" }
+
+    enum CodingKeys: String, CodingKey {
+        case category, message, file, line, timestamp
+        case appVersion = "app_version"
+        case osVersion = "os_version"
+    }
+}

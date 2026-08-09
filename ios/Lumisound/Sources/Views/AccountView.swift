@@ -508,6 +508,23 @@ struct AccountView: View {
                 }
                 .listRowBackground(AppTheme.surface)
 
+                // MARK: Operator Section
+                // Only ever rendered for the hardcoded operator account —
+                // see AdminDashboardView's own doc comment for why this is
+                // just a UX gate, not the real access boundary (the server
+                // enforces that independently either way).
+                if account.currentUser?.id == AdminDashboardView.operatorUserID {
+                    Section {
+                        NavigationLink(destination: AdminDashboardView()) {
+                            Label("Admin Dashboard", systemImage: "server.rack")
+                                .foregroundStyle(AppTheme.textPrimary)
+                        }
+                    } header: {
+                        sectionHeader("Operator")
+                    }
+                    .listRowBackground(AppTheme.surface)
+                }
+
                 // MARK: Connected Tools Section
                 Section {
                     NavigationLink(destination: DiscordRichPresenceView()) {
