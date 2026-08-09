@@ -839,7 +839,16 @@ async def check_auth(request: Request) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Admin dashboard auth (operator-only)
+# JWT auth dependency (for account endpoints)
+# ---------------------------------------------------------------------------
+
+_security = HTTPBearer(auto_error=False)
+
+
+# ---------------------------------------------------------------------------
+# Admin dashboard auth (operator-only) -- defined after _security above,
+# since check_admin_or_operator's Depends(_security) default argument is
+# evaluated at function-DEFINITION time, not call time.
 # ---------------------------------------------------------------------------
 
 # The one account allowed to see the in-app admin screen. Hardcoded (not an
@@ -888,13 +897,6 @@ async def check_admin_or_operator(
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer ") or auth_header[len("Bearer "):] != ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid admin credentials")
-
-
-# ---------------------------------------------------------------------------
-# JWT auth dependency (for account endpoints)
-# ---------------------------------------------------------------------------
-
-_security = HTTPBearer(auto_error=False)
 
 # Short-TTL cache of "this token_id's session is still valid" results, keyed
 # by token_id. get_current_user runs on every authenticated request (sync,
