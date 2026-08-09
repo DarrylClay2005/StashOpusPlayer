@@ -273,7 +273,22 @@ final class ArtworkService {
             }
         }
 
-        // Last resort: iTunes Search API using song title + artist.
+        // Last resort #1: search the bridge (YouTube) by title + artist and
+        // use the top result's thumbnail. Tried before iTunes Search since
+        // this app's library skews toward fan remixes/game-rips/niche
+        // content that YouTube actually hosts and iTunes's commercial
+        // catalog never will — and unlike iTunes, this device may not have
+        // any iTunes/Apple Music account or usage at all, so that fallback
+        // alone left plenty of tracks with no recoverable artwork.
+        appLog("Artwork: searching YouTube for \"\(song.displayName)\" by \(song.artistName)", category: "artwork")
+        if let image = await fetchYouTubeSearchArtwork(title: song.title, artist: song.artist) {
+            appLog("Artwork: YouTube search match found for \"\(song.displayName)\"", category: "artwork")
+            return persistFullArtwork(image, forKey: key)
+        }
+
+        // Last resort #2: iTunes Search API — still worth trying for
+        // legitimately commercial tracks the YouTube search above didn't
+        // resolve a usable thumbnail for.
         appLog("Artwork: querying iTunes for \"\(song.displayName)\" by \(song.artistName)", category: "artwork")
         if let image = await fetchITunesArtwork(title: song.title, artist: song.artist) {
             appLog("Artwork: iTunes match found for \"\(song.displayName)\"", category: "artwork")
@@ -696,6 +711,28 @@ final class ArtworkService {
             }
             return nil as UIImage?
         }.value
+    }
+
+    /// Searches the bridge (YouTube, via `StreamingService.searchSilently` —
+    /// the same silent/non-UI-disturbing search `DeadLinkHealingService`
+    /// uses) for `title` + `artist` and fetches the top result's thumbnail.
+    /// `StreamingService` is `@MainActor`-isolated; this function isn't, so
+    /// the call hops there explicitly rather than requiring every caller of
+    /// `loadArtwork` to already be on the main actor.
+    private func fetchYouTubeSearchArtwork(title: String, artist: String) async -> UIImage? {
+        let query = [title, artist]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard !query.isEmpty else { return nil }
+
+        guard let streaming = await MainActor.run(body: { StreamingService.shared }) else { return nil }
+        let results = await streaming.searchSilently(query: query)
+        guard let thumbnailURLString = results.first?.thumbnailURL,
+              !thumbnailURLString.isEmpty,
+              let thumbnailURL = URL(string: thumbnailURLString)
+        else { return nil }
+        return await fetchRemoteImage(url: thumbnailURL)
     }
 
     /// Queries the iTunes Search API for artwork matching `title` + `artist`.
