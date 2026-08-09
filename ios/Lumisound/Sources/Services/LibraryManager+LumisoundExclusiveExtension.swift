@@ -136,6 +136,9 @@ extension LibraryManager {
             return false
         }
 
+        // AudioTagWriter verifies its own output is genuinely readable
+        // before returning non-nil (see its doc comment) — a non-nil
+        // `repairedURL` here is safe to treat as the new truth for `url`.
         guard let repairedURL = await AudioTagWriter.tag(
             fileAt: url, title: song.title, artist: song.artist, album: song.album, sourceTrackID: tag.trackID
         ) else {

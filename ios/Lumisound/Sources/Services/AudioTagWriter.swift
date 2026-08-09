@@ -54,6 +54,20 @@ enum AudioTagWriter {
             try? FileManager.default.removeItem(at: outURL)
             return nil
         }
+        // `.completed` is the export session's own status, not proof the
+        // resulting file actually opens — a genuinely truncated/corrupt
+        // output (the app backgrounded/memory-pressured mid-export, etc.)
+        // can still report `.completed`. Verify before handing this back as
+        // success, matching the same "confirm playable before trusting it"
+        // rule AudioEncoderService.convertPermanently already follows —
+        // every caller here goes on to either replace an existing good file
+        // or import this as a brand-new one, so a false "success" is a real
+        // corruption risk, not just a cosmetic one.
+        guard CorruptFileFinderService.isValidAudioFile(at: outURL) else {
+            appWarn("AudioTagWriter: export reported success but output is unreadable (preset: \(presetUsed), elapsed: \(String(format: "%.2f", elapsed))s, sourceTrackID: \(sourceTrackID))", category: "network")
+            try? FileManager.default.removeItem(at: outURL)
+            return nil
+        }
         appLog("AudioTagWriter: tagged (preset: \(presetUsed), elapsed: \(String(format: "%.2f", elapsed))s, sourceTrackID: \(sourceTrackID))", category: "network")
         return outURL
     }
