@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - PodcastsView
 //
@@ -12,6 +13,13 @@ struct PodcastsView: View {
     @State private var isLoading = true
     @State private var showAddSheet = false
     @AppStorage(PodcastAutoDownloadService.enabledKey) private var autoDownloadEnabled = false
+
+    // OPML import/export
+    @State private var showImporter = false
+    @State private var exportURL: URL?
+    @State private var showShareSheet = false
+    @State private var isExporting = false
+    @State private var opmlAlertMessage: String?
 
     var body: some View {
         Group {
@@ -57,12 +65,88 @@ struct PodcastsView: View {
                     Image(systemName: "plus")
                 }
             }
+            ToolbarItem(placement: .navigationBarLeading) {
+                Menu {
+                    Button {
+                        exportOPML()
+                    } label: {
+                        Label("Export OPML", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(subscriptions.isEmpty || isExporting)
+
+                    Button {
+                        showImporter = true
+                    } label: {
+                        Label("Import OPML", systemImage: "square.and.arrow.down")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
         }
         .sheet(isPresented: $showAddSheet) {
             AddPodcastSheet { await reload() }
         }
+        .sheet(isPresented: $showShareSheet) {
+            if let exportURL {
+                RewindShareSheet(items: [exportURL])
+            }
+        }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: opmlContentTypes) { result in
+            handleImportResult(result)
+        }
+        .alert("Podcasts", isPresented: .constant(opmlAlertMessage != nil), presenting: opmlAlertMessage) { _ in
+            Button("OK") { opmlAlertMessage = nil }
+        } message: { message in
+            Text(message)
+        }
         .task { await reload() }
         .refreshable { await reload() }
+    }
+
+    private var opmlContentTypes: [UTType] {
+        [UTType(filenameExtension: "opml"), .xml].compactMap { $0 }
+    }
+
+    private func exportOPML() {
+        isExporting = true
+        Task {
+            defer { isExporting = false }
+            guard let opml = await account.exportPodcastsOPML() else {
+                opmlAlertMessage = account.errorMessage ?? "Couldn't export your subscriptions."
+                return
+            }
+            do {
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("Lumisound-Podcasts.opml")
+                try opml.write(to: url, atomically: true, encoding: .utf8)
+                exportURL = url
+                showShareSheet = true
+            } catch {
+                opmlAlertMessage = "Couldn't create the export file."
+            }
+        }
+    }
+
+    private func handleImportResult(_ result: Result<URL, Error>) {
+        switch result {
+        case .failure:
+            opmlAlertMessage = "Couldn't read that file."
+        case .success(let url):
+            let didStartAccessing = url.startAccessingSecurityScopedResource()
+            defer { if didStartAccessing { url.stopAccessingSecurityScopedResource() } }
+            guard let opml = try? String(contentsOf: url, encoding: .utf8) else {
+                opmlAlertMessage = "Couldn't read that file."
+                return
+            }
+            Task {
+                guard let result = await account.importPodcastsOPML(opml) else {
+                    opmlAlertMessage = account.errorMessage ?? "Import failed."
+                    return
+                }
+                opmlAlertMessage = "Added \(result.added) of \(result.total) podcast(s)."
+                await reload()
+            }
+        }
     }
 
     private var emptyState: some View {

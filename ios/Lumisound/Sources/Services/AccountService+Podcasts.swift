@@ -61,6 +61,38 @@ extension AccountService {
         }
     }
 
+    /// Fetches an OPML document of every subscription — the standard
+    /// cross-app podcast-subscription export format (Apple Podcasts,
+    /// Overcast, Pocket Casts, ...).
+    func exportPodcastsOPML() async -> String? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/user/podcasts/export-opml")
+            return String(data: data, encoding: .utf8)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Bulk-subscribes to every feed found in an OPML document (imported
+    /// from another podcast app). Returns (added, failed, total) counts.
+    func importPodcastsOPML(_ opml: String) async -> (added: Int, failed: Int, total: Int)? {
+        guard isLoggedIn else { return nil }
+        struct Body: Encodable { let opml: String }
+        struct Result: Decodable { let added: Int; let failed: Int; let total: Int }
+        do {
+            let data = try await makeRequest("/user/podcasts/import-opml", method: "POST", body: Body(opml: opml))
+            let result = try JSONDecoder().decode(Result.self, from: data)
+            return (result.added, result.failed, result.total)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     func unsubscribeFromPodcast(id: String) async {
         guard isLoggedIn else { return }
         do {

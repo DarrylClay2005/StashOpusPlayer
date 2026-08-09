@@ -15795,14 +15795,13 @@ def _parse_itunes_duration(raw: str) -> Optional[int]:
     return seconds
 
 
-@app.post("/user/podcasts/subscriptions", status_code=201)
-async def subscribe_podcast(body: PodcastSubscribeRequest, payload: dict = Depends(get_current_user)):
-    user_id = payload["sub"]
-    await _reject_ssrf_targets(body.feed_url)
-    try:
-        channel = await asyncio.to_thread(_fetch_podcast_feed_sync, body.feed_url)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Couldn't read that feed: {exc}")
+async def _subscribe_podcast_core(user_id: str, feed_url: str) -> dict:
+    """Shared by the single-feed subscribe endpoint and the OPML bulk
+    importer -- validates the feed by actually fetching it (catching typos/
+    dead feeds at add-time rather than silently at the next episode-list
+    fetch), same as it always has."""
+    await _reject_ssrf_targets(feed_url)
+    channel = await asyncio.to_thread(_fetch_podcast_feed_sync, feed_url)
     meta = _parse_podcast_channel_meta(channel)
 
     sub_id = str(uuid.uuid4())
@@ -15814,13 +15813,24 @@ async def subscribe_podcast(body: PodcastSubscribeRequest, payload: dict = Depen
                 "VALUES (%s, %s, %s, %s, %s) "
                 "ON CONFLICT (user_id, feed_url) DO UPDATE SET title = EXCLUDED.title, artwork_url = EXCLUDED.artwork_url "
                 "RETURNING id, feed_url, title, artwork_url, added_at",
-                (sub_id, user_id, body.feed_url, meta["title"], meta["artwork_url"]),
+                (sub_id, user_id, feed_url, meta["title"], meta["artwork_url"]),
             )
             row = await cur.fetchone()
     return {
         "id": row[0], "feed_url": row[1], "title": row[2], "artwork_url": row[3],
         "added_at": row[4].isoformat() if row[4] else None,
     }
+
+
+@app.post("/user/podcasts/subscriptions", status_code=201)
+async def subscribe_podcast(body: PodcastSubscribeRequest, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    try:
+        return await _subscribe_podcast_core(user_id, body.feed_url)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Couldn't read that feed: {exc}")
 
 
 @app.get("/user/podcasts/subscriptions")
@@ -16008,6 +16018,76 @@ async def get_podcast_episode_progress(
         }
         for r in rows
     ]
+
+
+def _build_opml_sync(subscriptions: list[dict]) -> str:
+    opml = ET.Element("opml", version="2.0")
+    head = ET.SubElement(opml, "head")
+    ET.SubElement(head, "title").text = "Lumisound Podcast Subscriptions"
+    body = ET.SubElement(opml, "body")
+    for sub in subscriptions:
+        ET.SubElement(
+            body, "outline", type="rss",
+            text=sub["title"] or sub["feed_url"], xmlUrl=sub["feed_url"],
+        )
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(opml, encoding="unicode")
+
+
+@app.get("/user/podcasts/export-opml")
+async def export_podcasts_opml(payload: dict = Depends(get_current_user)):
+    """Standard OPML export -- the format every podcast app (Apple Podcasts,
+    Overcast, Pocket Casts, ...) uses for subscription portability, so a
+    user can move their Lumisound subscriptions elsewhere (or back in)."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT feed_url, title FROM ios_podcast_subscriptions WHERE user_id = %s ORDER BY added_at",
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+    opml_text = _build_opml_sync([{"feed_url": r[0], "title": r[1]} for r in rows])
+    return Response(content=opml_text, media_type="text/x-opml+xml")
+
+
+def _parse_opml_feed_urls_sync(opml_text: str) -> list[str]:
+    root = ET.fromstring(opml_text)
+    urls: list[str] = []
+    for outline in root.iter("outline"):
+        url = outline.get("xmlUrl")
+        if url:
+            urls.append(url)
+    return urls
+
+
+class ImportOPMLRequest(BaseModel):
+    opml: str
+
+
+@app.post("/user/podcasts/import-opml")
+async def import_podcasts_opml(body: ImportOPMLRequest, payload: dict = Depends(get_current_user)):
+    """Bulk-subscribes to every <outline xmlUrl="..."> found in an uploaded
+    OPML document (the counterpart to export_podcasts_opml) -- lets a user
+    migrate their subscriptions in from another podcast app in one step
+    instead of re-adding shows one at a time. Reuses _subscribe_podcast_core
+    per feed so imports get the exact same validation/dedup as a normal
+    single subscribe."""
+    user_id = payload["sub"]
+    try:
+        feed_urls = await asyncio.to_thread(_parse_opml_feed_urls_sync, body.opml)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Couldn't parse OPML: {exc}")
+
+    added = 0
+    failed = 0
+    for feed_url in feed_urls[:100]:
+        try:
+            await _subscribe_podcast_core(user_id, feed_url)
+            added += 1
+        except Exception:
+            failed += 1
+    return {"added": added, "failed": failed, "total": len(feed_urls)}
 
 
 def _search_itunes_podcasts_sync(query: str, limit: int) -> list[dict]:
