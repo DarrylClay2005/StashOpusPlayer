@@ -73,6 +73,7 @@ enum LumisoundTrackVaultService {
             await runExtensionConversionPass()
             await runMetadataRepairMigrationIfNeeded()
             await runConversionIntegrityPassIfNeeded()
+            await DeadLinkHealingService.runIfNeeded()
             task.setTaskCompleted(success: true)
         }
         task.expirationHandler = {
@@ -106,6 +107,7 @@ enum LumisoundTrackVaultService {
                 await runExtensionConversionPass()
                 await runMetadataRepairMigrationIfNeeded()
                 await runConversionIntegrityPassIfNeeded()
+                await DeadLinkHealingService.runIfNeeded()
             }
         }
     }

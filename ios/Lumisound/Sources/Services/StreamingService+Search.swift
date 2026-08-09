@@ -175,4 +175,69 @@ extension StreamingService {
             return []
         }
     }
+
+    /// Same `/api/search` call as `search(query:source:)`, but returns the
+    /// results directly instead of publishing them to `searchResults` —
+    /// for callers that need search results without disturbing whatever
+    /// the user currently has on the actual Search screen. Used by
+    /// `DeadLinkHealingService`'s background pass, which must never clobber
+    /// live UI state.
+    func searchSilently(query: String, source: String = "youtube") async -> [StreamTrack] {
+        guard isConfigured, !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+
+        var components = URLComponents()
+        components.path = "/api/search"
+        components.queryItems = [
+            URLQueryItem(name: "q",      value: query),
+            URLQueryItem(name: "limit",  value: "20"),
+            URLQueryItem(name: "source", value: source),
+        ]
+        guard var request = makeRequest(components.string ?? "/api/search") else { return [] }
+        request.timeoutInterval = 20
+        if let accountToken = AccountService.shared?.token {
+            request.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse,
+               !(200..<300).contains(httpResponse.statusCode) {
+                return []
+            }
+            return try JSONDecoder().decode([StreamTrack].self, from: data)
+        } catch {
+            return []
+        }
+    }
+
+    /// Checks whether `url` (a reconstructed source watch URL, e.g.
+    /// `https://youtube.com/watch?v=<id>`) is still resolvable, via the
+    /// existing `/api/track` metadata endpoint — no dedicated "liveness
+    /// check" endpoint needed server-side, since a 404 there already means
+    /// exactly "yt-dlp couldn't extract this" (see that endpoint's error
+    /// handling in main.py). Used by `DeadLinkHealingService` to detect a
+    /// removed/private video before attempting to find a replacement.
+    func checkTrackAvailable(url: String) async -> Bool {
+        guard isConfigured else { return true } // unknown -- don't treat as dead just because the bridge is unreachable
+        var components = URLComponents()
+        components.path = "/api/track"
+        components.queryItems = [URLQueryItem(name: "url", value: url)]
+        guard var request = makeRequest(components.string ?? "/api/track") else { return true }
+        request.timeoutInterval = 20
+        if let accountToken = AccountService.shared?.token {
+            request.setValue(accountToken, forHTTPHeaderField: "X-Account-Token")
+        }
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else { return true }
+            // Only a definitive 404 ("Could not fetch track metadata" / "Track
+            // not found" in main.py's track_metadata) counts as genuinely dead —
+            // any other status (timeout->408, auth issues, 5xx) is ambiguous and
+            // must NOT be treated as "video removed", or a transient bridge
+            // hiccup would trigger real relinking off bad information.
+            return httpResponse.statusCode != 404
+        } catch {
+            return true // network error -- ambiguous, not evidence of removal
+        }
+    }
 }
