@@ -72,6 +72,7 @@ enum LumisoundTrackVaultService {
             await runBackfill()
             await runExtensionConversionPass()
             await runMetadataRepairMigrationIfNeeded()
+            await runConversionIntegrityPassIfNeeded()
             task.setTaskCompleted(success: true)
         }
         task.expirationHandler = {
@@ -104,6 +105,7 @@ enum LumisoundTrackVaultService {
                 await runBackfill()
                 await runExtensionConversionPass()
                 await runMetadataRepairMigrationIfNeeded()
+                await runConversionIntegrityPassIfNeeded()
             }
         }
     }
@@ -366,6 +368,107 @@ enum LumisoundTrackVaultService {
         // makes re-running cheap: already-fixed tracks are skipped instantly.
         if allResolved {
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: metadataRepairMigrationLastRunKey)
+        }
+    }
+
+    /// Periodic re-verification of every already-converted (`.lms`) track's
+    /// on-disk integrity — catches files that passed
+    /// `AudioEncoderService.convertPermanently`'s verification at conversion
+    /// time but were corrupted afterward (a disk/iCloud sync glitch, or —
+    /// for anything converted before this session's fix — a truncated
+    /// re-encode that the OLD, weaker ad-hoc check missed but
+    /// `isValidAudioFile`'s tail-read now catches), so a broken file doesn't
+    /// sit silently unplayable in the library forever. Same periodic-not-
+    /// one-time reasoning as `runMetadataRepairMigrationIfNeeded` above: a
+    /// one-time pass gives no protection against corruption that happens
+    /// (or is only detectable) after it runs.
+    ///
+    /// Deliberately deletes rather than attempts to auto-redownload +
+    /// reconvert: nothing else in this codebase auto-redownloads on its own
+    /// initiative (`CorruptFileFinderService` is delete-only too), and
+    /// `removeImportedSong` trashes to `RecentlyDeletedService` (30-day
+    /// recovery) rather than hard-deleting, so this doesn't lose data
+    /// outright — it just stops presenting a broken file as if it were a
+    /// working track. Re-downloading it is one tap away for the user.
+    private static let conversionIntegrityLastRunKey = "lumisoundTrackVault.conversionIntegrityPass.lastRun"
+    private static let conversionIntegrityInterval: TimeInterval = 24 * 60 * 60
+
+    @MainActor
+    static func runConversionIntegrityPassIfNeeded() async {
+        let lastRun = UserDefaults.standard.double(forKey: conversionIntegrityLastRunKey)
+        guard Date().timeIntervalSince1970 - lastRun >= conversionIntegrityInterval else { return }
+        guard let library = LibraryManager.shared else { return }
+        let currentlyPlayingID = AudioPlayerManager.shared?.currentSong?.id
+
+        let convertedURLsByID: [String: URL] = library.importedSongs.reduce(into: [:]) { acc, song in
+            guard let url = song.url, LumisoundExclusiveExtensionService.isConverted(url) else { return }
+            acc[song.id] = url
+        }
+        guard !convertedURLsByID.isEmpty else {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: conversionIntegrityLastRunKey)
+            return
+        }
+
+        appLog("LumisoundTrackVaultService: conversion integrity pass — checking \(convertedURLsByID.count) already-converted track(s)", category: "background")
+
+        // isValidAudioFile is synchronous but does real file I/O (a tail-read
+        // of up to 4096 frames per file) — run the whole scan off the main
+        // actor, concurrently, same shape as the metadata repair pass above.
+        let corruptIDs: [String] = await Task.detached(priority: .utility) {
+            await withTaskGroup(of: String?.self) { group in
+                var corrupt: [String] = []
+                var pending = 0
+                let maxConcurrent = 8
+                var iterator = convertedURLsByID.makeIterator()
+
+                func launchNext() {
+                    guard let (id, url) = iterator.next() else { return }
+                    pending += 1
+                    group.addTask {
+                        CorruptFileFinderService.isValidAudioFile(at: url) ? nil : id
+                    }
+                }
+                while pending < maxConcurrent { launchNext() }
+                for await result in group {
+                    pending -= 1
+                    if let result { corrupt.append(result) }
+                    launchNext()
+                }
+                return corrupt
+            }
+        }.value
+
+        guard !corruptIDs.isEmpty else {
+            appLog("LumisoundTrackVaultService: conversion integrity pass — all converted tracks verified OK", category: "background")
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: conversionIntegrityLastRunKey)
+            return
+        }
+
+        appWarn("LumisoundTrackVaultService: conversion integrity pass — \(corruptIDs.count) converted track(s) failed re-verification, removing", category: "background")
+        RemoteLogger.logError(
+            category: "library",
+            event: "conversion_integrity_failure",
+            message: "post-conversion file(s) failed integrity re-check",
+            detail: ["count": corruptIDs.count]
+        )
+
+        var allResolved = true
+        for id in corruptIDs {
+            if Task.isCancelled { allResolved = false; break }
+            if id == currentlyPlayingID {
+                // Don't yank a file out from under an open player — same
+                // "leave it for the next tick" reasoning as every other
+                // pass in this pipeline. Its `.lms` extension means nothing
+                // else will re-attempt conversion on it in the meantime, so
+                // this is safe to simply retry later.
+                allResolved = false
+                continue
+            }
+            library.removeImportedSong(id: id)
+        }
+
+        if allResolved {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: conversionIntegrityLastRunKey)
         }
     }
 

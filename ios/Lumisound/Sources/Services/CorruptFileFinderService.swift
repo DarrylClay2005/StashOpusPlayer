@@ -103,21 +103,42 @@ final class CorruptFileFinderService: ObservableObject {
     // MARK: - Single-File Integrity Check
 
     /// Returns `true` if `url` points to a regular, non-empty audio file that
-    /// `AVAudioFile` can open. Used right after downloads to catch corrupt or
-    /// truncated files (e.g. dropped connections, bad yt-dlp output) before
-    /// they're adopted into the library — same checks as `scanDirectory`, but
-    /// for a single freshly-downloaded file so callers can retry immediately.
+    /// `AVAudioFile` can open AND whose last chunk of declared audio data can
+    /// actually be decoded. Used right after downloads, right after
+    /// `AudioEncoderService` conversions, and by the periodic post-conversion
+    /// re-check (`LumisoundTrackVaultService.runConversionIntegrityPassIfNeeded`)
+    /// to catch corrupt or truncated files before they're adopted into (or
+    /// left sitting in) the library — the single shared integrity check every
+    /// one of those call sites uses, rather than each keeping its own
+    /// ad-hoc/weaker version that drifts out of sync with this one.
+    ///
+    /// The tail-read is the important part: a merely-opened `AVAudioFile`
+    /// only proves the container's HEADER parses — a dropped connection
+    /// mid-download, or a re-encode that got interrupted after writing a
+    /// valid header/duration but before finishing the sample data, both
+    /// produce a file that opens fine here but silently has no (or garbage)
+    /// audio for some trailing portion. Reading a real buffer from the very
+    /// end of the file's declared length catches exactly that class of
+    /// corruption a header-only check misses.
     nonisolated static func isValidAudioFile(at url: URL) -> Bool {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = attrs[.size] as? Int64,
               size >= 1_024 else { return false }
 
+        guard let file = try? AVAudioFile(forReading: url), file.length > 0 else { return false }
+
+        let tailFrameCount = AVAudioFrameCount(min(file.length, 4_096))
+        guard tailFrameCount > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: tailFrameCount) else {
+            return false
+        }
+        file.framePosition = max(0, file.length - AVAudioFramePosition(tailFrameCount))
         do {
-            _ = try AVAudioFile(forReading: url)
-            return true
+            try file.read(into: buffer, frameCount: tailFrameCount)
         } catch {
             return false
         }
+        return buffer.frameLength > 0
     }
 
     // MARK: - Private Scan Worker (nonisolated, runs off main actor)

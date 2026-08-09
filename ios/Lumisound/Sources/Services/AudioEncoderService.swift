@@ -72,16 +72,23 @@ final class AudioEncoderService {
     /// the same failure): falls back to the AVAssetReader/AVAssetWriter
     /// decode-then-AAC-encode path `transcodeForPlayback`'s tier 2 already
     /// proves works for these same containers, before giving up. Returns
-    /// `true` once `destinationURL` exists and is confirmed playable.
+    /// `true` once `destinationURL` exists and is confirmed playable —
+    /// via `CorruptFileFinderService.isValidAudioFile`, the SAME check
+    /// every download already goes through, not a separate/weaker
+    /// "does AVAudioFile even open it" probe. A conversion is exactly as
+    /// consequential as a fresh download (the pre-conversion source gets
+    /// deleted right after this returns true — see
+    /// `LumisoundExclusiveExtensionService.convert`), so it deserves the
+    /// same depth of verification a download already gets, not less.
     func convertPermanently(_ url: URL, to destinationURL: URL) async -> Bool {
         try? FileManager.default.removeItem(at: destinationURL)
-        if let result = await aacExport(url, to: destinationURL),
-           (try? AVAudioFile(forReading: result)) != nil {
+        if await aacExport(url, to: destinationURL) != nil,
+           CorruptFileFinderService.isValidAudioFile(at: destinationURL) {
             return true
         }
         try? FileManager.default.removeItem(at: destinationURL)
         guard await decodeAndReencode(url, to: destinationURL, settings: Self.aacSettings) else { return false }
-        return (try? AVAudioFile(forReading: destinationURL)) != nil
+        return CorruptFileFinderService.isValidAudioFile(at: destinationURL)
     }
 
     // MARK: - Lossless decode via AVAssetReader + AVAssetWriter
