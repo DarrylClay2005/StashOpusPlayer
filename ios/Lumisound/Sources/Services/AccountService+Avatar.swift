@@ -225,12 +225,33 @@ extension AccountService {
             let is_playing: Bool
             let bpm: Double?
         }
+        // NOT song?.url — for anything downloaded/imported that's a local
+        // `file:///...` path, not a real web URL. This is specifically what
+        // the Discord Rich Presence daemon's "Listen on YouTube/SoundCloud"
+        // button uses (build_activity in lumisound_discord_rpc.py); Discord
+        // rejects a SET_ACTIVITY payload with a non-http(s) button URL
+        // outright, which broke Rich Presence entirely for the common case
+        // (any currently-playing track that's actually downloaded, not
+        // being streamed live) rather than just omitting the button.
+        // `source` was also unconditionally nil here, so even on a build
+        // that only ever streamed (never hit this bug) the button always
+        // showed a generic "Open Track" instead of "Listen on YouTube".
+        let sourcePrefix = song?.sourceTrackID.flatMap { id -> String? in
+            guard let colon = id.firstIndex(of: ":") else { return nil }
+            return String(id[id.startIndex..<colon])
+        }
+        let sourceWebURL: String? = {
+            guard let sourceTrackID = song?.sourceTrackID, sourcePrefix == "youtube" else { return nil }
+            let videoID = sourceTrackID.dropFirst("youtube:".count)
+            guard !videoID.isEmpty else { return nil }
+            return "https://youtube.com/watch?v=\(videoID)"
+        }()
         let body = Body(
             song_id: song?.id,
             title: song?.title,
             artist: song?.artist.isEmpty == true ? nil : song?.artist,
-            track_url: song?.url?.absoluteString,
-            source: nil,
+            track_url: sourceWebURL,
+            source: sourcePrefix,
             position_seconds: position,
             duration_seconds: duration,
             is_playing: isPlaying,

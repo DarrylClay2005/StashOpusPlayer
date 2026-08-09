@@ -255,6 +255,22 @@ class BridgeClient:
             {"username": username, "password": password, "device_name": "Discord RPC Bridge"},
             auth=False,
         )
+        if result.get("requires_2fa"):
+            # /auth/login returns {"requires_2fa": True, "pending_token": ...}
+            # (no "token") for a 2FA-enabled account — this daemon has no way
+            # to prompt for a TOTP code, so username/password login can never
+            # complete for one. Without this check, `result["token"]` below
+            # raised an uncaught KeyError, crashing the daemon outright. The
+            # /user/rpc-token flow (Lumisound -> Account -> Discord Rich
+            # Presence -> Generate Rich Presence Token) sidesteps this
+            # entirely since it's generated from inside the already-logged-in
+            # app — that's the recommended setup for exactly this reason.
+            raise DiscordIPCError(
+                "This account has two-factor authentication enabled — username/password "
+                "login can't complete a TOTP challenge here. Generate a Rich Presence "
+                "token instead: Lumisound -> Account -> Discord Rich Presence -> "
+                "\"Generate Rich Presence Token\", then set it as access_token in config.json."
+            )
         self.access_token = result["token"]
         log("Logged in to Lumisound bridge")
 
