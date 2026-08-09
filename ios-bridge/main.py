@@ -30,7 +30,7 @@ import urllib.error
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
@@ -95,6 +95,10 @@ async def _executemany(cur, query: str, rows) -> None:
 YTDLP_CACHE_DIR: str = os.getenv("YTDLP_CACHE_DIR", "/app/.cache/yt-dlp")
 YTDLP_COOKIES_FILE: str = os.getenv("YTDLP_COOKIES_FILE", "/app/cookies.txt")
 API_KEY: str = os.getenv("IOS_BRIDGE_API_KEY", "")
+# Operator dashboard secret — deliberately separate from API_KEY (which is
+# embedded in the mobile client and could leak via device compromise/
+# jailbreak without ever exposing this one). See check_admin_auth below.
+ADMIN_TOKEN: str = os.getenv("ADMIN_TOKEN", "")
 # Durable holding area for finished /api/download jobs — see the
 # "/api/download job tracking" section below for why this exists (the old
 # model kept finished files only in an ephemeral temp dir, deleted 15 minutes
@@ -832,6 +836,23 @@ async def check_auth(request: Request) -> None:
     token = auth_header[len("Bearer "):]
     if token != API_KEY:
         raise HTTPException(status_code=403, detail="Invalid API key")
+
+
+# ---------------------------------------------------------------------------
+# Admin dashboard auth (operator-only)
+# ---------------------------------------------------------------------------
+
+
+async def check_admin_auth(request: Request) -> None:
+    """Every /admin/* route requires this. Unset by default — the whole
+    /admin surface 503s until an operator explicitly opts in by setting
+    ADMIN_TOKEN, rather than silently sitting open with no auth on a fresh
+    deploy."""
+    if not ADMIN_TOKEN:
+        raise HTTPException(status_code=503, detail="Admin dashboard not configured (set ADMIN_TOKEN)")
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer ") or auth_header[len("Bearer "):] != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid or missing admin token")
 
 
 # ---------------------------------------------------------------------------
@@ -2079,6 +2100,235 @@ async def health():
         "version": VERSION,
         "yt_dlp_version": yt_dlp.version.__version__,
     }
+
+
+# ---------------------------------------------------------------------------
+# Operator dashboard — zero-visibility gap this closes: before this, the
+# only way to know the bridge was healthy was /health (up/down, nothing
+# else), and every other signal (job failures, storage growth, concurrency
+# saturation) meant grepping container logs by hand. Every number below is
+# read from state that already exists (ios_download_log, ios_app_logs,
+# ios_user_music_metadata, the existing concurrency semaphores) — no new
+# tracking was added just to feed this.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/admin/api/overview", dependencies=[Depends(check_admin_auth)])
+async def admin_overview():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT COUNT(*) FROM ios_users")
+            (user_count,) = await cur.fetchone()
+
+            await cur.execute(
+                "SELECT COUNT(*), COALESCE(SUM(file_size_bytes), 0) FROM ios_user_music_metadata"
+            )
+            music_count, music_bytes = await cur.fetchone()
+
+            await cur.execute(
+                """
+                SELECT status, COUNT(*)
+                FROM ios_download_log
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                GROUP BY status
+                """
+            )
+            job_rows = await cur.fetchall()
+
+            await cur.execute(
+                "SELECT COUNT(*) FROM ios_app_logs WHERE level = 'error' AND timestamp >= NOW() - INTERVAL '24 hours'"
+            )
+            (recent_error_count,) = await cur.fetchone()
+
+    disk = None
+    root = _resolve_user_music_root()
+    if root is not None and root.exists():
+        try:
+            usage = shutil.disk_usage(root)
+            disk = {"total_bytes": usage.total, "used_bytes": usage.used, "free_bytes": usage.free}
+        except OSError:
+            disk = None
+
+    # asyncio.Semaphore has no public "how many currently acquired" API —
+    # `_value` (permits still available) is a private implementation detail,
+    # but this is read-only, best-effort diagnostic display, not a
+    # correctness-sensitive read, so the risk of relying on it is low.
+    return {
+        "version": VERSION,
+        "yt_dlp_version": yt_dlp.version.__version__,
+        "user_count": user_count,
+        "music_file_count": music_count,
+        "music_bytes": int(music_bytes),
+        "disk": disk,
+        "download_jobs_24h": {status: count for status, count in job_rows},
+        "recent_error_count_24h": recent_error_count,
+        "concurrency": {
+            "ytdlp_max": int(os.getenv("YTDLP_MAX_CONCURRENT", "2")),
+            "ytdlp_available": _YTDLP_SEMAPHORE._value,
+            "transcode_max": int(os.getenv("YTDLP_MAX_TRANSCODE_CONCURRENT", "2")),
+            "transcode_available": _TRANSCODE_SEMAPHORE._value,
+        },
+    }
+
+
+@app.get("/admin/api/download-jobs", dependencies=[Depends(check_admin_auth)])
+async def admin_download_jobs(limit: int = Query(50, ge=1, le=200)):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, source, source_id, title, status, error_message, duration_ms, created_at
+                FROM ios_download_log
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = await cur.fetchall()
+    return [
+        {
+            "id": r[0], "source": r[1], "source_id": r[2], "title": r[3],
+            "status": r[4], "error_message": r[5], "duration_ms": r[6],
+            "created_at": r[7].isoformat() if r[7] else None,
+        }
+        for r in rows
+    ]
+
+
+@app.get("/admin/api/errors", dependencies=[Depends(check_admin_auth)])
+async def admin_errors(limit: int = Query(50, ge=1, le=200)):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT category, message, file, line, timestamp, app_version, os_version
+                FROM ios_app_logs
+                WHERE level = 'error'
+                ORDER BY timestamp DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = await cur.fetchall()
+    return [
+        {
+            "category": r[0], "message": r[1], "file": r[2], "line": r[3],
+            "timestamp": r[4].isoformat() if r[4] else None,
+            "app_version": r[5], "os_version": r[6],
+        }
+        for r in rows
+    ]
+
+
+_ADMIN_DASHBOARD_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ios-bridge Admin</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #0b0d10; color: #e6e8eb; margin: 0; padding: 24px; }
+  h1 { font-size: 18px; margin: 0 0 20px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .card { background: #161a1f; border: 1px solid #262b32; border-radius: 10px; padding: 14px 16px; }
+  .card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a929c; margin-bottom: 6px; }
+  .card .value { font-size: 22px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 28px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #20242a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+  th { color: #8a929c; font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  .status-completed { color: #4ade80; } .status-failed { color: #f87171; } .status-error { color: #f87171; }
+  #login { max-width: 360px; margin: 80px auto; }
+  #login input { width: 100%; padding: 10px; margin: 8px 0; background: #161a1f; border: 1px solid #262b32; border-radius: 8px; color: #e6e8eb; box-sizing: border-box; }
+  #login button { width: 100%; padding: 10px; background: #3b82f6; border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer; }
+  #dash { display: none; }
+  h2 { font-size: 14px; color: #b6bcc4; }
+</style></head>
+<body>
+  <div id="login">
+    <h1>ios-bridge Admin</h1>
+    <input id="token" type="password" placeholder="Admin token" autocomplete="off">
+    <button onclick="login()">Sign in</button>
+  </div>
+  <div id="dash">
+    <h1>ios-bridge Admin</h1>
+    <div class="cards" id="cards"></div>
+    <h2>Download jobs (last 50)</h2>
+    <table id="jobs"><thead><tr><th>Created</th><th>Status</th><th>Source</th><th>Title</th><th>Error</th></tr></thead><tbody></tbody></table>
+    <h2>Recent errors (last 50)</h2>
+    <table id="errors"><thead><tr><th>Time</th><th>Category</th><th>Message</th><th>App</th></tr></thead><tbody></tbody></table>
+  </div>
+<script>
+function fmtBytes(b) {
+  if (b == null) return "n/a";
+  const u = ["B","KB","MB","GB","TB"]; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return b.toFixed(1) + " " + u[i];
+}
+async function api(path) {
+  const token = sessionStorage.getItem("admin_token");
+  const res = await fetch(path, { headers: { Authorization: "Bearer " + token } });
+  if (res.status === 401) { sessionStorage.removeItem("admin_token"); showLogin(); throw new Error("unauthorized"); }
+  return res.json();
+}
+function showLogin() { document.getElementById("login").style.display = "block"; document.getElementById("dash").style.display = "none"; }
+function showDash() { document.getElementById("login").style.display = "none"; document.getElementById("dash").style.display = "block"; }
+function login() {
+  const t = document.getElementById("token").value.trim();
+  if (!t) return;
+  sessionStorage.setItem("admin_token", t);
+  refresh();
+}
+async function refresh() {
+  try {
+    const o = await api("/admin/api/overview");
+    showDash();
+    const jobs24 = o.download_jobs_24h || {};
+    document.getElementById("cards").innerHTML = [
+      ["Users", o.user_count],
+      ["Music files", o.music_file_count],
+      ["Storage used", fmtBytes(o.music_bytes)],
+      ["Disk free", o.disk ? fmtBytes(o.disk.free_bytes) : "n/a"],
+      ["Jobs completed (24h)", jobs24.completed || 0],
+      ["Jobs failed (24h)", jobs24.failed || 0],
+      ["Errors (24h)", o.recent_error_count_24h],
+      ["yt-dlp slots", o.concurrency.ytdlp_available + "/" + o.concurrency.ytdlp_max + " free"],
+    ].map(([label, value]) => `<div class="card"><div class="label">${label}</div><div class="value">${value}</div></div>`).join("");
+
+    const jobs = await api("/admin/api/download-jobs");
+    document.querySelector("#jobs tbody").innerHTML = jobs.map(j => `<tr>
+      <td>${j.created_at || ""}</td>
+      <td class="status-${j.status}">${j.status}</td>
+      <td>${j.source}</td>
+      <td>${(j.title || "").slice(0, 60)}</td>
+      <td>${(j.error_message || "").slice(0, 80)}</td>
+    </tr>`).join("");
+
+    const errors = await api("/admin/api/errors");
+    document.querySelector("#errors tbody").innerHTML = errors.map(e => `<tr>
+      <td>${e.timestamp || ""}</td>
+      <td>${e.category}</td>
+      <td>${(e.message || "").slice(0, 100)}</td>
+      <td>${e.app_version || ""}</td>
+    </tr>`).join("");
+  } catch (e) { /* login screen already shown on 401 */ }
+}
+if (sessionStorage.getItem("admin_token")) { refresh(); } else { showLogin(); }
+setInterval(() => { if (sessionStorage.getItem("admin_token")) refresh(); }, 15000);
+</script>
+</body></html>"""
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard():
+    """Serves the dashboard shell — a static page with no server-rendered
+    data in it at all, so this route itself needs no auth; every actual
+    number comes from the /admin/api/* routes above, each independently
+    gated by check_admin_auth. The page prompts for the admin token and
+    keeps it in sessionStorage (tab-scoped, gone on close) rather than a
+    cookie/localStorage, since this is meant for one operator's own
+    browser tab, not a persisted login."""
+    return HTMLResponse(content=_ADMIN_DASHBOARD_HTML)
 
 
 def _youtube_search_via_api_sync(query: str, limit: int, api_key: str) -> Optional[list[dict]]:
