@@ -33,6 +33,7 @@ final class AccountService: ObservableObject {
     @Published var sessions: [AccountSession] = []
     @Published var stats: AccountStats? = nil
     @Published var achievements: AchievementsData? = nil
+    @Published var yearInReview: YearInReview? = nil
     @Published var hasDateOfBirth: Bool = false
 
     // MARK: Persisted token

@@ -403,6 +403,52 @@ struct AccountStats: Codable {
     }
 }
 
+/// GET /user/stats/year-in-review — a "Wrapped"-style annual recap, same
+/// `ios_play_history` source table `AccountStats` reads, just bucketed by
+/// calendar year. `YearInReviewView` renders this into a shareable card.
+struct YearInReview: Codable {
+    let year: Int
+    let totalPlays: Int
+    let totalListenSeconds: Int
+    let distinctArtists: Int
+    let distinctTracks: Int
+    /// `nil` when no play in the year had a recorded BPM.
+    let averageBpm: Double?
+    let topArtists: [AccountStats.TopArtist]
+    let topTracks: [AccountStats.TopTrack]
+    let byMonth: [MonthlyActivity]
+    /// `nil` for a year with no listening activity at all.
+    let peakDay: PeakDay?
+
+    enum CodingKeys: String, CodingKey {
+        case year
+        case totalPlays        = "total_plays"
+        case totalListenSeconds = "total_listen_seconds"
+        case distinctArtists   = "distinct_artists"
+        case distinctTracks    = "distinct_tracks"
+        case averageBpm        = "average_bpm"
+        case topArtists        = "top_artists"
+        case topTracks         = "top_tracks"
+        case byMonth            = "by_month"
+        case peakDay            = "peak_day"
+    }
+
+    struct MonthlyActivity: Codable, Identifiable {
+        let month: Int
+        let plays: Int
+        let listenSeconds: Int
+        var id: Int { month }
+        enum CodingKeys: String, CodingKey { case month, plays, listenSeconds = "listen_seconds" }
+    }
+
+    struct PeakDay: Codable {
+        let date: String
+        let plays: Int
+        let listenSeconds: Int
+        enum CodingKeys: String, CodingKey { case date, plays, listenSeconds = "listen_seconds" }
+    }
+}
+
 /// One collaborator entry from GET /user/playlists/{id}/collaborators.
 struct PlaylistCollaborator: Decodable, Identifiable {
     let userId: String

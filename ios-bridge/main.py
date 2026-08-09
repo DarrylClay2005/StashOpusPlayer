@@ -10028,6 +10028,112 @@ async def get_weekly_stats(payload: dict = Depends(get_current_user)):
     ]
 
 
+@app.get("/user/stats/year-in-review")
+async def get_year_in_review(
+    year: Optional[int] = Query(None, description="Calendar year; defaults to the current UTC year."),
+    payload: dict = Depends(get_current_user),
+):
+    """Annual "Wrapped"-style recap built entirely from ios_play_history for
+    the given calendar year — the exact same source table /user/stats and
+    /user/stats/weekly already aggregate, just bucketed by year instead of
+    lifetime/last-7-days. No new persisted state. Powers a shareable recap
+    card on the client (see YearInReviewView.swift) — this endpoint only
+    returns numbers; rendering the actual shareable image happens on-device
+    so it can use the app's theme/fonts and never touches server-side image
+    generation."""
+    user_id = payload["sub"]
+    target_year = year or datetime.now(timezone.utc).year
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT COUNT(*), COALESCE(SUM(listen_seconds), 0),
+                       COUNT(DISTINCT artist) FILTER (WHERE artist IS NOT NULL AND artist != ''),
+                       COUNT(DISTINCT (title, COALESCE(artist, ''))),
+                       AVG(bpm) FILTER (WHERE bpm IS NOT NULL)
+                FROM ios_play_history
+                WHERE user_id = %s AND EXTRACT(YEAR FROM played_at) = %s
+                """,
+                (user_id, target_year),
+            )
+            total_plays, total_seconds, distinct_artists, distinct_tracks, avg_bpm = await cur.fetchone()
+
+            await cur.execute(
+                """
+                SELECT artist, COUNT(*) AS plays, COALESCE(SUM(listen_seconds), 0) AS seconds
+                FROM ios_play_history
+                WHERE user_id = %s AND EXTRACT(YEAR FROM played_at) = %s
+                  AND artist IS NOT NULL AND artist != ''
+                GROUP BY artist
+                ORDER BY plays DESC
+                LIMIT 5
+                """,
+                (user_id, target_year),
+            )
+            top_artists = await cur.fetchall()
+
+            await cur.execute(
+                """
+                SELECT title, artist, COUNT(*) AS plays
+                FROM ios_play_history
+                WHERE user_id = %s AND EXTRACT(YEAR FROM played_at) = %s
+                  AND title IS NOT NULL AND title != ''
+                GROUP BY title, artist
+                ORDER BY plays DESC
+                LIMIT 5
+                """,
+                (user_id, target_year),
+            )
+            top_tracks = await cur.fetchall()
+
+            await cur.execute(
+                """
+                SELECT EXTRACT(MONTH FROM played_at)::int AS month, COUNT(*) AS plays, COALESCE(SUM(listen_seconds), 0) AS seconds
+                FROM ios_play_history
+                WHERE user_id = %s AND EXTRACT(YEAR FROM played_at) = %s
+                GROUP BY month
+                ORDER BY month ASC
+                """,
+                (user_id, target_year),
+            )
+            by_month_rows = await cur.fetchall()
+
+            await cur.execute(
+                """
+                SELECT DATE(played_at) AS day, COUNT(*) AS plays, COALESCE(SUM(listen_seconds), 0) AS seconds
+                FROM ios_play_history
+                WHERE user_id = %s AND EXTRACT(YEAR FROM played_at) = %s
+                GROUP BY day
+                ORDER BY seconds DESC
+                LIMIT 1
+                """,
+                (user_id, target_year),
+            )
+            peak_day_row = await cur.fetchone()
+
+    by_month = {m: {"plays": 0, "listen_seconds": 0} for m in range(1, 13)}
+    for month, plays, seconds in by_month_rows:
+        by_month[month] = {"plays": plays, "listen_seconds": int(seconds)}
+
+    return {
+        "year": target_year,
+        "total_plays": total_plays or 0,
+        "total_listen_seconds": int(total_seconds or 0),
+        "distinct_artists": distinct_artists or 0,
+        "distinct_tracks": distinct_tracks or 0,
+        "average_bpm": round(float(avg_bpm), 1) if avg_bpm is not None else None,
+        "top_artists": [{"artist": r[0], "play_count": r[1], "listen_seconds": int(r[2])} for r in top_artists],
+        "top_tracks": [{"title": r[0], "artist": r[1], "play_count": r[2]} for r in top_tracks],
+        "by_month": [{"month": m, **by_month[m]} for m in range(1, 13)],
+        "peak_day": (
+            {"date": peak_day_row[0].isoformat(), "plays": peak_day_row[1], "listen_seconds": int(peak_day_row[2])}
+            if peak_day_row and peak_day_row[1]
+            else None
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Duplicate Track Detection (Feature: library-duplicates)
 # ---------------------------------------------------------------------------
