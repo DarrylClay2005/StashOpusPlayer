@@ -1381,6 +1381,9 @@ CREATE TABLE IF NOT EXISTS ios_podcast_subscriptions (
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS ios_podcast_subscriptions_idx_user ON ios_podcast_subscriptions (user_id);
+ALTER TABLE ios_podcast_subscriptions ADD COLUMN IF NOT EXISTS last_episode_guid TEXT;
+ALTER TABLE ios_podcast_subscriptions ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMP NULL;
+ALTER TABLE ios_podcast_subscriptions ADD COLUMN IF NOT EXISTS notifications_muted BOOLEAN DEFAULT FALSE;
 
 -- guid is the RSS <guid> (or the enclosure URL when a feed omits guid) --
 -- stable per episode even though episodes aren't stored anywhere else here.

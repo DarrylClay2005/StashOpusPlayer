@@ -18,6 +18,7 @@ import string
 import tempfile
 import time
 import urllib.request
+import urllib.parse
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
@@ -10319,6 +10320,10 @@ async def _subscription_polling_loop() -> None:
             await _poll_due_tracked_playlists()
         except Exception:
             logger.exception("subscription polling loop: tracked playlists pass failed")
+        try:
+            await _poll_due_podcast_subscriptions()
+        except Exception:
+            logger.exception("subscription polling loop: podcast subscriptions pass failed")
 
 
 async def _poll_due_subscriptions() -> None:
@@ -15825,15 +15830,40 @@ async def list_podcast_subscriptions(payload: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, feed_url, title, artwork_url, added_at FROM ios_podcast_subscriptions "
+                "SELECT id, feed_url, title, artwork_url, added_at, notifications_muted FROM ios_podcast_subscriptions "
                 "WHERE user_id = %s ORDER BY added_at DESC",
                 (user_id,),
             )
             rows = await cur.fetchall()
     return [
-        {"id": r[0], "feed_url": r[1], "title": r[2], "artwork_url": r[3], "added_at": r[4].isoformat() if r[4] else None}
+        {
+            "id": r[0], "feed_url": r[1], "title": r[2], "artwork_url": r[3],
+            "added_at": r[4].isoformat() if r[4] else None, "notifications_muted": bool(r[5]),
+        }
         for r in rows
     ]
+
+
+class UpdatePodcastSubscriptionRequest(BaseModel):
+    notifications_muted: bool
+
+
+@app.patch("/user/podcasts/subscriptions/{subscription_id}")
+async def update_podcast_subscription(
+    subscription_id: str, body: UpdatePodcastSubscriptionRequest, payload: dict = Depends(get_current_user)
+):
+    """Only setting exposed so far is the new-episode notification mute,
+    same shape as PATCH /user/subscriptions/{sub_id}'s notifications_muted
+    for artist subscriptions."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_podcast_subscriptions SET notifications_muted = %s WHERE id = %s AND user_id = %s",
+                (body.notifications_muted, subscription_id, user_id),
+            )
+    return {"status": "updated"}
 
 
 @app.delete("/user/podcasts/subscriptions/{subscription_id}", status_code=204)
@@ -15978,6 +16008,135 @@ async def get_podcast_episode_progress(
         }
         for r in rows
     ]
+
+
+def _search_itunes_podcasts_sync(query: str, limit: int) -> list[dict]:
+    """iTunes Search API lookup (public, no API key) -- fixed host, so no
+    SSRF concern the way user-supplied feed/chapters URLs elsewhere in this
+    file need `_reject_ssrf_targets` for. Lets a user find a podcast by name
+    instead of having to already know/paste its raw RSS feed URL."""
+    params = urllib.parse.urlencode({"term": query, "media": "podcast", "limit": limit})
+    req = urllib.request.Request(
+        f"https://itunes.apple.com/search?{params}",
+        headers={"User-Agent": "Lumisound-Bridge/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read())
+    results = []
+    for r in data.get("results", []):
+        feed_url = r.get("feedUrl")
+        if not feed_url:
+            continue
+        results.append({
+            "title": r.get("collectionName") or r.get("trackName"),
+            "artist": r.get("artistName"),
+            "feed_url": feed_url,
+            "artwork_url": r.get("artworkUrl600") or r.get("artworkUrl100"),
+        })
+    return results
+
+
+@app.get("/podcasts/search")
+async def search_podcasts(
+    q: str = Query(..., min_length=1, max_length=200),
+    limit: int = Query(20, ge=1, le=50),
+    payload: dict = Depends(get_current_user),
+):
+    try:
+        return await asyncio.to_thread(_search_itunes_podcasts_sync, q, limit)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Podcast search failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Podcast new-episode polling -- same "periodic background pass, in-app +
+# push notification via _create_notification" shape as
+# _subscription_polling_loop's artist-channel checking, just for podcast
+# feeds instead of YouTube channels. Folded into the same loop/interval
+# rather than a second asyncio.create_task, since there's no reason to poll
+# on a different cadence.
+# ---------------------------------------------------------------------------
+
+_PODCAST_POLL_STALE_HOURS = 6
+_PODCAST_POLL_BATCH_SIZE = 10
+
+
+async def _check_podcast_subscription_core(
+    sub_id: str, user_id: str, feed_url: str, title: Optional[str],
+    last_episode_guid: Optional[str], notifications_muted: bool = False,
+) -> list[dict]:
+    pool = await get_pool()
+    try:
+        await _reject_ssrf_targets(feed_url)
+        channel = await asyncio.to_thread(_fetch_podcast_feed_sync, feed_url)
+        episodes = _parse_podcast_episodes(channel, 10)
+    except Exception:
+        logger.warning("podcast polling: failed to fetch feed %r for subscription %s", feed_url, sub_id)
+        # Still bump last_checked_at so a persistently broken feed doesn't
+        # keep sorting to the front of every future poll pass.
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE ios_podcast_subscriptions SET last_checked_at = NOW() WHERE id = %s", (sub_id,)
+                )
+        return []
+
+    new_episodes: list[dict] = []
+    if last_episode_guid is not None:
+        for ep in episodes:
+            if ep["guid"] == last_episode_guid:
+                break
+            new_episodes.append(ep)
+    # First-ever check: record the current top episode without notifying
+    # about the whole back catalog, same convention as artist subscriptions.
+    latest_guid = episodes[0]["guid"] if episodes else last_episode_guid
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_podcast_subscriptions SET last_episode_guid = %s, last_checked_at = NOW() WHERE id = %s",
+                (latest_guid, sub_id),
+            )
+            if new_episodes and not notifications_muted:
+                newest = new_episodes[0]
+                await _create_notification(
+                    cur, user_id, "new_episode",
+                    f"New episode from {title or 'a podcast you follow'}",
+                    newest["title"],
+                    {"feed_url": feed_url, "episode": newest},
+                )
+    return new_episodes
+
+
+async def _poll_due_podcast_subscriptions() -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, user_id, feed_url, title, last_episode_guid, notifications_muted
+                FROM ios_podcast_subscriptions
+                WHERE last_checked_at IS NULL OR last_checked_at < NOW() - make_interval(hours => %s)
+                ORDER BY last_checked_at IS NULL DESC, last_checked_at ASC
+                LIMIT %s
+                """,
+                (_PODCAST_POLL_STALE_HOURS, _PODCAST_POLL_BATCH_SIZE),
+            )
+            rows = await cur.fetchall()
+
+    for sub_id, user_id, feed_url, title, last_episode_guid, notifications_muted in rows:
+        try:
+            new_episodes = await _check_podcast_subscription_core(
+                sub_id, user_id, feed_url, title, last_episode_guid,
+                notifications_muted=bool(notifications_muted),
+            )
+            if new_episodes:
+                logger.info(
+                    "podcast polling: %d new episode(s) for subscription %s (user %s)",
+                    len(new_episodes), sub_id, user_id,
+                )
+        except Exception:
+            logger.exception("podcast polling: check failed for subscription %s", sub_id)
 
 
 # ---------------------------------------------------------------------------

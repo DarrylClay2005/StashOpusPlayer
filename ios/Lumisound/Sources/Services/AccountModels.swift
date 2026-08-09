@@ -964,12 +964,30 @@ struct RegisteredDevice: Codable, Identifiable {
 
 // MARK: - Podcasts
 
+/// One row from GET /podcasts/search (iTunes Search API, proxied) — feeds
+/// `AddPodcastSheet`'s search tab; not yet a subscription until tapped.
+struct PodcastSearchResult: Codable, Identifiable {
+    let title: String?
+    let artist: String?
+    let feedURL: String
+    let artworkURL: String?
+
+    var id: String { feedURL }
+
+    enum CodingKeys: String, CodingKey {
+        case title, artist
+        case feedURL = "feed_url"
+        case artworkURL = "artwork_url"
+    }
+}
+
 struct PodcastSubscription: Codable, Identifiable {
     let id: String
     let feedURL: String
     let title: String?
     let artworkURL: String?
     let addedAt: String?
+    var notificationsMuted: Bool = false
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -977,6 +995,7 @@ struct PodcastSubscription: Codable, Identifiable {
         case title
         case artworkURL = "artwork_url"
         case addedAt = "added_at"
+        case notificationsMuted = "notifications_muted"
     }
 }
 

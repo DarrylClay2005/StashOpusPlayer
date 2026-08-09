@@ -4,6 +4,21 @@ extension AccountService {
 
     // MARK: - Podcasts
 
+    /// Podcast search-by-name (iTunes Search API, proxied through the bridge
+    /// so the app never talks to a third-party host directly) — lets
+    /// `AddPodcastSheet` offer a "search" path alongside "paste a feed URL".
+    func searchPodcasts(query: String) async -> [PodcastSearchResult] {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty,
+              var components = URLComponents(string: "/podcasts/search") else { return [] }
+        components.queryItems = [URLQueryItem(name: "q", value: query)]
+        do {
+            let data = try await makeRequest(components.string ?? "/podcasts/search")
+            return try JSONDecoder().decode([PodcastSearchResult].self, from: data)
+        } catch {
+            return []
+        }
+    }
+
     /// Subscribes to a podcast RSS feed — the bridge fetches+validates it
     /// once (extracting title/artwork) before persisting the subscription.
     func subscribeToPodcast(feedURL: String) async -> PodcastSubscription? {
@@ -29,6 +44,20 @@ extension AccountService {
         } catch {
             errorMessage = (error as? AccountError)?.message ?? error.localizedDescription
             return []
+        }
+    }
+
+    /// Toggles new-episode push/in-app notifications for one subscription
+    /// (the `_poll_due_podcast_subscriptions` background pass respects this).
+    @discardableResult
+    func setPodcastNotificationsMuted(id: String, muted: Bool) async -> Bool {
+        guard isLoggedIn else { return false }
+        struct Body: Encodable { let notifications_muted: Bool }
+        do {
+            _ = try await makeRequest("/user/podcasts/subscriptions/\(id)", method: "PATCH", body: Body(notifications_muted: muted))
+            return true
+        } catch {
+            return false
         }
     }
 

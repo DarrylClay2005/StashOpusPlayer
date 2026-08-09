@@ -30,6 +30,17 @@ struct PodcastsView: View {
                         NavigationLink(destination: PodcastEpisodesView(subscription: sub)) {
                             row(for: sub)
                         }
+                        .swipeActions(edge: .leading) {
+                            Button {
+                                toggleMute(sub)
+                            } label: {
+                                Label(
+                                    sub.notificationsMuted ? "Unmute" : "Mute",
+                                    systemImage: sub.notificationsMuted ? "bell" : "bell.slash"
+                                )
+                            }
+                            .tint(AppTheme.dynamicAccent)
+                        }
                     }
                     .onDelete(perform: delete)
                 }
@@ -86,7 +97,21 @@ struct PodcastsView: View {
             Text(sub.title?.isEmpty == false ? sub.title! : sub.feedURL)
                 .foregroundStyle(AppTheme.textPrimary)
                 .lineLimit(1)
+
+            if sub.notificationsMuted {
+                Spacer()
+                Image(systemName: "bell.slash")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
         }
+    }
+
+    private func toggleMute(_ sub: PodcastSubscription) {
+        guard let index = subscriptions.firstIndex(where: { $0.id == sub.id }) else { return }
+        let newValue = !sub.notificationsMuted
+        subscriptions[index].notificationsMuted = newValue
+        Task { await account.setPodcastNotificationsMuted(id: sub.id, muted: newValue) }
     }
 
     private func reload() async {
@@ -111,24 +136,31 @@ private struct AddPodcastSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onAdded: () async -> Void
 
+    private enum Mode: String, CaseIterable { case search = "Search", url = "Feed URL" }
+    @State private var mode: Mode = .search
+
     @State private var feedURLText = ""
-    @State private var isSubmitting = false
     @State private var errorText: String?
+
+    @State private var searchQuery = ""
+    @State private var searchResults: [PodcastSearchResult] = []
+    @State private var isSearching = false
+    @State private var searchTask: Task<Void, Never>?
+    @State private var subscribingFeedURL: String?
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("https://example.com/feed.xml", text: $feedURLText)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                } header: {
-                    Text("Feed URL")
-                } footer: {
-                    if let errorText {
-                        Text(errorText).foregroundStyle(.red)
-                    }
+            VStack(spacing: 0) {
+                Picker("Mode", selection: $mode) {
+                    ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .padding()
+
+                if mode == .search {
+                    searchBody
+                } else {
+                    urlBody
                 }
             }
             .navigationTitle("Add Podcast")
@@ -137,31 +169,110 @@ private struct AddPodcastSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    if isSubmitting {
-                        ProgressView()
-                    } else {
-                        Button("Add") { submit() }
-                            .disabled(feedURLText.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                }
             }
         }
     }
 
-    private func submit() {
-        let url = feedURLText.trimmingCharacters(in: .whitespaces)
-        guard !url.isEmpty else { return }
-        isSubmitting = true
+    // MARK: Search tab
+
+    private var searchBody: some View {
+        List {
+            if let errorText {
+                Text(errorText).foregroundStyle(.red)
+            }
+            if isSearching && searchResults.isEmpty {
+                HStack { Spacer(); ProgressView(); Spacer() }
+            } else if searchResults.isEmpty && !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                Text("No podcasts found.")
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            ForEach(searchResults) { result in
+                Button {
+                    subscribe(feedURL: result.feedURL)
+                } label: {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(result.title ?? "Untitled")
+                                .foregroundStyle(AppTheme.textPrimary)
+                                .lineLimit(2)
+                            if let artist = result.artist {
+                                Text(artist)
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                        }
+                        Spacer()
+                        if subscribingFeedURL == result.feedURL {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "plus.circle")
+                                .foregroundStyle(AppTheme.dynamicAccent)
+                        }
+                    }
+                }
+                .disabled(subscribingFeedURL != nil)
+            }
+        }
+        .listStyle(.plain)
+        .searchable(text: $searchQuery, prompt: "Search podcasts")
+        .onChange(of: searchQuery) { newValue in
+            searchTask?.cancel()
+            searchTask = Task {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard !Task.isCancelled else { return }
+                await runSearch(newValue)
+            }
+        }
+    }
+
+    private func runSearch(_ query: String) async {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+            searchResults = []
+            return
+        }
+        isSearching = true
+        searchResults = await account.searchPodcasts(query: query)
+        isSearching = false
+    }
+
+    private func subscribe(feedURL: String) {
+        subscribingFeedURL = feedURL
         errorText = nil
         Task {
-            let result = await account.subscribeToPodcast(feedURL: url)
-            isSubmitting = false
+            let result = await account.subscribeToPodcast(feedURL: feedURL)
+            subscribingFeedURL = nil
             if result != nil {
                 await onAdded()
                 dismiss()
             } else {
                 errorText = account.errorMessage ?? "Couldn't add that feed."
+            }
+        }
+    }
+
+    // MARK: Feed URL tab
+
+    private var urlBody: some View {
+        Form {
+            Section {
+                TextField("https://example.com/feed.xml", text: $feedURLText)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } header: {
+                Text("Feed URL")
+            } footer: {
+                if let errorText {
+                    Text(errorText).foregroundStyle(.red)
+                }
+            }
+            Section {
+                if subscribingFeedURL != nil {
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                } else {
+                    Button("Add") { subscribe(feedURL: feedURLText.trimmingCharacters(in: .whitespaces)) }
+                        .disabled(feedURLText.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
             }
         }
     }
