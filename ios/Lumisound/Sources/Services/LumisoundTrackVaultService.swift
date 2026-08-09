@@ -291,16 +291,16 @@ enum LumisoundTrackVaultService {
         guard let library = LibraryManager.shared else { return }
         let currentlyPlayingID = AudioPlayerManager.shared?.currentSong?.id
 
-        let convertedURLsByID: [String: URL] = library.importedSongs.reduce(into: [:]) { acc, song in
+        let convertedByID: [String: (url: URL, sourceTrackID: String?)] = library.importedSongs.reduce(into: [:]) { acc, song in
             guard let url = song.url, LumisoundExclusiveExtensionService.isConverted(url) else { return }
-            acc[song.id] = url
+            acc[song.id] = (url, song.sourceTrackID)
         }
-        guard !convertedURLsByID.isEmpty else {
+        guard !convertedByID.isEmpty else {
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: metadataRepairMigrationLastRunKey)
             return
         }
 
-        appLog("LumisoundTrackVaultService: metadata repair migration — checking \(convertedURLsByID.count) already-converted track(s)", category: "background")
+        appLog("LumisoundTrackVaultService: metadata repair migration — checking \(convertedByID.count) already-converted track(s)", category: "background")
 
         // Check phase: `hasEmbeddedSourceTag` for every already-converted
         // track, run concurrently off the main actor — after this fix, the
@@ -314,13 +314,27 @@ enum LumisoundTrackVaultService {
                 var needsRepair: [String] = []
                 var pending = 0
                 let maxConcurrent = 8
-                var iterator = convertedURLsByID.makeIterator()
+                var iterator = convertedByID.makeIterator()
 
                 func launchNext() {
-                    guard let (id, url) = iterator.next() else { return }
+                    guard let (id, entry) = iterator.next() else { return }
                     pending += 1
                     group.addTask {
-                        await LumisoundExclusiveExtensionService.hasEmbeddedSourceTag(fileURL: url) ? nil : id
+                        guard await LumisoundExclusiveExtensionService.hasEmbeddedSourceTag(fileURL: entry.url) else {
+                            return id
+                        }
+                        // Second condition: catches tracks already repaired
+                        // once (title/artist/ID present, so the check above
+                        // passes) before AudioTagWriter started embedding a
+                        // thumbnail tag — only for YouTube sources, since
+                        // that's the only case a thumbnail URL can be
+                        // deterministically reconstructed for (see
+                        // repairEmbeddedMetadata).
+                        if let sourceTrackID = entry.sourceTrackID, sourceTrackID.hasPrefix("youtube:") {
+                            let hasThumbnail = await LumisoundExclusiveExtensionService.hasEmbeddedThumbnailTag(fileURL: entry.url)
+                            if !hasThumbnail { return id }
+                        }
+                        return nil
                     }
                 }
                 while pending < maxConcurrent { launchNext() }

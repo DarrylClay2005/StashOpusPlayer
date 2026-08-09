@@ -115,4 +115,21 @@ enum LumisoundExclusiveExtensionService {
             return idRaw.contains("lumisound_id") || keyRaw.contains("lumisound_id")
         }
     }
+
+    /// Same shape as `hasEmbeddedSourceTag`, for `LUMISOUND_THUMBNAIL` —
+    /// used by `LumisoundTrackVaultService`'s repair migration to catch
+    /// tracks that already have their ID/title/artist repaired but predate
+    /// `AudioTagWriter` embedding a thumbnail tag (a separate, later fix —
+    /// see that type's own header comment), so those tracks get a second
+    /// repair pass instead of staying permanently missing artwork despite
+    /// `hasEmbeddedSourceTag` alone now reporting `true` for them.
+    static func hasEmbeddedThumbnailTag(fileURL: URL) async -> Bool {
+        let asset = AVURLAsset(url: fileURL)
+        guard let items = try? await asset.load(.metadata) else { return false }
+        return items.contains { item in
+            let idRaw = item.identifier?.rawValue.lowercased() ?? ""
+            let keyRaw = (item.key as? String)?.lowercased() ?? ""
+            return idRaw.contains("lumisound_thumbnail") || keyRaw.contains("lumisound_thumbnail")
+        }
+    }
 }
