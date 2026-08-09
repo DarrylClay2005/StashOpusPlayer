@@ -357,7 +357,27 @@ final class DuplicateFinderService: ObservableObject {
             for key in keys {
                 byRootKey[find(key), default: []].append(contentsOf: byTitleArtist[key] ?? [])
             }
+            // `cluster` only guarantees each song is within `durationTolerance`
+            // of its NEIGHBOR in sorted order, not of every other song in the
+            // cluster — a dense-enough chain of unrelated intermediate
+            // durations (a real risk in a large library) can transitively
+            // bridge a cluster across a much wider span. Two songs that
+            // merely share a title/artist (e.g. an OST-rip channel that
+            // titles every track in a playlist identically) but whose
+            // durations actually differ by tens of seconds are clearly
+            // DIFFERENT recordings, not re-encodes of the same one — re-check
+            // the actual span of whatever this title+artist key matched
+            // before trusting it, so Auto-Clean can't delete distinct songs.
             for (_, matched) in byRootKey where matched.count > 1 {
+                let durations = matched.map(\.duration)
+                guard let minDuration = durations.min(), let maxDuration = durations.max(),
+                      maxDuration - minDuration <= durationTolerance else {
+                    appWarn(
+                        "DuplicateFinderService: discarded title+artist match spanning \(String(format: "%.1f", (durations.max() ?? 0) - (durations.min() ?? 0)))s (> \(durationTolerance)s tolerance) — likely a duration-cluster chain artifact, not real duplicates: \(matched.map(\.title))",
+                        category: "audio"
+                    )
+                    continue
+                }
                 groups.append(DuplicateGroup(id: UUID(), songs: matched, reason: .sameTitleAndArtist))
                 fallbackGroupCount += 1
             }
