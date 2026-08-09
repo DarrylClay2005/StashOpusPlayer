@@ -11,6 +11,7 @@ struct PodcastsView: View {
     @State private var subscriptions: [PodcastSubscription] = []
     @State private var isLoading = true
     @State private var showAddSheet = false
+    @AppStorage(PodcastAutoDownloadService.enabledKey) private var autoDownloadEnabled = false
 
     var body: some View {
         Group {
@@ -20,6 +21,11 @@ struct PodcastsView: View {
                 emptyState
             } else {
                 List {
+                    Section {
+                        Toggle("Auto-Download New Episodes", isOn: $autoDownloadEnabled)
+                    } footer: {
+                        Text("Downloads episodes published in the last 2 days, checked every few hours (up to 3 per show per check).")
+                    }
                     ForEach(subscriptions) { sub in
                         NavigationLink(destination: PodcastEpisodesView(subscription: sub)) {
                             row(for: sub)
