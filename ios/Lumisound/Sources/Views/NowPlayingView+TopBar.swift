@@ -84,6 +84,13 @@ extension NowPlayingView {
                     Label("Share", systemImage: "square.and.arrow.up")
                 }
             }
+            if account.isLoggedIn, player.currentSong != nil {
+                Button {
+                    showTransferPlaybackSheet = true
+                } label: {
+                    Label("Transfer Playback", systemImage: "arrow.triangle.swap")
+                }
+            }
         } label: {
             Image(systemName: "ellipsis.circle.fill")
                 .font(.system(size: 20, weight: .medium))

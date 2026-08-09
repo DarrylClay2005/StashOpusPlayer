@@ -52,20 +52,84 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        guard (userInfo["type"] as? String) == "download_ready", let streaming = StreamingService.shared else {
+        switch userInfo["type"] as? String {
+        case "download_ready":
+            guard let streaming = StreamingService.shared else {
+                completionHandler(.noData)
+                return
+            }
+            let bgTask = application.beginBackgroundTask(withName: "lumisound.download.reconcile") {
+                // Expiration fallback — nothing to cancel cleanly mid-fetch here,
+                // just make sure the background task itself always ends.
+            }
+            Task {
+                let imported = await streaming.reconcilePendingDownloads()
+                if bgTask != .invalid {
+                    application.endBackgroundTask(bgTask)
+                }
+                completionHandler(imported > 0 ? .newData : .noData)
+            }
+
+        case "playback_transfer":
+            handlePlaybackTransfer(userInfo: userInfo, application: application, completionHandler: completionHandler)
+
+        default:
+            completionHandler(.noData)
+        }
+    }
+
+    /// Entry point for another of this account's devices sending "play this
+    /// here" (see AccountService+PlaybackTransfer.swift / main.py's
+    /// /user/playback/transfer). Resolves the track the same way any other
+    /// "play a fetched StreamTrack" flow does (StreamingService.streamURL +
+    /// toSong, same as e.g. DiscoverMixView's play(track:)) rather than
+    /// inventing a separate playback path just for this.
+    private func handlePlaybackTransfer(
+        userInfo: [AnyHashable: Any],
+        application: UIApplication,
+        completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        guard let data = userInfo["data"] as? [String: Any],
+              let title = data["title"] as? String,
+              let source = data["source"] as? String,
+              let sourceID = data["source_id"] as? String, !sourceID.isEmpty,
+              let streaming = StreamingService.shared,
+              let player = AudioPlayerManager.shared else {
             completionHandler(.noData)
             return
         }
-        let bgTask = application.beginBackgroundTask(withName: "lumisound.download.reconcile") {
-            // Expiration fallback — nothing to cancel cleanly mid-fetch here,
-            // just make sure the background task itself always ends.
-        }
+        let artist = data["artist"] as? String ?? ""
+        let durationSeconds = (data["duration_seconds"] as? NSNumber)?.intValue ?? 0
+        let positionSeconds = (data["position_seconds"] as? NSNumber)?.doubleValue ?? 0
+        let isPlaying = data["is_playing"] as? Bool ?? true
+        let track = StreamTrack(
+            id: sourceID, title: title, artist: artist, durationSeconds: durationSeconds,
+            thumbnailURL: data["thumbnail_url"] as? String ?? "", source: source,
+            youtubeURL: data["track_url"] as? String ?? ""
+        )
+
+        let bgTask = application.beginBackgroundTask(withName: "lumisound.playback.transfer") {}
         Task {
-            let imported = await streaming.reconcilePendingDownloads()
-            if bgTask != .invalid {
-                application.endBackgroundTask(bgTask)
+            defer {
+                if bgTask != .invalid { application.endBackgroundTask(bgTask) }
             }
-            completionHandler(imported > 0 ? .newData : .noData)
+            do {
+                let url = try await streaming.streamURL(for: track)
+                let song = streaming.toSong(track: track, streamURL: url)
+                await MainActor.run {
+                    player.play(song: song, in: [song])
+                    if positionSeconds > 0 {
+                        player.seek(to: positionSeconds)
+                    }
+                    if !isPlaying {
+                        player.pause()
+                    }
+                }
+                completionHandler(.newData)
+            } catch {
+                appWarn("handlePlaybackTransfer: couldn't resolve stream URL: \(error.localizedDescription)", category: "notifications")
+                completionHandler(.failed)
+            }
         }
     }
 

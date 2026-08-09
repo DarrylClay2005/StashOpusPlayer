@@ -2067,6 +2067,27 @@ class ScrobbleLinkRequest(BaseModel):
 class PushTokenRequest(BaseModel):
     device_token: str
     platform: str = "ios"
+    device_name: Optional[str] = None
+
+
+class PlaybackTransferRequest(BaseModel):
+    target_device_token: str
+    song_id: Optional[str] = None
+    title: str
+    artist: Optional[str] = None
+    track_url: Optional[str] = None
+    source: Optional[str] = None
+    # The bare source-native id (e.g. a YouTube video id, without the
+    # "youtube:" prefix song_id/sourceTrackID carry) -- sent explicitly
+    # rather than making the receiving device re-derive it from song_id,
+    # since not every Song.id follows the "source:id" convention (plain
+    # local imports don't).
+    source_id: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    position_seconds: float = 0
+    duration_seconds: float = 0
+    is_playing: bool = True
+    bpm: Optional[float] = None
 
 
 class DiscordWebhookRequest(BaseModel):
@@ -12862,9 +12883,13 @@ async def register_push_token(body: PushTokenRequest, payload: dict = Depends(ge
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "INSERT INTO ios_push_tokens (user_id, device_token, platform) VALUES (%s, %s, %s) "
-                "ON CONFLICT (user_id, device_token) DO UPDATE SET platform = EXCLUDED.platform",
-                (user_id, body.device_token, body.platform),
+                "INSERT INTO ios_push_tokens (user_id, device_token, platform, device_name, last_seen_at) "
+                "VALUES (%s, %s, %s, %s, NOW()) "
+                "ON CONFLICT (user_id, device_token) DO UPDATE SET "
+                "platform = EXCLUDED.platform, "
+                "device_name = COALESCE(EXCLUDED.device_name, ios_push_tokens.device_name), "
+                "last_seen_at = NOW()",
+                (user_id, body.device_token, body.platform, body.device_name),
             )
     asyncio.create_task(log_event("push", "push_token_registered", user_id=user_id,
                                    detail={"platform": body.platform}))
@@ -12882,6 +12907,135 @@ async def unregister_push_token(device_token: str, payload: dict = Depends(get_c
                 (user_id, device_token),
             )
     asyncio.create_task(log_event("push", "push_token_unregistered", user_id=user_id))
+
+
+# ---------------------------------------------------------------------------
+# Cross-Device Playback Handoff (Feature: playback-transfer)
+# ---------------------------------------------------------------------------
+#
+# Builds on the existing push-token registration (above) and playback-state
+# sync (ios_playback_state, see get_playback_state/update_playback_state) --
+# no new device-presence system. A "device" is just a row in
+# ios_push_tokens; "transfer" is: push_state the track/position to the
+# target's normal ios_playback_state row (so it survives even if the push
+# never arrives — same "last known state" the target reads on next launch
+# regardless), then send that ONE device_token a push telling it to start
+# playing right now. Reuses the exact same aioapns call shape
+# _send_push_best_effort already uses successfully elsewhere in this file,
+# just aimed at a single token instead of every token a user has.
+
+
+@app.get("/user/devices")
+async def list_devices(payload: dict = Depends(get_current_user)):
+    """Lists this user's registered devices (push-token rows), most
+    recently seen first -- the transfer target picker's data source."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT device_token, platform, device_name, last_seen_at "
+                "FROM ios_push_tokens WHERE user_id = %s ORDER BY last_seen_at DESC",
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+    return [
+        {
+            "device_token": r[0],
+            "platform": r[1],
+            "device_name": r[2],
+            "last_seen_at": r[3].isoformat() if r[3] else None,
+        }
+        for r in rows
+    ]
+
+
+@app.post("/user/playback/transfer", status_code=204)
+async def transfer_playback(
+    body: PlaybackTransferRequest,
+    payload: dict = Depends(get_current_user),
+):
+    """Pushes the currently-playing track/position to `target_device_token`
+    and asks it to start playing. The calling device is implicitly the
+    source -- it sends whatever it's currently playing, there's no separate
+    "which device is the source" concept to track."""
+    user_id = payload["sub"]
+
+    # Persist first (best-effort, matches update_playback_state's own
+    # shape) so the target has the right state to resume from even if the
+    # push itself is dropped/delayed/never arrives -- the same fallback
+    # every "resume on next launch" flow already relies on.
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ios_playback_state
+                    (user_id, song_id, title, artist, track_url, source, position_seconds, duration_seconds, is_playing, bpm)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    song_id = EXCLUDED.song_id, title = EXCLUDED.title, artist = EXCLUDED.artist,
+                    track_url = EXCLUDED.track_url, source = EXCLUDED.source,
+                    position_seconds = EXCLUDED.position_seconds, duration_seconds = EXCLUDED.duration_seconds,
+                    is_playing = EXCLUDED.is_playing, bpm = EXCLUDED.bpm
+                """,
+                (
+                    user_id, body.song_id, body.title, body.artist, body.track_url,
+                    body.source, body.position_seconds, body.duration_seconds, body.is_playing,
+                    body.bpm,
+                ),
+            )
+            await cur.execute(
+                "SELECT platform FROM ios_push_tokens WHERE user_id = %s AND device_token = %s",
+                (user_id, body.target_device_token),
+            )
+            target_row = await cur.fetchone()
+
+    if target_row is None:
+        raise HTTPException(status_code=404, detail="Target device not found")
+    platform = target_row[0]
+
+    if platform == "android":
+        fcm_app = _get_fcm_app()
+        if fcm_app is not None:
+            await _send_fcm_push(
+                fcm_app, body.target_device_token, "playback_transfer",
+                "Playback Transferred", f"Now playing: {body.title}",
+                {
+                    "song_id": body.song_id, "title": body.title, "artist": body.artist,
+                    "track_url": body.track_url, "source": body.source, "source_id": body.source_id,
+                    "thumbnail_url": body.thumbnail_url,
+                    "position_seconds": body.position_seconds, "is_playing": body.is_playing,
+                },
+                True,
+            )
+        return
+
+    apns_client = _get_apns_client()
+    if apns_client is None:
+        return
+    request = aioapns.NotificationRequest(
+        device_token=body.target_device_token,
+        message={
+            "aps": {
+                "alert": {"title": "Playback Transferred", "body": f"Now playing: {body.title}"},
+                "sound": "default",
+                "content-available": 1,
+            },
+            "type": "playback_transfer",
+            "data": {
+                "song_id": body.song_id, "title": body.title, "artist": body.artist,
+                "track_url": body.track_url, "source": body.source, "source_id": body.source_id,
+                "thumbnail_url": body.thumbnail_url,
+                "position_seconds": body.position_seconds, "is_playing": body.is_playing,
+            },
+        },
+        push_type=aioapns.PushType.ALERT,
+    )
+    try:
+        await apns_client.send_notification(request)
+    except Exception as exc:
+        logger.debug("transfer_playback: send failed: %s", exc)
 
 
 @app.get("/user/notifications")

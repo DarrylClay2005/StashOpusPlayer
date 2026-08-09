@@ -918,3 +918,24 @@ struct AdminErrorLogEntry: Codable, Identifiable {
         case osVersion = "os_version"
     }
 }
+
+// MARK: - Cross-Device Playback Handoff
+
+/// One row from GET /user/devices (a push-token registration with display
+/// metadata) — the transfer target picker's data source.
+struct RegisteredDevice: Codable, Identifiable {
+    let deviceToken: String
+    let platform: String
+    let deviceName: String?
+    let lastSeenAt: String?
+
+    var id: String { deviceToken }
+    var displayName: String { deviceName?.isEmpty == false ? deviceName! : platform.capitalized }
+
+    enum CodingKeys: String, CodingKey {
+        case deviceToken = "device_token"
+        case platform
+        case deviceName = "device_name"
+        case lastSeenAt = "last_seen_at"
+    }
+}

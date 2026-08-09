@@ -50,9 +50,12 @@ extension AccountService {
     func registerPushToken(_ deviceToken: String) async {
         UserDefaults.standard.set(deviceToken, forKey: Self.deviceTokenKey)
         guard isLoggedIn else { return }
-        struct Body: Encodable { let device_token: String; let platform: String }
+        struct Body: Encodable { let device_token: String; let platform: String; let device_name: String }
         do {
-            _ = try await makeRequest("/user/push-token", method: "POST", body: Body(device_token: deviceToken, platform: "ios"))
+            _ = try await makeRequest(
+                "/user/push-token", method: "POST",
+                body: Body(device_token: deviceToken, platform: "ios", device_name: UIDevice.current.name)
+            )
         } catch {
             // Best-effort; will retry on next launch.
         }

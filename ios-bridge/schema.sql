@@ -1353,3 +1353,12 @@ CREATE TRIGGER trg_touch_scanned_at BEFORE UPDATE ON ios_duplicate_scan_cache FO
 
 DROP TRIGGER IF EXISTS trg_touch_generated_at ON ios_weekly_mix_cache;
 CREATE TRIGGER trg_touch_generated_at BEFORE UPDATE ON ios_weekly_mix_cache FOR EACH ROW EXECUTE FUNCTION ios_touch_generated_at();
+
+-- Cross-device playback handoff (Feature: playback-transfer): needs a
+-- human-readable device list to pick a transfer target from, and a rough
+-- "last seen" so a stale/uninstalled device doesn't show up forever.
+-- ios_push_tokens already uniquely identifies a device (one row per
+-- user+device_token) -- this just adds display metadata to rows that
+-- already exist, no new table needed.
+ALTER TABLE ios_push_tokens ADD COLUMN IF NOT EXISTS device_name VARCHAR(100) NULL;
+ALTER TABLE ios_push_tokens ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;

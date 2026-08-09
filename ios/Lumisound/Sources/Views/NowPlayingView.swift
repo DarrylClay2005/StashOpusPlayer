@@ -77,6 +77,7 @@ struct NowPlayingView: View {
     // passthrough — instead.
     @EnvironmentObject var library: LibraryManager
     @EnvironmentObject var sleepTimer: SleepTimerService
+    @EnvironmentObject var account: AccountService
 
     // Seeking
     @State var isSeeking = false
@@ -215,6 +216,9 @@ struct NowPlayingView: View {
     // Format info sheet
     @State var showFormatInfoSheet = false
 
+    // Transfer Playback sheet
+    @State var showTransferPlaybackSheet = false
+
     // Custom speed / pitch inline editing
     @State var editingSpeed = false
     @State var speedInput = ""
@@ -255,6 +259,11 @@ struct NowPlayingView: View {
         .sheet(isPresented: $showFormatInfoSheet) {
             FormatInfoSheet(song: player.currentSong, isUsingFallback: player.isUsingOpusPlayer)
                 .environmentObject(library)
+        }
+        .sheet(isPresented: $showTransferPlaybackSheet) {
+            TransferPlaybackSheet()
+                .environmentObject(account)
+                .environmentObject(player)
         }
         .sheet(isPresented: $showLyricsSyncEditor) {
             LyricsSyncEditorView(initialLines: lyricsLines)
