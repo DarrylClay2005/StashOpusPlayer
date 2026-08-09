@@ -544,17 +544,33 @@ private struct HubSpeedDialTile: View {
     // O(n) work.
     @State private var listenedFraction: Double? = nil
     @State private var collage: [Song] = []
+    // Custom, device-local folder cover art (see FolderCoverArtService) —
+    // only meaningful for `.folder` shortcuts. LocalFolderDetailView and
+    // FoldersTab's grid both show whatever custom cover is set for a
+    // folder; this speed-dial tile never checked for one at all, so a
+    // folder with a custom cover showed the generic song-collage instead
+    // here specifically, inconsistent with every other place the same
+    // folder's artwork appears.
+    @State private var customFolderCover: UIImage? = nil
 
     var body: some View {
         NavigationLink {
             destination
         } label: {
             VStack(alignment: .leading, spacing: 6) {
-                HubArtworkCollage(
-                    songs: collage,
-                    size: tileWidth,
-                    placeholderIcon: shortcut.icon
-                )
+                if let customFolderCover {
+                    Image(uiImage: customFolderCover)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: tileWidth, height: tileWidth)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                } else {
+                    HubArtworkCollage(
+                        songs: collage,
+                        size: tileWidth,
+                        placeholderIcon: shortcut.icon
+                    )
+                }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(shortcut.title)
                         .font(.caption.weight(.semibold))
@@ -580,6 +596,11 @@ private struct HubSpeedDialTile: View {
         .task(id: shortcut.id) {
             listenedFraction = library.listenedFraction(of: shortcut.songs)
             collage = library.collageSongs(from: shortcut.songs)
+            if case .folder(let folder) = shortcut.kind {
+                customFolderCover = FolderCoverArtService.shared.cover(for: folder.dirURL)
+            } else {
+                customFolderCover = nil
+            }
         }
     }
 

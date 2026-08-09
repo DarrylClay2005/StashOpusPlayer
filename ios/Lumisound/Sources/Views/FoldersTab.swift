@@ -1,5 +1,6 @@
 import SwiftUI
 import MediaPlayer
+import UIKit
 
 // MARK: - Folders Tab
 //
@@ -90,6 +91,18 @@ private struct FolderGridCell: View {
     private var representativeSong: Song? { folder.songs.first }
     private var trackCount: Int { folder.songs.count }
 
+    // Custom, device-local folder cover art (see FolderCoverArtService) —
+    // read once on appear/whenever this folder's identity changes rather
+    // than as a plain computed property: `cover(for:)` does a dictionary
+    // lookup (cheap) but also decodes+caches from disk on a cold cache
+    // miss, which isn't free to repeat on every SwiftUI body pass for a
+    // grid full of these cells. LocalFolderDetailView already shows
+    // whatever custom cover is set for a folder; this grid never checked
+    // for one at all, so a folder with a custom cover reverted to its
+    // default (first song's artwork / folder glyph) the moment you backed
+    // out to the grid.
+    @State private var customCover: UIImage? = nil
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // GeometryReader sizes the artwork to the actual column width — like
@@ -100,7 +113,13 @@ private struct FolderGridCell: View {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(AppTheme.surface)
 
-                    if let song = representativeSong {
+                    if let customCover {
+                        Image(uiImage: customCover)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: geo.size.width, height: geo.size.width)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    } else if let song = representativeSong {
                         ArtworkThumbnail(song: song, size: geo.size.width)
                             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     } else {
@@ -137,6 +156,9 @@ private struct FolderGridCell: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
             .padding(.horizontal, 2)
+        }
+        .onAppear {
+            customCover = FolderCoverArtService.shared.cover(for: folder.dirURL)
         }
     }
 }

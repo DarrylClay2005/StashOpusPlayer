@@ -202,8 +202,21 @@ actor MetadataFetchService {
 
     /// Convenience: enriches `song` with any fields currently missing, using a single
     /// iTunes lookup. Returns the updated Song (or the original if nothing was found).
+    /// Tracks at or beyond this length are essentially never a real single
+    /// song in iTunes/MusicBrainz/Deezer's catalogs — a compilation, full
+    /// album, or "whole playlist as one file" import routinely runs 20+
+    /// minutes. `fetchFromItunes` falls back to its first search result
+    /// whenever nothing matches the title exactly (see its doc comment),
+    /// so querying with a compilation-style title doesn't fail cleanly —
+    /// it silently returns an unrelated song's artist/album/genre, which
+    /// then gets written back as if it were a real identification. Skipping
+    /// enrichment entirely above this length is cheap insurance against
+    /// that whole class of bogus match.
+    private static let maxEnrichableDuration: TimeInterval = 20 * 60
+
     func enrich(song: Song) async -> Song {
         var s = song
+        guard song.duration < Self.maxEnrichableDuration else { return s }
         let meta = await fetchMetadata(title: song.title, artist: song.artist, filename: song.url?.lastPathComponent)
         guard let meta else { return s }
 
