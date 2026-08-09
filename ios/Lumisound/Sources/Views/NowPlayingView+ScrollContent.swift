@@ -182,6 +182,7 @@ extension NowPlayingView {
             VStack(spacing: 20) {
                 effectsSection
                 equalizerSection
+                workoutModeSection
                 trackAudioSettingsSection
             }
         case .queue:

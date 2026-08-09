@@ -142,7 +142,7 @@
     <!-- Required by CMHeadphoneMotionManager (Spatial Audio's head tracking) —
          calling its APIs without this key present crashes the app. -->
     <key>NSMotionUsageDescription</key>
-    <string>Lumisound uses head tracking to anchor Spatial Audio in place as you turn your head.</string>
+    <string>Lumisound uses head tracking to anchor Spatial Audio in place as you turn your head, and step counting (Workout Mode) to match playback speed to your pace.</string>
     <!-- Required to call LAContext.evaluatePolicy with Face ID (Settings →
          General → App Lock) — omitting this crashes the app on first use on
          a Face ID device, even though Touch ID/passcode need no such key. -->
