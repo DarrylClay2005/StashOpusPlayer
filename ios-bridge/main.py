@@ -15611,6 +15611,9 @@ async def gif_trending(
 # ---------------------------------------------------------------------------
 
 _ITUNES_NS = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+# Podcasting 2.0 namespace -- <podcast:chapters url="..." type="application/json+chapters">
+# on an <item>, pointing to a separate small JSON file of chapter markers.
+_PODCAST_NS = "{https://podcastindex.org/namespace/1.0}"
 
 
 class PodcastSubscribeRequest(BaseModel):
@@ -15675,6 +15678,9 @@ def _parse_podcast_episodes(channel: ET.Element, limit: int) -> list[dict]:
             except (TypeError, ValueError):
                 published_at = None
 
+        chapters_el = item.find(f"{_PODCAST_NS}chapters")
+        chapters_url = chapters_el.get("url") if chapters_el is not None else None
+
         episodes.append({
             "guid": guid,
             "title": (item.findtext("title") or "").strip(),
@@ -15682,6 +15688,7 @@ def _parse_podcast_episodes(channel: ET.Element, limit: int) -> list[dict]:
             "audio_url": audio_url,
             "duration_seconds": duration_seconds,
             "published_at": published_at,
+            "chapters_url": chapters_url,
         })
     return episodes
 
@@ -15774,6 +15781,52 @@ async def get_podcast_episodes(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Couldn't read that feed: {exc}")
     return _parse_podcast_episodes(channel, limit)
+
+
+def _fetch_podcast_chapters_sync(chapters_url: str) -> list[dict]:
+    """Synchronous fetch + parse of a Podcasting 2.0 chapters JSON file --
+    call via asyncio.to_thread. Caller MUST have already awaited
+    _reject_ssrf_targets(chapters_url), same division of responsibility as
+    _fetch_podcast_feed_sync. Format: {"chapters": [{"startTime": 0,
+    "title": "Intro", ...}, ...]} -- see
+    https://github.com/Podcastindex-org/podcast-namespace/blob/main/chapters/jsonChapters.md"""
+    req = urllib.request.Request(chapters_url, headers={"User-Agent": "Lumisound-Bridge/1.0"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        data = json.loads(resp.read())
+    raw_chapters = data.get("chapters", [])
+    if not isinstance(raw_chapters, list):
+        return []
+    chapters = []
+    for entry in raw_chapters:
+        if not isinstance(entry, dict) or "startTime" not in entry or "title" not in entry:
+            continue
+        try:
+            start_time = float(entry["startTime"])
+        except (TypeError, ValueError):
+            continue
+        chapters.append({
+            "start_time_seconds": start_time,
+            "title": str(entry["title"]).strip(),
+            "image_url": entry.get("img"),
+        })
+    return chapters
+
+
+@app.get("/user/podcasts/chapters")
+async def get_podcast_chapters(
+    chapters_url: str = Query(...),
+    payload: dict = Depends(get_current_user),
+):
+    """Fetches and parses one episode's Podcasting 2.0 chapters file (its
+    URL comes from that episode's `chapters_url`, returned by
+    GET /user/podcasts/episodes) -- a separate on-demand call rather than
+    inlined into the episode list, so listing 50 episodes doesn't mean 50
+    extra fetches when most will never be opened for chapters."""
+    await _reject_ssrf_targets(chapters_url)
+    try:
+        return await asyncio.to_thread(_fetch_podcast_chapters_sync, chapters_url)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Couldn't read chapters: {exc}")
 
 
 @app.put("/user/podcasts/episode-progress", status_code=204)

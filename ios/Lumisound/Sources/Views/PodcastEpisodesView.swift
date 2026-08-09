@@ -22,6 +22,7 @@ struct PodcastEpisodesView: View {
     @State private var episodes: [PodcastEpisode] = []
     @State private var progress: [String: PodcastEpisodeProgress] = [:]
     @State private var isLoading = true
+    @State private var chaptersEpisode: PodcastEpisode?
 
     var body: some View {
         Group {
@@ -50,6 +51,9 @@ struct PodcastEpisodesView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await reload() }
         .refreshable { await reload() }
+        .sheet(item: $chaptersEpisode) { episode in
+            PodcastChaptersSheet(episode: episode, subscription: subscription, savedProgress: progress[episode.guid])
+        }
     }
 
     private func episodeRow(_ episode: PodcastEpisode) -> some View {
@@ -79,6 +83,16 @@ struct PodcastEpisodesView: View {
                 .foregroundStyle(AppTheme.textSecondary)
             }
             Spacer()
+            if episode.chaptersURL != nil {
+                Button {
+                    chaptersEpisode = episode
+                } label: {
+                    Image(systemName: "list.bullet.rectangle")
+                        .font(.system(size: 20))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+            }
             downloadButton(for: episode)
             Image(systemName: "play.circle.fill")
                 .font(.system(size: 22))

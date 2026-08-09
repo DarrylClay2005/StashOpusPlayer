@@ -965,6 +965,10 @@ struct PodcastEpisode: Codable, Identifiable {
     let audioURL: String
     let durationSeconds: Int?
     let publishedAt: String?
+    /// Podcasting 2.0 `<podcast:chapters url="...">`, when the feed
+    /// includes it — pass to `AccountService.fetchPodcastChapters(url:)`
+    /// on demand (not fetched automatically per-episode).
+    let chaptersURL: String?
 
     var id: String { guid }
 
@@ -973,6 +977,22 @@ struct PodcastEpisode: Codable, Identifiable {
         case audioURL = "audio_url"
         case durationSeconds = "duration_seconds"
         case publishedAt = "published_at"
+        case chaptersURL = "chapters_url"
+    }
+}
+
+/// One entry from GET /user/podcasts/chapters (Podcasting 2.0 JSON chapters format).
+struct PodcastChapter: Codable, Identifiable {
+    let startTimeSeconds: Double
+    let title: String
+    let imageURL: String?
+
+    var id: Double { startTimeSeconds }
+
+    enum CodingKeys: String, CodingKey {
+        case startTimeSeconds = "start_time_seconds"
+        case title
+        case imageURL = "image_url"
     }
 }
 

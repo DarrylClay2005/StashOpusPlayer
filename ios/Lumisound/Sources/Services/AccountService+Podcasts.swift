@@ -73,6 +73,22 @@ extension AccountService {
         }
     }
 
+    /// Fetches and parses one episode's Podcasting 2.0 chapters file
+    /// (`episode.chaptersURL`, when a feed provides one). Not called
+    /// automatically per-episode — only when a chapters UI is actually
+    /// opened, since most episodes' chapters will never be viewed.
+    func fetchPodcastChapters(url: String) async -> [PodcastChapter] {
+        guard isLoggedIn,
+              var components = URLComponents(string: "/user/podcasts/chapters") else { return [] }
+        components.queryItems = [URLQueryItem(name: "chapters_url", value: url)]
+        do {
+            let data = try await makeRequest(components.string ?? "/user/podcasts/chapters")
+            return try JSONDecoder().decode([PodcastChapter].self, from: data)
+        } catch {
+            return []
+        }
+    }
+
     /// Every in-progress (not completed, >5s in) episode across ALL
     /// subscriptions, most recently updated first — the Home hub's
     /// Continue Listening teaser's data source. `title`/`feedURL` come
