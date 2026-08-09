@@ -110,8 +110,8 @@ extension LibraryManager {
         }
 
         let existingURLs = Set(importedSongs.compactMap { $0.url?.standardizedFileURL })
-        let (candidates, cleanedUpOrphans) = cleanUpConversionOrphans(among: candidates, existingURLs: existingURLs)
-        guard !candidates.isEmpty else {
+        let (cleanedCandidates, cleanedUpOrphans) = cleanUpConversionOrphans(among: candidates, existingURLs: existingURLs)
+        guard !cleanedCandidates.isEmpty else {
             if evicted || mergedDuplicates > 0 || cleanedUpOrphans > 0 { rebuildAllSongs() }
             return
         }
@@ -122,7 +122,7 @@ extension LibraryManager {
             // whose (mtime, size) still matches, and re-extracts metadata only
             // for files that actually changed on disk — so in-place tag edits
             // are finally picked up, which the new-files-only path below misses.
-            let resolved = await resolveSongs(for: candidates)
+            let resolved = await resolveSongs(for: cleanedCandidates)
             importedSongs = Array(
                 Dictionary(grouping: resolved, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id })
                     .compactMap { $0.value.first }
@@ -133,7 +133,7 @@ extension LibraryManager {
         }
 
         // Only process files we haven't seen before.
-        let newURLs = candidates.filter { !existingURLs.contains($0.standardizedFileURL) }
+        let newURLs = cleanedCandidates.filter { !existingURLs.contains($0.standardizedFileURL) }
         guard !newURLs.isEmpty else { return }
 
         let newSongs = await resolveSongs(for: newURLs)
