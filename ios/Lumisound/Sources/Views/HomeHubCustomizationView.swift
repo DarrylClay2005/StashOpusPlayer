@@ -38,6 +38,9 @@ enum HubSectionKind: String, CaseIterable, Codable, Identifiable {
     case topArtists
     case decades
     case deeperCuts
+    // 2026-08 Podcasts — in-progress episodes across every subscription,
+    // same "teaser card, not reorderable-carousel" shape as onThisDay.
+    case continueListeningPodcasts
 
     var id: String { rawValue }
 
@@ -60,6 +63,7 @@ enum HubSectionKind: String, CaseIterable, Codable, Identifiable {
         case .topArtists:         return "Top Artists"
         case .decades:            return "Decades"
         case .deeperCuts:         return "Deeper Cuts"
+        case .continueListeningPodcasts: return "Continue Listening"
         }
     }
 
@@ -85,6 +89,7 @@ enum HubSectionKind: String, CaseIterable, Codable, Identifiable {
         case .topArtists:         return "music.mic"
         case .decades:            return "hourglass"
         case .deeperCuts:         return "waveform.badge.magnifyingglass"
+        case .continueListeningPodcasts: return "headphones"
         }
     }
 
@@ -95,7 +100,7 @@ enum HubSectionKind: String, CaseIterable, Codable, Identifiable {
     /// first-run user (no saved order yet) sees them somewhere natural
     /// rather than all dumped at the very end.
     static let defaultOrder: [HubSectionKind] = [
-        .onThisDay, .achievements, .weeklyRecap, .speedDial, .weeklyMix, .mixes,
+        .onThisDay, .continueListeningPodcasts, .achievements, .weeklyRecap, .speedDial, .weeklyMix, .mixes,
         .recentlyAdded, .onRepeat, .recentlyPlayed, .topArtists, .genres, .decades,
         .forgottenFavorites, .deeperCuts, .moods, .friendsActivity, .similarListeners,
     ]

@@ -978,6 +978,13 @@ struct PodcastEpisode: Codable, Identifiable {
 
 struct PodcastEpisodeProgress: Codable {
     let episodeGuid: String
+    /// Only present when fetched cross-feed (no `feed_url` filter) — see
+    /// `AccountService.fetchRecentPodcastProgress`.
+    let feedURL: String?
+    /// A cached snapshot from when progress was last saved, not a live
+    /// re-fetch of the episode — see main.py's doc comment on
+    /// get_podcast_episode_progress.
+    let title: String?
     let positionSeconds: Double
     let durationSeconds: Double
     let completed: Bool
@@ -985,6 +992,8 @@ struct PodcastEpisodeProgress: Codable {
 
     enum CodingKeys: String, CodingKey {
         case episodeGuid = "episode_guid"
+        case feedURL = "feed_url"
+        case title
         case positionSeconds = "position_seconds"
         case durationSeconds = "duration_seconds"
         case completed

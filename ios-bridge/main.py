@@ -15804,26 +15804,45 @@ async def update_podcast_episode_progress(
 
 @app.get("/user/podcasts/episode-progress")
 async def get_podcast_episode_progress(
-    feed_url: str = Query(...),
+    feed_url: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
     payload: dict = Depends(get_current_user),
 ):
-    """Returns every tracked episode position for `feed_url` -- the client
-    merges this with the live episode list (title/audio_url/etc. from
-    /episodes) by `episode_guid` to show "in progress"/"completed" state."""
+    """Returns tracked episode positions -- scoped to `feed_url` if given
+    (PodcastEpisodesView's use), otherwise every in-progress (not
+    completed, > 5s in) episode across ALL subscriptions, most recently
+    updated first and capped at `limit` -- the Home hub's Continue
+    Listening teaser needs a cross-feed view without N feed-scoped round
+    trips, so this doubles as that endpoint rather than adding a second
+    route for the same table. `title` is a cached snapshot from when
+    progress was last saved (stored since PodcastEpisodeProgressRequest
+    already carries it) -- good enough for a teaser without also
+    re-fetching the full feed just to resolve a title."""
     user_id = payload["sub"]
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(
-                "SELECT episode_guid, position_seconds, duration_seconds, completed, updated_at "
-                "FROM ios_podcast_episode_progress WHERE user_id = %s AND feed_url = %s",
-                (user_id, feed_url),
-            )
+            if feed_url:
+                await cur.execute(
+                    "SELECT episode_guid, feed_url, title, position_seconds, duration_seconds, completed, updated_at "
+                    "FROM ios_podcast_episode_progress WHERE user_id = %s AND feed_url = %s "
+                    "ORDER BY updated_at DESC",
+                    (user_id, feed_url),
+                )
+            else:
+                await cur.execute(
+                    "SELECT episode_guid, feed_url, title, position_seconds, duration_seconds, completed, updated_at "
+                    "FROM ios_podcast_episode_progress "
+                    "WHERE user_id = %s AND completed = FALSE AND position_seconds > 5 "
+                    "ORDER BY updated_at DESC LIMIT %s",
+                    (user_id, limit),
+                )
             rows = await cur.fetchall()
     return [
         {
-            "episode_guid": r[0], "position_seconds": r[1], "duration_seconds": r[2],
-            "completed": r[3], "updated_at": r[4].isoformat() if r[4] else None,
+            "episode_guid": r[0], "feed_url": r[1], "title": r[2],
+            "position_seconds": r[3], "duration_seconds": r[4],
+            "completed": r[5], "updated_at": r[6].isoformat() if r[6] else None,
         }
         for r in rows
     ]

@@ -73,6 +73,24 @@ extension AccountService {
         }
     }
 
+    /// Every in-progress (not completed, >5s in) episode across ALL
+    /// subscriptions, most recently updated first — the Home hub's
+    /// Continue Listening teaser's data source. `title`/`feedURL` come
+    /// along on each entry so the teaser doesn't need a second fetch per
+    /// feed just to show what it found (see main.py's doc comment on
+    /// get_podcast_episode_progress for why `title` is a cached snapshot).
+    func fetchRecentPodcastProgress(limit: Int = 10) async -> [PodcastEpisodeProgress] {
+        guard isLoggedIn,
+              var components = URLComponents(string: "/user/podcasts/episode-progress") else { return [] }
+        components.queryItems = [URLQueryItem(name: "limit", value: "\(limit)")]
+        do {
+            let data = try await makeRequest(components.string ?? "/user/podcasts/episode-progress")
+            return try JSONDecoder().decode([PodcastEpisodeProgress].self, from: data)
+        } catch {
+            return []
+        }
+    }
+
     /// Best-effort position save — called periodically by
     /// `AudioPlayerManager.pushPlaybackStateToBridge` while a podcast
     /// episode is playing. Silent on failure, same posture as the main

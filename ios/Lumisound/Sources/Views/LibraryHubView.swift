@@ -59,6 +59,7 @@ struct LibraryHubView: View {
     @State private var weeklyMixSongs: [Song] = []
     @State private var similarListenerSearchQuery: String? = nil
     @State private var onThisDayGroups: [OnThisDayGroup] = []
+    @State private var continueListeningPodcasts: [ContinueListeningPodcastItem] = []
 
     // MARK: Home hub customization — see `HomeHubCustomizationView`.
     //
@@ -192,6 +193,7 @@ struct LibraryHubView: View {
         case .topArtists:         return !topArtistGroups.isEmpty
         case .decades:            return !decadeGroups.isEmpty
         case .deeperCuts:         return !deeperCutsSongs.isEmpty
+        case .continueListeningPodcasts: return !continueListeningPodcasts.isEmpty
         }
     }
 
@@ -278,6 +280,11 @@ struct LibraryHubView: View {
                 title: "Deeper Cuts", icon: "waveform.badge.magnifyingglass",
                 songs: deeperCutsSongs, seeAllTab: nil, selectedTab: $selectedTab, accent: resolvedAccent
             )
+
+        case .continueListeningPodcasts:
+            if let top = continueListeningPodcasts.first {
+                HubContinueListeningPodcastsTeaser(item: top, accent: resolvedAccent)
+            }
         }
     }
 
@@ -314,7 +321,23 @@ struct LibraryHubView: View {
             guard account.isLoggedIn else { return }
             await account.fetchAchievements()
         }()
-        _ = await (weeklyMix, similarListeners, friendsActivity, onThisDay, achievements)
+        // Cross-feed (no feed_url filter -- see main.py's doc comment on
+        // get_podcast_episode_progress), paired with subscriptions for
+        // display (show title/artwork) and playback (PodcastPlayback.play
+        // needs the PodcastSubscription, not just the progress row).
+        async let continueListeningPodcastsTask: Void = {
+            guard account.isLoggedIn else { return }
+            async let subsResult = account.fetchPodcastSubscriptions()
+            async let progressResult = account.fetchRecentPodcastProgress(limit: 10)
+            let subs = await subsResult
+            let progressEntries = await progressResult
+            let subsByFeed = Dictionary(uniqueKeysWithValues: subs.map { ($0.feedURL, $0) })
+            continueListeningPodcasts = progressEntries.compactMap { progress -> ContinueListeningPodcastItem? in
+                guard let feedURL = progress.feedURL, let sub = subsByFeed[feedURL] else { return nil }
+                return ContinueListeningPodcastItem(subscription: sub, progress: progress)
+            }
+        }()
+        _ = await (weeklyMix, similarListeners, friendsActivity, onThisDay, achievements, continueListeningPodcastsTask)
     }
 
     // MARK: Mixes carousel
@@ -943,6 +966,83 @@ private struct HubOnThisDayTeaser: View {
             .padding(.horizontal, 16)
         }
         .buttonStyle(PressableButtonStyle())
+    }
+}
+
+// MARK: - Continue Listening (podcasts) teaser
+
+struct ContinueListeningPodcastItem: Identifiable {
+    let subscription: PodcastSubscription
+    let progress: PodcastEpisodeProgress
+    var id: String { progress.episodeGuid }
+}
+
+/// Resumes the single most-recently-updated in-progress podcast episode
+/// across every subscription — same "compact teaser for a feature that
+/// already exists" reasoning as `HubOnThisDayTeaser`. Tapping fetches that
+/// one feed's episode list to resolve the audio URL (progress rows don't
+/// store it — see main.py's doc comment on get_podcast_episode_progress)
+/// before handing off to the shared `PodcastPlayback.play`.
+private struct HubContinueListeningPodcastsTeaser: View {
+    let item: ContinueListeningPodcastItem
+    var accent: Color = AppTheme.dynamicAccent
+
+    @EnvironmentObject private var account: AccountService
+    @EnvironmentObject private var player: AudioPlayerManager
+    @State private var isResolving = false
+
+    var body: some View {
+        Button {
+            resumeAndPlay()
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(accent.opacity(0.16))
+                    if isResolving {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "headphones")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(accent)
+                    }
+                }
+                .frame(width: 44, height: 44)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Continue Listening")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text(item.progress.title?.isEmpty == false ? item.progress.title! : (item.subscription.title ?? "Podcast"))
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "play.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(accent)
+            }
+            .padding(12)
+            .adaptiveGlass(
+                tint: accent.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous),
+                fallback: AppTheme.surface
+            )
+            .padding(.horizontal, 16)
+        }
+        .buttonStyle(PressableButtonStyle())
+        .disabled(isResolving)
+    }
+
+    private func resumeAndPlay() {
+        guard !isResolving else { return }
+        isResolving = true
+        Task {
+            let episodes = await account.fetchPodcastEpisodes(feedURL: item.subscription.feedURL)
+            isResolving = false
+            guard let episode = episodes.first(where: { $0.guid == item.progress.episodeGuid }) else { return }
+            PodcastPlayback.play(episode: episode, subscription: item.subscription, savedProgress: item.progress, player: player)
+        }
     }
 }
 

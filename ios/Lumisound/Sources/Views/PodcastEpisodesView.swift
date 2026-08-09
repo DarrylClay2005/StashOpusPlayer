@@ -4,12 +4,14 @@ import SwiftUI
 //
 // Episode list for one subscription — merges the live-parsed episode list
 // (GET /user/podcasts/episodes) with saved per-episode positions (GET
-// /user/podcasts/episode-progress) by guid. Tapping an episode plays it
-// directly from its host's audio URL (no download/yt-dlp pipeline — a
-// podcast enclosure URL is already a direct, playable file), constructed as
-// a plain Song with genre = "Podcast" and album repurposed to carry the
-// feed URL (see AudioPlayerManager+PositionTracking.pushPodcastProgressIfNeeded
-// for why, and where progress actually gets saved during playback).
+// /user/podcasts/episode-progress) by guid. Tapping an episode plays it via
+// the shared `PodcastPlayback.play` (also used by LibraryHubView's Continue
+// Listening teaser) — directly from its host's audio URL, no download/
+// yt-dlp pipeline involved, since a podcast enclosure URL is already a
+// direct, playable file. See that type's doc comment for the Song
+// genre/album repurposing, and AudioPlayerManager+PositionTracking
+// .pushPodcastProgressIfNeeded for where progress actually gets saved
+// during playback.
 struct PodcastEpisodesView: View {
     let subscription: PodcastSubscription
 
@@ -110,27 +112,7 @@ struct PodcastEpisodesView: View {
     }
 
     private func play(_ episode: PodcastEpisode) {
-        // Prefer the local download when available -- same audio, no
-        // network dependency to keep listening.
-        guard let url = downloads.localURL(for: episode.guid) ?? URL(string: episode.audioURL) else { return }
-        let song = Song(
-            id: episode.guid,
-            title: episode.title,
-            artist: subscription.title ?? "Podcast",
-            album: subscription.feedURL,
-            duration: TimeInterval(episode.durationSeconds ?? 0),
-            url: url,
-            genre: "Podcast"
-        )
-        player.play(song: song, in: [song])
-        if let saved = progress[episode.guid], saved.positionSeconds > 5, !saved.completed {
-            // Give the player a beat to actually start before seeking —
-            // matches the same pattern AppDelegate's playback-transfer
-            // handler uses for a freshly-resolved remote URL.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                player.seek(to: saved.positionSeconds)
-            }
-        }
+        PodcastPlayback.play(episode: episode, subscription: subscription, savedProgress: progress[episode.guid], player: player)
     }
 
     private func reload() async {
