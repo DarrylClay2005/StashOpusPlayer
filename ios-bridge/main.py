@@ -11969,6 +11969,173 @@ async def get_discover_mix(
 
 
 # ---------------------------------------------------------------------------
+# Listening Twin (Feature: listening-twin)
+# ---------------------------------------------------------------------------
+#
+# Distinct from /social/similar-listeners above: that endpoint finds an
+# anonymous cohort of up to 20 similar listeners and surfaces tracks THEY
+# play, never naming any of them individually. This finds and names the
+# SINGLE opted-in user whose top artists overlap most with the caller's —
+# a personal "who's my music twin" reveal — then (via the second endpoint)
+# builds a mix from that one person's other top artists, the same
+# seeded-yt-dlp-search approach /user/discover-mix already uses for the
+# caller's own top artists. Same opt-in gate (share_listening_activity) as
+# the rest of /social/*.
+
+
+@app.get("/user/social/twin")
+async def get_listening_twin(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT artist, COUNT(*) AS play_count
+                FROM ios_play_history
+                WHERE user_id = %s AND artist IS NOT NULL AND artist != ''
+                GROUP BY artist
+                ORDER BY play_count DESC
+                LIMIT 20
+                """,
+                (user_id,),
+            )
+            my_artists = [r[0] for r in await cur.fetchall()]
+            if not my_artists:
+                return {"twin": None, "reason": "not_enough_history"}
+
+            artist_placeholders = ",".join(["%s"] * len(my_artists))
+            await cur.execute(
+                f"""
+                SELECT u.username, u.display_name, u.avatar_url,
+                       COUNT(DISTINCT h.artist) AS overlap_count,
+                       ARRAY_AGG(DISTINCT h.artist) AS overlap_artists
+                FROM ios_play_history h
+                JOIN ios_users u ON u.id = h.user_id
+                WHERE u.share_listening_activity = TRUE AND u.is_active = TRUE
+                  AND h.user_id != %s
+                  AND h.artist IN ({artist_placeholders})
+                GROUP BY h.user_id, u.username, u.display_name, u.avatar_url
+                ORDER BY overlap_count DESC
+                LIMIT 1
+                """,
+                (user_id, *my_artists),
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        return {"twin": None, "reason": "no_similar_listeners"}
+
+    username, display_name, avatar_url, overlap_count, overlap_artists = row
+    similarity = round(100 * overlap_count / len(my_artists))
+    return {
+        "twin": {
+            "username": username,
+            "display_name": display_name,
+            "avatar_url": avatar_url,
+            "similarity": similarity,
+            "shared_artists": sorted(overlap_artists)[:10],
+        }
+    }
+
+
+@app.get("/user/social/twin/mix")
+async def get_twin_mix(
+    limit: int = Query(20, ge=1, le=50),
+    payload: dict = Depends(get_current_user),
+):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT artist, COUNT(*) AS play_count
+                FROM ios_play_history
+                WHERE user_id = %s AND artist IS NOT NULL AND artist != ''
+                GROUP BY artist
+                ORDER BY play_count DESC
+                LIMIT 20
+                """,
+                (user_id,),
+            )
+            my_artists = [r[0] for r in await cur.fetchall()]
+            if not my_artists:
+                return []
+
+            artist_placeholders = ",".join(["%s"] * len(my_artists))
+            await cur.execute(
+                f"""
+                SELECT h.user_id, COUNT(DISTINCT h.artist) AS overlap_count
+                FROM ios_play_history h
+                JOIN ios_users u ON u.id = h.user_id
+                WHERE u.share_listening_activity = TRUE AND u.is_active = TRUE
+                  AND h.user_id != %s
+                  AND h.artist IN ({artist_placeholders})
+                GROUP BY h.user_id
+                ORDER BY overlap_count DESC
+                LIMIT 1
+                """,
+                (user_id, *my_artists),
+            )
+            twin_row = await cur.fetchone()
+            if not twin_row:
+                return []
+            twin_id = twin_row[0]
+
+            await cur.execute(
+                """
+                SELECT artist, COUNT(*) AS plays
+                FROM ios_play_history
+                WHERE user_id = %s AND artist IS NOT NULL AND artist != ''
+                GROUP BY artist
+                ORDER BY plays DESC
+                LIMIT 3
+                """,
+                (twin_id,),
+            )
+            twin_top_artists = [r[0] for r in await cur.fetchall()]
+
+            await cur.execute(
+                "SELECT song_id FROM ios_user_favorites WHERE user_id = %s "
+                "UNION SELECT song_id FROM ios_user_library WHERE user_id = %s",
+                (user_id, user_id),
+            )
+            known_ids = {r[0] for r in await cur.fetchall()}
+
+    if not twin_top_artists:
+        return []
+
+    per_artist = max(1, limit // len(twin_top_artists) + 1)
+    tracks: list[dict] = []
+    seen_ids: set[str] = set()
+    for artist in twin_top_artists:
+        try:
+            entries = await _run_ytdlp(
+                f"ytsearch{per_artist}:{artist}",
+                "--dump-json", "--flat-playlist", "--no-playlist",
+                "--cache-dir", YTDLP_CACHE_DIR,
+                *(await _ytdlp_cookie_args(user_id)),
+                timeout=20.0,
+            )
+        except Exception as exc:
+            logger.warning("twin_mix: yt-dlp search failed for %r: %s", artist, exc)
+            continue
+        for entry in entries:
+            track = _parse_track(entry, "youtube")
+            if track["id"] in known_ids or track["id"] in seen_ids:
+                continue
+            seen_ids.add(track["id"])
+            tracks.append(track)
+            if len(tracks) >= limit:
+                break
+        if len(tracks) >= limit:
+            break
+
+    return tracks
+
+
+# ---------------------------------------------------------------------------
 # Artist/Channel Subscriptions (Feature: subscriptions)
 # ---------------------------------------------------------------------------
 

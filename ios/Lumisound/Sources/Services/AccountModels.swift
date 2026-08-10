@@ -350,6 +350,27 @@ struct TrendingTrack: Codable, Identifiable {
     }
 }
 
+/// The single opted-in user whose top artists overlap most with the
+/// caller's own — GET /user/social/twin. See `AccountService.fetchListeningTwin`
+/// for how this differs from the anonymous cohort behind `TrendingTrack`/
+/// similar-listeners recommendations.
+struct ListeningTwin: Codable {
+    let username: String
+    let displayName: String?
+    let avatarURL: String?
+    /// 0–100, roughly "% of your top 20 artists this person also plays".
+    let similarity: Int
+    let sharedArtists: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case username
+        case displayName   = "display_name"
+        case avatarURL     = "avatar_url"
+        case similarity
+        case sharedArtists = "shared_artists"
+    }
+}
+
 /// One active login (device/session) for this account — GET /auth/sessions.
 struct AccountSession: Codable, Identifiable {
     let tokenId: String

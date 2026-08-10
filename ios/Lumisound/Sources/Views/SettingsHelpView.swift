@@ -408,6 +408,11 @@ struct SettingsHelpView: View {
                 body: "Account → Discover → Discover Mix is a personalised list of tracks seeded from the artists you listen to most, automatically excluding anything already in your library or favourites. Tap Play All to queue the whole mix, or play/queue individual tracks. It refreshes as your listening history grows."
             ),
             HelpTopic(
+                icon: "person.2.wave.2",
+                title: "Listening Twin",
+                body: "Account → Discover → Listening Twin finds and names the single other opted-in user whose top artists overlap most with yours — a match percentage, the artists you share, and a one-tap Add as Friend, plus a Twin Mix seeded from their other favorite artists. Distinct from Similar Listeners on the Home dashboard, which recommends tracks from an anonymous group rather than naming one specific person. Requires \"Share Listening Activity\" to be on (Account settings) and some listening history to compare."
+            ),
+            HelpTopic(
                 icon: "person.crop.circle.badge.plus",
                 title: "Artist Subscriptions",
                 body: "Account → Subscriptions lets you follow a YouTube or SoundCloud channel/playlist URL by pasting it in and tapping Subscribe. Lumisound checks followed channels for new uploads in the background on a schedule iOS controls (so timing varies — it's not instant), plus any time you tap \"Check Now\". When new tracks appear you get a notification and can play or queue them straight from the Subscriptions screen."

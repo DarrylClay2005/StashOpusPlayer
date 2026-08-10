@@ -103,4 +103,35 @@ extension AccountService {
             appWarn("fetchSimilarListeners: \(error.localizedDescription)", category: "network")
         }
     }
+
+    /// Finds and names the single opted-in user whose top artists overlap
+    /// most with the caller's own — see `/user/social/twin` in main.py for
+    /// how this differs from the anonymous cohort `fetchSimilarListeners`
+    /// reads from. `nil` on failure or when there isn't enough history/no
+    /// match yet.
+    func fetchListeningTwin() async -> ListeningTwin? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/user/social/twin")
+            struct Response: Decodable { let twin: ListeningTwin? }
+            return try JSONDecoder().decode(Response.self, from: data).twin
+        } catch {
+            appWarn("fetchListeningTwin: \(error.localizedDescription)", category: "network")
+            return nil
+        }
+    }
+
+    /// A mix seeded from the listening twin's other top artists — same
+    /// seeded-yt-dlp-search shape as `fetchDiscoverMix`, just seeded from
+    /// someone else's taste instead of the caller's own.
+    func fetchTwinMix(limit: Int = 20) async -> [StreamTrack] {
+        guard isLoggedIn else { return [] }
+        do {
+            let data = try await makeRequest("/user/social/twin/mix?limit=\(limit)")
+            return try JSONDecoder().decode([StreamTrack].self, from: data)
+        } catch {
+            appWarn("fetchTwinMix: \(error.localizedDescription)", category: "network")
+            return []
+        }
+    }
 }

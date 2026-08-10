@@ -80,6 +80,10 @@ struct DiscoverView: View {
                             Label("Subscriptions", systemImage: "person.crop.circle.badge.checkmark")
                                 .foregroundStyle(AppTheme.textPrimary)
                         }
+                        NavigationLink(destination: ListeningTwinView()) {
+                            Label("Listening Twin", systemImage: "person.2.wave.2")
+                                .foregroundStyle(AppTheme.textPrimary)
+                        }
                     }
                     .listRowBackground(AppTheme.surface)
                 }

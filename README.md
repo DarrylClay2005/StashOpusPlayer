@@ -95,11 +95,19 @@ bridge, and build-from-source instructions.
 | Feature | Details |
 |---|---|
 | **Friends & profiles** | Add friends, accept/decline requests, and view a friend's public profile — banner, avatar, bio, pinned tracks, and live online/now-playing status if they share it. Your own Profile tab shows the same public view with an Edit button, rather than opening straight into editing |
+| **Listening Twin** | Finds and names the single other opted-in user whose top artists overlap most with yours — match %, shared artists, one-tap friend request, plus a Twin Mix seeded from their other favorites |
 | **Collaborative playlists** | Share a playlist via code/link; invite others as Editor or Viewer, revoke anytime |
 | **Shared with Me** | View, play, or save a local copy of playlists others have shared with you |
 | **Scrobbling** | Link Last.fm and/or ListenBrainz to scrobble finished tracks automatically |
 | **Discord Webhook** | Post a "Now Playing" message to a Discord channel via incoming webhook |
 | **Discord Rich Presence** | Generate a per-user token and register your Discord Application Client ID in-app; the [local Rich Presence daemon](discord-rpc) picks up both automatically and shows "Listening to X by Y" on your Discord profile while Discord is open |
+
+### Extras
+
+| Feature | Details |
+|---|---|
+| **Needle Drop** | A music-guessing mini-game built from your own library — a short clip plays from a random point in a random track, guess it from 4 choices before it fades out, and build a streak. Fully on-device |
+| **Time Capsules** | Seal a set of songs (from Favorites or a playlist) with a note to your future self, locked until a date you choose; a notification lets you know the moment it unlocks. Fully on-device |
 
 ### Privacy
 
