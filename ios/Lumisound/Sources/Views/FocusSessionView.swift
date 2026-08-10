@@ -51,7 +51,7 @@ struct FocusSessionView: View {
                 Stepper("Rounds: \(rounds)", value: $rounds, in: 1...12)
             }
 
-            Section("Soundtrack") {
+            Section {
                 Picker("Source", selection: $source) {
                     ForEach(SongSource.allCases) { Text($0.rawValue).tag($0) }
                 }
@@ -71,6 +71,8 @@ struct FocusSessionView: View {
                         }
                     }
                 }
+            } header: {
+                Text("Soundtrack")
             } footer: {
                 Text(source == .continueCurrent
                      ? "Whatever's already playing keeps going through work blocks; breaks still pause."
