@@ -218,6 +218,7 @@ struct NowPlayingView: View {
     @State var showFormatInfoSheet = false
     @State var showPracticeModeSheet = false
     @State var showFocusSessionSheet = false
+    @State var voiceMemoBookmark: TrackBookmark?
 
     // Transfer Playback sheet
     @State var showTransferPlaybackSheet = false
@@ -272,6 +273,9 @@ struct NowPlayingView: View {
         .sheet(isPresented: $showFocusSessionSheet) {
             FocusSessionView()
                 .environmentObject(library)
+        }
+        .sheet(item: $voiceMemoBookmark) { bookmark in
+            VoiceMemoRecorderSheet(bookmark: bookmark)
         }
         .sheet(isPresented: $showTransferPlaybackSheet) {
             TransferPlaybackSheet()

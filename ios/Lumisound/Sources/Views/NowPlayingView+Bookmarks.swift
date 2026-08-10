@@ -61,8 +61,17 @@ extension NowPlayingView {
             .buttonStyle(.plain)
 
             Button {
+                voiceMemoBookmark = bookmark
+            } label: {
+                Image(systemName: VoiceMemoStore.shared.hasMemo(for: bookmark.id) ? "waveform.circle.fill" : "mic.circle")
+                    .foregroundStyle(AppTheme.dynamicAccent.opacity(0.85))
+            }
+            .buttonStyle(.plain)
+
+            Button {
                 guard let songID = player.currentSong?.id else { return }
                 BookmarkStore.shared.removeBookmark(songID: songID, bookmarkID: bookmark.id)
+                VoiceMemoStore.shared.deleteMemo(for: bookmark.id)
                 bookmarksRefreshToken = UUID()
             } label: {
                 Image(systemName: "xmark.circle.fill")

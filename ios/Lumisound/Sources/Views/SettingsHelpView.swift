@@ -142,9 +142,14 @@ struct SettingsHelpView: View {
                 body: "Now Playing → overflow menu → Practice Mode opens a dedicated tool for learning a track by ear: a visual metronome pulse synced to the track's detected tempo (adjusted live for playback speed, so it always matches what you're actually hearing), a speed slider capped at 100% with quick 50/75/90% presets, and Loop Region controls (the same A-B repeat markers available elsewhere) to repeat just the section you're working on. Built from existing playback controls, not a separate audio engine. Once a loop is set on a local (downloaded/imported) track, an Export Clip button saves that exact region as a standalone .m4a file you can share, AirDrop, or bring into GarageBand/Finder to set as a ringtone."
             ),
             HelpTopic(
+                icon: "gobackward",
+                title: "Long Track Resume Points",
+                body: "Any local track 20 minutes or longer (a DJ mix, an audiobook file, a long mixtape) automatically remembers where you left off — no setup needed. Switch away partway through and come back later, even after closing the app, and it picks up right where you stopped, the same way podcast episodes already do. Doesn't apply to shorter tracks."
+            ),
+            HelpTopic(
                 icon: "bookmark",
                 title: "Track Bookmarks",
-                body: "Bookmark specific timestamps within a long track (a DJ mix, podcast, or audiobook-style file) to jump straight back to them later — useful for marking \"the drop\" or a chapter start. Bookmarks are entirely on-device and don't require an account."
+                body: "Bookmark specific timestamps within a long track (a DJ mix, podcast, or audiobook-style file) to jump straight back to them later — useful for marking \"the drop\" or a chapter start. Bookmarks are entirely on-device and don't require an account. Tap the mic icon on a bookmark to attach a short voice memo to it (up to 60 seconds) — handy for narrating why a moment matters instead of just typing a label. Voice memos are local-only: they stay on this device even if the bookmark itself syncs to your account."
             ),
         ]),
         HelpCategory(icon: "slider.vertical.3", title: "Audio Effects", topics: [

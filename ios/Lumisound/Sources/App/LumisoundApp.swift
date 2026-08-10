@@ -149,6 +149,7 @@ struct LumisoundApp: App {
                     aiDJ.setVolume = { player.audioSettings.volume = $0 }
                     aiDJ.attach(player: player, account: account)
                     silenceTrim.attach(player: player)
+                    LongTrackResumeService.shared.attach(player: player)
 
                     // Route transport commands from the watch companion to the player.
                     PhoneWatchSync.shared.commandHandler = { command in
