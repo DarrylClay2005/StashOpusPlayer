@@ -63,7 +63,7 @@ final class SharePlayCoordinator: ObservableObject {
     /// The shared "suggest a track, vote it up" queue for the current
     /// session — see `SharePlayCoordinator+Queue.swift`. Empty outside an
     /// active session.
-    @Published private(set) var sharedQueue: [SharedQueueItem] = []
+    @Published var sharedQueue: [SharedQueueItem] = []
 
     init() {
         Self.shared = self
