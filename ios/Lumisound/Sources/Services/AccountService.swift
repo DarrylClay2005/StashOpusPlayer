@@ -30,6 +30,7 @@ final class AccountService: ObservableObject {
     @Published var trendingTracks: [TrendingTrack] = []
     @Published var similarListenerTracks: [TrendingTrack] = []
     @Published var similarListenerCount: Int = 0
+    @Published var ariaDailyPick: AriaDailyPick? = nil
     @Published var sessions: [AccountSession] = []
     @Published var stats: AccountStats? = nil
     @Published var achievements: AchievementsData? = nil

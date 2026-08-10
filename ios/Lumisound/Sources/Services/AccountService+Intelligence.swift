@@ -98,4 +98,20 @@ extension AccountService {
             return nil
         }
     }
+
+    /// Fetches today's Aria's Daily Pick — cached server-side per user per
+    /// UTC calendar day (see `/user/aria/daily-pick` in main.py), so calling
+    /// this more than once in the same day is free and never costs an
+    /// extra Gemini call. Populates `ariaDailyPick`; leaves it untouched on
+    /// failure so a transient network error doesn't blank out an
+    /// already-loaded pick.
+    func fetchAriaDailyPick() async {
+        guard isLoggedIn else { return }
+        do {
+            let data = try await makeRequest("/user/aria/daily-pick")
+            ariaDailyPick = try JSONDecoder().decode(AriaDailyPick.self, from: data)
+        } catch {
+            appWarn("fetchAriaDailyPick: \(error.localizedDescription)", category: "network")
+        }
+    }
 }

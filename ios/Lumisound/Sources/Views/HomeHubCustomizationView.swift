@@ -41,6 +41,8 @@ enum HubSectionKind: String, CaseIterable, Codable, Identifiable {
     // 2026-08 Podcasts — in-progress episodes across every subscription,
     // same "teaser card, not reorderable-carousel" shape as onThisDay.
     case continueListeningPodcasts
+    /// One AI-picked track/day with a short reason — see `/user/aria/daily-pick`.
+    case ariaDailyPick
 
     var id: String { rawValue }
 
@@ -64,6 +66,7 @@ enum HubSectionKind: String, CaseIterable, Codable, Identifiable {
         case .decades:            return "Decades"
         case .deeperCuts:         return "Deeper Cuts"
         case .continueListeningPodcasts: return "Continue Listening"
+        case .ariaDailyPick:      return "Aria's Daily Pick"
         }
     }
 
@@ -90,6 +93,7 @@ enum HubSectionKind: String, CaseIterable, Codable, Identifiable {
         case .decades:            return "hourglass"
         case .deeperCuts:         return "waveform.badge.magnifyingglass"
         case .continueListeningPodcasts: return "headphones"
+        case .ariaDailyPick:      return "sparkle"
         }
     }
 
@@ -100,7 +104,7 @@ enum HubSectionKind: String, CaseIterable, Codable, Identifiable {
     /// first-run user (no saved order yet) sees them somewhere natural
     /// rather than all dumped at the very end.
     static let defaultOrder: [HubSectionKind] = [
-        .onThisDay, .continueListeningPodcasts, .achievements, .weeklyRecap, .speedDial, .weeklyMix, .mixes,
+        .ariaDailyPick, .onThisDay, .continueListeningPodcasts, .achievements, .weeklyRecap, .speedDial, .weeklyMix, .mixes,
         .recentlyAdded, .onRepeat, .recentlyPlayed, .topArtists, .genres, .decades,
         .forgottenFavorites, .deeperCuts, .moods, .friendsActivity, .similarListeners,
     ]

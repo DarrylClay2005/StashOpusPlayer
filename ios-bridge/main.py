@@ -11969,6 +11969,104 @@ async def get_discover_mix(
 
 
 # ---------------------------------------------------------------------------
+# Aria's Daily Pick (Feature: aria-daily-pick)
+# ---------------------------------------------------------------------------
+#
+# A second, deliberately rate-limit-conscious use of Aria Lumi (see
+# intelligence.py) beyond metadata_resolve — one AI-picked track
+# recommendation per user per UTC calendar day, with a short reason.
+# Grounded rather than free-form: the candidate pool is the same real,
+# resolvable tracks /user/discover-mix already fetches via yt-dlp, so Aria
+# only ever chooses among real tracks and writes the reason — she never
+# invents a track from scratch. Cached in ios_intelligence_cache keyed by
+# today's date, so this costs AT MOST ONE Gemini call per user per day no
+# matter how many times the client asks — important given metadata_resolve
+# alone already hits Gemini's rate limit a meaningful fraction of the time
+# (confirmed via ios_app_event_log's analysis_rate_limited events); adding
+# an unbounded-frequency AI feature on top of that would only make it
+# worse. Even when the Gemini call itself is rate-limited, a deterministic
+# fallback pick is still cached for the day, so the shelf never comes up
+# empty just because of an API hiccup.
+
+_DAILY_PICK_SYSTEM_PROMPT = (
+    "You are picking ONE track for a 'Daily Pick' recommendation shelf, from "
+    "a short list of real candidate tracks already fetched for this user "
+    "(seeded from their own top artists). You are also given a summary of "
+    "what they actually listen to and favorite. Pick the single candidate "
+    "(by index) most worth surfacing today, and write ONE short, natural "
+    "sentence (max 20 words) explaining why it fits them right now — plain, "
+    "no hype-speak, no exclamation points, sound like a sharp friend, not a "
+    "press release. Never invent facts about the track or artist beyond "
+    "what you were given."
+)
+
+_DAILY_PICK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "pick_index": {
+            "type": "integer",
+            "description": "0-based index into the candidates array",
+        },
+        "reason": {
+            "type": "string",
+            "description": "One short sentence, plain text, no markdown",
+        },
+    },
+    "required": ["pick_index", "reason"],
+}
+
+
+@app.get("/user/aria/daily-pick")
+async def get_aria_daily_pick(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    today = datetime.now(timezone.utc).date().isoformat()
+    cache_key = f"{user_id}:{today}"
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT result_json FROM ios_intelligence_cache WHERE task = %s AND cache_key = %s",
+                ("daily_pick", cache_key),
+            )
+            cached = await cur.fetchone()
+            if cached:
+                return json.loads(cached[0])
+
+    candidates = await get_discover_mix(limit=8, payload=payload)
+    if not candidates:
+        return {"pick": None, "reason": None}
+
+    taste_profile = await get_user_taste_profile(user_id)
+    model_input = {
+        "candidates": [{"title": c["title"], "artist": c["artist"]} for c in candidates],
+        "user_taste": taste_profile,
+    }
+    result = await call_intelligence(
+        "daily_pick", _DAILY_PICK_SYSTEM_PROMPT, model_input, _DAILY_PICK_SCHEMA
+    )
+
+    if result is not None and 0 <= result.get("pick_index", -1) < len(candidates):
+        picked = candidates[result["pick_index"]]
+        reason = result["reason"]
+    else:
+        # Gemini disabled/cooling down/failed — still cache a deterministic
+        # pick for today rather than leaving the shelf empty.
+        picked = candidates[0]
+        reason = "From an artist you've been playing a lot lately."
+
+    response = {"pick": picked, "reason": reason}
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_intelligence_cache (task, cache_key, result_json) VALUES (%s, %s, %s) "
+                "ON CONFLICT (task, cache_key) DO UPDATE SET result_json = EXCLUDED.result_json",
+                ("daily_pick", cache_key, json.dumps(response)),
+            )
+    return response
+
+
+# ---------------------------------------------------------------------------
 # Listening Twin (Feature: listening-twin)
 # ---------------------------------------------------------------------------
 #

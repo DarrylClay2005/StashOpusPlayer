@@ -13,9 +13,34 @@ struct BackgroundSettingsView: View {
 
     @State private var cloudError: String?
     @State private var uploadingIndices: Set<Int> = []
+    @AppStorage(GalleryBackgroundSource.storageKey) private var backgroundSource = GalleryBackgroundSource.photos.rawValue
 
     var body: some View {
         List {
+            // MARK: Background Source
+            //
+            // Everything below this section (photo picker, cloud sync, shuffle
+            // interval, transition animation) only applies to the Photos
+            // source — Sonic Wallpaper is fully automatic (generated from the
+            // user's own top-played/favorited artwork, see
+            // `SonicWallpaperView`) and has nothing to configure, so it isn't
+            // gated behind hiding/disabling the rest of this screen, just
+            // called out with a note.
+            Section {
+                Picker("Background Source", selection: $backgroundSource) {
+                    ForEach(GalleryBackgroundSource.allCases) { source in
+                        Text(source.title).tag(source.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if backgroundSource == GalleryBackgroundSource.sonic.rawValue {
+                    Text("Sonic Wallpaper is generated automatically from your own most-played and favorited tracks' artwork — nothing to add or configure. The photo settings below are ignored while it's selected.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+
             // MARK: Status + Start/Stop button
             Section {
                 HStack {

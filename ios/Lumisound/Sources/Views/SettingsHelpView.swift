@@ -211,6 +211,11 @@ struct SettingsHelpView: View {
                 body: "When a metadata lookup for a local file turns up more than one possible match, Aria Lumi — Lumisound's built-in music intelligence — reviews the candidates for you: comparing titles and artists, looking at each candidate's cover art, and weighing in a lightweight sense of what you actually listen to, rather than just grabbing the first result. She's always on, with nothing to turn on or set up, and she learns from it any time you manually correct a track she got wrong. No audio or file contents are ever sent — only text metadata and cover art for the specific candidates being compared."
             ),
             HelpTopic(
+                icon: "sparkle",
+                title: "Aria's Daily Pick",
+                body: "A Home dashboard card showing one track Aria picked for you today, with a short one-line reason — seeded from your own top artists and refreshed once every calendar day. Tap it to play. Requires being signed in and some recent listening history."
+            ),
+            HelpTopic(
                 icon: "internaldrive",
                 title: "Downloads Manager",
                 body: "Settings → Storage & Cache → Downloaded Music opens a dedicated list of every downloaded/imported track with its on-disk size, sortable by size or date. Swipe a track to delete it, or tap Select to remove several at once — useful for finding and clearing out the largest files when you're low on storage."
@@ -257,6 +262,11 @@ struct SettingsHelpView: View {
             ),
         ]),
         HelpCategory(icon: "photo.on.rectangle", title: "Background Gallery", topics: [
+            HelpTopic(
+                icon: "sparkle",
+                title: "Sonic Wallpaper",
+                body: "Settings → Appearance → Gallery Background → Background Source lets you pick Sonic Wallpaper instead of Photos — a generative background with no photos to add, built entirely from the color palettes of your own most-played and favorited tracks' artwork, slowly cycling between them. Fully automatic and on-device; nothing to configure, and the photo settings on this screen are ignored while it's selected."
+            ),
             HelpTopic(
                 icon: "photo.on.rectangle",
                 title: "How It Works",

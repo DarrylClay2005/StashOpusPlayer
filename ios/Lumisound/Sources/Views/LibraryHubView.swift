@@ -194,6 +194,7 @@ struct LibraryHubView: View {
         case .decades:            return !decadeGroups.isEmpty
         case .deeperCuts:         return !deeperCutsSongs.isEmpty
         case .continueListeningPodcasts: return !continueListeningPodcasts.isEmpty
+        case .ariaDailyPick:      return account.ariaDailyPick?.track != nil
         }
     }
 
@@ -285,6 +286,11 @@ struct LibraryHubView: View {
             if let top = continueListeningPodcasts.first {
                 HubContinueListeningPodcastsTeaser(item: top, accent: resolvedAccent)
             }
+
+        case .ariaDailyPick:
+            if let pick = account.ariaDailyPick, let track = pick.track {
+                HubAriaDailyPickCard(track: track, reason: pick.reason, accent: resolvedAccent)
+            }
         }
     }
 
@@ -308,6 +314,7 @@ struct LibraryHubView: View {
             weeklyMixSongs = streaming.weeklyMix.map { streaming.toSong(weeklyMixTrack: $0, token: token) }
         }()
         async let similarListeners: Void = account.fetchSimilarListeners()
+        async let ariaDailyPick: Void = account.fetchAriaDailyPick()
         async let friendsActivity: Void = social.fetchFriendsActivity()
         async let onThisDay: Void = {
             guard account.isLoggedIn else { return }
@@ -337,7 +344,7 @@ struct LibraryHubView: View {
                 return ContinueListeningPodcastItem(subscription: sub, progress: progress)
             }
         }()
-        _ = await (weeklyMix, similarListeners, friendsActivity, onThisDay, achievements, continueListeningPodcastsTask)
+        _ = await (weeklyMix, similarListeners, ariaDailyPick, friendsActivity, onThisDay, achievements, continueListeningPodcastsTask)
     }
 
     // MARK: Mixes carousel
@@ -1150,6 +1157,98 @@ private struct HubWeeklyRecapCard: View {
             in: RoundedRectangle(cornerRadius: 14, style: .continuous),
             fallback: AppTheme.surface
         )
+    }
+}
+
+// MARK: - Aria's Daily Pick
+//
+// One AI-picked track/day with a short reason (GET /user/aria/daily-pick),
+// cached server-side so revisiting Home never costs an extra Gemini call —
+// see that endpoint's doc comment in main.py. A single compact card, same
+// "not a carousel" shape as `HubWeeklyRecapCard`/`HubAchievementsTeaser`,
+// since there's only ever one pick to show per day.
+private struct HubAriaDailyPickCard: View {
+    let track: StreamTrack
+    let reason: String?
+    var accent: Color = AppTheme.dynamicAccent
+
+    @EnvironmentObject private var streaming: StreamingService
+    @EnvironmentObject private var player: AudioPlayerManager
+    @State private var isLoading = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HubSectionHeader(title: "Aria's Daily Pick", icon: "sparkle", accent: accent)
+                .padding(.horizontal, 16)
+
+            Button {
+                play()
+            } label: {
+                HStack(spacing: 12) {
+                    AsyncImage(url: URL(string: track.thumbnailURL)) { phase in
+                        switch phase {
+                        case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
+                        default:
+                            Image(systemName: "music.note")
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                    }
+                    .frame(width: 52, height: 52)
+                    .background(AppTheme.elevatedSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(track.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .lineLimit(1)
+                        Text(track.artist)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .lineLimit(1)
+                        if let reason, !reason.isEmpty {
+                            Text(reason)
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.textSecondary.opacity(0.85))
+                                .italic()
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer(minLength: 4)
+                    if isLoading {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 26))
+                            .foregroundStyle(accent)
+                    }
+                }
+                .padding(12)
+                .adaptiveGlass(
+                    tint: accent.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous),
+                    fallback: AppTheme.surface
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isLoading)
+            .padding(.horizontal, 16)
+        }
+    }
+
+    private func play() {
+        guard !isLoading else { return }
+        isLoading = true
+        Task {
+            defer { isLoading = false }
+            do {
+                let url = try await streaming.streamURL(for: track)
+                let song = streaming.toSong(track: track, streamURL: url)
+                player.play(song: song, in: [song])
+            } catch {
+                streaming.errorMessage = error.localizedDescription
+            }
+        }
     }
 }
 

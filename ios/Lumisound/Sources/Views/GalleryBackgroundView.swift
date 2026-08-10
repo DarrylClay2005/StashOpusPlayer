@@ -6,8 +6,17 @@ import UIKit
 struct GalleryBackgroundView: View {
     @EnvironmentObject var bg: BackgroundService
     @AppStorage("app_reduce_motion") private var reduceMotion = false
+    @AppStorage(GalleryBackgroundSource.storageKey) private var backgroundSource = GalleryBackgroundSource.photos.rawValue
 
     var body: some View {
+        if backgroundSource == GalleryBackgroundSource.sonic.rawValue {
+            SonicWallpaperView()
+        } else {
+            photoBackground
+        }
+    }
+
+    private var photoBackground: some View {
         // GeometryReader gives an exact screen-sized canvas so scaledToFill can't
         // push outside the ZStack and stretch the parent layout.
         GeometryReader { geo in

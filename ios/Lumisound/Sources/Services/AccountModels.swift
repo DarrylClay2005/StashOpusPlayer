@@ -371,6 +371,20 @@ struct ListeningTwin: Codable {
     }
 }
 
+/// GET /user/aria/daily-pick — one AI-picked track per user per UTC
+/// calendar day, with a short reason from Aria Lumi. `track`/`reason` are
+/// both `nil` when there wasn't enough listening history yet to seed a
+/// pick (see main.py's doc comment — never treated as an error).
+struct AriaDailyPick: Codable {
+    let track: StreamTrack?
+    let reason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case track = "pick"
+        case reason
+    }
+}
+
 /// One active login (device/session) for this account — GET /auth/sessions.
 struct AccountSession: Codable, Identifiable {
     let tokenId: String
