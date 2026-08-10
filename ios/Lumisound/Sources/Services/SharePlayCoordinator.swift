@@ -49,16 +49,21 @@ final class SharePlayCoordinator: ObservableObject {
     weak var library: LibraryManager?
     weak var streaming: StreamingService?
 
-    private var groupSession: GroupSession<ListenTogetherActivity>?
-    private var messenger: GroupSessionMessenger?
-    private var subscriptions = Set<AnyCancellable>()
-    private var tasks: [Task<Void, Never>] = []
+    var groupSession: GroupSession<ListenTogetherActivity>?
+    var messenger: GroupSessionMessenger?
+    var subscriptions = Set<AnyCancellable>()
+    var tasks: [Task<Void, Never>] = []
 
     /// Set while applying an incoming message to the local player, so the
     /// resulting `currentSong`/`isPlaying` change doesn't get re-broadcast
     /// straight back to the group (which would otherwise loop messages
     /// between participants forever).
-    private var isApplyingRemoteMessage = false
+    var isApplyingRemoteMessage = false
+
+    /// The shared "suggest a track, vote it up" queue for the current
+    /// session — see `SharePlayCoordinator+Queue.swift`. Empty outside an
+    /// active session.
+    @Published private(set) var sharedQueue: [SharedQueueItem] = []
 
     init() {
         Self.shared = self
@@ -101,6 +106,7 @@ final class SharePlayCoordinator: ObservableObject {
             }
         }
         tasks.append(messageTask)
+        subscribeQueueMessages(messenger: messenger)
 
         session.join()
         isSessionActive = true
@@ -119,6 +125,7 @@ final class SharePlayCoordinator: ObservableObject {
         isSessionActive = false
         participantCount = 0
         subscriptions.removeAll()
+        sharedQueue.removeAll()
     }
 
     /// Ends the current SharePlay session for this participant (does not end it

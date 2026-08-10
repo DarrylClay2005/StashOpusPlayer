@@ -34,6 +34,7 @@ final class AccountService: ObservableObject {
     @Published var stats: AccountStats? = nil
     @Published var achievements: AchievementsData? = nil
     @Published var yearInReview: YearInReview? = nil
+    @Published var monthInReview: MonthInReview? = nil
     @Published var adminOverview: AdminOverview? = nil
     @Published var adminDownloadJobs: [AdminDownloadJob] = []
     @Published var adminErrors: [AdminErrorLogEntry] = []

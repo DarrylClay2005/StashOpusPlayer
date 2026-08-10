@@ -18,6 +18,7 @@ struct LumisoundApp: App {
     @StateObject private var sharePlay = SharePlayCoordinator()
     @StateObject private var appLock = AppLockService()
     @StateObject private var recentlyDeleted = RecentlyDeletedService()
+    @StateObject private var aiDJ = AIDJService()
     /// Shared app-wide instance so the Profile/Friends tabs, the Library
     /// hub's friends-activity carousel, and Account settings all see the
     /// same friends list / profile / incoming-requests state instead of
@@ -59,6 +60,7 @@ struct LumisoundApp: App {
                     .environmentObject(appLock)
                     .environmentObject(recentlyDeleted)
                     .environmentObject(social)
+                    .environmentObject(aiDJ)
                     .opacity(showLaunch ? 0 : 1)
                     .animation(.easeInOut(duration: 0.4), value: showLaunch)
 
@@ -138,6 +140,12 @@ struct LumisoundApp: App {
                     sharePlay.player = player
                     sharePlay.library = libraryManager
                     sharePlay.streaming = streaming
+
+                    // Wire AI DJ Mode's volume ducking to the same
+                    // `audioSettings.volume` knob the sleep-timer fade uses.
+                    aiDJ.getVolume = { player.audioSettings.volume }
+                    aiDJ.setVolume = { player.audioSettings.volume = $0 }
+                    aiDJ.attach(player: player, account: account)
 
                     // Route transport commands from the watch companion to the player.
                     PhoneWatchSync.shared.commandHandler = { command in

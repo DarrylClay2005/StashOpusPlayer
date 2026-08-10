@@ -78,6 +78,7 @@ struct NowPlayingView: View {
     @EnvironmentObject var library: LibraryManager
     @EnvironmentObject var sleepTimer: SleepTimerService
     @EnvironmentObject var account: AccountService
+    @EnvironmentObject var aiDJ: AIDJService
 
     // Seeking
     @State var isSeeking = false

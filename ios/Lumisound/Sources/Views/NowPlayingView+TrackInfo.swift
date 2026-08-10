@@ -38,6 +38,29 @@ extension NowPlayingView {
         }
     }
 
+    /// A small "Aria is speaking" caption shown only while `AIDJService` is
+    /// mid-announcement (see that type's doc comment) — otherwise collapses
+    /// to nothing so AI DJ Mode being off (the default) changes nothing
+    /// about this screen's layout.
+    @ViewBuilder
+    var aiDJCaption: some View {
+        if aiDJ.isSpeaking, let blurb = aiDJ.lastBlurb {
+            HStack(spacing: 6) {
+                Image(systemName: "mic.fill")
+                    .font(.caption2)
+                Text(blurb)
+                    .font(.caption)
+                    .lineLimit(2)
+            }
+            .foregroundStyle(AppTheme.textSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(AppTheme.elevatedSurface, in: Capsule())
+            .transition(.opacity.combined(with: .move(edge: .top)))
+            .animation(.easeInOut(duration: 0.25), value: aiDJ.isSpeaking)
+        }
+    }
+
     var trackInfoSection: some View {
         HStack(alignment: .center, spacing: 12) {
             // Whole title/artist row is tappable — a reinterpretation of the

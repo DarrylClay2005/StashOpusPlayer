@@ -5267,6 +5267,77 @@ async def intelligence_feedback(
 
 
 # ---------------------------------------------------------------------------
+# AI DJ Mode (Feature: ai-dj-mode)
+# ---------------------------------------------------------------------------
+#
+# A second, much smaller use of the same `call_intelligence` helper the
+# metadata-resolve endpoint above uses — instead of a structured pick, it
+# asks Aria Lumi for one short spoken transition line between two tracks,
+# which the client speaks aloud (AVSpeechSynthesizer, entirely on-device)
+# during the crossfade gap when AI DJ Mode is on. Deliberately uncached
+# (each transition should feel fresh, unlike a metadata pick which is the
+# same answer every time for the same inputs) and, like every other Aria
+# Lumi task, a null/failed result just means the client skips the spoken
+# intro for that transition and plays on as normal.
+
+_DJ_TRANSITION_SYSTEM_PROMPT = (
+    "You are voicing a short spoken radio-DJ transition for a music app's "
+    "'AI DJ Mode'. You are given the track that just finished (optional — "
+    "omitted at the start of a session) and the track about to play next. "
+    "Write ONE short line (max 25 words) a real, tasteful radio DJ might say "
+    "live over the transition — naturally mention the upcoming title and/or "
+    "artist, keep the tone confident and warm, never cheesy old-radio "
+    "clichés, no hashtags, no emoji, no markdown, no stage directions — just "
+    "the plain words as they'd be spoken aloud. Never invent facts (chart "
+    "positions, awards, trivia, release dates) you were not given — a plain "
+    "transition beats a confident wrong one."
+)
+
+_DJ_TRANSITION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "blurb": {
+            "type": "string",
+            "description": "One short spoken DJ transition line, plain text, no markdown",
+        },
+    },
+    "required": ["blurb"],
+}
+
+
+class DJTransitionRequest(BaseModel):
+    next_title: str
+    next_artist: Optional[str] = None
+    previous_title: Optional[str] = None
+    previous_artist: Optional[str] = None
+
+
+@app.post("/user/ai-dj/transition")
+async def ai_dj_transition(
+    body: DJTransitionRequest, payload: dict = Depends(get_current_user)
+):
+    """Returns one short spoken DJ transition line for the client to read
+    aloud via on-device TTS before playing *next_title*. Returns
+    {"blurb": null} (never an error) whenever intelligence is disabled,
+    cooling down, or the call fails — AI DJ Mode just plays the next track
+    with no spoken intro in that case."""
+    model_input = {
+        "next": {"title": body.next_title, "artist": body.next_artist},
+        "previous": (
+            {"title": body.previous_title, "artist": body.previous_artist}
+            if body.previous_title else None
+        ),
+    }
+    result = await call_intelligence(
+        "dj_transition",
+        _DJ_TRANSITION_SYSTEM_PROMPT,
+        model_input,
+        _DJ_TRANSITION_SCHEMA,
+    )
+    return {"blurb": result.get("blurb") if result else None}
+
+
+# ---------------------------------------------------------------------------
 # Avatar Endpoints
 # ---------------------------------------------------------------------------
 
@@ -10538,6 +10609,108 @@ async def get_year_in_review(
         "top_artists": [{"artist": r[0], "play_count": r[1], "listen_seconds": int(r[2])} for r in top_artists],
         "top_tracks": [{"title": r[0], "artist": r[1], "play_count": r[2]} for r in top_tracks],
         "by_month": [{"month": m, **by_month[m]} for m in range(1, 13)],
+        "peak_day": (
+            {"date": peak_day_row[0].isoformat(), "plays": peak_day_row[1], "listen_seconds": int(peak_day_row[2])}
+            if peak_day_row and peak_day_row[1]
+            else None
+        ),
+    }
+
+
+@app.get("/user/stats/month-in-review")
+async def get_month_in_review(
+    year: Optional[int] = Query(None, description="Calendar year; defaults to the current UTC year."),
+    month: Optional[int] = Query(None, ge=1, le=12, description="Calendar month (1-12); defaults to the current UTC month."),
+    payload: dict = Depends(get_current_user),
+):
+    """Monthly "Wrapped"-style recap, same shape and source table as
+    /user/stats/year-in-review but bucketed to a single calendar month
+    (by day instead of by month). Powers the "This Month" mode on
+    RewindView alongside the existing All Time / This Year cards."""
+    user_id = payload["sub"]
+    now = datetime.now(timezone.utc)
+    target_year = year or now.year
+    target_month = month or now.month
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT COUNT(*), COALESCE(SUM(listen_seconds), 0),
+                       COUNT(DISTINCT artist) FILTER (WHERE artist IS NOT NULL AND artist != ''),
+                       COUNT(DISTINCT (title, COALESCE(artist, ''))),
+                       AVG(bpm) FILTER (WHERE bpm IS NOT NULL)
+                FROM ios_play_history
+                WHERE user_id = %s AND EXTRACT(YEAR FROM played_at) = %s AND EXTRACT(MONTH FROM played_at) = %s
+                """,
+                (user_id, target_year, target_month),
+            )
+            total_plays, total_seconds, distinct_artists, distinct_tracks, avg_bpm = await cur.fetchone()
+
+            await cur.execute(
+                """
+                SELECT artist, COUNT(*) AS plays, COALESCE(SUM(listen_seconds), 0) AS seconds
+                FROM ios_play_history
+                WHERE user_id = %s AND EXTRACT(YEAR FROM played_at) = %s AND EXTRACT(MONTH FROM played_at) = %s
+                  AND artist IS NOT NULL AND artist != ''
+                GROUP BY artist
+                ORDER BY plays DESC
+                LIMIT 5
+                """,
+                (user_id, target_year, target_month),
+            )
+            top_artists = await cur.fetchall()
+
+            await cur.execute(
+                """
+                SELECT title, artist, COUNT(*) AS plays
+                FROM ios_play_history
+                WHERE user_id = %s AND EXTRACT(YEAR FROM played_at) = %s AND EXTRACT(MONTH FROM played_at) = %s
+                  AND title IS NOT NULL AND title != ''
+                GROUP BY title, artist
+                ORDER BY plays DESC
+                LIMIT 5
+                """,
+                (user_id, target_year, target_month),
+            )
+            top_tracks = await cur.fetchall()
+
+            await cur.execute(
+                """
+                SELECT DATE(played_at) AS day, COUNT(*) AS plays, COALESCE(SUM(listen_seconds), 0) AS seconds
+                FROM ios_play_history
+                WHERE user_id = %s AND EXTRACT(YEAR FROM played_at) = %s AND EXTRACT(MONTH FROM played_at) = %s
+                GROUP BY day
+                ORDER BY day ASC
+                """,
+                (user_id, target_year, target_month),
+            )
+            by_day_rows = await cur.fetchall()
+
+            await cur.execute(
+                """
+                SELECT DATE(played_at) AS day, COUNT(*) AS plays, COALESCE(SUM(listen_seconds), 0) AS seconds
+                FROM ios_play_history
+                WHERE user_id = %s AND EXTRACT(YEAR FROM played_at) = %s AND EXTRACT(MONTH FROM played_at) = %s
+                GROUP BY day
+                ORDER BY seconds DESC
+                LIMIT 1
+                """,
+                (user_id, target_year, target_month),
+            )
+            peak_day_row = await cur.fetchone()
+
+    return {
+        "year": target_year,
+        "month": target_month,
+        "total_plays": total_plays or 0,
+        "total_listen_seconds": int(total_seconds or 0),
+        "distinct_artists": distinct_artists or 0,
+        "distinct_tracks": distinct_tracks or 0,
+        "average_bpm": round(float(avg_bpm), 1) if avg_bpm is not None else None,
+        "top_artists": [{"artist": r[0], "play_count": r[1], "listen_seconds": int(r[2])} for r in top_artists],
+        "top_tracks": [{"title": r[0], "artist": r[1], "play_count": r[2]} for r in top_tracks],
+        "by_day": [{"date": r[0].isoformat(), "plays": r[1], "listen_seconds": int(r[2])} for r in by_day_rows],
         "peak_day": (
             {"date": peak_day_row[0].isoformat(), "plays": peak_day_row[1], "listen_seconds": int(peak_day_row[2])}
             if peak_day_row and peak_day_row[1]

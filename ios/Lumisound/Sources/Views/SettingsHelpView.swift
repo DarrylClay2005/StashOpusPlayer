@@ -390,6 +390,11 @@ struct SettingsHelpView: View {
                 title: "Queue Sync",
                 body: "While signed in, your \"Up Next\" queue is saved to the server in the background as it changes, and restored automatically when you open the app on another signed-in device — so you can pick up the same playback queue on your phone and iPad. Only track identifiers and titles are stored, not audio."
             ),
+            HelpTopic(
+                icon: "shareplay",
+                title: "Listen Together Group Queue",
+                body: "Once a Listen Together (SharePlay) session is active, the Queue screen shows a Listen Together section. Swipe left on any track and tap Suggest to add it to a shared list everyone in the session can see and upvote. Tap Play Top Voted Next to insert whichever suggestion has the most votes right after the current track. Suggestions and votes only exist for the lifetime of the session — nothing is saved to your account."
+            ),
         ]),
         HelpCategory(icon: "sparkles", title: "Achievements & Discovery", topics: [
             HelpTopic(
@@ -421,6 +426,11 @@ struct SettingsHelpView: View {
                 icon: "person.text.rectangle",
                 title: "Artist Bio",
                 body: "Open any artist from your library to see an \"About\" panel with a short biography, active years, and genre tags pulled from public sources (Wikipedia and MusicBrainz) — no setup needed. Tap \"Read More\" to expand a longer excerpt, or \"Wikipedia\" to open the full article."
+            ),
+            HelpTopic(
+                icon: "mic.fill",
+                title: "AI DJ Mode",
+                body: "Account → AI Features → AI DJ Mode. When on, Aria briefly ducks the volume and speaks a short transition line as each new track starts, like a real radio DJ handing off between songs, using on-device text-to-speech — nothing about your voice is recorded or sent anywhere. Only the two track titles/artists involved in a transition are sent to write that line. Off by default; requires being signed in."
             ),
         ]),
         HelpCategory(icon: "lock.shield", title: "Privacy & Security", topics: [

@@ -2,18 +2,22 @@ import SwiftUI
 
 // MARK: - RewindView
 //
-// A shareable "Rewind" recap of the user's listening. Two modes:
+// A shareable "Rewind" recap of the user's listening. Three modes:
 //  - All Time: the original lifetime card, built from /user/stats.
 //  - This Year: a proper "Wrapped"-style annual recap, built from
 //    /user/stats/year-in-review (calendar-year-bucketed — /user/stats has
 //    no year dimension at all, it's lifetime-only) with a couple of extra
 //    stats the lifetime card has no room/data for (distinct artists/tracks,
 //    peak listening day, average BPM).
-// Either card is rendered to an image via ImageRenderer (iOS 16+) and
+//  - This Month: same idea as This Year but bucketed to the current
+//    calendar month via /user/stats/month-in-review, for a recap that
+//    refreshes far more often than the annual one.
+// Any card is rendered to an image via ImageRenderer (iOS 16+) and
 // shared through the system share sheet.
 
 private enum RewindMode: String, CaseIterable, Identifiable {
     case allTime = "All Time"
+    case thisMonth = "This Month"
     case thisYear = "This Year"
     var id: String { rawValue }
 }
@@ -68,6 +72,7 @@ struct RewindView: View {
     private var hasDataForCurrentMode: Bool {
         switch mode {
         case .allTime: return account.stats != nil
+        case .thisMonth: return account.monthInReview != nil
         case .thisYear: return account.yearInReview != nil
         }
     }
@@ -76,6 +81,8 @@ struct RewindView: View {
         switch mode {
         case .allTime:
             if account.stats == nil { await account.fetchStats() }
+        case .thisMonth:
+            if account.monthInReview == nil { await account.fetchMonthInReview() }
         case .thisYear:
             if account.yearInReview == nil { await account.fetchYearInReview() }
         }
@@ -87,7 +94,46 @@ struct RewindView: View {
     private var recapCard: some View {
         switch mode {
         case .allTime: allTimeCard
+        case .thisMonth: monthCard
         case .thisYear: yearCard
+        }
+    }
+
+    private var monthCard: some View {
+        cardShell(title: "LUMISOUND \(account.monthInReview?.displayName.uppercased() ?? "") REWIND") {
+            if let m = account.monthInReview {
+                if m.totalPlays == 0 {
+                    Text("No listening activity yet this month.")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.vertical, 20)
+                } else {
+                    bigStat(value: "\(m.totalPlays)", label: "songs played")
+                    bigStat(value: formattedTime(m.totalListenSeconds), label: "time listened")
+
+                    HStack(spacing: 24) {
+                        smallStat(value: "\(m.distinctArtists)", label: "artists")
+                        smallStat(value: "\(m.distinctTracks)", label: "tracks")
+                        if let bpm = m.averageBpm {
+                            smallStat(value: "\(Int(bpm.rounded()))", label: "avg bpm")
+                        }
+                    }
+
+                    if !m.topArtists.isEmpty {
+                        listBlock(title: "Top Artists",
+                                  rows: m.topArtists.prefix(5).map { "\($0.artist)" })
+                    }
+                    if !m.topTracks.isEmpty {
+                        listBlock(title: "Top Songs",
+                                  rows: m.topTracks.prefix(5).map { $0.title })
+                    }
+                    if let peak = m.peakDay {
+                        listBlock(title: "Peak Day", rows: ["\(peak.date) — \(peak.plays) plays"])
+                    }
+                }
+            } else {
+                loadingRow
+            }
         }
     }
 

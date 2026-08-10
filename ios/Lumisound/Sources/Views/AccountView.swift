@@ -5,6 +5,7 @@ struct AccountView: View {
 
     @EnvironmentObject var account: AccountService
     @EnvironmentObject var library: LibraryManager
+    @EnvironmentObject var aiDJ: AIDJService
     @Environment(\.dismiss) var dismiss
 
     @State private var showLogoutConfirm = false
@@ -489,10 +490,16 @@ struct AccountView: View {
                 Section {
                     Label("Aria Lumi", systemImage: "wand.and.stars")
                         .foregroundStyle(AppTheme.textPrimary)
+
+                    Toggle(isOn: $aiDJ.isEnabled) {
+                        Label("AI DJ Mode", systemImage: "mic.fill")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                    .tint(AppTheme.dynamicAccent)
                 } header: {
                     sectionHeader("AI Features")
                 } footer: {
-                    Text("Aria Lumi, Lumisound's built-in music intelligence, automatically helps pick the right metadata match for local files — using titles, artists, thumbnails, and how you actually listen. Always on; see Settings → Help → Library for details. No audio or file contents are ever sent.")
+                    Text("Aria Lumi, Lumisound's built-in music intelligence, automatically helps pick the right metadata match for local files — using titles, artists, thumbnails, and how you actually listen. Always on; see Settings → Help → Library for details. No audio or file contents are ever sent.\n\nAI DJ Mode is opt-in: when on, Aria briefly speaks a short transition line (on-device text-to-speech) between tracks. Only the two track titles/artists involved are sent to write that line — never audio.")
                         .font(AppTheme.bodyFont(size: 12))
                         .foregroundStyle(AppTheme.textSecondary)
                 }

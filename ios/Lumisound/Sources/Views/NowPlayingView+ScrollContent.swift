@@ -37,6 +37,7 @@ extension NowPlayingView {
                 }
 
                 trackInfoSection
+                aiDJCaption
                 timelineSection
                 transportSection
 

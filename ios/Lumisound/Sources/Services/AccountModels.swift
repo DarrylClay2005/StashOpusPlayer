@@ -449,6 +449,60 @@ struct YearInReview: Codable {
     }
 }
 
+/// GET /user/stats/month-in-review — same shape as `YearInReview` but
+/// bucketed to a single calendar month (by day instead of by month).
+/// Powers the "This Month" mode on `RewindView`.
+struct MonthInReview: Codable {
+    let year: Int
+    let month: Int
+    let totalPlays: Int
+    let totalListenSeconds: Int
+    let distinctArtists: Int
+    let distinctTracks: Int
+    /// `nil` when no play in the month had a recorded BPM.
+    let averageBpm: Double?
+    let topArtists: [AccountStats.TopArtist]
+    let topTracks: [AccountStats.TopTrack]
+    let byDay: [DailyActivity]
+    /// `nil` for a month with no listening activity at all.
+    let peakDay: YearInReview.PeakDay?
+
+    enum CodingKeys: String, CodingKey {
+        case year, month
+        case totalPlays        = "total_plays"
+        case totalListenSeconds = "total_listen_seconds"
+        case distinctArtists   = "distinct_artists"
+        case distinctTracks    = "distinct_tracks"
+        case averageBpm        = "average_bpm"
+        case topArtists        = "top_artists"
+        case topTracks         = "top_tracks"
+        case byDay              = "by_day"
+        case peakDay             = "peak_day"
+    }
+
+    struct DailyActivity: Codable, Identifiable {
+        let date: String
+        let plays: Int
+        let listenSeconds: Int
+        var id: String { date }
+        enum CodingKeys: String, CodingKey { case date, plays, listenSeconds = "listen_seconds" }
+    }
+
+    /// Short display name for the month, e.g. "March 2026".
+    var displayName: String {
+        var comps = DateComponents()
+        comps.year = year
+        comps.month = month
+        comps.day = 1
+        let formatter = DateFormatter()
+        formatter.dateFormat = "LLLL yyyy"
+        if let date = Calendar.current.date(from: comps) {
+            return formatter.string(from: date)
+        }
+        return "\(month)/\(year)"
+    }
+}
+
 /// One collaborator entry from GET /user/playlists/{id}/collaborators.
 struct PlaylistCollaborator: Decodable, Identifiable {
     let userId: String

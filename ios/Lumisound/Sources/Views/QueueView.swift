@@ -16,6 +16,7 @@ struct QueueView: View {
     @EnvironmentObject private var player: AudioPlayerManager
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var account: AccountService
+    @EnvironmentObject private var sharePlay: SharePlayCoordinator
     @State private var editMode: EditMode = .inactive
     @State private var isRestoringQueue = false
     @State private var showSaveQueueAlert = false
@@ -168,6 +169,7 @@ struct QueueView: View {
                 emptyState
             } else {
                 contextHeaderSection
+                listenTogetherSection
                 earlierSection
                 nowPlayingSection
                 manualSection
@@ -241,6 +243,68 @@ struct QueueView: View {
         .padding(.vertical, 6)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+    }
+
+    /// Shows only during an active Listen Together (SharePlay) session —
+    /// participants suggest tracks (via the "Suggest to Group" swipe action
+    /// on any row below) and upvote each other's picks; the most-voted one
+    /// can be played next with one tap. See `SharePlayCoordinator+Queue.swift`.
+    @ViewBuilder
+    private var listenTogetherSection: some View {
+        if sharePlay.isSessionActive {
+            Section {
+                if sharePlay.sortedSharedQueue.isEmpty {
+                    Text("Swipe a track below and tap \"Suggest\" to add it here for the group to vote on.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .padding(.vertical, 4)
+                } else {
+                    ForEach(sharePlay.sortedSharedQueue) { item in
+                        listenTogetherRow(item)
+                    }
+                    Button {
+                        Task { await sharePlay.playTopSuggestion() }
+                    } label: {
+                        Label("Play Top Voted Next", systemImage: "play.fill")
+                    }
+                    .disabled(sharePlay.sortedSharedQueue.isEmpty)
+                }
+            } header: {
+                Label("Listen Together · \(sharePlay.participantCount) here", systemImage: "shareplay")
+            }
+            .listRowSeparatorTint(AppTheme.surface)
+        }
+    }
+
+    private func listenTogetherRow(_ item: SharedQueueItem) -> some View {
+        let voted = item.voterDeviceIDs.contains(sharePlay.localDeviceID)
+        return HStack(spacing: 10) {
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    sharePlay.toggleVote(for: item.id)
+                }
+            } label: {
+                VStack(spacing: 2) {
+                    Image(systemName: voted ? "arrow.up.circle.fill" : "arrow.up.circle")
+                    Text("\(item.voteCount)")
+                        .font(.caption2.monospacedDigit())
+                }
+                .foregroundStyle(voted ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .lineLimit(1)
+                Text(item.artist)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
     }
 
     @ViewBuilder
@@ -365,6 +429,17 @@ struct QueueView: View {
                 }
             } label: {
                 Label("Remove", systemImage: "trash")
+            }
+        }
+        .swipeActions(edge: .leading) {
+            if sharePlay.isSessionActive {
+                Button {
+                    sharePlay.suggestTrack(song)
+                    ToastCenter.shared.show("Suggested to group", category: .success, icon: "shareplay")
+                } label: {
+                    Label("Suggest", systemImage: "shareplay")
+                }
+                .tint(AppTheme.dynamicAccent)
             }
         }
         .transition(.asymmetric(
