@@ -39,6 +39,7 @@ bridge, and build-from-source instructions.
 | **ReplayGain & Volume Boost** | Loudness normalisation plus up to 200% volume with a limiter |
 | **Now Playing** | 25 selectable visual styles for the album art (vinyl, cassette, aurora, glitch/VHS, and more), plus a built-in editor to design and save your own; full transport controls, Up Next queue, lock-screen & headphone controls, synced lyrics |
 | **AI DJ Mode** | Opt-in — Aria Lumi writes a short spoken transition line between tracks, read aloud on-device (no audio ever leaves the device) while volume briefly ducks |
+| **Practice Mode** | A dedicated tool for learning a track by ear — a visual metronome synced to the track's detected tempo (live-adjusted for playback speed), a sub-100% speed slider with quick presets, and Loop Region controls built on the existing A-B repeat |
 | **Listen Together** | SharePlay session keeps everyone's playback in sync; participants can also suggest tracks into a shared queue and upvote each other's picks, with the top-voted pick playable in one tap |
 | **Widgets & Live Activity** | Home Screen, Lock Screen, and StandBy widgets plus a Live Activity showing the current track; CarPlay support for browsing and transport controls; Siri/Shortcuts App Intents; a Focus Filter to tie playback behavior to a Focus mode |
 | **Companion apps** | A full Apple Watch app (its own library browsing, playback, and widget) and Apple TV app (library, playlists, playback) — both talk to the same bridge account as the phone |

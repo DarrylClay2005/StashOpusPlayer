@@ -216,6 +216,7 @@ struct NowPlayingView: View {
 
     // Format info sheet
     @State var showFormatInfoSheet = false
+    @State var showPracticeModeSheet = false
 
     // Transfer Playback sheet
     @State var showTransferPlaybackSheet = false
@@ -259,6 +260,11 @@ struct NowPlayingView: View {
         }
         .sheet(isPresented: $showFormatInfoSheet) {
             FormatInfoSheet(song: player.currentSong, isUsingFallback: player.isUsingOpusPlayer)
+                .environmentObject(library)
+        }
+        .sheet(isPresented: $showPracticeModeSheet) {
+            PracticeModeView()
+                .environmentObject(player)
                 .environmentObject(library)
         }
         .sheet(isPresented: $showTransferPlaybackSheet) {

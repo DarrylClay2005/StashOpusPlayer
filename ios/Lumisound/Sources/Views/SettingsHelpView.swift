@@ -122,6 +122,11 @@ struct SettingsHelpView: View {
                 body: "Smart Auto Crossfade (Settings → Audio) is an alternative to manual Crossfade that picks its own transition timing per-track instead of a fixed slider — it beatmatches the outgoing and incoming songs' tempos and snaps the fade to land on a downbeat, and reads how the outgoing track actually sounds right as it ends (a live audio analysis, not just a genre/tempo guess): a quiet fade-out gets a longer, gentler blend, while a track still at full energy gets a tighter one so two loud passages don't smear together. Turning it on automatically turns manual Crossfade off, since only one transition strategy can be active."
             ),
             HelpTopic(
+                icon: "metronome",
+                title: "Practice Mode",
+                body: "Now Playing → overflow menu → Practice Mode opens a dedicated tool for learning a track by ear: a visual metronome pulse synced to the track's detected tempo (adjusted live for playback speed, so it always matches what you're actually hearing), a speed slider capped at 100% with quick 50/75/90% presets, and Loop Region controls (the same A-B repeat markers available elsewhere) to repeat just the section you're working on. Built from existing playback controls, not a separate audio engine."
+            ),
+            HelpTopic(
                 icon: "bookmark",
                 title: "Track Bookmarks",
                 body: "Bookmark specific timestamps within a long track (a DJ mix, podcast, or audiobook-style file) to jump straight back to them later — useful for marking \"the drop\" or a chapter start. Bookmarks are entirely on-device and don't require an account."

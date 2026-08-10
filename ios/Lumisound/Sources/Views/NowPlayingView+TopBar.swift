@@ -84,6 +84,13 @@ extension NowPlayingView {
                     Label("Share", systemImage: "square.and.arrow.up")
                 }
             }
+            if player.currentSong != nil {
+                Button {
+                    showPracticeModeSheet = true
+                } label: {
+                    Label("Practice Mode", systemImage: "metronome")
+                }
+            }
             if account.isLoggedIn, player.currentSong != nil {
                 Button {
                     showTransferPlaybackSheet = true
