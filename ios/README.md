@@ -1,24 +1,34 @@
 # Lumisound for iOS
 
-A full-featured, privacy-respecting iOS music player built with SwiftUI and AVFoundation. Stream from YouTube and SoundCloud, manage your personal cloud library, apply spatial 8D audio and a 10-band EQ, and keep everything synced across devices with a free account.
+A full-featured, privacy-respecting music player built with SwiftUI and AVFoundation, for iPhone/iPad, Apple Watch, and Apple TV. Stream from YouTube and SoundCloud, manage your personal cloud library, apply spatial 8D audio and a 10-band EQ, listen together over SharePlay, and keep everything synced across devices with a free account.
+
+This directory is one `xcodegen` project with five targets: `Lumisound` (iPhone/iPad),
+`LumisoundWidget` (Home/Lock Screen/StandBy + Live Activity), `LumisoundWatch` + its own
+`LumisoundWatchWidget`, and `LumisoundTV`.
 
 ---
 
 ## Features
 
+See the [top-level README](../README.md) for the full feature list. Short version:
+
 | Category | Details |
 |---|---|
-| **Home** | A customizable dashboard tab — reorderable/hideable shelves (Recently Added, Mixes, Genres, Friends Activity, and more), a custom greeting, and a dashboard-only accent color |
-| **Playback** | Gapless, crossfade, AB repeat, sleep timer, variable speed & pitch |
-| **Audio FX** | 10-band EQ, 23 audio effects (8D spatial audio with speed control, nightcore, vaporwave, karaoke…) |
-| **Library** | Local files, Apple Music library, folder/album organisation by directory name, duplicate & corrupt file finders |
+| **Home** | A customizable dashboard tab — reorderable/hideable shelves (Recently Added, Mixes, Genres, Friends Activity, Similar Listeners, and more), a custom greeting, and a dashboard-only accent color |
+| **Playback** | Gapless, crossfade (manual or beatmatched Smart Auto Crossfade), AB repeat, sleep timer, sleep/wake alarm, variable speed & pitch, AI DJ Mode |
+| **Audio FX** | 10-band EQ (+ Auto EQ) and 23 audio effects (8D spatial audio with speed control, nightcore, vaporwave, karaoke…) |
+| **Library** | Local files, Apple Music library, folder/album organisation by directory name, AcoustID-based duplicate finder & corrupt file finder |
+| **Podcasts** | Search, subscribe, chapters, offline downloads, auto-download, OPML import/export |
 | **Streaming** | YouTube & SoundCloud search, stream, download, Pending Imports visibility — via bridge server |
 | **Personal Cloud Library** | Upload your own audio files to your personal server folder; play & manage from anywhere |
-| **Account** | Free accounts on the shared server — sync playlists, settings, play history, and favourites |
-| **Friends & Profiles** | Add friends, see live online/now-playing status, and a public profile page with banner, avatar, bio, and pinned tracks |
-| **Visuals** | Gallery background (slideshow with transitions), 25 Now Playing artwork styles plus a custom style editor, lyric display |
+| **Account** | Free accounts on the shared server — sync playlists, settings, play history, and favourites; shareable Rewind recap cards |
+| **Friends & Profiles** | Add friends, see live online/now-playing status, a public profile page, and a Listening Twin match |
+| **Listen Together** | SharePlay sync plus a shared suggest-and-vote Up Next queue |
+| **Extras** | Needle Drop (a music-guessing mini-game) and Time Capsules (songs + a note, locked until a future date) |
+| **Visuals** | Gallery background (slideshow with transitions), 25 Now Playing artwork styles plus a custom style editor, synced lyrics |
 | **Lua Theme Presets** | 10 complete, swappable Lua-scripted presets (Settings → Appearance → Lua Theme Presets) — each one script sets colors, fonts, panel/glass style, feature flags, and Library sort/display defaults in one tap |
-| **Now Playing** | Full transport controls, Up Next queue, lock-screen & headphone controls |
+| **Now Playing** | Full transport controls, Up Next queue, lock-screen & headphone controls, CarPlay, Siri Shortcuts, Focus Filter |
+| **Companion apps** | A full Apple Watch app and Apple TV app, both signed into the same account as the phone |
 
 ---
 
