@@ -15643,6 +15643,86 @@ async def social_compatibility(user_id: str, payload: dict = Depends(get_current
     }
 
 
+@app.get("/api/social/blend/{user_id}")
+async def social_blend_mix(
+    user_id: str,
+    limit: int = Query(20, ge=1, le=50),
+    payload: dict = Depends(get_current_user),
+):
+    """A playable mix blending the caller's and a friend's top artists —
+    the "press play" companion to /api/social/compatibility's score-only
+    match above. Same friends-only authorization, and the same seeded-
+    yt-dlp-search approach /user/discover-mix and Listening Twin's
+    twin/mix already use, just alternating between two NAMED people's top
+    artists instead of one person's own or an auto-matched stranger's."""
+    caller_id = payload["sub"]
+    if caller_id == user_id:
+        raise HTTPException(status_code=400, detail="Can't blend with yourself")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if await _blocked_either_direction(cur, caller_id, user_id):
+                raise HTTPException(status_code=404, detail="User not found")
+            await cur.execute(
+                "SELECT 1 FROM ios_social_friends WHERE user_id = %s AND friend_id = %s",
+                (caller_id, user_id),
+            )
+            if not await cur.fetchone():
+                raise HTTPException(status_code=403, detail="Blend is only available between friends")
+
+            await cur.execute(
+                "SELECT song_id FROM ios_user_favorites WHERE user_id = %s "
+                "UNION SELECT song_id FROM ios_user_library WHERE user_id = %s",
+                (caller_id, caller_id),
+            )
+            known_ids = {r[0] for r in await cur.fetchall()}
+
+    profile_a = await get_user_taste_profile(caller_id)
+    profile_b = await get_user_taste_profile(user_id)
+    artists_a = profile_a["top_played_artists"][:6]
+    artists_b = profile_b["top_played_artists"][:6]
+    if not artists_a and not artists_b:
+        return []
+
+    # Interleave so the mix doesn't skew toward whichever person's list
+    # happens to get resolved first.
+    interleaved: list[str] = []
+    for i in range(max(len(artists_a), len(artists_b))):
+        if i < len(artists_a):
+            interleaved.append(artists_a[i])
+        if i < len(artists_b):
+            interleaved.append(artists_b[i])
+
+    per_artist = max(1, limit // len(interleaved) + 1)
+    tracks: list[dict] = []
+    seen_ids: set[str] = set()
+    for artist in interleaved:
+        try:
+            entries = await _run_ytdlp(
+                f"ytsearch{per_artist}:{artist}",
+                "--dump-json", "--flat-playlist", "--no-playlist",
+                "--cache-dir", YTDLP_CACHE_DIR,
+                *(await _ytdlp_cookie_args(caller_id)),
+                timeout=20.0,
+            )
+        except Exception as exc:
+            logger.warning("social_blend_mix: yt-dlp search failed for %r: %s", artist, exc)
+            continue
+        for entry in entries:
+            track = _parse_track(entry, "youtube")
+            if track["id"] in known_ids or track["id"] in seen_ids:
+                continue
+            seen_ids.add(track["id"])
+            tracks.append(track)
+            if len(tracks) >= limit:
+                break
+        if len(tracks) >= limit:
+            break
+
+    return tracks
+
+
 # ---------------------------------------------------------------------------
 # Friends tab expansion (Feature: friends-tab-expansion, 2026-07-21) — five
 # additions woven into the redesigned Friends tab (see FriendsListView.swift

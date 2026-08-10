@@ -424,6 +424,11 @@ struct SettingsHelpView: View {
                 body: "The Profile tab shows your profile exactly as friends see it — banner, avatar, bio, pinned tracks, and what you're currently listening to. Tap Edit Profile to change any of that: avatar and banner images (including animated GIFs), accent colors, up to 5 pinned favorite tracks, and whether your \"now playing\" status is shared with friends at all."
             ),
             HelpTopic(
+                icon: "waveform.path.ecg",
+                title: "Music Match & Blend Mix",
+                body: "A friend's profile shows a Music Match card — a percentage score plus your shared artists/genres, computed from real listening history (friends only). Tap Play Blend Mix underneath it for an actual mix blending both your top artists — the listenable version of that match, not just a number. Distinct from Listening Twin (Account → Library), which auto-matches an anonymous best-fit stranger rather than a friend you already picked."
+            ),
+            HelpTopic(
                 icon: "dot.radiowaves.left.and.right",
                 title: "Online Status & Presence",
                 body: "While the app is open, Lumisound reports you as online (and what you're playing, if sharing is on) to friends viewing your profile. This updates automatically in the background and clears itself shortly after you close the app or the app goes idle — there's nothing to manually turn on or off beyond the now-playing sharing toggle in Edit Profile."

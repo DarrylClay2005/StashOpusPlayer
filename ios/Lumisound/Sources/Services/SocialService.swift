@@ -395,6 +395,20 @@ final class SocialService: ObservableObject {
         }
     }
 
+    /// A playable mix blending the caller's and `userId`'s top artists —
+    /// the "press play" companion to `fetchCompatibility`'s score-only
+    /// match. Friends-only server-side, same as compatibility.
+    func fetchBlendMix(userId: String) async -> [StreamTrack] {
+        guard let account, account.isLoggedIn else { return [] }
+        do {
+            let data = try await account.makeRequest("/api/social/blend/\(userId)")
+            return try JSONDecoder().decode([StreamTrack].self, from: data)
+        } catch {
+            handle(error)
+            return []
+        }
+    }
+
     // MARK: - Friends tab expansion (2026-07-21)
     //
     // Five additions woven into the redesigned FriendsListView: private

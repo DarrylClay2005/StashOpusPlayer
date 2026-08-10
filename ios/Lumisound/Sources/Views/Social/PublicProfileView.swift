@@ -40,6 +40,7 @@ struct PublicProfileView: View {
     @State private var draftComment = ""
     @State private var isPostingComment = false
     @State private var compatibility: MusicCompatibility? = nil
+    @State private var showBlendMix = false
     // MARK: Feature: profile-customization-3
     @State private var recentlyPlayedTogether: [SharedRecentTrack] = []
 
@@ -221,7 +222,18 @@ struct PublicProfileView: View {
 
                         if let compatibility, profile.isFriend, !isSelfPreview {
                             ProfileInfoCard(title: "Music Match", icon: "waveform.path.ecg", tint: mainAccentColor) {
-                                MusicCompatibilityRow(compatibility: compatibility, tint: mainAccentColor)
+                                VStack(alignment: .leading, spacing: 12) {
+                                    MusicCompatibilityRow(compatibility: compatibility, tint: mainAccentColor)
+                                    Button {
+                                        showBlendMix = true
+                                    } label: {
+                                        Label("Play Blend Mix", systemImage: "play.fill")
+                                            .font(.subheadline.weight(.semibold))
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .tint(mainAccentColor)
+                                }
                             }
                         }
 
@@ -323,6 +335,11 @@ struct PublicProfileView: View {
                 }
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .sheet(isPresented: $showBlendMix) {
+            NavigationStack {
+                BlendMixView(friendUserID: userId, friendName: profile?.displayName ?? profile?.username ?? "your friend")
+            }
         }
     }
 
