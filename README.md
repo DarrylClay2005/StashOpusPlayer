@@ -74,6 +74,7 @@ bridge, and build-from-source instructions.
 | Feature | Details |
 |---|---|
 | **Search & stream** | YouTube and SoundCloud search, with playlist/album URL resolution (up to 50 tracks) |
+| **Name That Tune** | A Home quick action that listens through the microphone for ~12 seconds and identifies the actual recording playing nearby via audio fingerprinting (AcoustID/MusicBrainz, the same technology behind Shazam) — requires a personal AcoustID key |
 | **Spotify link import** | Paste a Spotify track/album/playlist link — the bridge reads public Spotify metadata only (never audio, which Spotify DRM-protects) and matches each track to a playable YouTube result. Requires the server operator to set `SPOTIFY_CLIENT_ID`/`SPOTIFY_CLIENT_SECRET` |
 | **Downloads** | Save streamed tracks to your local library with format choice (Opus, MP3, AAC, Best) |
 | **Background downloads & Pending Imports** | Downloads keep running server-side even if you close the app; a Pending Imports screen (Cloud Services menu) shows what's finished and waiting, which folder it's headed for, and lets you override the folder or import on demand |

@@ -72,6 +72,7 @@ struct LibraryHubView: View {
     @AppStorage("home_hub_accent_hex") private var hubAccentHex: String?
     @State private var showCustomizationSheet = false
     @State private var showHumToSearch = false
+    @State private var showNameThatTune = false
 
     /// This screen's own accent override (see `HomeHubCustomizationView`),
     /// resolved back to a `Color` via the same curated palette the profile
@@ -127,6 +128,10 @@ struct LibraryHubView: View {
         .sheet(isPresented: $showHumToSearch) {
             HumToSearchView()
         }
+        .sheet(isPresented: $showNameThatTune) {
+            NameThatTuneView()
+                .environmentObject(streaming)
+        }
         .sheet(item: Binding(
             get: { similarListenerSearchQuery.map { IdentifiableQuery(text: $0) } },
             set: { similarListenerSearchQuery = $0?.text }
@@ -149,7 +154,12 @@ struct LibraryHubView: View {
         )
         .padding(.horizontal, 16)
 
-        HubQuickActionsRow(hasLibrary: !library.allSongs.isEmpty, onShuffleAll: shuffleAll, onHumToSearch: { showHumToSearch = true })
+        HubQuickActionsRow(
+            hasLibrary: !library.allSongs.isEmpty,
+            onShuffleAll: shuffleAll,
+            onHumToSearch: { showHumToSearch = true },
+            onNameThatTune: { showNameThatTune = true }
+        )
 
         // Everything below is data-driven: the persisted order (see
         // `HomeHubLayoutStore`) filtered to sections that are both not
@@ -825,6 +835,7 @@ private struct HubQuickActionsRow: View {
     let hasLibrary: Bool
     let onShuffleAll: () -> Void
     let onHumToSearch: () -> Void
+    let onNameThatTune: () -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -835,6 +846,7 @@ private struct HubQuickActionsRow: View {
                 actionChip(title: "Hum to Search", icon: "waveform", action: onHumToSearch)
                     .disabled(!hasLibrary)
                     .opacity(hasLibrary ? 1 : 0.4)
+                actionChip(title: "Name That Tune", icon: "waveform.badge.magnifyingglass", action: onNameThatTune)
             }
             .padding(.horizontal, 16)
         }

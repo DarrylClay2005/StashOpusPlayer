@@ -63,9 +63,6 @@ final class AcoustIDService {
     /// reports no AcoustID key is set (HTTP 400) — see `Server error` mapping
     /// below, which surfaces the bridge's own "Add one in Settings" detail.
     func identify(song: Song) async throws -> Match {
-        guard let account = AccountService.shared, account.isLoggedIn, let token = account.token else {
-            throw IdentifyError.notLoggedIn
-        }
         guard let sourceURL = song.url, sourceURL.isFileURL else {
             throw IdentifyError.noLocalFile
         }
@@ -75,6 +72,26 @@ final class AcoustIDService {
 
         guard let clipData = try? Data(contentsOf: clipURL) else {
             throw IdentifyError.trimFailed
+        }
+        return try await uploadForIdentification(clipData)
+    }
+
+    /// Identifies whatever's in an already-recorded `.m4a` clip — used by
+    /// `NameThatTuneService` for a live-microphone "what's this song"
+    /// lookup rather than fingerprinting a file already in the library.
+    /// No local-file/trim step needed: the recording is already short
+    /// (~12-15s) and already `.m4a`.
+    func identify(recordingURL: URL) async throws -> Match {
+        guard let clipData = try? Data(contentsOf: recordingURL) else {
+            throw IdentifyError.trimFailed
+        }
+        return try await uploadForIdentification(clipData)
+    }
+
+    /// Shared upload + response-parsing path for both entry points above.
+    private func uploadForIdentification(_ clipData: Data) async throws -> Match {
+        guard let account = AccountService.shared, account.isLoggedIn, let token = account.token else {
+            throw IdentifyError.notLoggedIn
         }
 
         let base = account.bridgeURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))

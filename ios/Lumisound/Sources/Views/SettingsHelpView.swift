@@ -70,6 +70,11 @@ struct SettingsHelpView: View {
                 body: "The Home tab (first tab in Library) is a dashboard of shortcuts and auto-generated shelves rather than a plain file browser: Quick Access shortcuts to your real playlists/folders/favorites, a Weekly Mix, your Mixes (rule-based smart playlists), Recently Added, On Repeat, Recently Played, Genres, Forgotten Favorites, Moods, On This Day throwbacks, Friends Activity, and Similar Listeners. Each shelf only appears once it actually has something to show — an empty library shows a simplified welcome view instead."
             ),
             HelpTopic(
+                icon: "waveform.badge.magnifyingglass",
+                title: "Name That Tune",
+                body: "The Name That Tune quick action on Home listens through the microphone for about 12 seconds and identifies the actual recording playing nearby — precise audio fingerprinting against the AcoustID/MusicBrainz database, the same technology behind Shazam, not a guess from humming. Requires a personal AcoustID key (Settings → Streaming) and being signed in. Distinct from Hum to Search, which matches a hummed melody against your own library instead."
+            ),
+            HelpTopic(
                 icon: "slider.horizontal.3",
                 title: "Customize Home",
                 body: "Tap the slider icon in the Home tab's toolbar to open Customize Home: drag to reorder any shelf, or toggle one off entirely if you don't want to see it (the Greeting header and Quick Actions row always stay pinned at the top). The same sheet also lets you set a custom greeting message that replaces the automatic \"Good morning/afternoon/evening\" line, and pick a Home-only accent color — separate from your profile's accent — that tints this screen's section headers and greeting text. All three are saved on this device only, not synced to your account."
