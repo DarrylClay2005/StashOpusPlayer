@@ -5,9 +5,10 @@
 <h1 align="center">Lumisound</h1>
 
 <p align="center">
-  A full-featured, privacy-respecting iOS music player — stream from YouTube and SoundCloud,
-  manage a personal cloud library, apply spatial 8D audio and a 10-band EQ, and sync
-  everything across devices with a free account.
+  A full-featured, privacy-respecting music player for iOS, watchOS, and tvOS — stream from
+  YouTube and SoundCloud, manage a personal cloud library, apply spatial 8D audio and a
+  10-band EQ, listen together over SharePlay, and sync everything across devices with a
+  free account.
 </p>
 
 ---
@@ -16,8 +17,8 @@
 
 | Path | What it is |
 |---|---|
-| [`ios/`](ios) | The Lumisound iOS app (SwiftUI + AVFoundation) — install instructions, build steps, full feature docs |
-| [`ios-bridge/`](ios-bridge) | FastAPI server powering search/streaming, account sync, and all server-side features below |
+| [`ios/`](ios) | The Xcode project — one `xcodegen` project, five targets: the iPhone/iPad app, a Home/Lock Screen + StandBy widget, an Apple Watch app + its own complication widget, and a full Apple TV app. Install instructions, build steps, full feature docs |
+| [`ios-bridge/`](ios-bridge) | FastAPI server powering search/streaming, account sync, Aria Lumi (AI features), and all server-side features below |
 | [`discord-rpc/`](discord-rpc) | Optional local daemon that mirrors your "now playing" to Discord Rich Presence |
 
 See [`ios/README.md`](ios/README.md) for installation (AltStore / Sideloadly), self-hosting the
@@ -31,12 +32,16 @@ bridge, and build-from-source instructions.
 
 | Feature | Details |
 |---|---|
-| **Playback** | Gapless, crossfade, A–B repeat, sleep timer, variable speed & pitch, auto-radio |
-| **Audio FX** | 10-band EQ with presets, 23 effects (8D spatial audio, bass boost, tremolo, vibrato, nightcore, vaporwave, karaoke vocal removal…), real-room reverb (on by default, adjustable room/mix) |
+| **Playback** | Gapless, crossfade, A–B repeat, sleep timer, sleep/wake alarm with graduated volume, variable speed & pitch, auto-radio, track bookmarks |
+| **Smart Auto Crossfade** | Beatmatches outgoing/incoming tempos and snaps the fade to a downbeat, reading how the outgoing track actually sounds as it ends rather than a fixed slider |
+| **Audio FX** | 10-band EQ with presets (+ Auto EQ, which switches presets per track by genre/tempo/live analysis), 23 effects (8D spatial audio, bass boost, tremolo, vibrato, nightcore, vaporwave, karaoke vocal removal…), real-room reverb (on by default, adjustable room/mix) |
 | **Per-Track Sound** | Pin EQ/effects/volume overrides to a specific song |
 | **ReplayGain & Volume Boost** | Loudness normalisation plus up to 200% volume with a limiter |
-| **Now Playing** | 25 selectable visual styles for the album art (vinyl, cassette, aurora, glitch/VHS, and more), plus a built-in editor to design and save your own; full transport controls, Up Next queue, lock-screen & headphone controls |
-| **Widgets** | Home Screen and Lock Screen widgets showing the current track |
+| **Now Playing** | 25 selectable visual styles for the album art (vinyl, cassette, aurora, glitch/VHS, and more), plus a built-in editor to design and save your own; full transport controls, Up Next queue, lock-screen & headphone controls, synced lyrics |
+| **AI DJ Mode** | Opt-in — Aria Lumi writes a short spoken transition line between tracks, read aloud on-device (no audio ever leaves the device) while volume briefly ducks |
+| **Listen Together** | SharePlay session keeps everyone's playback in sync; participants can also suggest tracks into a shared queue and upvote each other's picks, with the top-voted pick playable in one tap |
+| **Widgets & Live Activity** | Home Screen, Lock Screen, and StandBy widgets plus a Live Activity showing the current track; CarPlay support for browsing and transport controls; Siri/Shortcuts App Intents; a Focus Filter to tie playback behavior to a Focus mode |
+| **Companion apps** | A full Apple Watch app (its own library browsing, playback, and widget) and Apple TV app (library, playlists, playback) — both talk to the same bridge account as the phone |
 
 ### Library
 
@@ -47,10 +52,18 @@ bridge, and build-from-source instructions.
 | **Apple Music library** | Scan and play your existing iTunes/Apple Music library on-device |
 | **Folder/album organisation** | Albums derived from directory names; list, 2-col, and 3-col grid layouts |
 | **Playlist folders & tags** | File playlists into folders and attach free-form tags to keep things organised |
+| **Smart Playlists** | Rule-based playlists (favorite status, play count, duration, genre, and more) that refresh themselves every time you open them |
 | **M3U import/export** | Bring in a `.m3u`/`.m3u8` playlist from another app (matched by filename, falling back to title/artist), or export any playlist as one |
-| **Downloads manager** | See every downloaded track's on-disk size, sort by size or date, and delete individually or in bulk |
-| **Duplicate & corrupt file finders** | Duplicate Finder groups likely-duplicate downloads by matching how they actually sound, not just title text; Corrupt File Finder flags any download that fails to play so you can re-fetch just that one |
+| **Downloads manager & Recently Deleted** | See every downloaded track's on-disk size, sort by size or date, delete individually or in bulk; deletions land in a 30-day Recently Deleted safety net first |
+| **Duplicate & corrupt file finders** | Duplicate Finder groups likely-duplicate downloads by matching how they actually sound via audio fingerprinting (AcoustID), not just title text; Corrupt File Finder flags any download that fails to play so you can re-fetch just that one |
 | **Aria Lumi metadata matching** | Built-in, always on — when a local file has more than one possible metadata match, Aria Lumi (Lumisound's own music intelligence) reviews the candidates using titles, artists, cover art, and a sense of your own listening habits to pick the right one instead of a plain "first result" guess, and learns from any corrections you make |
+
+### Podcasts
+
+| Feature | Details |
+|---|---|
+| **Search & subscriptions** | Discover and subscribe to podcasts; new-episode push notifications; OPML import/export to bring subscriptions in from (or out to) another podcast app |
+| **Playback** | Chapter support (Podcasting 2.0 chapters JSON), offline episode downloads, opt-in auto-download of new episodes, a Continue Listening teaser on the Home hub |
 
 ### Streaming (via the bridge server)
 
@@ -73,6 +86,7 @@ bridge, and build-from-source instructions.
 | **Push/pull sync** | Background sync on every change and app launch; pull merges rather than overwrites |
 | **Backup history** | Automatic pre-sync snapshots you can restore from |
 | **Queue sync** | Your Up Next queue is saved server-side and restored on other signed-in devices |
+| **Rewind** | A shareable "Wrapped"-style recap card — All Time, This Month, or This Year — with top songs/artists, listening time, and (for Month/Year) distinct artists/tracks, average BPM, and peak listening day |
 | **Achievements** | Listening streaks, play-count and listening-time badges, time-of-day badges |
 | **Notifications** | In-app inbox for achievement unlocks, subscription uploads, and collaborator activity — delivered as real background push when the server operator configures an APNs key (`APNS_KEY_BASE64`/`APNS_KEY_ID`/`APNS_TEAM_ID`), otherwise surfaced on next foreground/poll |
 
@@ -100,6 +114,10 @@ bridge, and build-from-source instructions.
   to pick the correct match instead of a plain "first result" guess, and she learns from any corrections
   you make. No audio or file contents are ever sent, and she never overrides an already-exact match by
   herself without reviewing the alternatives first.
+- **AI DJ Mode** (Settings → Account → AI Features) — off by default. When enabled, only the
+  titles/artists of the two tracks either side of a transition are sent to write a spoken
+  transition line; the line itself is read aloud entirely on-device (`AVSpeechSynthesizer`), so
+  nothing about your voice is ever recorded or sent anywhere.
 
 ---
 
