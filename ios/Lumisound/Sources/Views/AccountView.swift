@@ -269,6 +269,16 @@ struct AccountView: View {
                             .foregroundStyle(AppTheme.textPrimary)
                     }
 
+                    NavigationLink(destination: NeedleDropView()) {
+                        Label("Needle Drop", systemImage: "questionmark.circle")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+
+                    NavigationLink(destination: TimeCapsulesView()) {
+                        Label("Time Capsules", systemImage: "shippingbox")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+
                     NavigationLink(destination: ScrobblingView()) {
                         Label("Scrobbling", systemImage: "waveform.path.ecg")
                             .foregroundStyle(AppTheme.textPrimary)

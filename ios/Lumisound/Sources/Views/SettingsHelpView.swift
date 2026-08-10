@@ -432,6 +432,16 @@ struct SettingsHelpView: View {
                 title: "AI DJ Mode",
                 body: "Account → AI Features → AI DJ Mode. When on, Aria briefly ducks the volume and speaks a short transition line as each new track starts, like a real radio DJ handing off between songs, using on-device text-to-speech — nothing about your voice is recorded or sent anywhere. Only the two track titles/artists involved in a transition are sent to write that line. Off by default; requires being signed in."
             ),
+            HelpTopic(
+                icon: "questionmark.circle",
+                title: "Needle Drop",
+                body: "Account → Library → Needle Drop is a music-guessing mini-game built from your own library: a short clip plays from a random point in a random track, and you pick the right title/artist from 4 choices before it fades out. Build a streak — a miss resets it, but your best streak and lifetime record are always saved. Entirely on-device; needs at least 4 songs of a decent length in your library to play."
+            ),
+            HelpTopic(
+                icon: "shippingbox",
+                title: "Time Capsules",
+                body: "Account → Library → Time Capsules lets you seal a set of songs (from Favorites or an existing playlist) with a short note to your future self, locked until a date you choose. A notification lets you know the moment it unlocks; open it to relive the songs and read the note back. Entirely on-device — nothing about a capsule's contents is sent anywhere."
+            ),
         ]),
         HelpCategory(icon: "lock.shield", title: "Privacy & Security", topics: [
             HelpTopic(
