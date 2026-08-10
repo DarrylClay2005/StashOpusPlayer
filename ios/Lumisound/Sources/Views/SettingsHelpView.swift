@@ -411,6 +411,11 @@ struct SettingsHelpView: View {
                 body: "From a playlist, tap Share to generate a share code or link and invite other Lumisound users as Editors (can add/remove songs) or Viewers (read-only). Anyone with the code can open Collaborative Playlists → Enter Share Code to import it. You can revoke a share link at any time, which immediately cuts off access for everyone using it."
             ),
             HelpTopic(
+                icon: "photo.artframe",
+                title: "Mixtape Card",
+                body: "Open a playlist → the folder icon in the toolbar → Mixtape Card generates a designed cover image — artwork collage, name, length, and tracklist — that you can share anywhere via the system share sheet. Purely a picture: unlike Collaborative Playlists' share code, there's no live data or invite behind it, just something nice to post."
+            ),
+            HelpTopic(
                 icon: "tray.and.arrow.down",
                 title: "Shared with Me",
                 body: "Playlists → Shared with Me lists every playlist another user has added you to as a collaborator, along with your role (Editor/Viewer) and the owner's username. Tap one to view its tracks, play them all, or save a local copy into your own library. Updates from the owner or other collaborators appear automatically the next time you open it."

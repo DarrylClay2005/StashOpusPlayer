@@ -100,6 +100,7 @@ bridge, and build-from-source instructions.
 | **Friends & profiles** | Add friends, accept/decline requests, and view a friend's public profile — banner, avatar, bio, pinned tracks, and live online/now-playing status if they share it. Your own Profile tab shows the same public view with an Edit button, rather than opening straight into editing |
 | **Listening Twin** | Finds and names the single other opted-in user whose top artists overlap most with yours — match %, shared artists, one-tap friend request, plus a Twin Mix seeded from their other favorites |
 | **Collaborative playlists** | Share a playlist via code/link; invite others as Editor or Viewer, revoke anytime |
+| **Mixtape Cards** | Generate a designed cover image for any playlist — artwork collage, name, length, tracklist — to share anywhere via the system share sheet; a purely aesthetic export, not a live invite |
 | **Shared with Me** | View, play, or save a local copy of playlists others have shared with you |
 | **Scrobbling** | Link Last.fm and/or ListenBrainz to scrobble finished tracks automatically |
 | **Discord Webhook** | Post a "Now Playing" message to a Discord channel via incoming webhook |

@@ -12,6 +12,7 @@ struct PlaylistDetailView: View {
     @State private var showingAddSongs = false
     @State private var showShareSheet = false
     @State private var showOrganizeSheet = false
+    @State private var showMixtapeCard = false
     @State private var m3uExportURL: URL?
     @State private var showM3UShareSheet = false
 
@@ -164,6 +165,11 @@ struct PlaylistDetailView: View {
                         } label: {
                             Label("Export as M3U", systemImage: "doc.text")
                         }
+                        Button {
+                            showMixtapeCard = true
+                        } label: {
+                            Label("Mixtape Card", systemImage: "photo.artframe")
+                        }
                     } label: {
                         Image(systemName: "folder.badge.gearshape")
                     }
@@ -201,6 +207,12 @@ struct PlaylistDetailView: View {
         .sheet(isPresented: $showOrganizeSheet) {
             PlaylistOrganizeSheet(playlist: currentPlaylist)
                 .environmentObject(library)
+        }
+        .sheet(isPresented: $showMixtapeCard) {
+            NavigationStack {
+                MixtapeCardView(playlist: currentPlaylist)
+                    .environmentObject(library)
+            }
         }
         .sheet(isPresented: $showShareSheet) {
             CollaborativePlaylistView(playlist: playlist)
