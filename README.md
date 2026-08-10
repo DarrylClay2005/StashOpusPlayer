@@ -40,7 +40,7 @@ bridge, and build-from-source instructions.
 | **Now Playing** | 25 selectable visual styles for the album art (vinyl, cassette, aurora, glitch/VHS, and more), plus a built-in editor to design and save your own; full transport controls, Up Next queue, lock-screen & headphone controls, synced lyrics |
 | **AI DJ Mode** | Opt-in — Aria Lumi writes a short spoken transition line between tracks, read aloud on-device (no audio ever leaves the device) while volume briefly ducks |
 | **Silence Trim** | Opt-in — automatically skips up to 10 seconds of dead air at the start of a local track, analyzed and cached on-device the first time it plays |
-| **Practice Mode** | A dedicated tool for learning a track by ear — a visual metronome synced to the track's detected tempo (live-adjusted for playback speed), a sub-100% speed slider with quick presets, and Loop Region controls built on the existing A-B repeat |
+| **Practice Mode** | A dedicated tool for learning a track by ear — a visual metronome synced to the track's detected tempo (live-adjusted for playback speed), a sub-100% speed slider with quick presets, and Loop Region controls built on the existing A-B repeat; export the loop region as a standalone .m4a clip to share or use as a ringtone |
 | **Focus Sessions** | A Pomodoro-style work/break timer tied to playback — plays a chosen soundtrack through work blocks, pauses for breaks, notifies you at each transition, and tracks completed sessions |
 | **Listen Together** | SharePlay session keeps everyone's playback in sync; participants can also suggest tracks into a shared queue and upvote each other's picks, with the top-voted pick playable in one tap |
 | **Widgets & Live Activity** | Home Screen, Lock Screen, and StandBy widgets plus a Live Activity showing the current track; CarPlay support for browsing and transport controls; Siri/Shortcuts App Intents; a Focus Filter to tie playback behavior to a Focus mode |
@@ -59,6 +59,7 @@ bridge, and build-from-source instructions.
 | **M3U import/export** | Bring in a `.m3u`/`.m3u8` playlist from another app (matched by filename, falling back to title/artist), or export any playlist as one |
 | **Downloads manager & Recently Deleted** | See every downloaded track's on-disk size, sort by size or date, delete individually or in bulk; deletions land in a 30-day Recently Deleted safety net first |
 | **Duplicate & corrupt file finders** | Duplicate Finder groups likely-duplicate downloads by matching how they actually sound via audio fingerprinting (AcoustID), not just title text; Corrupt File Finder flags any download that fails to play so you can re-fetch just that one |
+| **Library Health** | A single 0-100 scorecard tying together Duplicate Finder, Corrupt File Finder, and two new checks (missing metadata, low bitrate) — tap any category to jump straight to the affected songs |
 | **Aria Lumi metadata matching** | Built-in, always on — when a local file has more than one possible metadata match, Aria Lumi (Lumisound's own music intelligence) reviews the candidates using titles, artists, cover art, and a sense of your own listening habits to pick the right one instead of a plain "first result" guess, and learns from any corrections you make |
 
 ### Podcasts

@@ -14,6 +14,10 @@ struct PracticeModeView: View {
 
     @State private var bpm: Double?
     @State private var isLoadingBPM = false
+    @State private var isExportingClip = false
+    @State private var exportedClipURL: URL?
+    @State private var showExportShareSheet = false
+    @State private var exportError: String?
 
     private var song: Song? { player.currentSong }
 
@@ -197,10 +201,55 @@ struct PracticeModeView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+
+                if song?.url?.isFileURL == true {
+                    Button {
+                        exportClip()
+                    } label: {
+                        if isExportingClip {
+                            ProgressView().frame(maxWidth: .infinity)
+                        } else {
+                            Label("Export Clip", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.dynamicAccent)
+                    .disabled(isExportingClip)
+
+                    if let exportError {
+                        Text(exportError)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.error)
+                    }
+                }
             }
         }
         .padding()
         .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+        .sheet(isPresented: $showExportShareSheet) {
+            if let exportedClipURL {
+                RewindShareSheet(items: [exportedClipURL])
+            }
+        }
+    }
+
+    private func exportClip() {
+        guard let song, let url = song.url,
+              let start = player.abRepeatStart, let end = player.abRepeatEnd else { return }
+        isExportingClip = true
+        exportError = nil
+        Task {
+            defer { isExportingClip = false }
+            do {
+                exportedClipURL = try await ClipExportService.exportClip(
+                    from: url, start: start, end: end, title: song.title
+                )
+                showExportShareSheet = true
+            } catch {
+                exportError = error.localizedDescription
+            }
+        }
     }
 
     private func loopBoundLabel(title: String, value: TimeInterval?) -> some View {

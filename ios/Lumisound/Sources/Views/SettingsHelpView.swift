@@ -134,7 +134,7 @@ struct SettingsHelpView: View {
             HelpTopic(
                 icon: "metronome",
                 title: "Practice Mode",
-                body: "Now Playing → overflow menu → Practice Mode opens a dedicated tool for learning a track by ear: a visual metronome pulse synced to the track's detected tempo (adjusted live for playback speed, so it always matches what you're actually hearing), a speed slider capped at 100% with quick 50/75/90% presets, and Loop Region controls (the same A-B repeat markers available elsewhere) to repeat just the section you're working on. Built from existing playback controls, not a separate audio engine."
+                body: "Now Playing → overflow menu → Practice Mode opens a dedicated tool for learning a track by ear: a visual metronome pulse synced to the track's detected tempo (adjusted live for playback speed, so it always matches what you're actually hearing), a speed slider capped at 100% with quick 50/75/90% presets, and Loop Region controls (the same A-B repeat markers available elsewhere) to repeat just the section you're working on. Built from existing playback controls, not a separate audio engine. Once a loop is set on a local (downloaded/imported) track, an Export Clip button saves that exact region as a standalone .m4a file you can share, AirDrop, or bring into GarageBand/Finder to set as a ringtone."
             ),
             HelpTopic(
                 icon: "bookmark",
@@ -254,6 +254,11 @@ struct SettingsHelpView: View {
                 icon: "trash.slash",
                 title: "Recently Deleted",
                 body: "Deleting a downloaded track (from the Downloads Manager or the general Library view) doesn't remove it immediately — it moves to Recently Deleted (accessible from the Downloads Manager) for 30 days, where you can restore it or delete it permanently right away. This is a safety net for an accidental bulk delete; after 30 days it's purged automatically."
+            ),
+            HelpTopic(
+                icon: "heart.text.square",
+                title: "Library Health",
+                body: "Settings → Library → Library Health is a single scorecard tying together Duplicate Finder, Corrupt File Finder, and two new checks (missing metadata, low bitrate under 128 kbps) — a 0-100 score plus a tappable count for each category, so you don't have to remember to open each tool separately. Tap any category to see (and jump to) the affected songs."
             ),
             HelpTopic(
                 icon: "doc.on.doc",

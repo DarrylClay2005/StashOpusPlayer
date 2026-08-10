@@ -97,6 +97,12 @@ extension SettingsView {
             }
             .foregroundStyle(AppTheme.textPrimary)
 
+            // Unified health scorecard — metadata/bitrate checks plus the two below
+            NavigationLink(destination: LibraryHealthView()) {
+                Label("Library Health", systemImage: "heart.text.square")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+
             // Corrupt file finder
             NavigationLink(destination: CorruptFilesView()) {
                 Label("Corrupt File Finder", systemImage: "exclamationmark.triangle")
