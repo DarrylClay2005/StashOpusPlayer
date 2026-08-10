@@ -114,4 +114,23 @@ extension AccountService {
             appWarn("fetchAriaDailyPick: \(error.localizedDescription)", category: "network")
         }
     }
+
+    /// Fetches (or triggers, on a first-ever request for this album) a
+    /// short Aria Lumi liner-notes blurb for `artist`/`album` — cached
+    /// server-side per album, not per user, so most calls are free (see
+    /// `/music/liner-notes` in main.py). `nil` when logged out, the album
+    /// isn't recognized/confident enough, or the request fails.
+    func fetchLinerNotes(artist: String, album: String) async -> String? {
+        guard isLoggedIn,
+              let encodedArtist = artist.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let encodedAlbum = album.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+        else { return nil }
+        do {
+            let data = try await makeRequest("/music/liner-notes?artist=\(encodedArtist)&album=\(encodedAlbum)")
+            struct Response: Decodable { let blurb: String? }
+            return try JSONDecoder().decode(Response.self, from: data).blurb
+        } catch {
+            return nil
+        }
+    }
 }

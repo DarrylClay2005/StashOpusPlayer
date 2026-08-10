@@ -217,6 +217,7 @@ struct NowPlayingView: View {
     // Format info sheet
     @State var showFormatInfoSheet = false
     @State var showPracticeModeSheet = false
+    @State var showFocusSessionSheet = false
 
     // Transfer Playback sheet
     @State var showTransferPlaybackSheet = false
@@ -265,6 +266,10 @@ struct NowPlayingView: View {
         .sheet(isPresented: $showPracticeModeSheet) {
             PracticeModeView()
                 .environmentObject(player)
+                .environmentObject(library)
+        }
+        .sheet(isPresented: $showFocusSessionSheet) {
+            FocusSessionView()
                 .environmentObject(library)
         }
         .sheet(isPresented: $showTransferPlaybackSheet) {

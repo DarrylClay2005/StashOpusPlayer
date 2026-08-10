@@ -97,6 +97,11 @@ struct SettingsHelpView: View {
                 body: "The Sleep Timer pauses playback after a set amount of time — useful for falling asleep to music without leaving audio running all night. Choose a preset duration (5 minutes to 2 hours) and tap Start. The remaining time appears as a pill in Now Playing. Tapping the pill opens the timer sheet where you can cancel early."
             ),
             HelpTopic(
+                icon: "timer",
+                title: "Focus Sessions",
+                body: "Now Playing → overflow menu → Focus Session opens a Pomodoro-style work/break timer: pick work and break lengths and a number of rounds, choose a soundtrack (keep whatever's playing, Favorites, or a playlist), and it automatically plays through work blocks and pauses for breaks, notifying you at each transition even if you've left the app. Tracks how many sessions you've completed."
+            ),
+            HelpTopic(
                 icon: "sparkles",
                 title: "Auto-Radio",
                 body: "Auto-Radio automatically appends new songs to the queue when it is about to run out. When the last track finishes, Lumisound searches YouTube for songs similar to the one you were just listening to and queues up the top results. Toggle it on in the Now Playing screen. Requires an internet connection."
@@ -214,6 +219,11 @@ struct SettingsHelpView: View {
                 icon: "wand.and.stars",
                 title: "Aria Lumi",
                 body: "When a metadata lookup for a local file turns up more than one possible match, Aria Lumi — Lumisound's built-in music intelligence — reviews the candidates for you: comparing titles and artists, looking at each candidate's cover art, and weighing in a lightweight sense of what you actually listen to, rather than just grabbing the first result. She's always on, with nothing to turn on or set up, and she learns from it any time you manually correct a track she got wrong. No audio or file contents are ever sent — only text metadata and cover art for the specific candidates being compared."
+            ),
+            HelpTopic(
+                icon: "text.quote",
+                title: "Liner Notes",
+                body: "Open any album to see a short Aria-written note about it, when she recognizes it — genre, mood, where it sits in the artist's catalog. Shared across every listener rather than generated per person, so most albums load instantly once anyone has viewed them; some albums show nothing if she's not confident enough to say anything specific."
             ),
             HelpTopic(
                 icon: "sparkle",

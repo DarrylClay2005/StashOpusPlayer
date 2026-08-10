@@ -91,6 +91,11 @@ extension NowPlayingView {
                     Label("Practice Mode", systemImage: "metronome")
                 }
             }
+            Button {
+                showFocusSessionSheet = true
+            } label: {
+                Label("Focus Session", systemImage: "timer")
+            }
             if account.isLoggedIn, player.currentSong != nil {
                 Button {
                     showTransferPlaybackSheet = true

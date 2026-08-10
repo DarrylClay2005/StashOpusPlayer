@@ -12067,6 +12067,92 @@ async def get_aria_daily_pick(payload: dict = Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
+# Liner Notes (Feature: liner-notes)
+# ---------------------------------------------------------------------------
+#
+# A third, maximally rate-limit-conscious use of Aria Lumi: a short blurb
+# about an album, cached in ios_intelligence_cache keyed by the album alone
+# (normalized "artist|album", NOT including a user id) — since what's true
+# about an album doesn't depend on who's asking, this costs at most ONE
+# Gemini call EVER per unique album across every user on the server, for
+# the lifetime of the cache row. Compare metadata_resolve (per request) and
+# daily_pick (per user per day): this is the lightest-weight of the three.
+
+_LINER_NOTES_SYSTEM_PROMPT = (
+    "You are writing short liner notes for an album, shown on its detail "
+    "screen in a music app. You are given only the artist and album title — "
+    "no other data. Write 2-3 plain sentences (max 60 words total) about "
+    "the album: genre/mood, what it's known for, where it sits in the "
+    "artist's catalog — using your own general knowledge if you recognize "
+    "it. If you don't confidently recognize this exact album, keep it "
+    "brief and describe only what the title/artist reasonably suggest — "
+    "never state a specific fact (release date, chart position, sales "
+    "figure, award, tracklist detail) you are not confident is real. A "
+    "shorter, vaguer note is much better than a confident wrong one. No "
+    "markdown, plain prose only."
+)
+
+_LINER_NOTES_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "blurb": {
+            "type": "string",
+            "description": "2-3 plain sentences, no markdown",
+        },
+    },
+    "required": ["blurb"],
+}
+
+
+@app.get("/music/liner-notes")
+async def get_liner_notes(
+    artist: str = Query(...),
+    album: str = Query(...),
+    payload: dict = Depends(get_current_user),
+):
+    """Returns {"blurb": null} (never an error) whenever intelligence is
+    disabled, cooling down, or the call fails — the client just shows
+    nothing in that case (see AlbumLinerNotesCard.swift)."""
+    artist_norm = artist.strip().lower()
+    album_norm = album.strip().lower()
+    if not artist_norm or not album_norm:
+        return {"blurb": None}
+    cache_key = f"{artist_norm}|{album_norm}"
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT result_json FROM ios_intelligence_cache WHERE task = %s AND cache_key = %s",
+                ("liner_notes", cache_key),
+            )
+            cached = await cur.fetchone()
+            if cached:
+                return json.loads(cached[0])
+
+    result = await call_intelligence(
+        "liner_notes",
+        _LINER_NOTES_SYSTEM_PROMPT,
+        {"artist": artist, "album": album},
+        _LINER_NOTES_SCHEMA,
+    )
+    response = {"blurb": result["blurb"] if result else None}
+
+    # Only cache a real result — a rate-limited/failed call should be
+    # retried by the next viewer of this album, not permanently frozen as
+    # "no notes" for everyone.
+    if result is not None:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "INSERT INTO ios_intelligence_cache (task, cache_key, result_json) VALUES (%s, %s, %s) "
+                    "ON CONFLICT (task, cache_key) DO UPDATE SET result_json = EXCLUDED.result_json",
+                    ("liner_notes", cache_key, json.dumps(response)),
+                )
+    return response
+
+
+# ---------------------------------------------------------------------------
 # Listening Twin (Feature: listening-twin)
 # ---------------------------------------------------------------------------
 #

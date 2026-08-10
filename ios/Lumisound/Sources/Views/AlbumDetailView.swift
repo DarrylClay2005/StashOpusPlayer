@@ -5,6 +5,7 @@ struct AlbumDetailView: View {
 
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
+    @EnvironmentObject private var account: AccountService
 
     @AppStorage("albumDetail_columns") private var columns: Int = 1
 
@@ -77,6 +78,12 @@ struct AlbumDetailView: View {
                     }
                     .listSectionSeparator(.hidden)
 
+                    Section {
+                        AlbumLinerNotesCard(album: album, artist: artistName)
+                    }
+                    .listRowBackground(Color.clear)
+                    .listSectionSeparator(.hidden)
+
                     // Tracks — uses the same SongRow component as the main Songs
                     // tab so rows look/behave identically (artwork, context menus,
                     // favorite/play targets, styling) everywhere.
@@ -127,6 +134,9 @@ struct AlbumDetailView: View {
                         .buttonStyle(.bordered)
                         .tint(AppTheme.dynamicAccent)
                         .padding(.horizontal, 16)
+
+                        AlbumLinerNotesCard(album: album, artist: artistName)
+                            .padding(.horizontal, 16)
 
                         if songs.isEmpty {
                             EmptyStateView(icon: "square.stack", title: "No tracks", message: "This album has no tracks.")
@@ -190,6 +200,44 @@ struct AlbumDetailView: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+}
+
+// MARK: - Liner Notes
+//
+// A short Aria Lumi-written blurb about the album (GET /music/liner-notes),
+// cached server-side PER ALBUM rather than per-user — since album facts
+// don't change per listener, this costs at most one Gemini call EVER per
+// unique album across the whole server, not once per user/day like Aria's
+// Daily Pick. Renders nothing at all (no placeholder, no error state) when
+// there's no blurb yet, so a cache-miss or logged-out state never leaves
+// visible dead space on the album screen.
+private struct AlbumLinerNotesCard: View {
+    let album: String
+    let artist: String
+
+    @EnvironmentObject private var account: AccountService
+    @State private var blurb: String?
+
+    var body: some View {
+        Group {
+            if let blurb {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Liner Notes", systemImage: "text.quote")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                    Text(blurb)
+                        .font(.subheadline)
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+        .task(id: "\(artist)|\(album)") {
+            blurb = await account.fetchLinerNotes(artist: artist, album: album)
         }
     }
 }
