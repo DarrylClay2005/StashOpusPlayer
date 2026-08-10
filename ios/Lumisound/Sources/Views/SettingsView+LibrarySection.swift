@@ -115,6 +115,12 @@ extension SettingsView {
                     .foregroundStyle(AppTheme.textPrimary)
             }
 
+            // Playlist overlap/merge tool
+            NavigationLink(destination: PlaylistMergeToolView()) {
+                Label("Compare Playlists", systemImage: "rectangle.2.swap")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+
             // Storage & cache manager
             NavigationLink(destination: CacheManagerView().environmentObject(cacheManager)) {
                 Label("Storage & Cache", systemImage: "internaldrive")

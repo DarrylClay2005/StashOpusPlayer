@@ -60,6 +60,7 @@ bridge, and build-from-source instructions.
 | **Downloads manager & Recently Deleted** | See every downloaded track's on-disk size, sort by size or date, delete individually or in bulk; deletions land in a 30-day Recently Deleted safety net first |
 | **Duplicate & corrupt file finders** | Duplicate Finder groups likely-duplicate downloads by matching how they actually sound via audio fingerprinting (AcoustID), not just title text; Corrupt File Finder flags any download that fails to play so you can re-fetch just that one |
 | **Library Health** | A single 0-100 scorecard tying together Duplicate Finder, Corrupt File Finder, and two new checks (missing metadata, low bitrate) — tap any category to jump straight to the affected songs |
+| **Compare Playlists** | Pick two playlists to see what overlaps and what's unique to each, with a one-tap Save as New Playlist for any of the three resulting lists |
 | **Aria Lumi metadata matching** | Built-in, always on — when a local file has more than one possible metadata match, Aria Lumi (Lumisound's own music intelligence) reviews the candidates using titles, artists, cover art, and a sense of your own listening habits to pick the right one instead of a plain "first result" guess, and learns from any corrections you make |
 
 ### Podcasts
@@ -93,6 +94,7 @@ bridge, and build-from-source instructions.
 | **Queue sync** | Your Up Next queue is saved server-side and restored on other signed-in devices |
 | **Rewind** | A shareable "Wrapped"-style recap card — All Time, This Month, or This Year — with top songs/artists, listening time, and (for Month/Year) distinct artists/tracks, average BPM, and peak listening day |
 | **Achievements** | Listening streaks, play-count and listening-time badges, time-of-day badges |
+| **Listening Goal** | Set a weekly listening-time target and track real progress against it — forward-looking, unlike Achievements' retrospective badges |
 | **Notifications** | In-app inbox for achievement unlocks, subscription uploads, and collaborator activity — delivered as real background push when the server operator configures an APNs key (`APNS_KEY_BASE64`/`APNS_KEY_ID`/`APNS_TEAM_ID`), otherwise surfaced on next foreground/poll |
 
 ### Sharing & Social

@@ -261,6 +261,11 @@ struct SettingsHelpView: View {
                 body: "Deleting a downloaded track (from the Downloads Manager or the general Library view) doesn't remove it immediately — it moves to Recently Deleted (accessible from the Downloads Manager) for 30 days, where you can restore it or delete it permanently right away. This is a safety net for an accidental bulk delete; after 30 days it's purged automatically."
             ),
             HelpTopic(
+                icon: "rectangle.2.swap",
+                title: "Compare Playlists",
+                body: "Settings → Library → Compare Playlists picks two playlists and shows what's in both, and what's unique to each, with a Save as New Playlist button for any of the three resulting lists — a quick way to merge two playlists, split off just the overlap, or find what one playlist has that another doesn't."
+            ),
+            HelpTopic(
                 icon: "heart.text.square",
                 title: "Library Health",
                 body: "Settings → Library → Library Health is a single scorecard tying together Duplicate Finder, Corrupt File Finder, and two new checks (missing metadata, low bitrate under 128 kbps) — a 0-100 score plus a tappable count for each category, so you don't have to remember to open each tool separately. Tap any category to see (and jump to) the affected songs."
@@ -447,6 +452,11 @@ struct SettingsHelpView: View {
             ),
         ]),
         HelpCategory(icon: "sparkles", title: "Achievements & Discovery", topics: [
+            HelpTopic(
+                icon: "target",
+                title: "Listening Goal",
+                body: "Account → Listening Goal lets you set a weekly listening-time target and tracks real progress against it (last 7 days of actual listen time), with a one-time toast the first time you hit it each week. Forward-looking, unlike Achievements below — a target you set for yourself, not a badge for something you already did. The target itself is saved on this device only."
+            ),
             HelpTopic(
                 icon: "trophy",
                 title: "Achievements & Streaks",

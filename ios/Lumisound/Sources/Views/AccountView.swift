@@ -269,6 +269,11 @@ struct AccountView: View {
                             .foregroundStyle(AppTheme.textPrimary)
                     }
 
+                    NavigationLink(destination: ListeningGoalView()) {
+                        Label("Listening Goal", systemImage: "target")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+
                     NavigationLink(destination: NeedleDropView()) {
                         Label("Needle Drop", systemImage: "questionmark.circle")
                             .foregroundStyle(AppTheme.textPrimary)

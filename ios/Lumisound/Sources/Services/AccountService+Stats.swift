@@ -53,6 +53,22 @@ extension AccountService {
         }
     }
 
+    /// Fetches per-day play counts/listen time for the last 7 days —
+    /// powers `ListeningGoalService`'s weekly progress tracking. Same
+    /// response shape as `fetchListeningHeatmap`, reused via `HeatmapDay`
+    /// rather than a duplicate model, just hitting the shorter-range
+    /// /user/stats/weekly endpoint instead of /user/stats/heatmap.
+    func fetchWeeklyStats() async -> [HeatmapDay] {
+        guard isLoggedIn else { return [] }
+        do {
+            let data = try await makeRequest("/user/stats/weekly")
+            return try JSONDecoder().decode([HeatmapDay].self, from: data)
+        } catch {
+            appWarn("fetchWeeklyStats: \(error.localizedDescription)", category: "network")
+            return []
+        }
+    }
+
     /// Fetches per-day play counts/listen time for the last `days` days
     /// (default a year) — powers `ListeningHeatmapView`'s calendar heatmap.
     /// Empty on failure or if there's no history yet.
