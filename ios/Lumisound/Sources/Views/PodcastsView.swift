@@ -220,7 +220,7 @@ private struct AddPodcastSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onAdded: () async -> Void
 
-    private enum Mode: String, CaseIterable { case search = "Search", url = "Feed URL" }
+    private enum Mode: String, CaseIterable { case search = "Search", trending = "Trending", url = "Feed URL" }
     @State private var mode: Mode = .search
 
     @State private var feedURLText = ""
@@ -232,6 +232,10 @@ private struct AddPodcastSheet: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var subscribingFeedURL: String?
 
+    @State private var trendingResults: [PodcastSearchResult] = []
+    @State private var isLoadingTrending = false
+    @State private var hasLoadedTrending = false
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -241,10 +245,10 @@ private struct AddPodcastSheet: View {
                 .pickerStyle(.segmented)
                 .padding()
 
-                if mode == .search {
-                    searchBody
-                } else {
-                    urlBody
+                switch mode {
+                case .search: searchBody
+                case .trending: trendingBody
+                case .url: urlBody
                 }
             }
             .navigationTitle("Add Podcast")
@@ -271,28 +275,8 @@ private struct AddPodcastSheet: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
             ForEach(searchResults) { result in
-                Button {
+                PodcastResultRow(result: result, isSubscribing: subscribingFeedURL == result.feedURL) {
                     subscribe(feedURL: result.feedURL)
-                } label: {
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(result.title ?? "Untitled")
-                                .foregroundStyle(AppTheme.textPrimary)
-                                .lineLimit(2)
-                            if let artist = result.artist {
-                                Text(artist)
-                                    .font(.caption)
-                                    .foregroundStyle(AppTheme.textSecondary)
-                            }
-                        }
-                        Spacer()
-                        if subscribingFeedURL == result.feedURL {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "plus.circle")
-                                .foregroundStyle(AppTheme.dynamicAccent)
-                        }
-                    }
                 }
                 .disabled(subscribingFeedURL != nil)
             }
@@ -306,6 +290,33 @@ private struct AddPodcastSheet: View {
                 guard !Task.isCancelled else { return }
                 await runSearch(newValue)
             }
+        }
+    }
+
+    // MARK: Trending tab
+
+    private var trendingBody: some View {
+        List {
+            if isLoadingTrending && trendingResults.isEmpty {
+                HStack { Spacer(); ProgressView(); Spacer() }
+            } else if trendingResults.isEmpty && hasLoadedTrending {
+                Text("Nothing trending right now — try again later.")
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            ForEach(trendingResults) { result in
+                PodcastResultRow(result: result, isSubscribing: subscribingFeedURL == result.feedURL) {
+                    subscribe(feedURL: result.feedURL)
+                }
+                .disabled(subscribingFeedURL != nil)
+            }
+        }
+        .listStyle(.plain)
+        .task {
+            guard !hasLoadedTrending else { return }
+            isLoadingTrending = true
+            trendingResults = await account.fetchTrendingPodcasts()
+            hasLoadedTrending = true
+            isLoadingTrending = false
         }
     }
 
@@ -356,6 +367,39 @@ private struct AddPodcastSheet: View {
                 } else {
                     Button("Add") { subscribe(feedURL: feedURLText.trimmingCharacters(in: .whitespaces)) }
                         .disabled(feedURLText.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+/// One tappable row for a `PodcastSearchResult` — shared by the Search and
+/// Trending tabs of `AddPodcastSheet`, since both just show a subscribe
+/// button over the same result shape.
+private struct PodcastResultRow: View {
+    let result: PodcastSearchResult
+    let isSubscribing: Bool
+    let onSubscribe: () -> Void
+
+    var body: some View {
+        Button(action: onSubscribe) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(result.title ?? "Untitled")
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .lineLimit(2)
+                    if let artist = result.artist {
+                        Text(artist)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+                Spacer()
+                if isSubscribing {
+                    ProgressView()
+                } else {
+                    Image(systemName: "plus.circle")
+                        .foregroundStyle(AppTheme.dynamicAccent)
                 }
             }
         }

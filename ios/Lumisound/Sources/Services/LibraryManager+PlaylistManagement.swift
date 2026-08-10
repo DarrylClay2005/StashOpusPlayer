@@ -67,10 +67,23 @@ extension LibraryManager {
     }
 
     func deletePlaylist(_ playlist: Playlist) {
+        DeletedPlaylistsStore.shared.trash(playlist)
         playlists.removeAll { $0.id == playlist.id }
         persistence.savePlaylists(playlists)
         appLog("deletePlaylist: \"\(playlist.name)\" (id: \(playlist.id), \(playlist.songIDs.count) song(s))", category: "library")
         ToastCenter.shared.show("Deleted playlist \"\(playlist.name)\"", category: .info, icon: "trash")
+    }
+
+    /// Re-adds a playlist trashed via `deletePlaylist` — see
+    /// `DeletedPlaylistsView`. Preserves the playlist's original id, so any
+    /// existing references to it (e.g. a Home dashboard shortcut) come
+    /// back working rather than pointing at a since-deleted id.
+    func restorePlaylist(_ playlist: Playlist) {
+        guard !playlists.contains(where: { $0.id == playlist.id }) else { return }
+        playlists.append(playlist)
+        persistence.savePlaylists(playlists)
+        appLog("restorePlaylist: \"\(playlist.name)\" (id: \(playlist.id))", category: "library")
+        ToastCenter.shared.show("Restored playlist \"\(playlist.name)\"", category: .success, icon: "arrow.uturn.backward")
     }
 
     func renamePlaylist(_ playlist: Playlist, to newName: String) {

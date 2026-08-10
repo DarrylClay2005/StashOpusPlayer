@@ -16703,6 +16703,87 @@ async def search_podcasts(
         raise HTTPException(status_code=502, detail=f"Podcast search failed: {exc}")
 
 
+def _fetch_trending_podcasts_sync(limit: int) -> list[dict]:
+    """Apple's public top-podcasts chart — no seeding logic needed (unlike
+    /user/discover-mix, which seeds from the caller's own top artists),
+    since podcast discovery has no per-user listening history to seed from
+    the way music does. The chart endpoint doesn't include feedUrl, so a
+    second batch lookup call resolves it for each chart entry, same
+    two-step shape real-world iTunes-API integrations always need."""
+    req = urllib.request.Request(
+        f"https://itunes.apple.com/us/rss/toppodcasts/limit={limit}/json",
+        headers={"User-Agent": "Lumisound-Bridge/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        chart = json.loads(resp.read())
+    entries = chart.get("feed", {}).get("entry", [])
+
+    ordered_ids: list[str] = []
+    meta_by_id: dict[str, dict] = {}
+    for entry in entries:
+        pid = entry.get("id", {}).get("attributes", {}).get("im:id")
+        if not pid:
+            continue
+        ordered_ids.append(pid)
+        images = entry.get("im:image") or []
+        meta_by_id[pid] = {
+            "title": (entry.get("im:name") or {}).get("label"),
+            "artist": (entry.get("im:artist") or {}).get("label"),
+            "artwork_url": images[-1]["label"] if images else None,
+        }
+    if not ordered_ids:
+        return []
+
+    lookup_params = urllib.parse.urlencode({"id": ",".join(ordered_ids), "entity": "podcast"})
+    lookup_req = urllib.request.Request(
+        f"https://itunes.apple.com/lookup?{lookup_params}",
+        headers={"User-Agent": "Lumisound-Bridge/1.0"},
+    )
+    with urllib.request.urlopen(lookup_req, timeout=15) as resp:
+        lookup = json.loads(resp.read())
+    feed_url_by_id = {
+        str(r.get("collectionId")): r.get("feedUrl")
+        for r in lookup.get("results", [])
+        if r.get("feedUrl")
+    }
+
+    results = []
+    for pid in ordered_ids:
+        feed_url = feed_url_by_id.get(pid)
+        if not feed_url:
+            continue
+        results.append({**meta_by_id[pid], "feed_url": feed_url})
+    return results
+
+
+@app.get("/podcasts/trending")
+async def get_trending_podcasts(
+    limit: int = Query(20, ge=1, le=50),
+    payload: dict = Depends(get_current_user),
+):
+    """Trending podcasts via Apple's public top-podcasts chart, filtered to
+    exclude shows the caller is already subscribed to — the first real
+    discovery surface for podcasts in this app; everything else podcast-
+    related (search, subscriptions) requires already knowing what you're
+    looking for."""
+    user_id = payload["sub"]
+    try:
+        trending = await asyncio.to_thread(_fetch_trending_podcasts_sync, limit)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Trending podcasts fetch failed: {exc}")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT feed_url FROM ios_podcast_subscriptions WHERE user_id = %s",
+                (user_id,),
+            )
+            subscribed = {r[0] for r in await cur.fetchall()}
+
+    return [item for item in trending if item["feed_url"] not in subscribed]
+
+
 # ---------------------------------------------------------------------------
 # Podcast new-episode polling -- same "periodic background pass, in-app +
 # push notification via _create_notification" shape as

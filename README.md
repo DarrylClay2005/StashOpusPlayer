@@ -58,6 +58,7 @@ bridge, and build-from-source instructions.
 | **Smart Playlists** | Rule-based playlists (favorite status, play count, duration, genre, and more) that refresh themselves every time you open them |
 | **M3U import/export** | Bring in a `.m3u`/`.m3u8` playlist from another app (matched by filename, falling back to title/artist), or export any playlist as one |
 | **Downloads manager & Recently Deleted** | See every downloaded track's on-disk size, sort by size or date, delete individually or in bulk; deletions land in a 30-day Recently Deleted safety net first |
+| **Recently Deleted Playlists** | The same 30-day undo safety net, for playlists — restore one with its original id intact, or delete it forever right away |
 | **Duplicate & corrupt file finders** | Duplicate Finder groups likely-duplicate downloads by matching how they actually sound via audio fingerprinting (AcoustID), not just title text; Corrupt File Finder flags any download that fails to play so you can re-fetch just that one |
 | **Library Health** | A single 0-100 scorecard tying together Duplicate Finder, Corrupt File Finder, and two new checks (missing metadata, low bitrate) — tap any category to jump straight to the affected songs |
 | **Compare Playlists** | Pick two playlists to see what overlaps and what's unique to each, with a one-tap Save as New Playlist for any of the three resulting lists |
@@ -69,6 +70,7 @@ bridge, and build-from-source instructions.
 |---|---|
 | **Search & subscriptions** | Discover and subscribe to podcasts; new-episode push notifications; OPML import/export to bring subscriptions in from (or out to) another podcast app |
 | **Playback** | Chapter support (Podcasting 2.0 chapters JSON), offline episode downloads, opt-in auto-download of new episodes, a Continue Listening teaser on the Home hub |
+| **Trending** | A discovery feed via Apple's public podcast chart, excluding shows you already subscribe to — the first real "what's out there" surface for podcasts, distinct from search which requires already knowing the name |
 
 ### Streaming (via the bridge server)
 
@@ -77,7 +79,7 @@ bridge, and build-from-source instructions.
 | **Search & stream** | YouTube and SoundCloud search, with playlist/album URL resolution (up to 50 tracks) |
 | **Name That Tune** | A Home quick action that listens through the microphone for ~12 seconds and identifies the actual recording playing nearby via audio fingerprinting (AcoustID/MusicBrainz, the same technology behind Shazam) — requires a personal AcoustID key |
 | **Spotify link import** | Paste a Spotify track/album/playlist link — the bridge reads public Spotify metadata only (never audio, which Spotify DRM-protects) and matches each track to a playable YouTube result. Requires the server operator to set `SPOTIFY_CLIENT_ID`/`SPOTIFY_CLIENT_SECRET` |
-| **Downloads** | Save streamed tracks to your local library with format choice (Opus, MP3, AAC, Best) |
+| **Downloads** | Save streamed tracks to your local library with format choice (Opus, MP3, AAC, Best); an opt-in Wi-Fi Only Downloads setting blocks new downloads while on cellular |
 | **Background downloads & Pending Imports** | Downloads keep running server-side even if you close the app; a Pending Imports screen (Cloud Services menu) shows what's finished and waiting, which folder it's headed for, and lets you override the folder or import on demand |
 | **Personal Cloud Library** | Upload your own files to a private server folder; play and manage from any device |
 | **Discover Mix** | A personalised mix seeded from your most-played artists, excluding anything you already have |

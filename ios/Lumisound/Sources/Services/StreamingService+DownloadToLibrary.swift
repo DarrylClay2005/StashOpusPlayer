@@ -34,6 +34,15 @@ extension StreamingService {
         existingSongs: [Song] = [],
         destinationFolderName: String? = nil
     ) async throws -> URL {
+        // Single chokepoint every download path in the app funnels through
+        // (foreground downloads, background job reconciliation, tracked
+        // playlist auto-download), so gating Wi-Fi Only Downloads here
+        // covers all of them at once rather than needing a check at each
+        // call site.
+        if UserDefaults.standard.bool(forKey: "wifiOnlyDownloads.enabled"), NetworkPathMonitor.shared.isCellularOnly {
+            throw StreamingError.wifiRequired
+        }
+
         let sourceTrackID = "\(track.source):\(track.id)"
 
         // Pre-download dedupe — skip entirely if we already have a valid copy

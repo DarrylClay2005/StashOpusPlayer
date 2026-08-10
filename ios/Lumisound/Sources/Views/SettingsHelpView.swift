@@ -261,6 +261,11 @@ struct SettingsHelpView: View {
                 body: "Deleting a downloaded track (from the Downloads Manager or the general Library view) doesn't remove it immediately — it moves to Recently Deleted (accessible from the Downloads Manager) for 30 days, where you can restore it or delete it permanently right away. This is a safety net for an accidental bulk delete; after 30 days it's purged automatically."
             ),
             HelpTopic(
+                icon: "trash",
+                title: "Recently Deleted Playlists",
+                body: "Settings → Library → Recently Deleted Playlists is the same 30-day safety net as Recently Deleted, for playlists instead of downloaded tracks: deleting a playlist doesn't remove it for good right away. Swipe right on an entry to restore it (same id, so shortcuts and folders pointing at it still work), or swipe left to delete it forever immediately."
+            ),
+            HelpTopic(
                 icon: "rectangle.2.swap",
                 title: "Compare Playlists",
                 body: "Settings → Library → Compare Playlists picks two playlists and shows what's in both, and what's unique to each, with a Save as New Playlist button for any of the three resulting lists — a quick way to merge two playlists, split off just the overlap, or find what one playlist has that another doesn't."
@@ -338,6 +343,11 @@ struct SettingsHelpView: View {
                 icon: "waveform",
                 title: "Audio Format Preference",
                 body: "The Audio Format picker in Settings → Streaming controls which container is requested when streaming or downloading: Opus (best quality per kilobyte, default), MP3 (maximum compatibility), AAC, or Best Available. Opus is recommended for most networks. Use MP3 if you have trouble playing a downloaded track."
+            ),
+            HelpTopic(
+                icon: "wifi",
+                title: "Wi-Fi Only Downloads",
+                body: "Settings → Streaming → Wi-Fi Only Downloads blocks new downloads (streamed track downloads, background job pickups, tracked-playlist auto-downloads) whenever the device is on cellular with no Wi-Fi available, so you don't burn cellular data without meaning to. Off by default. Streaming playback itself is never affected — only saving a track to your library is."
             ),
         ]),
         HelpCategory(icon: "person.crop.circle", title: "Account", topics: [
@@ -461,6 +471,11 @@ struct SettingsHelpView: View {
                 icon: "trophy",
                 title: "Achievements & Streaks",
                 body: "Account → Achievements tracks your listening streaks (consecutive days with at least one play), total plays, and total listening time, and unlocks badges as you hit milestones for play counts, hours listened, and streak lengths — plus a few special badges like Night Owl and Early Bird for listening at certain times of day. Badges are computed entirely server-side from your play history; there's nothing to configure."
+            ),
+            HelpTopic(
+                icon: "mic.square",
+                title: "Trending Podcasts",
+                body: "Podcasts → the + button → Trending shows what's currently popular via Apple's public podcast chart, automatically excluding shows you're already subscribed to. Tap one to subscribe immediately — the first real discovery surface for podcasts, since Search requires already knowing what you're looking for."
             ),
             HelpTopic(
                 icon: "wand.and.stars",

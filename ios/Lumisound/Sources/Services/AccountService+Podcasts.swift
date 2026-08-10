@@ -19,6 +19,23 @@ extension AccountService {
         }
     }
 
+    /// Trending podcasts (GET /podcasts/trending, Apple's public top-
+    /// podcasts chart, filtered server-side to exclude shows already
+    /// subscribed) — the first real discovery surface for podcasts, unlike
+    /// `searchPodcasts` above which requires already knowing what to look
+    /// for. Same `PodcastSearchResult` shape/decode path since the two
+    /// endpoints return identical JSON.
+    func fetchTrendingPodcasts(limit: Int = 20) async -> [PodcastSearchResult] {
+        guard isLoggedIn else { return [] }
+        do {
+            let data = try await makeRequest("/podcasts/trending?limit=\(limit)")
+            return try JSONDecoder().decode([PodcastSearchResult].self, from: data)
+        } catch {
+            appWarn("fetchTrendingPodcasts: \(error.localizedDescription)", category: "network")
+            return []
+        }
+    }
+
     /// Subscribes to a podcast RSS feed — the bridge fetches+validates it
     /// once (extracting title/artwork) before persisting the subscription.
     func subscribeToPodcast(feedURL: String) async -> PodcastSubscription? {

@@ -279,6 +279,9 @@ enum StreamingError: LocalizedError {
     /// (see `DownloadLedgerStore.beginDownload`) — not a real failure, just
     /// "don't duplicate work someone else already started."
     case alreadyInFlight
+    /// Blocked by the Wi-Fi Only Downloads setting (Settings → Streaming)
+    /// — see `NetworkPathMonitor`/`downloadToLibrary`'s guard at the top.
+    case wifiRequired
 
     var errorDescription: String? {
         switch self {
@@ -320,6 +323,8 @@ enum StreamingError: LocalizedError {
             return "Downloaded file failed an integrity check. Please try again."
         case .alreadyInFlight:
             return "This track is already being downloaded."
+        case .wifiRequired:
+            return "Wi-Fi Only Downloads is on and you're on cellular — connect to Wi-Fi or turn the setting off in Settings → Streaming."
         }
     }
 }

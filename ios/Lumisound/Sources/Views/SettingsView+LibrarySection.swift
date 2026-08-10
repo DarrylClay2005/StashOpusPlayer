@@ -133,6 +133,12 @@ extension SettingsView {
                     .foregroundStyle(AppTheme.textPrimary)
             }
 
+            // 30-day undo for deleted playlists — no server/account involved
+            NavigationLink(destination: DeletedPlaylistsView()) {
+                Label("Recently Deleted Playlists", systemImage: "trash")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+
             // On-device listening stats — no server/account involved
             NavigationLink(destination: ListeningStatsView()) {
                 Label("Listening Stats", systemImage: "chart.bar.fill")

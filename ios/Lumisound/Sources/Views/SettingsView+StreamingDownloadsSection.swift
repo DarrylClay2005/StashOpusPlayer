@@ -76,6 +76,17 @@ extension SettingsView {
                 .tint(AppTheme.dynamicAccent)
             }
 
+            // Wi-Fi Only Downloads — blocks the single downloadToLibrary
+            // chokepoint (see that function's guard) whenever the device is
+            // on cellular with no Wi-Fi available, so it covers every
+            // download path (foreground, background job reconciliation,
+            // tracked-playlist auto-download) without a check at each site.
+            Toggle(isOn: $wifiOnlyDownloadsEnabled) {
+                Label("Wi-Fi Only Downloads", systemImage: "wifi")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
             // Test connection
             Button {
                 Task {
