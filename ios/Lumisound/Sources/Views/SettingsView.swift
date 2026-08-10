@@ -16,6 +16,7 @@ struct SettingsView: View {
     @EnvironmentObject var cacheManager: CacheManagerService
     @EnvironmentObject var folderService: MusicFolderService
     @EnvironmentObject var appLock: AppLockService
+    @EnvironmentObject var silenceTrim: SilenceTrimService
 
     /// Drives the Notifications entry row's status pill (On/Off/Needs Access)
     /// and the master toggle inside `NotificationsSettingsView`.

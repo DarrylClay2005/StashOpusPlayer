@@ -53,6 +53,20 @@ extension AccountService {
         }
     }
 
+    /// Fetches per-day play counts/listen time for the last `days` days
+    /// (default a year) — powers `ListeningHeatmapView`'s calendar heatmap.
+    /// Empty on failure or if there's no history yet.
+    func fetchListeningHeatmap(days: Int = 365) async -> [HeatmapDay] {
+        guard isLoggedIn else { return [] }
+        do {
+            let data = try await makeRequest("/user/stats/heatmap?days=\(days)")
+            return try JSONDecoder().decode([HeatmapDay].self, from: data)
+        } catch {
+            appWarn("fetchListeningHeatmap: \(error.localizedDescription)", category: "network")
+            return []
+        }
+    }
+
     /// Fetches listening streaks and badge unlocks (derived server-side from play history).
     func fetchAchievements() async {
         guard isLoggedIn else { return }

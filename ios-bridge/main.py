@@ -10511,6 +10511,39 @@ async def get_weekly_stats(payload: dict = Depends(get_current_user)):
     ]
 
 
+@app.get("/user/stats/heatmap")
+async def get_listening_heatmap(
+    days: int = Query(365, ge=7, le=400),
+    payload: dict = Depends(get_current_user),
+):
+    """Same per-day shape as /user/stats/weekly, just over a much longer
+    window — powers a GitHub-contributions-style calendar heatmap
+    (`ListeningHeatmapView.swift`) rather than a 7-day bar chart. A
+    separate endpoint rather than a `days` param added to /user/stats/weekly
+    since that one's response already has an established client shape/name
+    ("weekly") not worth overloading."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT DATE(played_at) AS day, COUNT(*) AS plays, COALESCE(SUM(listen_seconds), 0) AS seconds
+                FROM ios_play_history
+                WHERE user_id = %s AND played_at >= (CURRENT_DATE - make_interval(days => %s))
+                GROUP BY DATE(played_at)
+                ORDER BY day ASC
+                """,
+                (user_id, days - 1),
+            )
+            rows = await cur.fetchall()
+
+    return [
+        {"date": r[0].isoformat(), "plays": r[1], "listen_seconds": int(r[2])}
+        for r in rows
+    ]
+
+
 @app.get("/user/stats/year-in-review")
 async def get_year_in_review(
     year: Optional[int] = Query(None, description="Calendar year; defaults to the current UTC year."),

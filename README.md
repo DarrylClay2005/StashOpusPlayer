@@ -39,6 +39,7 @@ bridge, and build-from-source instructions.
 | **ReplayGain & Volume Boost** | Loudness normalisation plus up to 200% volume with a limiter |
 | **Now Playing** | 25 selectable visual styles for the album art (vinyl, cassette, aurora, glitch/VHS, and more), plus a built-in editor to design and save your own; full transport controls, Up Next queue, lock-screen & headphone controls, synced lyrics |
 | **AI DJ Mode** | Opt-in — Aria Lumi writes a short spoken transition line between tracks, read aloud on-device (no audio ever leaves the device) while volume briefly ducks |
+| **Silence Trim** | Opt-in — automatically skips up to 10 seconds of dead air at the start of a local track, analyzed and cached on-device the first time it plays |
 | **Practice Mode** | A dedicated tool for learning a track by ear — a visual metronome synced to the track's detected tempo (live-adjusted for playback speed), a sub-100% speed slider with quick presets, and Loop Region controls built on the existing A-B repeat |
 | **Focus Sessions** | A Pomodoro-style work/break timer tied to playback — plays a chosen soundtrack through work blocks, pauses for breaks, notifies you at each transition, and tracks completed sessions |
 | **Listen Together** | SharePlay session keeps everyone's playback in sync; participants can also suggest tracks into a shared queue and upvote each other's picks, with the top-voted pick playable in one tap |
@@ -111,6 +112,7 @@ bridge, and build-from-source instructions.
 | **Needle Drop** | A music-guessing mini-game built from your own library — a short clip plays from a random point in a random track, guess it from 4 choices before it fades out, and build a streak. Fully on-device |
 | **Time Capsules** | Seal a set of songs (from Favorites or a playlist) with a note to your future self, locked until a date you choose; a notification lets you know the moment it unlocks. Fully on-device |
 | **Constellation** | Maps your library as a scatter of genre or artist "stars" sized by song count — tap one to shuffle-play or browse it. A visual alternative to browsing by list/grid |
+| **Listening Heatmap** | A GitHub-style calendar grid of the last year of listening activity — darker days mean more plays |
 | **Aria's Daily Pick** | A Home dashboard card with one AI-picked track a day and a short reason from Aria Lumi, seeded from your own top artists — cached server-side so it costs at most one AI call per user per day |
 | **Liner Notes** | A short Aria-written note on any album's detail screen — genre, mood, catalog context — cached per album rather than per user, so it costs at most one AI call ever per unique album across the whole server |
 | **Gallery Background** | A full-screen animated background behind every screen — either your own photos (with 8 transition styles, blur/opacity, Ken Burns motion) or **Sonic Wallpaper**, a generative alternative with no photos needed: a soft gradient built from the color palettes of your own most-played/favorited tracks' artwork |

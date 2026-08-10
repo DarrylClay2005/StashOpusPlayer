@@ -284,6 +284,11 @@ struct AccountView: View {
                             .foregroundStyle(AppTheme.textPrimary)
                     }
 
+                    NavigationLink(destination: ListeningHeatmapView()) {
+                        Label("Listening Heatmap", systemImage: "calendar")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+
                     NavigationLink(destination: ScrobblingView()) {
                         Label("Scrobbling", systemImage: "waveform.path.ecg")
                             .foregroundStyle(AppTheme.textPrimary)

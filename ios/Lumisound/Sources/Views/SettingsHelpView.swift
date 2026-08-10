@@ -107,6 +107,11 @@ struct SettingsHelpView: View {
                 body: "Auto-Radio automatically appends new songs to the queue when it is about to run out. When the last track finishes, Lumisound searches YouTube for songs similar to the one you were just listening to and queues up the top results. Toggle it on in the Now Playing screen. Requires an internet connection."
             ),
             HelpTopic(
+                icon: "waveform.slash",
+                title: "Silence Trim",
+                body: "Settings → Audio → Silence Trim automatically skips past dead air at the very start of a local track — up to 10 seconds — a common ripping/mastering artifact. Each track is analyzed on-device the first time it plays and cached, so it's instant after that. Off by default; only applies to local files, not streamed tracks."
+            ),
+            HelpTopic(
                 icon: "speaker.wave.3",
                 title: "ReplayGain",
                 body: "ReplayGain normalises the perceived loudness across your library so you do not have to keep adjusting the volume when switching between tracks recorded at different levels. The app reads the REPLAYGAIN_TRACK_GAIN and REPLAYGAIN_ALBUM_GAIN metadata tags embedded in your audio files. If a file has no gain tag the track is played at its original volume."
@@ -476,6 +481,11 @@ struct SettingsHelpView: View {
                 icon: "sparkles",
                 title: "Constellation",
                 body: "Account → Library → Constellation maps your library as a scatter of genre or artist \"stars\" — bigger stars have more songs. Tap one to shuffle-play it or browse its songs. A different, more visual way to explore your library than the usual lists and grids."
+            ),
+            HelpTopic(
+                icon: "calendar",
+                title: "Listening Heatmap",
+                body: "Account → Library → Listening Heatmap shows a GitHub-style calendar grid of the last year of listening — darker squares mean more plays that day. A quick way to spot patterns (weekends, late-night streaks, dry spells) that a single stat or leaderboard doesn't show."
             ),
         ]),
         HelpCategory(icon: "lock.shield", title: "Privacy & Security", topics: [

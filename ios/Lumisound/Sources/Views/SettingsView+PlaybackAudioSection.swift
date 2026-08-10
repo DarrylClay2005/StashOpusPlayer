@@ -125,6 +125,21 @@ extension SettingsView {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
+            // Silence Trim
+            Toggle(isOn: $silenceTrim.isEnabled) {
+                Label("Silence Trim", systemImage: "waveform.slash")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.dynamicAccent)
+
+            if silenceTrim.isEnabled {
+                Text("Automatically skips past dead air at the very start of a local track (up to 10 seconds), analyzed on-device the first time each track plays. Doesn't apply to streamed tracks.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .padding(.leading, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Default speed
             VStack(alignment: .leading, spacing: 6) {
                 HStack {

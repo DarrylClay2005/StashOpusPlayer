@@ -484,6 +484,21 @@ struct YearInReview: Codable {
     }
 }
 
+/// One day's entry from GET /user/stats/heatmap — a much longer-range
+/// version of the same per-day shape /user/stats/weekly returns. Powers
+/// `ListeningHeatmapView`'s calendar heatmap.
+struct HeatmapDay: Codable, Identifiable {
+    let date: String
+    let plays: Int
+    let listenSeconds: Int
+    var id: String { date }
+
+    enum CodingKeys: String, CodingKey {
+        case date, plays
+        case listenSeconds = "listen_seconds"
+    }
+}
+
 /// GET /user/stats/month-in-review — same shape as `YearInReview` but
 /// bucketed to a single calendar month (by day instead of by month).
 /// Powers the "This Month" mode on `RewindView`.
