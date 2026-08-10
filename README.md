@@ -42,7 +42,7 @@ bridge, and build-from-source instructions.
 | **Silence Trim** | Opt-in — automatically skips up to 10 seconds of dead air at the start of a local track, analyzed and cached on-device the first time it plays |
 | **Practice Mode** | A dedicated tool for learning a track by ear — a visual metronome synced to the track's detected tempo (live-adjusted for playback speed), a sub-100% speed slider with quick presets, and Loop Region controls built on the existing A-B repeat; export the loop region as a standalone .m4a clip to share or use as a ringtone |
 | **Focus Sessions** | A Pomodoro-style work/break timer tied to playback — plays a chosen soundtrack through work blocks, pauses for breaks, notifies you at each transition, and tracks completed sessions |
-| **Listen Together** | SharePlay session keeps everyone's playback in sync; participants can also suggest tracks into a shared queue and upvote each other's picks, with the top-voted pick playable in one tap |
+| **Listen Together** | SharePlay session keeps everyone's playback in sync; participants can also suggest tracks into a shared queue and upvote each other's picks, with the top-voted pick playable in one tap. Live emoji reactions float on everyone's screen in real time — purely in-the-moment, nothing saved |
 | **Widgets & Live Activity** | Home Screen, Lock Screen, and StandBy widgets plus a Live Activity showing the current track; CarPlay support for browsing and transport controls; Siri/Shortcuts App Intents; a Focus Filter to tie playback behavior to a Focus mode |
 | **Companion apps** | A full Apple Watch app (its own library browsing, playback, and widget) and Apple TV app (library, playlists, playback) — both talk to the same bridge account as the phone |
 

@@ -435,6 +435,11 @@ struct SettingsHelpView: View {
                 title: "Listen Together Group Queue",
                 body: "Once a Listen Together (SharePlay) session is active, the Queue screen shows a Listen Together section. Swipe left on any track and tap Suggest to add it to a shared list everyone in the session can see and upvote. Tap Play Top Voted Next to insert whichever suggestion has the most votes right after the current track. Suggestions and votes only exist for the lifetime of the session — nothing is saved to your account."
             ),
+            HelpTopic(
+                icon: "face.smiling",
+                title: "Listen Together Reactions",
+                body: "During a Listen Together session, a row of emoji appears on Now Playing — tap one and it floats up on every participant's screen in real time. Purely in-the-moment: reactions aren't saved anywhere, and a device that joins mid-session won't see ones sent before it arrived."
+            ),
         ]),
         HelpCategory(icon: "sparkles", title: "Achievements & Discovery", topics: [
             HelpTopic(

@@ -254,6 +254,7 @@ struct NowPlayingView: View {
             scrollContent
                 .appScreenBackground()
                 .background(nowPlayingScreenBackground.ignoresSafeArea())
+                .overlay(ListenTogetherReactionsOverlay())
         }
         .sheet(isPresented: $showSleepTimerSheet) {
             SleepTimerSheet()

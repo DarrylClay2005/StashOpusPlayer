@@ -38,6 +38,7 @@ extension NowPlayingView {
 
                 trackInfoSection
                 aiDJCaption
+                ListenTogetherReactionBar()
                 timelineSection
                 transportSection
 

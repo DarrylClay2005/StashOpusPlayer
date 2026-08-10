@@ -65,6 +65,12 @@ final class SharePlayCoordinator: ObservableObject {
     /// active session.
     @Published var sharedQueue: [SharedQueueItem] = []
 
+    /// Fires each incoming (or locally-sent) reaction's emoji as it
+    /// happens — see `SharePlayCoordinator+Reactions.swift`. Ephemeral:
+    /// nothing here is persisted or retried, same as a live chat, unlike
+    /// `sharedQueue` above which is real (if session-scoped) state.
+    let reactionReceived = PassthroughSubject<String, Never>()
+
     init() {
         Self.shared = self
         let sessionTask = Task { [weak self] in
@@ -107,6 +113,7 @@ final class SharePlayCoordinator: ObservableObject {
         }
         tasks.append(messageTask)
         subscribeQueueMessages(messenger: messenger)
+        subscribeReactionMessages(messenger: messenger)
 
         session.join()
         isSessionActive = true
