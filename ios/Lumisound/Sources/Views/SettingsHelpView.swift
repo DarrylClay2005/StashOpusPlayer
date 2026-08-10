@@ -472,6 +472,11 @@ struct SettingsHelpView: View {
                 title: "Time Capsules",
                 body: "Account → Library → Time Capsules lets you seal a set of songs (from Favorites or an existing playlist) with a short note to your future self, locked until a date you choose. A notification lets you know the moment it unlocks; open it to relive the songs and read the note back. Entirely on-device — nothing about a capsule's contents is sent anywhere."
             ),
+            HelpTopic(
+                icon: "sparkles",
+                title: "Constellation",
+                body: "Account → Library → Constellation maps your library as a scatter of genre or artist \"stars\" — bigger stars have more songs. Tap one to shuffle-play it or browse its songs. A different, more visual way to explore your library than the usual lists and grids."
+            ),
         ]),
         HelpCategory(icon: "lock.shield", title: "Privacy & Security", topics: [
             HelpTopic(

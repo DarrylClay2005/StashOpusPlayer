@@ -279,6 +279,11 @@ struct AccountView: View {
                             .foregroundStyle(AppTheme.textPrimary)
                     }
 
+                    NavigationLink(destination: ConstellationView()) {
+                        Label("Constellation", systemImage: "sparkles")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+
                     NavigationLink(destination: ScrobblingView()) {
                         Label("Scrobbling", systemImage: "waveform.path.ecg")
                             .foregroundStyle(AppTheme.textPrimary)

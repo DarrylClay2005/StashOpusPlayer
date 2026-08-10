@@ -110,6 +110,7 @@ bridge, and build-from-source instructions.
 |---|---|
 | **Needle Drop** | A music-guessing mini-game built from your own library — a short clip plays from a random point in a random track, guess it from 4 choices before it fades out, and build a streak. Fully on-device |
 | **Time Capsules** | Seal a set of songs (from Favorites or a playlist) with a note to your future self, locked until a date you choose; a notification lets you know the moment it unlocks. Fully on-device |
+| **Constellation** | Maps your library as a scatter of genre or artist "stars" sized by song count — tap one to shuffle-play or browse it. A visual alternative to browsing by list/grid |
 | **Aria's Daily Pick** | A Home dashboard card with one AI-picked track a day and a short reason from Aria Lumi, seeded from your own top artists — cached server-side so it costs at most one AI call per user per day |
 | **Liner Notes** | A short Aria-written note on any album's detail screen — genre, mood, catalog context — cached per album rather than per user, so it costs at most one AI call ever per unique album across the whole server |
 | **Gallery Background** | A full-screen animated background behind every screen — either your own photos (with 8 transition styles, blur/opacity, Ken Burns motion) or **Sonic Wallpaper**, a generative alternative with no photos needed: a soft gradient built from the color palettes of your own most-played/favorited tracks' artwork |
