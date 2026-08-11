@@ -51,7 +51,16 @@ async def get_pool() -> aiopg.Pool:
         # conn.begin()/commit()/rollback() — psycopg2/aiopg connections
         # raise "commit cannot be used in asynchronous mode" if you call
         # conn.commit()/rollback() directly instead of issuing the SQL.
-        _pool = await aiopg.create_pool(**DB_CONFIG, minsize=1, maxsize=10)
+        # Lowered from the original aiomysql-era default of 10: this pool's
+        # connections sit on the SAME shared Postgres instance every one of
+        # the 13 music bots + Aria + SwarmPanel + upscaler-bridge also
+        # connect to, whose max_connections=100 was observed sitting at
+        # 102/100 in production -- ios-bridge's actual traffic (a personal
+        # iOS app backend) doesn't need anywhere near 10 concurrent
+        # connections, so this was a disproportionate share of a scarce,
+        # shared budget rather than something this service needed.
+        pool_max = int(os.getenv("DB_POOL_MAX_SIZE", "4"))
+        _pool = await aiopg.create_pool(**DB_CONFIG, minsize=1, maxsize=pool_max)
     return _pool
 
 
