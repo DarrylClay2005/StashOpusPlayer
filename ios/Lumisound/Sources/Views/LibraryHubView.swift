@@ -106,7 +106,7 @@ struct LibraryHubView: View {
         }
         .background(Color.clear.ignoresSafeArea())
         .task(id: library.allSongs.count) {
-            reload()
+            await reload()
         }
         .task {
             await loadServerExtras()
@@ -432,16 +432,35 @@ struct LibraryHubView: View {
     // than recomputing in `body` on every unrelated re-render — e.g. a
     // `player` publish from a track change), mirroring `FoldersTab`'s
     // `.task(id:)` pattern. Re-runs whenever `allSongs.count` changes.
-    private func reload() {
+    //
+    // `async` with `Task.yield()` between each shelf, not a plain synchronous
+    // function — several of these (see LibraryManager+HubContent.swift's own
+    // header comment) are O(n log n) sorts over the whole library, and this
+    // is all MainActor-isolated work (LibraryManager, PlayHistoryStore, etc.
+    // are all @MainActor, so there's no way to genuinely move the CPU work
+    // off the main thread here without a much larger, riskier refactor).
+    // Run back-to-back as one synchronous block, up to 9 full-library passes
+    // for a large library was a single uninterrupted stall long enough to
+    // read as a "lag spike" — a real one, and specifically a HOME-screen one,
+    // exactly matching that report. Yielding between shelves doesn't reduce
+    // the total CPU time spent, but it lets the run loop interleave a frame
+    // draw / touch event between each pass instead of blocking through all
+    // of them at once, turning one long stall into several much smaller ones.
+    private func reload() async {
         shortcuts = Self.buildShortcuts(library: library)
+        await Task.yield()
         recentlyAdded = library.recentlyAddedSongs(limit: 20)
         mostPlayed = library.mostPlayedSongs(limit: 20)
+        await Task.yield()
         forgottenFavorites = library.forgottenFavoriteSongs(limit: 20)
         recentlyPlayed = library.recentlyPlayedSongs(limit: 20)
+        await Task.yield()
         genreGroups = library.genreGroups(limit: 12)
         topArtistGroups = library.topArtistGroups(limit: 12)
+        await Task.yield()
         decadeGroups = library.decadeGroups(limit: 10)
         deeperCutsSongs = library.deeperCutsSongs(limit: 20)
+        await Task.yield()
         weeklyRecap = library.weeklyRecap()
         if !hasLoadedOnce {
             withAnimation(.easeInOut(duration: 0.35)) { hasLoadedOnce = true }
