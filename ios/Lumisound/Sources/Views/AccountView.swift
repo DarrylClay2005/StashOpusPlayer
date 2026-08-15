@@ -1,12 +1,28 @@
+import AuthenticationServices
 import SwiftUI
 import PhotosUI
+
+/// Minimal `ASWebAuthenticationPresentationContextProviding` conformance —
+/// Discord's OAuth2 consent screen (`DiscordVerificationService
+/// .startVerification`) is the first thing in this app that needs a system
+/// web-auth session, so there's no existing provider to reuse.
+private final class DiscordAuthPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow }
+            .first ?? ASPresentationAnchor()
+    }
+}
 
 struct AccountView: View {
 
     @EnvironmentObject var account: AccountService
     @EnvironmentObject var library: LibraryManager
     @EnvironmentObject var aiDJ: AIDJService
+    @EnvironmentObject var discordVerification: DiscordVerificationService
     @Environment(\.dismiss) var dismiss
+
+    private let discordPresentationContext = DiscordAuthPresentationContext()
 
     @State private var showLogoutConfirm = false
     @State private var isEditingDisplayName = false
@@ -42,33 +58,46 @@ struct AccountView: View {
                         // AnimatedImageView (not a plain SwiftUI Image) so a GIF avatar
                         // actually plays here — Image(uiImage:) would only ever show
                         // its first frame. Static avatars render identically either way.
-                        ZStack {
-                            if let img = account.avatarImage {
-                                AnimatedImageView(image: img, contentMode: .scaleAspectFill)
-                                    .frame(width: 64, height: 64)
-                                    .clipShape(Circle())
-                            } else {
-                                Circle()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
+                        ZStack(alignment: .bottomTrailing) {
+                            ZStack {
+                                if let img = account.avatarImage {
+                                    AnimatedImageView(image: img, contentMode: .scaleAspectFill)
+                                        .frame(width: 64, height: 64)
+                                        .clipShape(Circle())
+                                } else {
+                                    Circle()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [AppTheme.dynamicAccent, AppTheme.accentSoft],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
                                         )
-                                    )
-                                    .frame(width: 64, height: 64)
-                                    .overlay(
-                                        Text(initials)
-                                            .font(.title2.bold())
-                                            .foregroundStyle(.white)
-                                    )
+                                        .frame(width: 64, height: 64)
+                                        .overlay(
+                                            Text(initials)
+                                                .font(.title2.bold())
+                                                .foregroundStyle(.white)
+                                        )
+                                }
+                                if isUploadingAvatar {
+                                    Circle()
+                                        .fill(.black.opacity(0.45))
+                                        .frame(width: 64, height: 64)
+                                    ProgressView()
+                                        .tint(.white)
+                                }
                             }
-                            if isUploadingAvatar {
-                                Circle()
-                                    .fill(.black.opacity(0.45))
-                                    .frame(width: 64, height: 64)
-                                ProgressView()
-                                    .tint(.white)
+
+                            // Discord-verified badge — Discord's own "blurple" so it
+                            // reads instantly as "this is specifically Discord", the
+                            // same convention StreamTrackRow's per-source badges use.
+                            if discordVerification.isVerified {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(Color(red: 0.345, green: 0.396, blue: 0.949))
+                                    .background(Circle().fill(AppTheme.surface).frame(width: 18, height: 18))
+                                    .offset(x: 2, y: 2)
                             }
                         }
                         .shadow(color: AppTheme.dynamicAccent.opacity(0.4), radius: 8, x: 0, y: 4)
@@ -92,9 +121,71 @@ struct AccountView: View {
                                     .font(AppTheme.bodyFont(size: 12))
                                     .foregroundStyle(AppTheme.textSecondary)
                             }
+                            if discordVerification.isVerified {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(Color(red: 0.345, green: 0.396, blue: 0.949))
+                                    Text("Discord Verified")
+                                        .font(AppTheme.bodyFont(size: 12).weight(.semibold))
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                }
+                            }
                         }
                     }
                     .padding(.vertical, 8)
+
+                    // Discord verification — link/unlink. Row lives here rather than
+                    // buried in Settings → Integrations (where the pre-existing Now
+                    // Playing webhook/Rich Presence config live) since this one drives
+                    // the badge shown directly above, on the profile header itself.
+                    if discordVerification.isVerified {
+                        HStack {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Discord Verified")
+                                        .foregroundStyle(AppTheme.textPrimary)
+                                    if let username = discordVerification.discordUsername {
+                                        Text(username)
+                                            .font(AppTheme.bodyFont(size: 12))
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+                                }
+                            } icon: {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .foregroundStyle(Color(red: 0.345, green: 0.396, blue: 0.949))
+                            }
+                            Spacer()
+                            Button("Unlink") {
+                                Task { await discordVerification.unlink() }
+                            }
+                            .font(AppTheme.bodyFont(size: 13).weight(.semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                        }
+                    } else {
+                        Button {
+                            Task {
+                                await discordVerification.startVerification(
+                                    presentationContext: discordPresentationContext
+                                )
+                            }
+                        } label: {
+                            HStack {
+                                Label("Verify with Discord", systemImage: "checkmark.seal")
+                                    .foregroundStyle(AppTheme.dynamicAccent)
+                                Spacer()
+                                if discordVerification.isLinking {
+                                    ProgressView().tint(AppTheme.dynamicAccent)
+                                }
+                            }
+                        }
+                        .disabled(discordVerification.isLinking)
+                        if let error = discordVerification.errorMessage {
+                            Text(error)
+                                .font(AppTheme.bodyFont(size: 12))
+                                .foregroundStyle(AppTheme.warning)
+                        }
+                    }
 
                     // Upload photo button
                     PhotosPicker(

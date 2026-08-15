@@ -188,5 +188,26 @@
     <key>UILaunchScreen</key>
     <dict/>
 
+    <!-- Custom URL scheme — currently only used as the OAuth2 redirect target
+         for Discord account verification (see DiscordVerificationService.swift
+         / LumisoundApp.swift's .onOpenURL). The bridge's
+         /api/discord/oauth/callback redirects the ASWebAuthenticationSession
+         here (lumisound://discord-verify?success=...) once Discord's own
+         consent flow finishes, handing control straight back to the app. */*
+         is not registered as an alternate document opener — this scheme is
+         verification-only, unlike the Files-app "Open in Lumisound" audio
+         import path above, which goes through CFBundleDocumentTypes instead. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>lumisound</string>
+            </array>
+        </dict>
+    </array>
+
 </dict>
 </plist>

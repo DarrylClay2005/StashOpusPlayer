@@ -1399,3 +1399,29 @@ CREATE TABLE IF NOT EXISTS ios_podcast_episode_progress (
     PRIMARY KEY (user_id, feed_url, episode_guid),
     FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
 );
+
+-- Feature: real Discord account verification (OAuth2 "identify" scope) — a
+-- "Discord Verified" badge next to the user's profile icon, distinct from
+-- the pre-existing ios_discord_webhooks (Now Playing webhook) and
+-- ios_discord_rpc_config (local Rich Presence daemon config) tables above,
+-- neither of which actually confirms the user owns a specific Discord
+-- account. Populated by /api/discord/oauth/callback after a real OAuth2
+-- authorization-code exchange with Discord (see main.py). discord_user_id
+-- is Discord's own snowflake ID for the linked account — kept even though
+-- only discord_username is shown in the badge, since it's the stable
+-- identity to re-check against if Discord username changes need refreshing
+-- later, and it's what a future "unlink if this Discord account gets banned"
+-- admin tool would key off of.
+CREATE TABLE IF NOT EXISTS ios_discord_verifications (
+    user_id VARCHAR(36) PRIMARY KEY,
+    discord_user_id VARCHAR(32) NOT NULL,
+    discord_username VARCHAR(64) NOT NULL,
+    discord_avatar_hash VARCHAR(64) NULL,
+    verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
+-- A given Discord account should back at most one Lumisound "Verified"
+-- badge — without this, the same Discord account could OAuth-link to many
+-- Lumisound accounts and light up "Discord Verified" on all of them.
+CREATE UNIQUE INDEX IF NOT EXISTS ios_discord_verifications_idx_discord_user
+    ON ios_discord_verifications (discord_user_id);

@@ -20,6 +20,7 @@ struct LumisoundApp: App {
     @StateObject private var recentlyDeleted = RecentlyDeletedService()
     @StateObject private var aiDJ = AIDJService()
     @StateObject private var silenceTrim = SilenceTrimService()
+    @StateObject private var discordVerification = DiscordVerificationService.shared
     /// Shared app-wide instance so the Profile/Friends tabs, the Library
     /// hub's friends-activity carousel, and Account settings all see the
     /// same friends list / profile / incoming-requests state instead of
@@ -63,6 +64,7 @@ struct LumisoundApp: App {
                     .environmentObject(social)
                     .environmentObject(aiDJ)
                     .environmentObject(silenceTrim)
+                    .environmentObject(discordVerification)
                     .opacity(showLaunch ? 0 : 1)
                     .animation(.easeInOut(duration: 0.4), value: showLaunch)
 
@@ -142,6 +144,11 @@ struct LumisoundApp: App {
                     sharePlay.player = player
                     sharePlay.library = libraryManager
                     sharePlay.streaming = streaming
+
+                    discordVerification.attach(account: account)
+                    if account.isLoggedIn {
+                        Task { await discordVerification.refresh() }
+                    }
 
                     // Wire AI DJ Mode's volume ducking to the same
                     // `audioSettings.volume` knob the sleep-timer fade uses.
@@ -341,6 +348,7 @@ struct LumisoundApp: App {
                     }
                     account.startAutoPushTimer(library: libraryManager)
                     Task { await account.loadAvatar(forceRefresh: true) }
+                    Task { await discordVerification.refresh() }
                 }
         }
     }

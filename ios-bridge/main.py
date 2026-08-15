@@ -33,7 +33,7 @@ import urllib.error
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
@@ -48,8 +48,10 @@ import pyotp
 import yt_dlp
 
 from auth import (
+    create_discord_oauth_state_token,
     create_token,
     create_totp_pending_token,
+    decode_discord_oauth_state_token,
     decode_token,
     decode_totp_pending_token,
     hash_password_async,
@@ -190,6 +192,22 @@ BUG_REPORT_WEBHOOK_URL: str = os.getenv(
     "BUG_REPORT_WEBHOOK_URL",
     "https://discord.com/api/webhooks/1515883701353971763/0BPMmzjkq2E3zaCXaJtyiJmedW2Xqid-ohyBFxpJHDw7i4WrNJW-HIwMtujuj7Hxe9-U",
 )
+# Optional: Discord OAuth2 app credentials (discord.com/developers/applications
+# -> New Application -> OAuth2), powering real account-linking verification
+# (the "Discord Verified" badge next to a user's profile icon) — distinct from
+# both the bug-report webhook above and the per-user Now-Playing webhook/RPC
+# config elsewhere: this is the only one of the three that actually confirms
+# the user owns a specific Discord account, via a real OAuth2 authorization-
+# code exchange (identify scope only — never any message/server access).
+# DISCORD_OAUTH_REDIRECT_URI must exactly match a "Redirect" registered on
+# the Discord application (typically "https://<this bridge's public
+# host>/api/discord/oauth/callback"). Unset (default) disables the feature
+# entirely — /api/discord/oauth/start 503s instead of silently no-op'ing, so
+# a misconfigured deployment fails loudly rather than presenting a "Verify"
+# button that can never succeed.
+DISCORD_OAUTH_CLIENT_ID: str = os.getenv("DISCORD_OAUTH_CLIENT_ID", "")
+DISCORD_OAUTH_CLIENT_SECRET: str = os.getenv("DISCORD_OAUTH_CLIENT_SECRET", "")
+DISCORD_OAUTH_REDIRECT_URI: str = os.getenv("DISCORD_OAUTH_REDIRECT_URI", "")
 VERSION = "1.0.0"
 
 # ---------------------------------------------------------------------------
@@ -13834,6 +13852,187 @@ async def delete_discord_webhook(payload: dict = Depends(get_current_user)):
         async with conn.cursor() as cur:
             await cur.execute("DELETE FROM ios_discord_webhooks WHERE user_id = %s", (user_id,))
     await log_event("webhooks", "discord_webhook_removed", user_id=user_id)
+
+
+# ---------------------------------------------------------------------------
+# Discord account verification (Feature: discord-verified-badge)
+#
+# Real OAuth2 "identify"-scope account linking, distinct from the Now
+# Playing webhook / Rich Presence config above — this is the only one of the
+# three that actually proves the user owns a specific Discord account, so
+# it's the only one the "Discord Verified" badge (client: ProfileView /
+# AccountView) can honestly be driven by. Standard three-endpoint OAuth2
+# authorization-code flow: /start hands the client Discord's own consent-
+# screen URL (opened via ASWebAuthenticationSession on-device, never a
+# WKWebView — see DiscordVerificationService.swift's doc comment for why),
+# Discord redirects the browser to /callback with a code, and this server
+# exchanges that code server-side (the client never sees the OAuth2 client
+# secret) before deep-linking back into the app.
+# ---------------------------------------------------------------------------
+
+_DISCORD_OAUTH_SCOPE = "identify"
+_DISCORD_OAUTH_AUTHORIZE_URL = "https://discord.com/api/oauth2/authorize"
+_DISCORD_OAUTH_TOKEN_URL = "https://discord.com/api/oauth2/token"
+_DISCORD_OAUTH_USER_URL = "https://discord.com/api/users/@me"
+# Where /callback deep-links the app back to once verification finishes (or
+# fails) — DiscordVerificationService registers this scheme/host with
+# ASWebAuthenticationSession so the OS hands control back to the app the
+# instant this redirect fires, without the app needing to poll.
+_DISCORD_CALLBACK_DEEP_LINK = "lumisound://discord-verify"
+
+
+def _require_discord_oauth_configured() -> None:
+    if not (DISCORD_OAUTH_CLIENT_ID and DISCORD_OAUTH_CLIENT_SECRET and DISCORD_OAUTH_REDIRECT_URI):
+        raise HTTPException(
+            status_code=503,
+            detail="Discord verification is not configured on this server "
+                   "(DISCORD_OAUTH_CLIENT_ID/DISCORD_OAUTH_CLIENT_SECRET/DISCORD_OAUTH_REDIRECT_URI unset).",
+        )
+
+
+@app.get("/api/discord/oauth/start")
+async def discord_oauth_start(payload: dict = Depends(get_current_user)):
+    _require_discord_oauth_configured()
+    user_id = payload["sub"]
+    state = create_discord_oauth_state_token(user_id)
+    params = {
+        "client_id": DISCORD_OAUTH_CLIENT_ID,
+        "redirect_uri": DISCORD_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "scope": _DISCORD_OAUTH_SCOPE,
+        "state": state,
+        "prompt": "consent",
+    }
+    return {"authorize_url": f"{_DISCORD_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"}
+
+
+async def _discord_oauth_exchange_code(code: str) -> dict:
+    """Exchanges an authorization code for an access token, then fetches the
+    identify-scoped /users/@me payload — both are plain HTTPS calls to
+    Discord's own API, run off-thread the same way `_post_discord_webhook`
+    does (no async HTTP client dependency in this project)."""
+    def _exchange() -> dict:
+        token_data = urlencode({
+            "client_id": DISCORD_OAUTH_CLIENT_ID,
+            "client_secret": DISCORD_OAUTH_CLIENT_SECRET,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": DISCORD_OAUTH_REDIRECT_URI,
+        }).encode("utf-8")
+        token_req = urllib.request.Request(
+            _DISCORD_OAUTH_TOKEN_URL,
+            data=token_data,
+            headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Lumisound-iOS-Bridge/1.0"},
+            method="POST",
+        )
+        with urllib.request.urlopen(token_req, timeout=15) as resp:
+            token_payload = json.loads(resp.read())
+        access_token = token_payload.get("access_token")
+        if not access_token:
+            raise RuntimeError("Discord token exchange returned no access_token")
+
+        user_req = urllib.request.Request(
+            _DISCORD_OAUTH_USER_URL,
+            headers={"Authorization": f"Bearer {access_token}", "User-Agent": "Lumisound-iOS-Bridge/1.0"},
+        )
+        with urllib.request.urlopen(user_req, timeout=15) as resp:
+            return json.loads(resp.read())
+
+    return await asyncio.to_thread(_exchange)
+
+
+@app.get("/api/discord/oauth/callback")
+async def discord_oauth_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+):
+    # Discord itself sent this redirect (the user tapped "Cancel" on the
+    # consent screen, or something else went wrong on their end) — no code
+    # to exchange, just report the failure back to the app.
+    if error or not code or not state:
+        return RedirectResponse(f"{_DISCORD_CALLBACK_DEEP_LINK}?success=false&reason={error or 'missing_code'}")
+
+    user_id = decode_discord_oauth_state_token(state)
+    if not user_id:
+        # Expired (>10 min since /start) or tampered — never trust an
+        # unsigned/unverifiable state value to attribute a verification to
+        # an account.
+        return RedirectResponse(f"{_DISCORD_CALLBACK_DEEP_LINK}?success=false&reason=expired_state")
+
+    try:
+        discord_user = await _discord_oauth_exchange_code(code)
+    except Exception as exc:
+        logger.warning("discord_oauth_callback: code exchange failed for user %s: %s", user_id, exc)
+        return RedirectResponse(f"{_DISCORD_CALLBACK_DEEP_LINK}?success=false&reason=exchange_failed")
+
+    discord_user_id = discord_user.get("id")
+    discord_username = discord_user.get("username")
+    if not discord_user_id or not discord_username:
+        return RedirectResponse(f"{_DISCORD_CALLBACK_DEEP_LINK}?success=false&reason=invalid_response")
+    # Discord's newer "global name"/pomelo usernames still populate `username`;
+    # `discriminator` is "0" (not a real 4-digit tag) for migrated accounts —
+    # only append it for the legacy accounts that still have a real one.
+    discriminator = discord_user.get("discriminator")
+    display_username = (
+        f"{discord_username}#{discriminator}" if discriminator and discriminator != "0" else discord_username
+    )
+    avatar_hash = discord_user.get("avatar")
+
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "INSERT INTO ios_discord_verifications "
+                    "(user_id, discord_user_id, discord_username, discord_avatar_hash, verified_at) "
+                    "VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT (user_id) DO UPDATE SET discord_user_id = EXCLUDED.discord_user_id, "
+                    "discord_username = EXCLUDED.discord_username, discord_avatar_hash = EXCLUDED.discord_avatar_hash, "
+                    "verified_at = CURRENT_TIMESTAMP",
+                    (user_id, discord_user_id, display_username, avatar_hash),
+                )
+    except Exception as exc:
+        # Most likely the ios_discord_verifications_idx_discord_user unique
+        # index — this exact Discord account is already linked to a
+        # DIFFERENT Lumisound account.
+        logger.warning("discord_oauth_callback: verification upsert failed for user %s: %s", user_id, exc)
+        return RedirectResponse(f"{_DISCORD_CALLBACK_DEEP_LINK}?success=false&reason=already_linked_elsewhere")
+
+    await log_event("account", "discord_verified", user_id=user_id, detail={"discord_username": display_username})
+    return RedirectResponse(f"{_DISCORD_CALLBACK_DEEP_LINK}?success=true")
+
+
+@app.get("/api/discord/verification")
+async def get_discord_verification(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT discord_username, discord_avatar_hash, verified_at "
+                "FROM ios_discord_verifications WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+    if not row:
+        return {"verified": False, "discord_username": None, "discord_avatar_hash": None, "verified_at": None}
+    return {
+        "verified": True,
+        "discord_username": row[0],
+        "discord_avatar_hash": row[1],
+        "verified_at": row[2].isoformat() if row[2] else None,
+    }
+
+
+@app.delete("/api/discord/verification", status_code=204)
+async def delete_discord_verification(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM ios_discord_verifications WHERE user_id = %s", (user_id,))
+    await log_event("account", "discord_unverified", user_id=user_id)
 
 
 # ---------------------------------------------------------------------------

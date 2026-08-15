@@ -103,3 +103,42 @@ def decode_totp_pending_token(token: str) -> str | None:
     if payload.get("purpose") != "totp_pending":
         return None
     return payload.get("sub")
+
+
+# ---------------------------------------------------------------------------
+# Discord OAuth2 account-verification state token
+# ---------------------------------------------------------------------------
+#
+# Same shape as the totp_pending token above (a separate "purpose"-scoped JWT,
+# never accepted by get_current_user's session lookup) — used as the OAuth2
+# "state" parameter for /api/discord/oauth/start -> /api/discord/oauth/callback.
+# Discord's callback is an unauthenticated browser redirect (no Authorization
+# header this server issued), so this signed, short-lived, tamper-proof token
+# is both the CSRF-protection "state" value the OAuth2 spec requires AND the
+# only way the callback recovers *which account* started the flow — without
+# needing an in-memory state store that wouldn't survive a bridge restart or
+# work across multiple worker processes.
+
+DISCORD_OAUTH_STATE_EXPIRE_SECONDS = 600  # 10 minutes to complete the Discord consent screen
+
+
+def create_discord_oauth_state_token(user_id: str) -> str:
+    payload = {
+        "sub": user_id,
+        "purpose": "discord_oauth_state",
+        "exp": datetime.now(timezone.utc) + timedelta(seconds=DISCORD_OAUTH_STATE_EXPIRE_SECONDS),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def decode_discord_oauth_state_token(token: str) -> str | None:
+    """Returns the initiating user_id if *token* is a valid, unexpired
+    discord_oauth_state token, else None."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except Exception:
+        return None
+    if payload.get("purpose") != "discord_oauth_state":
+        return None
+    return payload.get("sub")
