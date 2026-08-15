@@ -752,16 +752,34 @@ extension StreamingService {
     /// without clobbering or being silently mistaken for something else.
     func resolveDownloadDestination(preferred: URL, sourceTrackID: String) -> (url: URL, alreadyComplete: Bool) {
         let fm = FileManager.default
+        let dir = preferred.deletingLastPathComponent()
+
+        // Consult the ledger BEFORE checking whether `preferred`'s own path
+        // exists — a track that's already been downloaded AND converted
+        // (LumisoundExclusiveExtensionService.convert re-encodes to a fresh
+        // "<name>.m4a.lms" and deletes the original) no longer has anything
+        // at `preferred`'s original requested extension at all, even though
+        // it's fully, correctly downloaded. Checking `preferred` first (as
+        // this used to) made every already-converted track look
+        // undownloaded here, so a later reconciliation pass for the same
+        // pending job re-downloaded and re-converted it from scratch —
+        // confirmed from real client logs: the same 2 tracks re-imported and
+        // re-converted 4 times over ~2 minutes, fully wasted bandwidth/CPU
+        // each time since the result was identical. The ledger's recorded
+        // filename is the only thing that still points at where a track
+        // actually lives post-conversion.
+        if let ledgerName = DownloadLedgerStore.shared.filename(for: sourceTrackID) {
+            let ledgerURL = dir.appendingPathComponent(ledgerName)
+            if fm.fileExists(atPath: ledgerURL.path), CorruptFileFinderService.isValidAudioFile(at: ledgerURL) {
+                return (ledgerURL, true)
+            }
+        }
+
         guard fm.fileExists(atPath: preferred.path) else {
             return (preferred, false)
         }
-        if DownloadLedgerStore.shared.filename(for: sourceTrackID) == preferred.lastPathComponent,
-           CorruptFileFinderService.isValidAudioFile(at: preferred) {
-            return (preferred, true)
-        }
         let ext = preferred.pathExtension
         let base = preferred.deletingPathExtension().lastPathComponent
-        let dir = preferred.deletingLastPathComponent()
         var n = 2
         var candidate = dir.appendingPathComponent("\(base) (\(n))").appendingPathExtension(ext)
         while fm.fileExists(atPath: candidate.path) {
