@@ -551,13 +551,20 @@ final class SocialService: ObservableObject {
 
     // MARK: - Helpers
 
-    private func handle(_ error: Error) {
+    /// `function` defaults to `#function`, which Swift resolves to the NAME
+    /// OF THE CALLER at each of this method's ~30 call sites automatically —
+    /// no need to touch any of them. Added because the plain error text
+    /// alone (e.g. "The data couldn't be read because it is missing.", a
+    /// DecodingError's generic localizedDescription for a missing/null key)
+    /// gives no way to tell which of ~10 different endpoints this service
+    /// calls actually failed, from the log alone.
+    private func handle(_ error: Error, function: String = #function) {
         if let err = error as? AccountError {
             errorMessage = err.message
         } else {
             errorMessage = error.localizedDescription
         }
-        appWarn("SocialService error: \(errorMessage ?? "")", category: "social")
+        appWarn("SocialService.\(function) error: \(errorMessage ?? "")", category: "social")
     }
 }
 

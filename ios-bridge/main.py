@@ -9475,11 +9475,24 @@ async def _generate_weekly_mix_core(user_id: str) -> list[dict]:
             # own doc comment in schema.sql) — a row from before that column
             # existed, never re-uploaded since, would otherwise show up in
             # the mix as a track that silently can't be played.
+            # title/artist/album are nullable columns (no NOT NULL constraint —
+            # plenty of uploaded files lack ID3 tags entirely), but the iOS
+            # client's WeeklyMixTrack decodes them as non-optional Strings —
+            # a single NULL among any track in the whole mix used to fail the
+            # ENTIRE array's decode with a generic "data couldn't be read"
+            # error, silently killing the Weekly Mix card for that user
+            # (confirmed via real client logs after the deeper-logging pass:
+            # "fetchWeeklyMix: The data couldn't be read because it is
+            # missing."). COALESCE to a sensible placeholder here so the
+            # response is always decodable, instead of also loosening the
+            # client's Codable (a null artist/album showing as literally
+            # blank text is worse UX than a placeholder either way).
             if top_artists:
                 placeholders = ",".join(["%s"] * len(top_artists))
                 await cur.execute(
                     f"""
-                    SELECT id, title, artist, album, bpm, musical_key, relative_path, has_artwork
+                    SELECT id, COALESCE(title, 'Unknown Title'), COALESCE(artist, 'Unknown Artist'),
+                           COALESCE(album, ''), bpm, musical_key, relative_path, has_artwork
                     FROM ios_user_music_metadata
                     WHERE user_id = %s AND artist IN ({placeholders}) AND relative_path IS NOT NULL
                     ORDER BY RANDOM()
@@ -9496,7 +9509,8 @@ async def _generate_weekly_mix_core(user_id: str) -> list[dict]:
             if len(rows) < _WEEKLY_MIX_SIZE:
                 seen_ids = {r[0] for r in rows}
                 await cur.execute(
-                    "SELECT id, title, artist, album, bpm, musical_key, relative_path, has_artwork "
+                    "SELECT id, COALESCE(title, 'Unknown Title'), COALESCE(artist, 'Unknown Artist'), "
+                    "COALESCE(album, ''), bpm, musical_key, relative_path, has_artwork "
                     "FROM ios_user_music_metadata "
                     "WHERE user_id = %s AND relative_path IS NOT NULL ORDER BY RANDOM() LIMIT %s",
                     (user_id, _WEEKLY_MIX_SIZE),
