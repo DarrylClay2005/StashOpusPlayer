@@ -5,8 +5,11 @@ import PhotosUI
 /// Minimal `ASWebAuthenticationPresentationContextProviding` conformance —
 /// Discord's OAuth2 consent screen (`DiscordVerificationService
 /// .startVerification`) is the first thing in this app that needs a system
-/// web-auth session, so there's no existing provider to reuse.
-private final class DiscordAuthPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
+/// web-auth session, so there's no existing provider to reuse. Not private:
+/// `DiscordRichPresenceView` reuses this same trivial, stateless conformance
+/// rather than duplicating it for its own inline "Verify with Discord" entry
+/// point.
+final class DiscordAuthPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         UIApplication.shared.connectedScenes
             .compactMap { ($0 as? UIWindowScene)?.keyWindow }

@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 
 // MARK: - DiscordRichPresenceView
@@ -19,6 +20,9 @@ import SwiftUI
 
 struct DiscordRichPresenceView: View {
     @EnvironmentObject private var account: AccountService
+    @EnvironmentObject private var discordVerification: DiscordVerificationService
+
+    private let discordPresentationContext = DiscordAuthPresentationContext()
 
     @State private var isGeneratingToken = false
     @State private var generatedToken: String?
@@ -36,6 +40,46 @@ struct DiscordRichPresenceView: View {
 
     var body: some View {
         List {
+            Section {
+                if discordVerification.isVerified {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color(red: 0.345, green: 0.396, blue: 0.949))
+                        Text(discordVerification.discordUsername ?? "Discord Verified")
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                } else {
+                    Button {
+                        Task {
+                            await discordVerification.startVerification(presentationContext: discordPresentationContext)
+                        }
+                    } label: {
+                        HStack {
+                            Label("Verify with Discord", systemImage: "checkmark.seal")
+                                .foregroundStyle(AppTheme.textPrimary)
+                            if discordVerification.isLinking {
+                                Spacer()
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(discordVerification.isLinking)
+                    if let error = discordVerification.errorMessage {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(AppTheme.error)
+                    }
+                }
+            } header: {
+                sectionHeader("Discord Account")
+            } footer: {
+                Text("Confirms which Discord account this is you — separate from Rich Presence itself, which is driven by whatever Discord desktop client is signed in locally and works whether or not you verify here.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .listRowBackground(AppTheme.surface)
+
             Section {
                 if let generatedToken {
                     VStack(alignment: .leading, spacing: 8) {
