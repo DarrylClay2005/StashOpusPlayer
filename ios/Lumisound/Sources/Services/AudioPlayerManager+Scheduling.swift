@@ -436,14 +436,35 @@ extension AudioPlayerManager {
             // YouTube CDN URLs often include the itag/mime in the path or may serve webm/opus
             // even when we requested m4a. AVAudioFile reads magic bytes but uses the file
             // extension for format hints — a mismatch causes silent failure.
+            // This app's own `/api/stream/proxy` URL (see StreamingService+
+            // StreamURL.swift) carries the requested format as a QUERY
+            // PARAM ("format=flac"/"opus"/"mp3"/...), not anywhere in the
+            // path — so none of the path-suffix checks below ever matched
+            // it, and every non-m4a stream through this app's own bridge
+            // silently fell through to the "m4a" default regardless of the
+            // user's actual preferred format. That mismatch (real bytes:
+            // flac/opus/mp3; file written and opened as ".m4a") is exactly
+            // what AVAudioFile's `kAudioFileUnsupportedFileTypeError`
+            // ("typ?") failures in the field trace back to — this was the
+            // "streaming doesn't work" report. Checked FIRST, before the
+            // path-suffix heuristics below (which stay for any other
+            // arbitrary/remote stream URL that isn't this app's own proxy).
             let urlPath = url.path.lowercased()
             let ext: String
-            if urlPath.contains("audio/webm") || urlPath.hasSuffix(".webm") || urlPath.contains("mime=audio%2fwebm") {
+            if let queryFormat = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "format" })?.value?.lowercased(),
+                ["m4a", "opus", "mp3", "flac", "wav"].contains(queryFormat) {
+                ext = queryFormat
+            } else if urlPath.contains("audio/webm") || urlPath.hasSuffix(".webm") || urlPath.contains("mime=audio%2fwebm") {
                 ext = "webm"
             } else if urlPath.hasSuffix(".opus") || urlPath.contains("mime=audio%2fogg") {
                 ext = "opus"
             } else if urlPath.hasSuffix(".mp3") {
                 ext = "mp3"
+            } else if urlPath.hasSuffix(".flac") {
+                ext = "flac"
+            } else if urlPath.hasSuffix(".wav") {
+                ext = "wav"
             } else {
                 ext = "m4a"    // default; covers m4a, aac, mp4 audio
             }
@@ -478,6 +499,8 @@ extension AudioPlayerManager {
                     if ct.contains("webm") { refinedExt = "webm" }
                     else if ct.contains("ogg") || ct.contains("opus") { refinedExt = "opus" }
                     else if ct.contains("mpeg") { refinedExt = "mp3" }
+                    else if ct.contains("flac") { refinedExt = "flac" }
+                    else if ct.contains("wav") { refinedExt = "wav" }
                     else { refinedExt = "m4a" }
                     let refinedURL = tempURL.deletingPathExtension().appendingPathExtension(refinedExt)
                     try? FileManager.default.removeItem(at: refinedURL)
@@ -541,16 +564,19 @@ extension AudioPlayerManager {
             updateNowPlaying()
 
         } catch {
-            errorMessage = "Could not load audio: \(error.localizedDescription)"
-            isPlaying = false
-            appError("Stream load failed for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
-            // See handleLoadFailure's matching comment — errorMessage alone
-            // isn't visible from the Library/Playlists/Folders tabs, and this
-            // path (unlike handleLoadFailure) doesn't skip or retry either,
-            // so without this a failed stream just silently stalls.
-            if let name = currentSong?.displayName {
-                ToastCenter.shared.show("Couldn't play \"\(name)\"", category: .error, icon: "exclamationmark.triangle.fill")
-            }
+            // AVAudioFile couldn't open the downloaded temp file — usually a
+            // container it just doesn't support (raw Ogg/Opus, or a
+            // format/extension mismatch the heuristics above didn't catch).
+            // Previously this just gave up and showed an error, which is
+            // most of what "streaming doesn't work" reports traced back to
+            // — the very same class of failure the LOCAL-file path already
+            // has a fallback for (`transcodeAndSchedule` -> AVPlayer via
+            // `scheduleWithOpusPlayer`). AVPlayer has access to iOS's full
+            // codec pipeline and can play directly from the ORIGINAL remote
+            // URL without needing the temp-file download at all, so fall
+            // back to it here too instead of only ever erroring out.
+            appWarn("downloadAndSchedule: AVAudioFile open failed for \"\(currentSong?.displayName ?? "?")\" (\(error.localizedDescription)) — falling back to AVPlayer", category: "audio")
+            scheduleWithOpusPlayer(url: url, startTime: startTime)
         }
     }
 

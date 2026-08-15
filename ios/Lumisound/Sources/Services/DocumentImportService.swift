@@ -168,12 +168,31 @@ struct DocumentImportService {
     /// Exposed so LibraryManager can build Song objects when scanning the Documents folder directly.
     func makeSong(for url: URL) async -> Song {
         appLog("Processing: \(url.lastPathComponent)", category: "library")
-        let asset = AVURLAsset(url: url)
+        // A `.lms`-locked track's on-disk bytes are XOR-masked (see
+        // LumisoundLockFormat) — AVFoundation cannot read ANY metadata,
+        // artwork, or audio properties from `url` directly for such a
+        // file. Every read below goes through `readableURL` instead, which
+        // is a no-op for anything not `.lms`-marked. Without this, every
+        // converted track's embedded title/artist/album/artwork silently
+        // failed to read and fell back to the raw filename (still showing
+        // the inner ".m4a"/etc extension) — the "still seeing .m4a in the
+        // title" / "metadata and artwork data is bugged" reports.
+        let readableURL = LumisoundExclusiveExtensionService.playableURL(for: url)
+        let asset = AVURLAsset(url: readableURL)
         let loadedDuration = (try? await asset.load(.duration)).map(CMTimeGetSeconds) ?? 0
         let commonMetadata = (try? await asset.load(.commonMetadata)) ?? []
         let metadata = (try? await asset.load(.metadata)) ?? []
 
-        var title = url.deletingPathExtension().lastPathComponent
+        // Filename fallback title: strip BOTH the outer Lumisound marker
+        // (".lms") and the real container extension underneath it
+        // (`effectiveExtension`'s counterpart for the whole filename) — a
+        // plain `url.deletingPathExtension()` only strips one level, which
+        // for a locked "Song.m4a.lms" file left the fallback title reading
+        // "Song.m4a" whenever the metadata read above came up empty.
+        let fallbackTitle = LumisoundExclusiveExtensionService.isConverted(url)
+            ? url.deletingPathExtension().deletingPathExtension().lastPathComponent
+            : url.deletingPathExtension().lastPathComponent
+        var title = fallbackTitle
         var artist = ""
         var album = ""
         var genre = ""
@@ -246,7 +265,7 @@ struct DocumentImportService {
         var sampleRate = 0
         var bitrate = 0
 
-        if let audioFile = try? AVAudioFile(forReading: url) {
+        if let audioFile = try? AVAudioFile(forReading: readableURL) {
             let rate = audioFile.processingFormat.sampleRate
             if rate > 0 { sampleRate = Int(rate.rounded()) }
         }
@@ -270,8 +289,8 @@ struct DocumentImportService {
         // would otherwise look like neither opus/ogg nor a known video container.
         let fileExt = LumisoundExclusiveExtensionService.effectiveExtension(for: url)
         let opusExtensions: Set<String> = ["opus", "ogg"]
-        if opusExtensions.contains(fileExt), title == url.deletingPathExtension().lastPathComponent {
-            let vorbis = Self.readVorbisComments(url: url)
+        if opusExtensions.contains(fileExt), title == fallbackTitle {
+            let vorbis = Self.readVorbisComments(url: readableURL)
             if let v = vorbis["TITLE"],  !v.isEmpty { title  = v }
             if let v = vorbis["ARTIST"], !v.isEmpty { artist = v }
             if let v = vorbis["ALBUM"],  !v.isEmpty { album  = v }
@@ -286,7 +305,7 @@ struct DocumentImportService {
         }
 
         // Filename fallback: if title is still the raw filename, try "Artist - Title" pattern
-        if title == url.deletingPathExtension().lastPathComponent && title.contains(" - ") {
+        if title == fallbackTitle && title.contains(" - ") {
             let parts = title.components(separatedBy: " - ")
             if parts.count >= 2 {
                 if artist.isEmpty { artist = parts[0].trimmingCharacters(in: .whitespaces) }
@@ -298,7 +317,7 @@ struct DocumentImportService {
         // write it to both memory and disk cache so it survives restarts.
         let videoExtensions: Set<String> = ["mp4", "m4v", "mov"]
         if videoExtensions.contains(fileExt) {
-            let asset = AVURLAsset(url: url)
+            let asset = AVURLAsset(url: readableURL)
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
             generator.maximumSize = CGSize(width: 600, height: 600)
@@ -377,7 +396,10 @@ struct DocumentImportService {
     /// run on a small rotating batch of tracks every few minutes. Returns `nil`
     /// if nothing changed (the common case), so callers can skip persistence work.
     func refreshTags(for url: URL, current: Song) async -> Song? {
-        let asset = AVURLAsset(url: url)
+        // See makeSong's `readableURL` comment — a `.lms`-locked track's raw
+        // bytes aren't a valid audio container to AVFoundation.
+        let readableURL = LumisoundExclusiveExtensionService.playableURL(for: url)
+        let asset = AVURLAsset(url: readableURL)
         let commonMetadata = (try? await asset.load(.commonMetadata)) ?? []
         let metadata = (try? await asset.load(.metadata)) ?? []
 
@@ -436,8 +458,11 @@ struct DocumentImportService {
 
         let fileExt = LumisoundExclusiveExtensionService.effectiveExtension(for: url)
         let opusExtensions: Set<String> = ["opus", "ogg"]
-        if opusExtensions.contains(fileExt), title == url.deletingPathExtension().lastPathComponent {
-            let vorbis = Self.readVorbisComments(url: url)
+        let fallbackTitle = LumisoundExclusiveExtensionService.isConverted(url)
+            ? url.deletingPathExtension().deletingPathExtension().lastPathComponent
+            : url.deletingPathExtension().lastPathComponent
+        if opusExtensions.contains(fileExt), title == fallbackTitle {
+            let vorbis = Self.readVorbisComments(url: readableURL)
             if let v = vorbis["TITLE"],  !v.isEmpty { title  = v }
             if let v = vorbis["ARTIST"], !v.isEmpty { artist = v }
             if let v = vorbis["ALBUM"],  !v.isEmpty { album  = v }
@@ -451,7 +476,7 @@ struct DocumentImportService {
             }
         }
 
-        if title == url.deletingPathExtension().lastPathComponent && title.contains(" - ") {
+        if title == fallbackTitle && title.contains(" - ") {
             let parts = title.components(separatedBy: " - ")
             if parts.count >= 2 {
                 if artist.isEmpty { artist = parts[0].trimmingCharacters(in: .whitespaces) }

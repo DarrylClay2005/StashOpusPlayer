@@ -220,8 +220,18 @@ final class ArtworkService {
         }
 
         if let url = song.url {
+            // Reads embedded tags/artwork below need `playableURL` — a
+            // `.lms`-locked track's on-disk bytes are XOR-masked (see
+            // LumisoundLockFormat's header comment) and are NOT a valid
+            // audio container to AVFoundation at all, so every embedded-
+            // metadata read against the raw `url` silently failed for any
+            // track that had gone through the exclusive-lock pipeline —
+            // this was the "metadata and artwork data is bugged, nothing
+            // is showing" report. A no-op for anything not `.lms`-marked.
+            let readableURL = LumisoundExclusiveExtensionService.playableURL(for: url)
+
             // Try embedded asset artwork (works for m4a, mp3, flac with embedded tags).
-            if let image = await fetchAssetArtwork(url: url) {
+            if let image = await fetchAssetArtwork(url: readableURL) {
                 appLog("Artwork: embedded tag found for \"\(song.displayName)\"", category: "artwork")
                 return persistFullArtwork(image, forKey: key)
             }
@@ -231,7 +241,7 @@ final class ArtworkService {
             // --embed-thumbnail isn't available. If the disk cache entry seeded
             // at download time was ever cleared, recover the same thumbnail here
             // instead of falling through to a guess-based iTunes Search lookup.
-            if let thumbnailURL = await fetchEmbeddedThumbnailURL(url: url),
+            if let thumbnailURL = await fetchEmbeddedThumbnailURL(url: readableURL),
                let image = await fetchRemoteImage(url: thumbnailURL) {
                 appLog("Artwork: recovered embedded LUMISOUND_THUMBNAIL for \"\(song.displayName)\"", category: "artwork")
                 return persistFullArtwork(image, forKey: key)
@@ -266,7 +276,7 @@ final class ArtworkService {
             // For local video files, extract the first frame as artwork.
             if Self.videoExtensions.contains(LumisoundExclusiveExtensionService.effectiveExtension(for: url)) {
                 appLog("Artwork: extracting video frame for \"\(song.displayName)\"", category: "artwork")
-                if let image = await extractVideoFrame(url: url) {
+                if let image = await extractVideoFrame(url: readableURL) {
                     return persistFullArtwork(image, forKey: key)
                 }
                 appWarn("Artwork: video frame extraction failed for \"\(song.displayName)\"", category: "artwork")

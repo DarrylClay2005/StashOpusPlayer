@@ -5,13 +5,12 @@ import Foundation
 //
 // Finishes the "this track belongs to Lumisound" pipeline started by
 // LumisoundTrackVault/LumisoundTrackTagger (the encrypted xattr metadata):
-// actually re-encodes an already-downloaded, already-vault-tagged track's
-// audio into a fresh AAC .m4a container (real bytes rewritten via
-// `AudioEncoderService.convertPermanently`, not merely a file rename) and
-// appends a Lumisound-exclusive marker extension on top of that.
+// locks an already-downloaded, already-vault-tagged track's bytes (see
+// `LumisoundLockFormat`) and appends a Lumisound-exclusive marker
+// extension on top of the real one — no re-encode, no format change.
 //
 // The marker is appended as an OUTER extension on top of the real one
-// (e.g. "Song.opus" -> "Song.m4a.lms"), not stripped/renamed away:
+// (e.g. "Song.opus" -> "Song.opus.lms"), not stripped/renamed away:
 //   - `url.pathExtension` is genuinely ".lms" — no other app, share sheet,
 //     or file browser has any type association for it, which is the whole
 //     point ("exclusive").
@@ -25,14 +24,24 @@ import Foundation
 //     calls `effectiveExtension(for:)` instead of raw `pathExtension` — see
 //     git history for the full list.
 //
-// Re-encoding (rather than a pure rename) is the point of this pass, not
-// just the marker: every converted track ends up as AAC .m4a, which plays
-// back via AVAudioFile's native Tier 1 path in `AudioEncoderService`
-// instead of needing the opus/webm compatibility fallback on every play.
+// `convert` used to unconditionally re-encode every track to AAC .m4a
+// before locking it — so every converted track played back via
+// AVAudioFile's native Tier 1 path instead of needing the opus/webm
+// compatibility fallback on every play. That silently overrode a user's
+// preferred download format (opus/flac/mp3 all ended up as .m4a.lms on
+// disk regardless of Settings) since essentially every track gets swept
+// into this pass eventually. Fixed: the lock now wraps the ORIGINAL
+// downloaded bytes as-is (see `convert` below) — the outer `.lms` marker
+// is appended on top of whatever the real extension already is (e.g.
+// "Song.opus" -> "Song.opus.lms"), so the on-disk format matches what the
+// user actually asked for. Playback still works for every format because
+// every route that plays a `.lms` file already dispatches on
+// `effectiveExtension(for:)` (opus/webm compatibility fallback included),
+// not a hardcoded assumption of AAC.
 //
 // The marker extension alone used to be the ONLY thing making a `.lms` file
 // exclusive — a copy with the marker stripped off was still a perfectly
-// standard, decodable m4a to any player. It no longer is: the re-encoded
+// standard, decodable file to any player. It no longer is: the original
 // bytes are additionally masked by `LumisoundLockFormat` before being
 // written to the `.lms` path, so what's actually on disk isn't a valid
 // audio container to ANY framework — including this app's own — until
@@ -92,58 +101,55 @@ enum LumisoundExclusiveExtensionService {
         return outURL
     }
 
-    /// The `.m4a.lms` path `convert(fileURL:)` would (or did) write `url`'s
-    /// re-encode to — pure path math, no I/O. Exposed so callers (the local
-    /// documents scan) can recognize "this file already has a converted
-    /// counterpart" without duplicating the naming scheme. `nil` for a URL
-    /// that's already converted (nothing further to convert it to).
+    /// The `<original-ext>.lms` path `convert(fileURL:)` would (or did)
+    /// write `url`'s locked copy to — pure path math, no I/O. Exposed so
+    /// callers (the local documents scan) can recognize "this file already
+    /// has a converted counterpart" without duplicating the naming scheme.
+    /// `nil` for a URL that's already converted (nothing further to convert
+    /// it to).
     static func expectedConvertedURL(for url: URL) -> URL? {
         guard !isConverted(url) else { return nil }
-        return url.deletingPathExtension()
-            .appendingPathExtension("m4a")
-            .appendingPathExtension(marker)
+        return url.appendingPathExtension(marker)
     }
 
-    /// Re-encodes `fileURL`'s audio into a clean temp AAC .m4a file, then
-    /// LOCKS that (see `LumisoundLockFormat`) into `<original-name>.m4a.lms`
-    /// — the on-disk bytes at `newURL` are the actual masked format, not a
-    /// plain m4a wearing a fake extension. Verifies the locked file
-    /// round-trips (unlocks correctly AND the unlocked result passes
+    /// LOCKS `fileURL`'s existing bytes (see `LumisoundLockFormat`) as-is
+    /// into `<original-name>.<original-ext>.lms` — no re-encode, so the
+    /// user's actual downloaded format (opus/flac/mp3/m4a/whatever the
+    /// preferred-format setting produced) is preserved on disk; only the
+    /// outer marker extension changes. Verifies the locked file round-trips
+    /// (unlocks correctly AND the unlocked result passes
     /// `CorruptFileFinderService.isValidAudioFile`) before removing
     /// `fileURL`, and never leaves a locked file behind that failed that
     /// check. Returns the new URL — or `nil` if `fileURL` is already
-    /// converted, the destination somehow already exists, the re-encode
-    /// fails, or the lock/verify step fails (all logged, never thrown —
-    /// this is always called from a best-effort background pass). Extended
-    /// attributes (the LumisoundTrackVault tag) are re-applied by the
-    /// caller after this returns, since this produces a brand new inode
-    /// rather than preserving the original's xattrs the way a rename
-    /// would have.
+    /// converted, the destination somehow already exists, or the lock/
+    /// verify step fails (all logged, never thrown — this is always called
+    /// from a best-effort background pass). Extended attributes (the
+    /// LumisoundTrackVault tag) are re-applied by the caller after this
+    /// returns, since this produces a brand new inode rather than
+    /// preserving the original's xattrs the way a rename would have.
     static func convert(fileURL: URL) async -> URL? {
         guard !isConverted(fileURL), let newURL = expectedConvertedURL(for: fileURL) else { return nil }
         let fm = FileManager.default
         guard !fm.fileExists(atPath: newURL.path) else { return nil }
 
         let beforeBytes = (try? fm.attributesOfItem(atPath: fileURL.path))?[.size] as? Int64 ?? -1
-        appLog("LumisoundExclusiveExtensionService: converting \(fileURL.lastPathComponent) (\(beforeBytes) bytes, ext=\(fileURL.pathExtension.lowercased())) -> \(newURL.lastPathComponent)", category: "background")
+        appLog("LumisoundExclusiveExtensionService: locking \(fileURL.lastPathComponent) (\(beforeBytes) bytes, ext=\(fileURL.pathExtension.lowercased())) -> \(newURL.lastPathComponent)", category: "background")
 
-        let tempPlainURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("m4a")
-        defer { try? fm.removeItem(at: tempPlainURL) }
-        guard await AudioEncoderService.shared.convertPermanently(fileURL, to: tempPlainURL) else {
-            appWarn("LumisoundExclusiveExtensionService: re-encode failed for \(fileURL.lastPathComponent)", category: "background")
-            return nil
-        }
-        let plainBytes = (try? fm.attributesOfItem(atPath: tempPlainURL.path))?[.size] as? Int64 ?? -1
-
-        guard LumisoundLockFormat.lock(plainURL: tempPlainURL, to: newURL) else {
+        guard LumisoundLockFormat.lock(plainURL: fileURL, to: newURL) else {
             appWarn("LumisoundExclusiveExtensionService: lock failed for \(fileURL.lastPathComponent)", category: "background")
             return nil
         }
         let lockedBytes = (try? fm.attributesOfItem(atPath: newURL.path))?[.size] as? Int64 ?? -1
 
         // Verify the locked file actually round-trips before trusting it
-        // with the original's removal — never delete on faith.
-        let verifyURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("m4a")
+        // with the original's removal — never delete on faith. Must keep
+        // `fileURL`'s REAL extension (opus/flac/mp3/m4a/...), not a
+        // hardcoded ".m4a" — AVAudioFile (which `isValidAudioFile` reads
+        // through) selects its container parser from the file extension,
+        // so verifying real opus/flac bytes under a fake ".m4a" name would
+        // always misreport them as unreadable.
+        let verifyURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(fileURL.pathExtension)
         defer { try? fm.removeItem(at: verifyURL) }
         guard LumisoundLockFormat.unlock(lockedURL: newURL, to: verifyURL),
               CorruptFileFinderService.isValidAudioFile(at: verifyURL) else {
@@ -167,7 +173,7 @@ enum LumisoundExclusiveExtensionService {
             originalRemoved = false
             appWarn("LumisoundExclusiveExtensionService: could not remove pre-conversion file \(fileURL.lastPathComponent) after successful convert: \(error.localizedDescription)", category: "background")
         }
-        appLog("LumisoundExclusiveExtensionService: converted+locked \(newURL.lastPathComponent) — before=\(beforeBytes)B, plain-reencode=\(plainBytes)B, locked=\(lockedBytes)B, verified=true, original-removed=\(originalRemoved)", category: "background")
+        appLog("LumisoundExclusiveExtensionService: converted+locked \(newURL.lastPathComponent) — before=\(beforeBytes)B, locked=\(lockedBytes)B, verified=true, original-removed=\(originalRemoved)", category: "background")
         return newURL
     }
 
@@ -222,7 +228,7 @@ enum LumisoundExclusiveExtensionService {
     /// file's header promising it "MUST stay plaintext/ffprobe-readable".
     /// See `LumisoundTrackVaultService`'s one-time repair migration.
     static func hasEmbeddedSourceTag(fileURL: URL) async -> Bool {
-        let asset = AVURLAsset(url: fileURL)
+        let asset = AVURLAsset(url: playableURL(for: fileURL))
         guard let items = try? await asset.load(.metadata) else { return false }
         return items.contains { item in
             let idRaw = item.identifier?.rawValue.lowercased() ?? ""
@@ -239,7 +245,7 @@ enum LumisoundExclusiveExtensionService {
     /// repair pass instead of staying permanently missing artwork despite
     /// `hasEmbeddedSourceTag` alone now reporting `true` for them.
     static func hasEmbeddedThumbnailTag(fileURL: URL) async -> Bool {
-        let asset = AVURLAsset(url: fileURL)
+        let asset = AVURLAsset(url: playableURL(for: fileURL))
         guard let items = try? await asset.load(.metadata) else { return false }
         return items.contains { item in
             let idRaw = item.identifier?.rawValue.lowercased() ?? ""

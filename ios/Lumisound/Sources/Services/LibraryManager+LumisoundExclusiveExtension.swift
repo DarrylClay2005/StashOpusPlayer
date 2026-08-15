@@ -167,27 +167,54 @@ extension LibraryManager {
             }
         }
 
+        // `url` is `.lms`-locked (guaranteed above), so its on-disk bytes
+        // are XOR-masked — AVAssetExportSession can't read them directly.
         // AudioTagWriter verifies its own output is genuinely readable
         // before returning non-nil (see its doc comment) — a non-nil
-        // `repairedURL` here is safe to treat as the new truth for `url`.
+        // `repairedURL` here is safe to treat as the new (plain, unlocked)
+        // truth to re-lock back into place.
+        let readableURL = LumisoundExclusiveExtensionService.playableURL(for: url)
         guard let repairedURL = await AudioTagWriter.tag(
-            fileAt: url, title: song.title, artist: song.artist, album: song.album,
+            fileAt: readableURL, title: song.title, artist: song.artist, album: song.album,
             sourceTrackID: tag.trackID, thumbnailURL: thumbnailURL
         ) else {
             appWarn("repairEmbeddedMetadata: tag-write failed for \(songID) at \(url.lastPathComponent)", category: "background")
             return false
         }
+        defer { try? FileManager.default.removeItem(at: repairedURL) }
 
-        do {
-            _ = try FileManager.default.replaceItemAt(url, withItemAt: repairedURL)
-        } catch {
-            appWarn("repairEmbeddedMetadata: replaceItemAt failed for \(songID): \(error.localizedDescription)", category: "background")
-            try? FileManager.default.removeItem(at: repairedURL)
+        // Re-lock the freshly-tagged plain file back into `url`'s path —
+        // writing `repairedURL`'s PLAIN bytes straight to the `.lms` path
+        // would silently strip the file of its actual lock (no magic
+        // header), which is exactly the "exclusive" guarantee this whole
+        // pipeline exists for. Locked to a temp file first and only
+        // swapped in via `replaceItemAt` once verified, matching
+        // `LumisoundExclusiveExtensionService.relockLegacyFile`'s pattern.
+        let fm = FileManager.default
+        let lockedTempURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("lms")
+        defer { try? fm.removeItem(at: lockedTempURL) }
+        guard LumisoundLockFormat.lock(plainURL: repairedURL, to: lockedTempURL) else {
+            appWarn("repairEmbeddedMetadata: re-lock failed for \(songID) at \(url.lastPathComponent)", category: "background")
             return false
         }
-        // replaceItemAt (like the AudioTagWriter export before it) produces
-        // a new inode, so the xattr vault tag doesn't carry over for free —
-        // re-apply it, same as convertToLumisoundExclusiveExtension does.
+        let verifyURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(repairedURL.pathExtension)
+        defer { try? fm.removeItem(at: verifyURL) }
+        guard LumisoundLockFormat.unlock(lockedURL: lockedTempURL, to: verifyURL),
+              CorruptFileFinderService.isValidAudioFile(at: verifyURL) else {
+            appWarn("repairEmbeddedMetadata: re-lock round-trip verification failed for \(songID) at \(url.lastPathComponent)", category: "background")
+            return false
+        }
+
+        do {
+            _ = try fm.replaceItemAt(url, withItemAt: lockedTempURL)
+        } catch {
+            appWarn("repairEmbeddedMetadata: replaceItemAt failed for \(songID): \(error.localizedDescription)", category: "background")
+            return false
+        }
+        // replaceItemAt produces a new inode, so the xattr vault tag
+        // doesn't carry over for free — re-apply it, same as
+        // convertToLumisoundExclusiveExtension does.
         LumisoundTrackTagger.tag(fileURL: url, trackID: tag.trackID, sourceURL: tag.sourceURL)
         if let stamp = ScanCacheService.fileStamp(for: url) {
             ScanCacheService.shared.store(song: song, for: url, stamp: stamp)

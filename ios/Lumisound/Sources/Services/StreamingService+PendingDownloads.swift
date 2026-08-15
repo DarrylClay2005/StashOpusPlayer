@@ -185,7 +185,7 @@ extension StreamingService {
                 .prefix(100)
         )
         let sourceTrackID = entry.source_track_id ?? entry.job_id
-        let (destURL, alreadyComplete) = resolveDownloadDestination(
+        var (destURL, alreadyComplete) = resolveDownloadDestination(
             preferred: importDir.appendingPathComponent("\(safeName).\(ext)"),
             sourceTrackID: sourceTrackID
         )
@@ -204,6 +204,29 @@ extension StreamingService {
                 try? FileManager.default.removeItem(at: destURL)
                 appWarn("reconcilePendingDownloads: corrupt/unreadable file for job \(entry.job_id) — discarding", category: "network")
                 return false
+            }
+
+            // This reconciliation path (a download that finished while the
+            // app wasn't around to fetch it in the foreground) never used to
+            // run the Lumisound-exclusive lock at all — only the foreground
+            // `attemptDownload`/`finalizeRelayedFile` paths called
+            // `finalizeAndLockDownload`. A track imported here sat as a
+            // plain, unlocked file until SOME LATER background pass
+            // (`LumisoundTrackVaultService.runExtensionConversionPass`)
+            // happened to run — which, on a device that's mostly backgrounded
+            // between app opens, could be a long wait or never happen before
+            // the user noticed. That was the "some downloads still seep
+            // through to the user's device un-converted" report. Best-effort,
+            // same as the foreground path: on any failure this just leaves
+            // `destURL` as the plain file, which is fully playable and still
+            // picked up by the next background pass.
+            LumisoundTrackVaultService.tagNewDownload(fileURL: destURL, trackID: sourceTrackID, sourceURL: "")
+            if let lockedURL = await LumisoundExclusiveExtensionService.convert(fileURL: destURL) {
+                LumisoundTrackTagger.tag(fileURL: lockedURL, trackID: sourceTrackID, sourceURL: "")
+                appLog("reconcilePendingDownloads: locked job \(entry.job_id) synchronously -> \(lockedURL.lastPathComponent)", category: "network")
+                destURL = lockedURL
+            } else {
+                appWarn("reconcilePendingDownloads: synchronous lock failed for job \(entry.job_id) — will retry on next background conversion pass", category: "network")
             }
         }
 
