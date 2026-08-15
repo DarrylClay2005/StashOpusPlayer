@@ -4,6 +4,40 @@ import AVKit
 
 extension NowPlayingView {
 
+    // MARK: - Share content
+    //
+    // Sharing the current track used to hand `ShareLink` the on-disk audio
+    // file URL, so the system share sheet offered to AirDrop/message the raw
+    // audio file itself — surprising (and, for a downloaded stream, legally
+    // murky) compared to what every other music app's share button does:
+    // hand off the track's name/artist and artwork so it can be posted,
+    // messaged, etc. as a reference to the song, not the song's bytes.
+    // `Image` is `Transferable` out of the box (exports as image data) and
+    // `SharePreview` is exactly the "title + image" shape this needs, so
+    // this shares the artwork with a title/subtitle preview when artwork is
+    // cached, falling back to a plain "Title — Artist" text share otherwise.
+    private var shareText: String {
+        guard let song = player.currentSong else { return "" }
+        return song.artist.isEmpty ? song.title : "\(song.title) — \(song.artist)"
+    }
+
+    private var shareArtworkImage: Image? {
+        guard let song = player.currentSong,
+              let uiImage = ArtworkService.shared.artwork(for: song) else { return nil }
+        return Image(uiImage: uiImage)
+    }
+
+    @ViewBuilder
+    func shareLink<Label: View>(@ViewBuilder label: () -> Label) -> some View {
+        if player.currentSong != nil {
+            if let image = shareArtworkImage {
+                ShareLink(item: image, preview: SharePreview(shareText, image: image), label: label)
+            } else {
+                ShareLink(item: shareText, label: label)
+            }
+        }
+    }
+
     // MARK: - Top bar
     //
     // A reinterpretation of the YouTube-Music-style reference's collapsed-
@@ -79,10 +113,8 @@ extension NowPlayingView {
                     Label("Format Info", systemImage: "info.circle")
                 }
             }
-            if let url = player.currentSong?.url {
-                ShareLink(item: url) {
-                    Label("Share", systemImage: "square.and.arrow.up")
-                }
+            shareLink {
+                Label("Share", systemImage: "square.and.arrow.up")
             }
             if player.currentSong != nil {
                 Button {
@@ -194,10 +226,8 @@ extension NowPlayingView {
                     }
                 }
 
-                if let url = player.currentSong?.url {
-                    ShareLink(item: url) {
-                        actionPillLabel(icon: "square.and.arrow.up", label: "Share", isActive: false)
-                    }
+                shareLink {
+                    actionPillLabel(icon: "square.and.arrow.up", label: "Share", isActive: false)
                 }
             }
             .padding(.horizontal, 2)
