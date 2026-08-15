@@ -139,12 +139,6 @@ struct AudioSettings: Codable, Equatable {
     /// same missing-key-safety reason as `spatialAudioEnabled`.
     var nightModeEnabled: Bool? = false
 
-    /// Detects and skips near-silent lead-in audio at the start of a track
-    /// (not mid-track or trailing silence — see `AudioPlayerManager`'s
-    /// `detectLeadingSilenceFrames`). Optional for the same missing-key-safety
-    /// reason as `spatialAudioEnabled`.
-    var silenceTrimmingEnabled: Bool? = false
-
     /// Volume curve used during a crossfade's overlap. Optional so old saved
     /// blobs decode with `.equalPower` (the recommended default — avoids the
     /// perceived-loudness dip a linear fade has at the midpoint — rather than

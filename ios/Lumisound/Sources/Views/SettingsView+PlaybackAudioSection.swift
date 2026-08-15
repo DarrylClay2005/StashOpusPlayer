@@ -125,21 +125,6 @@ extension SettingsView {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            // Silence Trim
-            Toggle(isOn: $silenceTrim.isEnabled) {
-                Label("Silence Trim", systemImage: "waveform.slash")
-                    .foregroundStyle(AppTheme.textPrimary)
-            }
-            .tint(AppTheme.dynamicAccent)
-
-            if silenceTrim.isEnabled {
-                Text("Automatically skips past dead air at the very start of a local track (up to 10 seconds), analyzed on-device the first time each track plays. Doesn't apply to streamed tracks.")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .padding(.leading, 16)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
             // Default speed
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
@@ -343,19 +328,26 @@ extension SettingsView {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            // Silence Trimming — skips near-silent lead-in audio at the start
-            // of a track. Off by default.
-            Toggle(isOn: Binding(
-                get: { player.audioSettings.silenceTrimmingEnabled ?? false },
-                set: { player.audioSettings.silenceTrimmingEnabled = $0 }
-            )) {
+            // Skip Silent Intros — skips near-silent lead-in audio at the start
+            // of a local track. Off by default. Was previously two separate,
+            // independently-toggled implementations that both partially did
+            // this (a weak, hard-coded-threshold 2-second scan gated on
+            // `audioSettings.silenceTrimmingEnabled` and run synchronously in
+            // `scheduleCurrent`, versus this one — `SilenceTrimService` +
+            // `SilenceTrimAnalyzer`, which analyzes up to 10s with a
+            // peak-relative threshold and caches the result on-device) —
+            // confusing to find two nearly-identical rows in Settings, and
+            // the weaker one rarely actually trimmed anything for intros
+            // longer than 2s. Consolidated onto the more robust one; see
+            // `AudioPlayerManager+Scheduling.swift`'s removed call site.
+            Toggle(isOn: $silenceTrim.isEnabled) {
                 Label("Skip Silent Intros", systemImage: "forward.end")
                     .foregroundStyle(AppTheme.textPrimary)
             }
             .tint(AppTheme.dynamicAccent)
 
-            if player.audioSettings.silenceTrimmingEnabled ?? false {
-                Text("Automatically skips past near-silent lead-in audio when a track starts playing.")
+            if silenceTrim.isEnabled {
+                Text("Automatically skips past dead air at the very start of a local track (up to 10 seconds), analyzed on-device the first time each track plays. Doesn't apply to streamed tracks.")
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
                     .padding(.leading, 16)
@@ -434,7 +426,7 @@ extension SettingsView {
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.spatialAudioEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.smartCrossfadeEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.nightModeEnabled)
-        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.silenceTrimmingEnabled)
+        .animation(.easeInOut(duration: 0.22), value: silenceTrim.isEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.monoAudioEnabled)
     }
 }

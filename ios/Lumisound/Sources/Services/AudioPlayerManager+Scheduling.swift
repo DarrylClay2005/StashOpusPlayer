@@ -122,19 +122,14 @@ extension AudioPlayerManager {
             audioFile = file
             duration = file.duration
             let sampleRate = file.processingFormat.sampleRate
-            var startFrame = max(0, AVAudioFramePosition(startTime * sampleRate))
-            // Only trim on a fresh track start, never a mid-track seek — a
-            // manual seek/rewind is a specific position the user chose, and
-            // silently nudging it forward past silence would be surprising.
-            if startTime == 0, audioSettings.silenceTrimmingEnabled ?? false {
-                startFrame += detectLeadingSilenceFrames(in: file)
-            }
+            let startFrame = max(0, AVAudioFramePosition(startTime * sampleRate))
+            // Skip Silent Intros (`SilenceTrimService`) nudges playback past any
+            // detected leading dead air itself, via a `player.seek(to:)` right
+            // after `currentSong` changes — see that type's doc comment for why
+            // it lives outside this scheduling path instead of trimming
+            // `startFrame` here directly (its detection is async/cached and
+            // needs the track already scheduled and playing to seek against).
             let framesLeft = max(0, AVAudioFrameCount(file.length - startFrame))
-            // Explicitly reset to 0 for new-track starts so the position formula is exact.
-            // (When silence trimming nudges `startFrame` forward, `position`
-            // starts at that trimmed offset rather than 0 — consistent with
-            // how a manual seek already works, and with zero risk of the
-            // position/duration math drifting out of sync over playback.)
             fileStartFrame = startFrame
             position = Double(startFrame) / sampleRate
             gaplessScheduled = false
