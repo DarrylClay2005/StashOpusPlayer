@@ -347,7 +347,7 @@ struct AdminDashboardView: View {
     }
 
     private func quotaSummary(for user: AdminUser) -> String {
-        let used = formattedBytes(user.storageUsedBytes)
+        let used = formattedBytes(user.storageUsedBytes ?? 0)
         guard let quota = user.storageQuotaBytes, quota > 0 else {
             return "\(used) used — server default limit"
         }

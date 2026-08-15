@@ -1063,7 +1063,12 @@ struct AdminUser: Codable, Identifiable {
     /// nil = no per-user override set (falls back to the server-wide
     /// default) — distinct from an override explicitly set to 0 bytes.
     let storageQuotaBytes: Int?
-    let storageUsedBytes: Int
+    /// Optional (not just semantically, but for missing-key safety) — a
+    /// bridge deployment running before this field existed server-side
+    /// would otherwise fail to decode the WHOLE admin user list with a
+    /// generic "data couldn't be read" error instead of just missing this
+    /// one number. `nil` reads as 0 used at every call site.
+    let storageUsedBytes: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, username, email
