@@ -12,7 +12,11 @@ extension AudioPlayerManager {
         guard let nextSong = peekNextSong(), let nextURL = nextSong.url else {
             skipToNext(); return
         }
-        guard let nextFile = try? AVAudioFile(forReading: nextURL) else {
+        // See LumisoundExclusiveExtensionService.playableURL's doc comment —
+        // without this, a `.lms`-converted next track would fail to open
+        // here for a pure extension-recognition reason, silently degrading
+        // every crossfade into a plain skip instead of an actual fade.
+        guard let nextFile = try? AVAudioFile(forReading: LumisoundExclusiveExtensionService.playableURL(for: nextURL)) else {
             skipToNext(); return
         }
 

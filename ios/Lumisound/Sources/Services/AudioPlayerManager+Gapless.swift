@@ -61,7 +61,10 @@ extension AudioPlayerManager {
             resolvedURL = nextURL
         }
 
-        guard let nextFile = try? AVAudioFile(forReading: resolvedURL) else { return }
+        // See LumisoundExclusiveExtensionService.playableURL's doc comment —
+        // a no-op for the cached-stream-download branch above (never
+        // `.lms`-marked), but needed for a `.lms`-converted local file.
+        guard let nextFile = try? AVAudioFile(forReading: LumisoundExclusiveExtensionService.playableURL(for: resolvedURL)) else { return }
 
         gaplessScheduled = true
         // Stashed so `handleTrackEnded` can adopt it as the live `audioFile`

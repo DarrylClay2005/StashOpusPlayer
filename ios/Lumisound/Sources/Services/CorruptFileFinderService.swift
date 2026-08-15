@@ -140,7 +140,11 @@ final class CorruptFileFinderService: ObservableObject {
               let size = attrs[.size] as? Int64,
               size >= 1_024 else { return false }
 
-        guard let file = try? AVAudioFile(forReading: url), file.length > 0 else { return false }
+        // See LumisoundExclusiveExtensionService.playableURL's doc comment —
+        // without this, every `.lms`-converted track in the library would
+        // read as "corrupt" here for the same extension-recognition reason
+        // playback itself hit, not any actual corruption.
+        guard let file = try? AVAudioFile(forReading: LumisoundExclusiveExtensionService.playableURL(for: url)), file.length > 0 else { return false }
 
         let tailFrameCount = AVAudioFrameCount(min(file.length, 4_096))
         guard tailFrameCount > 0,
@@ -203,7 +207,7 @@ final class CorruptFileFinderService: ObservableObject {
 
             // Try opening with AVAudioFile on a throw-catching path
             do {
-                _ = try AVAudioFile(forReading: fileURL)
+                _ = try AVAudioFile(forReading: LumisoundExclusiveExtensionService.playableURL(for: fileURL))
             } catch {
                 results.append(CorruptFileEntry(
                     url: fileURL,

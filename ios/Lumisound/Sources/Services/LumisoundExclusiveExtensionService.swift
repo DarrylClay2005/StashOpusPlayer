@@ -49,6 +49,58 @@ enum LumisoundExclusiveExtensionService {
         url.pathExtension.lowercased() == marker
     }
 
+    /// A URL safe to hand directly to `AVAudioFile(forReading:)` /
+    /// `AVPlayerItem(url:)` / `AVURLAsset(url:)` — returns `url` unchanged
+    /// for anything not `.lms`-marked, otherwise a cheap symlink at a
+    /// stable path with the real inner extension (e.g. ".m4a") restored.
+    ///
+    /// Root cause this works around: `.lms` is deliberately an extension no
+    /// other app/framework has a type association for (see this file's own
+    /// header comment) — including, it turns out, AVFoundation's own file-
+    /// type detection for `AVAudioFile`/`AVPlayerItem`. Handing either API a
+    /// `.m4a.lms` URL directly can fail outright — `AVAudioFile` with
+    /// CoreAudio's generic "wht?" (`kAudioFileUnspecifiedError`), AVPlayer
+    /// with a -11800/-17913 load failure — even though the underlying bytes
+    /// are perfectly valid, freshly-re-encoded AAC. Confirmed from real
+    /// device logs (after the deeper-logging pass): the SAME handful of
+    /// `.lms` tracks failing both AVAudioFile open AND the AVPlayer
+    /// fallback, repeatedly, across many app launches — not corruption
+    /// (which would be one-and-done, not track-specific-and-permanent), an
+    /// extension-recognition problem every play of that track hit again.
+    /// Previously only the opus/webm/ogg branch of `scheduleCurrent`
+    /// (`transcodeAndSchedule` → `AudioEncoderService`) routed around this,
+    /// by virtue of re-encoding to a temp path with a real extension as a
+    /// side effect — every OTHER container (m4a/mp3/flac/wav, i.e. most
+    /// tracks) had no such protection once `.lms`-converted.
+    ///
+    /// A symlink (not a copy) keeps this O(1) regardless of file size, and
+    /// reusing the same stable path (keyed by the real filename, not a
+    /// per-call temp name) means repeated plays of the same track don't
+    /// accumulate new symlinks — a stale/wrong target from a previous
+    /// convert is detected and replaced automatically.
+    static func playableURL(for url: URL) -> URL {
+        guard isConverted(url) else { return url }
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("lumisound_lms_playable", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Stripping just the outer ".lms" leaves the real extension intact
+        // in the filename (e.g. "Track.m4a.lms" -> "Track.m4a") — no need
+        // to separately look up and re-append it.
+        let linkURL = dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent)
+        if let existingTarget = try? fm.destinationOfSymbolicLink(atPath: linkURL.path),
+           existingTarget == url.path {
+            return linkURL
+        }
+        try? fm.removeItem(at: linkURL)
+        do {
+            try fm.createSymbolicLink(at: linkURL, withDestinationURL: url)
+            return linkURL
+        } catch {
+            appWarn("LumisoundExclusiveExtensionService.playableURL: symlink failed for \(url.lastPathComponent): \(error.localizedDescription)", category: "audio")
+            return url
+        }
+    }
+
     /// The `.m4a.lms` path `convert(fileURL:)` would (or did) write `url`'s
     /// re-encode to — pure path math, no I/O. Exposed so callers (the local
     /// documents scan) can recognize "this file already has a converted

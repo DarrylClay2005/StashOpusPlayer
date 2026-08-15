@@ -118,7 +118,10 @@ extension AudioPlayerManager {
             let gen = scheduleGeneration &+ 1
             scheduleGeneration = gen
             node.stop()
-            let file = try AVAudioFile(forReading: url)
+            // See LumisoundExclusiveExtensionService.playableURL's doc
+            // comment — a `.lms`-marked URL handed to AVAudioFile directly
+            // can fail outright even though the underlying bytes are fine.
+            let file = try AVAudioFile(forReading: LumisoundExclusiveExtensionService.playableURL(for: url))
             audioFile = file
             duration = file.duration
             let sampleRate = file.processingFormat.sampleRate

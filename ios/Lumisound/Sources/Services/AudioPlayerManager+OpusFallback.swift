@@ -104,7 +104,12 @@ extension AudioPlayerManager {
         primaryNode.stop()
         secondaryNode.stop()
 
-        let item   = AVPlayerItem(url: url)
+        // See LumisoundExclusiveExtensionService.playableURL's doc comment —
+        // this is the fallback AVAudioFile itself falls back to, so it needs
+        // the same `.lms`-URL resolution or it can fail for the identical
+        // reason right behind it (a no-op for a non-`.lms` `url`, including
+        // every remote/streamed one).
+        let item   = AVPlayerItem(url: LumisoundExclusiveExtensionService.playableURL(for: url))
         // Pitch-preserving time stretch — without this, AVPlayer's default
         // `.varispeed` algorithm ties pitch to rate (chipmunk/slow-mo effect),
         // which made the Speed slider feel "broken" for streamed/opus tracks.
