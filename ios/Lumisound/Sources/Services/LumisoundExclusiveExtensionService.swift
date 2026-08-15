@@ -91,7 +91,7 @@ enum LumisoundExclusiveExtensionService {
     /// stepping on each other, which showed up in the field as sporadic
     /// "unlock failed" warnings (worse odds the bigger the file — e.g. a
     /// lossless FLAC track — since that widens the race window).
-    private static let unlockLocks = NSMapTable<NSString, NSLock>(keyOptions: .strongToStrongObjects, valueOptions: .strongToStrongObjects)
+    private static let unlockLocks = NSMapTable<NSString, NSLock>.strongToStrongObjects()
     private static let unlockLocksTableLock = NSLock()
 
     private static func lock(for key: String) -> NSLock {
