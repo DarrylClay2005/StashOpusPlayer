@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 
 struct LoginView: View {
@@ -10,6 +11,8 @@ struct LoginView: View {
     @EnvironmentObject var player: AudioPlayerManager
     @Environment(\.dismiss) var dismiss
 
+    private let discordPresentationContext = DiscordAuthPresentationContext()
+
     @State private var isRegistering = false
     @State private var username = ""
     @State private var password = ""
@@ -17,6 +20,7 @@ struct LoginView: View {
     @State private var email = ""
     @State private var displayName = ""
     @State private var isLoading = false
+    @State private var isDiscordLoggingIn = false
 
     // Local validation error (e.g. passwords don't match)
     @State private var localError: String? = nil
@@ -174,6 +178,43 @@ struct LoginView: View {
                             localError = nil
                             account.errorMessage = nil
                         }
+
+                        // MARK: Sign in with Discord
+                        //
+                        // One button regardless of the Sign In/Register picker
+                        // above — the bridge's /auth/discord/* pair transparently
+                        // logs into an existing account or creates one on the
+                        // fly (see AccountService+DiscordLogin.swift), so there's
+                        // no separate "register with Discord" mode to pick.
+                        VStack(spacing: 14) {
+                            Button {
+                                discordSignInTapped()
+                            } label: {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(red: 0.345, green: 0.396, blue: 0.949))
+                                        .frame(height: 50)
+                                    if isDiscordLoggingIn {
+                                        ProgressView().tint(.white)
+                                    } else {
+                                        Label("Continue with Discord", systemImage: "checkmark.seal.fill")
+                                            .font(.headline)
+                                            .foregroundStyle(.white)
+                                    }
+                                }
+                            }
+                            .disabled(isDiscordLoggingIn || isLoading)
+                            .opacity((isDiscordLoggingIn || isLoading) ? 0.6 : 1.0)
+
+                            HStack(spacing: 10) {
+                                Rectangle().fill(AppTheme.textSecondary.opacity(0.25)).frame(height: 1)
+                                Text("or")
+                                    .font(AppTheme.bodyFont(size: 12))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                Rectangle().fill(AppTheme.textSecondary.opacity(0.25)).frame(height: 1)
+                            }
+                        }
+                        .padding(.horizontal)
 
                         // MARK: Form Fields
                         VStack(spacing: 14) {
@@ -372,16 +413,31 @@ struct LoginView: View {
             } else {
                 await account.login(username: trimmedUsername, password: password)
             }
-
-            // Immediately pull this user's server-side data (library state,
-            // gallery background settings, badges, etc.) instead of waiting
-            // for the next app launch — matters most when switching accounts
-            // within the same session.
-            if account.isLoggedIn {
-                await account.pullSync(library: libraryManager, player: player)
-                account.startAutoPushTimer(library: libraryManager)
-                await account.loadAvatar(forceRefresh: true)
-            }
+            await completePostLoginSyncIfNeeded()
         }
+    }
+
+    private func discordSignInTapped() {
+        localError = nil
+        account.errorMessage = nil
+        isDiscordLoggingIn = true
+        Task {
+            defer { isDiscordLoggingIn = false }
+            await account.loginWithDiscord(presentationContext: discordPresentationContext)
+            await completePostLoginSyncIfNeeded()
+        }
+    }
+
+    /// Immediately pulls this user's server-side data (library state, gallery
+    /// background settings, badges, etc.) instead of waiting for the next app
+    /// launch — matters most when switching accounts within the same
+    /// session. Shared by every path that can end in `account.isLoggedIn`
+    /// flipping true (password sign-in/register, Discord sign-in) so none of
+    /// them can forget this step.
+    private func completePostLoginSyncIfNeeded() async {
+        guard account.isLoggedIn else { return }
+        await account.pullSync(library: libraryManager, player: player)
+        account.startAutoPushTimer(library: libraryManager)
+        await account.loadAvatar(forceRefresh: true)
     }
 }

@@ -48,9 +48,11 @@ import pyotp
 import yt_dlp
 
 from auth import (
+    create_discord_oauth_login_state_token,
     create_discord_oauth_state_token,
     create_token,
     create_totp_pending_token,
+    decode_discord_oauth_login_state_token,
     decode_discord_oauth_state_token,
     decode_token,
     decode_totp_pending_token,
@@ -14142,6 +14144,11 @@ _DISCORD_OAUTH_USER_URL = "https://discord.com/api/users/@me"
 # ASWebAuthenticationSession so the OS hands control back to the app the
 # instant this redirect fires, without the app needing to poll.
 _DISCORD_CALLBACK_DEEP_LINK = "lumisound://discord-verify"
+# Same idea, for the sign-in-with-Discord flow below (a different deep-link
+# host so the two ASWebAuthenticationSession callers never confuse a link
+# result for a login result, even though both share the one Discord-
+# registered redirect URI).
+_DISCORD_LOGIN_CALLBACK_DEEP_LINK = "lumisound://discord-login"
 
 
 def _require_discord_oauth_configured() -> None:
@@ -14158,6 +14165,29 @@ async def discord_oauth_start(payload: dict = Depends(get_current_user)):
     _require_discord_oauth_configured()
     user_id = payload["sub"]
     state = create_discord_oauth_state_token(user_id)
+    params = {
+        "client_id": DISCORD_OAUTH_CLIENT_ID,
+        "redirect_uri": DISCORD_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "scope": _DISCORD_OAUTH_SCOPE,
+        "state": state,
+        "prompt": "consent",
+    }
+    return {"authorize_url": f"{_DISCORD_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"}
+
+
+@app.get("/auth/discord/start")
+async def discord_login_start():
+    """Unauthenticated counterpart to /api/discord/oauth/start above — signs
+    into (or silently creates) a Lumisound account via Discord directly from
+    the login screen, rather than linking Discord to an account you're
+    already signed into. Deliberately reuses the SAME Discord-registered
+    redirect URI as the link flow (no second URI for the user to register in
+    the Discord Developer Portal) — /api/discord/oauth/callback below tells
+    the two apart by the state token's "purpose" claim, which is also what
+    stops a token minted for one flow from being replayed as the other."""
+    _require_discord_oauth_configured()
+    state = create_discord_oauth_login_state_token()
     params = {
         "client_id": DISCORD_OAUTH_CLIENT_ID,
         "redirect_uri": DISCORD_OAUTH_REDIRECT_URI,
@@ -14204,35 +14234,159 @@ async def _discord_oauth_exchange_code(code: str) -> dict:
     return await asyncio.to_thread(_exchange)
 
 
+def _sanitize_discord_username(raw: str) -> str:
+    """Derives a Lumisound-username candidate from a Discord display name for
+    the sign-in-with-Discord auto-registration path below. ios_users.username
+    only needs to be >=3 chars and unique (see /auth/register), but Discord
+    names routinely contain characters (unicode, '#discriminator', dots)
+    that field was never exercised with elsewhere in this codebase (URLs,
+    @mentions, search) — keep it simple/predictable: lowercase alnum and
+    underscore only, padded/truncated to a safe length. Uniqueness against
+    existing accounts is handled separately by the caller."""
+    cleaned = "".join(c for c in raw if c.isalnum() or c == "_").lower()
+    if len(cleaned) < 3:
+        cleaned = (cleaned + "user")[:3] if cleaned else "user"
+    return cleaned[:32]
+
+
+async def _unique_discord_username(cur, discord_username: str) -> str:
+    base = _sanitize_discord_username(discord_username)
+    candidate = base
+    suffix = 0
+    while True:
+        await cur.execute("SELECT 1 FROM ios_users WHERE username = %s", (candidate,))
+        if not await cur.fetchone():
+            return candidate
+        suffix += 1
+        candidate = f"{base}{suffix}"
+
+
+async def _complete_discord_login(discord_user_id: str, display_username: str) -> RedirectResponse:
+    """The sign-in-with-Discord counterpart to /auth/login — called once the
+    OAuth2 code exchange below has already proven the caller owns this exact
+    Discord account. Logs into the Lumisound account already linked to it
+    (via a prior /api/discord/oauth/callback link OR a prior call to this
+    same function), or silently creates a brand new one and links it on the
+    spot — either way ending in the same session-token issuance /auth/login
+    itself does, so the client's post-login code path (pullSync, avatar,
+    etc.) needs no special-casing for "logged in via Discord" vs. password."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT user_id FROM ios_discord_verifications WHERE discord_user_id = %s",
+                (discord_user_id,),
+            )
+            link_row = await cur.fetchone()
+
+            if link_row:
+                user_id = link_row[0]
+                await cur.execute(
+                    "SELECT is_active, totp_enabled FROM ios_users WHERE id = %s",
+                    (user_id,),
+                )
+                user_row = await cur.fetchone()
+                if not user_row:
+                    return RedirectResponse(f"{_DISCORD_LOGIN_CALLBACK_DEEP_LINK}?success=false&reason=invalid_response")
+                is_active, totp_enabled = user_row
+                if not is_active:
+                    return RedirectResponse(f"{_DISCORD_LOGIN_CALLBACK_DEEP_LINK}?success=false&reason=account_disabled")
+                # Discord's own display name can drift between logins — keep
+                # the stored copy current, same as the link flow's upsert.
+                await cur.execute(
+                    "UPDATE ios_discord_verifications SET discord_username = %s WHERE user_id = %s",
+                    (display_username, user_id),
+                )
+                if totp_enabled:
+                    # Same as password login with 2FA on (/auth/login): the
+                    # Discord identity alone isn't enough for an account that
+                    # specifically opted into a second factor — hand back a
+                    # pending_token for the existing TOTP step instead of a
+                    # real session, no different from how completeTOTPLogin
+                    # already works regardless of how the pending token was
+                    # minted.
+                    await log_event("auth", "login_2fa_required", user_id=user_id,
+                                     message="Discord sign-in verified, awaiting TOTP code")
+                    pending_token = create_totp_pending_token(user_id)
+                    return RedirectResponse(
+                        f"{_DISCORD_LOGIN_CALLBACK_DEEP_LINK}?success=true&requires_2fa=true&pending_token={pending_token}"
+                    )
+            else:
+                user_id = str(uuid.uuid4())
+                # No password was ever set — a random, never-shown, never-
+                # guessable hash means password-based login simply always
+                # fails for this account rather than silently succeeding
+                # against a predictable value. The user can still sign in
+                # any time via this same Discord flow.
+                random_password_hash = await hash_password_async(secrets.token_urlsafe(32))
+                username = await _unique_discord_username(cur, display_username)
+                await cur.execute(
+                    "INSERT INTO ios_users (id, username, password_hash, display_name) VALUES (%s, %s, %s, %s)",
+                    (user_id, username, random_password_hash, display_username),
+                )
+                await cur.execute("INSERT INTO ios_user_settings (user_id) VALUES (%s)", (user_id,))
+                await cur.execute(
+                    "INSERT INTO ios_discord_verifications (user_id, discord_user_id, discord_username, verified_at) "
+                    "VALUES (%s, %s, %s, CURRENT_TIMESTAMP)",
+                    (user_id, discord_user_id, display_username),
+                )
+                await log_event("account", "discord_verified", user_id=user_id, detail={"discord_username": display_username})
+                await log_event("auth", "register", user_id=user_id,
+                                 message=f"new account auto-registered via Discord sign-in: {username!r}")
+
+            token_id = str(uuid.uuid4())
+            expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+            await cur.execute(
+                "INSERT INTO ios_user_sessions (token_id, user_id, expires_at, device_name) VALUES (%s, %s, %s, %s)",
+                (token_id, user_id, expires_at, "Discord Sign-In"),
+            )
+            await cur.execute("UPDATE ios_users SET last_login = NOW() WHERE id = %s", (user_id,))
+
+    token = create_token(user_id, token_id)
+    await log_event("auth", "login_success", user_id=user_id, message="device='Discord Sign-In'")
+    return RedirectResponse(f"{_DISCORD_LOGIN_CALLBACK_DEEP_LINK}?success=true&token={token}")
+
+
 @app.get("/api/discord/oauth/callback")
 async def discord_oauth_callback(
     code: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
     error: Optional[str] = Query(None),
 ):
+    # Two different flows share this one Discord-registered redirect URI
+    # (see /auth/discord/start's doc comment) — decode the state token BEFORE
+    # any code exchange to find out which one this is; an unrecognized/
+    # expired/tampered state fails closed rather than guessing.
+    user_id: Optional[str] = None
+    is_login_flow = False
+    if state:
+        user_id = decode_discord_oauth_state_token(state)
+        if user_id is None:
+            is_login_flow = decode_discord_oauth_login_state_token(state)
+    deep_link = _DISCORD_LOGIN_CALLBACK_DEEP_LINK if is_login_flow else _DISCORD_CALLBACK_DEEP_LINK
+
     # Discord itself sent this redirect (the user tapped "Cancel" on the
     # consent screen, or something else went wrong on their end) — no code
     # to exchange, just report the failure back to the app.
     if error or not code or not state:
-        return RedirectResponse(f"{_DISCORD_CALLBACK_DEEP_LINK}?success=false&reason={error or 'missing_code'}")
-
-    user_id = decode_discord_oauth_state_token(state)
-    if not user_id:
+        return RedirectResponse(f"{deep_link}?success=false&reason={error or 'missing_code'}")
+    if user_id is None and not is_login_flow:
         # Expired (>10 min since /start) or tampered — never trust an
-        # unsigned/unverifiable state value to attribute a verification to
-        # an account.
-        return RedirectResponse(f"{_DISCORD_CALLBACK_DEEP_LINK}?success=false&reason=expired_state")
+        # unsigned/unverifiable state value to attribute a login/verification
+        # to an account.
+        return RedirectResponse(f"{deep_link}?success=false&reason=expired_state")
 
     try:
         discord_user = await _discord_oauth_exchange_code(code)
     except Exception as exc:
-        logger.warning("discord_oauth_callback: code exchange failed for user %s: %s", user_id, exc)
-        return RedirectResponse(f"{_DISCORD_CALLBACK_DEEP_LINK}?success=false&reason=exchange_failed")
+        logger.warning("discord_oauth_callback: code exchange failed (login=%s, user=%s): %s",
+                        is_login_flow, user_id, exc)
+        return RedirectResponse(f"{deep_link}?success=false&reason=exchange_failed")
 
     discord_user_id = discord_user.get("id")
     discord_username = discord_user.get("username")
     if not discord_user_id or not discord_username:
-        return RedirectResponse(f"{_DISCORD_CALLBACK_DEEP_LINK}?success=false&reason=invalid_response")
+        return RedirectResponse(f"{deep_link}?success=false&reason=invalid_response")
     # Discord's newer "global name"/pomelo usernames still populate `username`;
     # `discriminator` is "0" (not a real 4-digit tag) for migrated accounts —
     # only append it for the legacy accounts that still have a real one.
@@ -14241,6 +14395,9 @@ async def discord_oauth_callback(
         f"{discord_username}#{discriminator}" if discriminator and discriminator != "0" else discord_username
     )
     avatar_hash = discord_user.get("avatar")
+
+    if is_login_flow:
+        return await _complete_discord_login(discord_user_id, display_username)
 
     try:
         pool = await get_pool()

@@ -142,3 +142,38 @@ def decode_discord_oauth_state_token(token: str) -> str | None:
     if payload.get("purpose") != "discord_oauth_state":
         return None
     return payload.get("sub")
+
+
+# ---------------------------------------------------------------------------
+# Discord OAuth2 sign-in/sign-up state token
+# ---------------------------------------------------------------------------
+#
+# Separate "purpose" from discord_oauth_state above, even though both are
+# used as the OAuth2 "state" param on the SAME Discord-registered redirect
+# URI (see /auth/discord/start's doc comment on the bridge for why this
+# doesn't need its own redirect URI) — this one has no `sub` at all, since
+# it's minted from the logged-OUT login screen, before there's any account
+# to attribute it to. Keeping the purposes distinct means a token minted for
+# one flow can never be replayed as the other: this one decodes to a plain
+# bool (valid-and-unexpired or not), never to a user_id a link-flow token
+# would trust.
+
+DISCORD_OAUTH_LOGIN_STATE_EXPIRE_SECONDS = 600  # 10 minutes to complete the Discord consent screen
+
+
+def create_discord_oauth_login_state_token() -> str:
+    payload = {
+        "purpose": "discord_oauth_login_state",
+        "exp": datetime.now(timezone.utc) + timedelta(seconds=DISCORD_OAUTH_LOGIN_STATE_EXPIRE_SECONDS),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def decode_discord_oauth_login_state_token(token: str) -> bool:
+    """True if *token* is a valid, unexpired discord_oauth_login_state token."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except Exception:
+        return False
+    return payload.get("purpose") == "discord_oauth_login_state"
