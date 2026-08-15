@@ -31,6 +31,11 @@ struct LaunchView: View {
     @State private var showLoginSheet = false
     @State private var loginStartOnRegister = false
 
+    // Rotating tip — picked once per launch (not re-randomized on every
+    // re-render) and advanced on a timer for as long as the screen is up.
+    @State private var tipIndex = Int.random(in: 0..<LaunchView.tips.count)
+    @State private var tipCyclingTask: Task<Void, Never>?
+
     @State private var logoScale: CGFloat = 0.6
     @State private var logoOpacity: Double = 0
     @State private var contentOpacity: Double = 0
@@ -204,7 +209,18 @@ struct LaunchView: View {
                     }
                 }
                 .opacity(contentOpacity)
-                .padding(.bottom, 40)
+
+                Text(LaunchView.tips[tipIndex])
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, 32)
+                    .padding(.top, 4)
+                    .opacity(contentOpacity)
+                    .id(tipIndex)
+                    .transition(.opacity)
+                    .padding(.bottom, 40)
             }
 
             // Account prompt overlay — shown when not logged in after load
@@ -291,6 +307,20 @@ struct LaunchView: View {
                 logoScale = 1.0
                 logoOpacity = 1.0
             }
+            // Cycle to a new random tip every few seconds for as long as the
+            // launch screen is up. Cancelled below once `isLoading` flips to
+            // false so it doesn't keep running (harmlessly, but pointlessly)
+            // in the background after this view is gone.
+            tipCyclingTask?.cancel()
+            tipCyclingTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    guard !Task.isCancelled else { break }
+                    withAnimation(.easeInOut(duration: 0.4)) {
+                        tipIndex = LaunchView.nextTipIndex(excluding: tipIndex)
+                    }
+                }
+            }
             // Continuous rotating halo + drifting aurora + breathing pulse —
             // skipped entirely in Minimalist style / Reduce Motion, where
             // none of the elements they drive are even shown.
@@ -370,6 +400,16 @@ struct LaunchView: View {
                 withAnimation(.easeOut(duration: 0.5)) { isLoading = false }
             }
         }
+        // The tip-cycling task (a genuine infinite `while !Task.isCancelled`
+        // loop, unlike this view's other `.onAppear` tasks, which all
+        // terminate on their own) isn't tied to this view's lifecycle just by
+        // living in `@State` — a plain `Task` (not the `.task` modifier)
+        // keeps running even after this view is removed from the hierarchy
+        // (the normal case once `isLoading` flips false and the parent swaps
+        // to its main content) unless explicitly cancelled here.
+        .onChange(of: isLoading) { loading in
+            if !loading { tipCyclingTask?.cancel() }
+        }
     }
 
     // MARK: - Stats strip
@@ -392,6 +432,39 @@ struct LaunchView: View {
         let h = total / 3600
         let m = (total % 3600) / 60
         return h > 0 ? "\(h)h \(m)m" : "\(m)m"
+    }
+
+    // MARK: - Loading tips
+    //
+    // Every tip references a real, currently-shipping feature — not filler
+    // copy — so this doubles as passive feature discovery for anyone who
+    // hasn't found a given screen yet.
+    static let tips: [String] = [
+        "Pin custom EQ, effects, and volume to a specific song from its track menu — Per-Track Sound remembers it every time that track plays.",
+        "Turn on Skip Silent Intros in Settings → Playback & Audio to automatically skip past dead air at the start of local tracks.",
+        "The Duplicate Finder matches songs by how they actually sound (audio fingerprinting), not just by title text.",
+        "Smart Auto Crossfade reads how the outgoing track's ending actually sounds and snaps the fade to a downbeat.",
+        "Practice Mode adds a tempo-synced metronome and a sub-100% speed slider — built for learning a track by ear.",
+        "Focus Sessions pair a Pomodoro-style work/break timer with a soundtrack that pauses itself at each break.",
+        "Listen Together keeps everyone's playback in sync over SharePlay, with a shared suggest-and-vote queue.",
+        "Smart Playlists refresh themselves automatically based on rules like favorite status, play count, or genre.",
+        "Library Health gives your whole library a single 0–100 score across duplicates, corruption, and missing metadata.",
+        "Two-Factor Authentication is available under Account → Security — protect your account with an authenticator app.",
+        "Verify your Discord account under Account → Security for a Discord Verified badge on your profile.",
+        "Force Metadata Sync (Settings → Library) re-reads and re-embeds corrected tags into the actual files, not just the app's cache.",
+        "Design your own Now Playing look in the built-in style editor — 25+ styles ship in, and yours can join the rotation.",
+        "8D spatial audio, bass boost, nightcore, and 20+ other effects live under the Sound tab in Now Playing.",
+        "M3U playlists from another app can be imported directly — matched by filename, falling back to title and artist.",
+    ]
+
+    /// A tip index different from `current` (when there's more than one tip
+    /// to choose from) — avoids a same-tip-twice-in-a-row cycle, which would
+    /// otherwise happen roughly 1-in-N times with a plain random pick.
+    static func nextTipIndex(excluding current: Int) -> Int {
+        guard tips.count > 1 else { return 0 }
+        var next = Int.random(in: 0..<tips.count)
+        while next == current { next = Int.random(in: 0..<tips.count) }
+        return next
     }
 }
 
