@@ -40,6 +40,11 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
     /// longer Bio card below — Discord custom-status style.
     var statusEmoji: String? = nil
     var statusText: String? = nil
+    /// Public flair — see `DiscordVerificationService`/AccountView's own
+    /// badge for the visual convention this mirrors (Discord's "blurple").
+    /// Defaults false/nil so every pre-existing call site is unaffected.
+    var discordVerified: Bool = false
+    var discordUsername: String? = nil
 
     private let avatar: Avatar
     private let action: Action
@@ -55,6 +60,8 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
         pronouns: String? = nil,
         statusEmoji: String? = nil,
         statusText: String? = nil,
+        discordVerified: Bool = false,
+        discordUsername: String? = nil,
         @ViewBuilder avatar: () -> Avatar,
         @ViewBuilder action: () -> Action
     ) {
@@ -68,6 +75,8 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
         self.pronouns = pronouns
         self.statusEmoji = statusEmoji
         self.statusText = statusText
+        self.discordVerified = discordVerified
+        self.discordUsername = discordUsername
         self.avatar = avatar()
         self.action = action()
     }
@@ -139,10 +148,17 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
             .padding(.top, 8)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(displayName)
-                    .font(.title2.bold())
-                    .foregroundStyle(AppTheme.textPrimary)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(displayName)
+                        .font(.title2.bold())
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .lineLimit(1)
+                    if discordVerified {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Color(red: 0.345, green: 0.396, blue: 0.949))
+                    }
+                }
                 HStack(spacing: 6) {
                     Text("@\(username)")
                         .font(AppTheme.bodyFont(size: 13))
@@ -151,6 +167,16 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
                         Text("· \(pronouns)")
                             .font(AppTheme.bodyFont(size: 13))
                             .foregroundStyle(AppTheme.textSecondary.opacity(0.8))
+                    }
+                }
+                if discordVerified, let discordUsername, !discordUsername.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color(red: 0.345, green: 0.396, blue: 0.949))
+                        Text(discordUsername)
+                            .font(AppTheme.bodyFont(size: 12))
+                            .foregroundStyle(AppTheme.textSecondary)
                     }
                 }
                 if let statusText, !statusText.isEmpty {

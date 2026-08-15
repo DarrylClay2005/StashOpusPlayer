@@ -125,6 +125,10 @@ struct PublicSocialProfile: Decodable, Identifiable {
     let featuredPlaylist: FeaturedPlaylist?
     /// Feature: profile-customization-4 — see `MySocialProfile`'s doc comment.
     let accentGlowIntensity: String
+    /// Public flair, no privacy toggle — mirrors `badges`. See
+    /// `DiscordVerificationService`/the bridge's `/api/discord/oauth/callback`.
+    let discordVerified: Bool
+    let discordUsername: String?
 
     var id: String { userId }
 
@@ -152,6 +156,8 @@ struct PublicSocialProfile: Decodable, Identifiable {
         case recentVisitors  = "recent_visitors"
         case featuredPlaylist = "featured_playlist"
         case accentGlowIntensity = "accent_glow_intensity"
+        case discordVerified = "discord_verified"
+        case discordUsername = "discord_username"
     }
 }
 

@@ -137,7 +137,9 @@ struct PublicProfileView: View {
                             avatarFrame: profile.avatarFrame,
                             pronouns: profile.pronouns,
                             statusEmoji: profile.statusEmoji,
-                            statusText: profile.statusText
+                            statusText: profile.statusText,
+                            discordVerified: profile.discordVerified,
+                            discordUsername: profile.discordUsername
                         ) {
                             SocialAvatarView(userId: userId, size: 84, fallbackFill: .clear)
                         } action: {

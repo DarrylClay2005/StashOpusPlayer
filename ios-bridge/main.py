@@ -15285,6 +15285,15 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
             )
             is_friend = (await cur.fetchone()) is not None
 
+            # Discord-verified badge — see /api/discord/oauth/callback. Public
+            # flair, same as badges below: shown regardless of any privacy
+            # toggle, since it's the profile owner who chose to link it.
+            await cur.execute(
+                "SELECT discord_username FROM ios_discord_verifications WHERE user_id = %s",
+                (user_id,),
+            )
+            discord_row = await cur.fetchone()
+
             # Feature: profile-customization-3 — badges have no privacy
             # toggle (public flair); streak/visitor-stats respect the
             # profile owner's own show_listening_stats/show_visitor_stats
@@ -15344,6 +15353,8 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
         "recent_visitors": visitor_stats["recent_visitors"],
         "featured_playlist": featured_playlist,
         "accent_glow_intensity": (profile_row[12] if profile_row and profile_row[12] else "normal"),
+        "discord_verified": discord_row is not None,
+        "discord_username": discord_row[0] if discord_row else None,
     }
 
 

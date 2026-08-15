@@ -14,6 +14,7 @@ struct ProfileView: View {
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var social: SocialService
     @EnvironmentObject private var player: AudioPlayerManager
+    @EnvironmentObject private var discordVerification: DiscordVerificationService
 
     @State private var draftBio: String = ""
     @State private var mainAccentHex: String? = nil
@@ -87,7 +88,9 @@ struct ProfileView: View {
                         avatarFrame: avatarFrame.rawValue,
                         pronouns: pronouns,
                         statusEmoji: statusEmoji,
-                        statusText: statusText
+                        statusText: statusText,
+                        discordVerified: discordVerification.isVerified,
+                        discordUsername: discordVerification.discordUsername
                     ) {
                         ZStack {
                             if let img = account.avatarImage {
