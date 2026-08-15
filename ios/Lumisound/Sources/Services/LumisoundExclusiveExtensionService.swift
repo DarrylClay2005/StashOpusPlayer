@@ -124,17 +124,22 @@ enum LumisoundExclusiveExtensionService {
         let fm = FileManager.default
         guard !fm.fileExists(atPath: newURL.path) else { return nil }
 
+        let beforeBytes = (try? fm.attributesOfItem(atPath: fileURL.path))?[.size] as? Int64 ?? -1
+        appLog("LumisoundExclusiveExtensionService: converting \(fileURL.lastPathComponent) (\(beforeBytes) bytes, ext=\(fileURL.pathExtension.lowercased())) -> \(newURL.lastPathComponent)", category: "background")
+
         let tempPlainURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("m4a")
         defer { try? fm.removeItem(at: tempPlainURL) }
         guard await AudioEncoderService.shared.convertPermanently(fileURL, to: tempPlainURL) else {
             appWarn("LumisoundExclusiveExtensionService: re-encode failed for \(fileURL.lastPathComponent)", category: "background")
             return nil
         }
+        let plainBytes = (try? fm.attributesOfItem(atPath: tempPlainURL.path))?[.size] as? Int64 ?? -1
 
         guard LumisoundLockFormat.lock(plainURL: tempPlainURL, to: newURL) else {
             appWarn("LumisoundExclusiveExtensionService: lock failed for \(fileURL.lastPathComponent)", category: "background")
             return nil
         }
+        let lockedBytes = (try? fm.attributesOfItem(atPath: newURL.path))?[.size] as? Int64 ?? -1
 
         // Verify the locked file actually round-trips before trusting it
         // with the original's removal — never delete on faith.
@@ -155,11 +160,14 @@ enum LumisoundExclusiveExtensionService {
         // recognizes and cleans up exactly this leftover (see
         // performLocalDocumentsScan), so this failing is self-healing rather
         // than a permanent duplicate — but it's still worth knowing about.
+        var originalRemoved = true
         do {
             try fm.removeItem(at: fileURL)
         } catch {
+            originalRemoved = false
             appWarn("LumisoundExclusiveExtensionService: could not remove pre-conversion file \(fileURL.lastPathComponent) after successful convert: \(error.localizedDescription)", category: "background")
         }
+        appLog("LumisoundExclusiveExtensionService: converted+locked \(newURL.lastPathComponent) — before=\(beforeBytes)B, plain-reencode=\(plainBytes)B, locked=\(lockedBytes)B, verified=true, original-removed=\(originalRemoved)", category: "background")
         return newURL
     }
 
@@ -175,6 +183,7 @@ enum LumisoundExclusiveExtensionService {
     static func relockLegacyFile(at url: URL) -> Bool {
         guard isConverted(url), !LumisoundLockFormat.isLocked(at: url) else { return false }
         let fm = FileManager.default
+        let beforeBytes = (try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int64 ?? -1
 
         let lockedTempURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("lms")
         defer { try? fm.removeItem(at: lockedTempURL) }
@@ -182,6 +191,7 @@ enum LumisoundExclusiveExtensionService {
             appWarn("LumisoundExclusiveExtensionService.relockLegacyFile: lock failed for \(url.lastPathComponent)", category: "background")
             return false
         }
+        let lockedBytes = (try? fm.attributesOfItem(atPath: lockedTempURL.path))?[.size] as? Int64 ?? -1
 
         let verifyURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("m4a")
         defer { try? fm.removeItem(at: verifyURL) }
@@ -193,6 +203,7 @@ enum LumisoundExclusiveExtensionService {
 
         do {
             _ = try fm.replaceItemAt(url, withItemAt: lockedTempURL)
+            appLog("LumisoundExclusiveExtensionService.relockLegacyFile: migrated \(url.lastPathComponent) from legacy plain bytes to real lock — before=\(beforeBytes)B, locked=\(lockedBytes)B, verified=true", category: "background")
             return true
         } catch {
             appWarn("LumisoundExclusiveExtensionService.relockLegacyFile: replaceItemAt failed for \(url.lastPathComponent): \(error.localizedDescription)", category: "background")

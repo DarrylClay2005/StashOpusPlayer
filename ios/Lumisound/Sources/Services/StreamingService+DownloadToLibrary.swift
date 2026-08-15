@@ -293,9 +293,16 @@ extension StreamingService {
     /// normal download takes to get there.
     func finalizeAndLockDownload(destURL: URL, track: StreamTrack) async -> URL {
         LumisoundTrackVaultService.tagNewDownload(fileURL: destURL, trackID: track.sourceTrackID, sourceURL: track.youtubeURL)
+        // `convert` itself logs the detailed before/after (sizes, verify
+        // result) on success and the specific failing step on failure — this
+        // just marks the fallback so it's visible in the log stream that
+        // THIS track missed the synchronous hold and will only pick up the
+        // real lock on the next background `runExtensionConversionPass`.
         guard let lockedURL = await LumisoundExclusiveExtensionService.convert(fileURL: destURL) else {
+            appWarn("finalizeAndLockDownload: synchronous lock failed for \"\(track.title)\" — returning plain file, will retry on next background conversion pass", category: "network")
             return destURL
         }
+        appLog("finalizeAndLockDownload: \"\(track.title)\" locked synchronously at download time -> \(lockedURL.lastPathComponent)", category: "network")
         // `convert` writes a brand new inode — re-apply the xattr vault tag
         // here using the trackID/sourceURL we just tagged `destURL` with,
         // same as `LibraryManager.convertToLumisoundExclusiveExtension`
