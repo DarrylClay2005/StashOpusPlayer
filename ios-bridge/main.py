@@ -210,6 +210,16 @@ BUG_REPORT_WEBHOOK_URL: str = os.getenv(
 DISCORD_OAUTH_CLIENT_ID: str = os.getenv("DISCORD_OAUTH_CLIENT_ID", "")
 DISCORD_OAUTH_CLIENT_SECRET: str = os.getenv("DISCORD_OAUTH_CLIENT_SECRET", "")
 DISCORD_OAUTH_REDIRECT_URI: str = os.getenv("DISCORD_OAUTH_REDIRECT_URI", "")
+
+# Fine-grained PAT with read-only "Contents" access on the Lumisound repo —
+# the client's own /api/app/latest-release check used to hit GitHub's
+# releases API directly and unauthenticated, which 404s outright for a
+# PRIVATE repo (every unauthenticated request to a private repo's API reads
+# as "not found", not "forbidden" — GitHub doesn't reveal the repo exists).
+# Unset (default): the endpoint below still tries the request unauthenticated
+# (harmless no-op if the repo is or becomes public) rather than refusing to
+# run at all.
+GITHUB_RELEASES_TOKEN: str = os.getenv("GITHUB_RELEASES_TOKEN", "")
 VERSION = "1.0.0"
 
 # ---------------------------------------------------------------------------
@@ -14453,6 +14463,55 @@ async def delete_discord_verification(payload: dict = Depends(get_current_user))
         async with conn.cursor() as cur:
             await cur.execute("DELETE FROM ios_discord_verifications WHERE user_id = %s", (user_id,))
     await log_event("account", "discord_unverified", user_id=user_id)
+
+
+# ---------------------------------------------------------------------------
+# App update check (proxies GitHub releases — see /api/app/latest-release)
+# ---------------------------------------------------------------------------
+
+# Repo went private (see GITHUB_RELEASES_TOKEN above), so a straight
+# unauthenticated fetch from this endpoint would hit the same 404 the
+# client used to get hitting GitHub directly. Cached in-process (all users
+# share one upstream fetch) since this fires on every app launch — a 5 min
+# TTL keeps a fresh release visible promptly without hammering GitHub's API
+# every time someone opens the app.
+_github_releases_cache: dict = {"data": None, "fetched_at": 0.0}
+_GITHUB_RELEASES_CACHE_TTL = 300.0
+
+
+def _fetch_github_releases_sync() -> Optional[list]:
+    req = urllib.request.Request(
+        "https://api.github.com/repos/HeavenlyXenusVR/Lumisound/releases",
+        headers={
+            "User-Agent": "Lumisound-Bridge",
+            "Accept": "application/vnd.github+json",
+            **({"Authorization": f"Bearer {GITHUB_RELEASES_TOKEN}"} if GITHUB_RELEASES_TOKEN else {}),
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())
+    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        logger.warning("GitHub releases fetch failed: %s", exc)
+        return None
+
+
+@app.get("/api/app/latest-release")
+async def app_latest_release(request: Request):
+    """Proxies GitHub's releases list for the (private) Lumisound repo, so
+    the client's update check no longer needs to hit GitHub directly and
+    unauthenticated (which always 404s for a private repo). Deliberately
+    NOT behind `check_auth`/`get_current_user` — this fires on app launch
+    before login too (see LumisoundApp.swift), and the response carries
+    nothing sensitive (the same release metadata GitHub's public releases
+    page would show if the repo were public)."""
+    now = time.monotonic()
+    if _github_releases_cache["data"] is None or now - _github_releases_cache["fetched_at"] > _GITHUB_RELEASES_CACHE_TTL:
+        releases = await asyncio.to_thread(_fetch_github_releases_sync)
+        if releases is not None:
+            _github_releases_cache["data"] = releases
+            _github_releases_cache["fetched_at"] = now
+    return _github_releases_cache["data"] or []
 
 
 # ---------------------------------------------------------------------------

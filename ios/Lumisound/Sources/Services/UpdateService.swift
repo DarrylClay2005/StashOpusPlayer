@@ -52,18 +52,23 @@ final class UpdateService: ObservableObject {
         defer { isChecking = false }
         appLog("checkForUpdates: current=\(currentVersion)", category: "network")
 
-        guard let apiURL = URL(string: "https://api.github.com/repos/HeavenlyXenusVR/Lumisound/releases") else {
-            appWarn("checkForUpdates: could not build GitHub API URL", category: "network")
+        // Routed through the bridge (see ios-bridge/main.py's
+        // /api/app/latest-release) rather than hitting GitHub directly —
+        // the Lumisound repo is private, and an unauthenticated request
+        // from the client always 404s against a private repo's API (GitHub
+        // doesn't even reveal it exists to an unauthenticated caller). The
+        // bridge holds a read-only PAT server-side and proxies the same
+        // releases-list JSON shape this function already parses below, so
+        // nothing past this request itself needed to change.
+        guard let account = AccountService.shared else {
+            appWarn("checkForUpdates: AccountService not available", category: "network")
             return
         }
-        var request = URLRequest(url: apiURL)
-        request.setValue("Lumisound-iOS", forHTTPHeaderField: "User-Agent")
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let data = try await account.makeRequest("/api/app/latest-release")
             guard let releases = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-                appWarn("checkForUpdates: unexpected response format (http \(status))", category: "network")
+                appWarn("checkForUpdates: unexpected response format", category: "network")
                 return
             }
 
