@@ -1034,6 +1034,10 @@ struct AdminUser: Codable, Identifiable {
     let isActive: Bool
     let activeSessions: Int
     let isOperator: Bool
+    /// nil = no per-user override set (falls back to the server-wide
+    /// default) — distinct from an override explicitly set to 0 bytes.
+    let storageQuotaBytes: Int?
+    let storageUsedBytes: Int
 
     enum CodingKeys: String, CodingKey {
         case id, username, email
@@ -1042,6 +1046,8 @@ struct AdminUser: Codable, Identifiable {
         case isActive = "is_active"
         case activeSessions = "active_sessions"
         case isOperator = "is_operator"
+        case storageQuotaBytes = "storage_quota_bytes"
+        case storageUsedBytes = "storage_used_bytes"
     }
 }
 

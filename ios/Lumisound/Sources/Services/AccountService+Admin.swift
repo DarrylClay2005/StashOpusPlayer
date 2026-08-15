@@ -107,6 +107,26 @@ extension AccountService {
         }
     }
 
+    /// Sets (or clears, when `quotaBytes` is nil) a per-user storage quota
+    /// override. Refetches the user list afterward so the dashboard reflects
+    /// the new value immediately.
+    @discardableResult
+    func setAdminUserQuota(id: String, quotaBytes: Int?) async -> Bool {
+        guard isLoggedIn else { return false }
+        struct Body: Encodable { let quota_bytes: Int? }
+        do {
+            _ = try await makeRequest("/admin/api/users/\(id)/quota", method: "PUT", body: Body(quota_bytes: quotaBytes))
+            await fetchAdminUsers()
+            return true
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     @discardableResult
     func clearAdminErrors() async -> Bool {
         guard isLoggedIn else { return false }

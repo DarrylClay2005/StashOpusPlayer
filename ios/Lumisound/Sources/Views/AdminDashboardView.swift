@@ -25,6 +25,10 @@ struct AdminDashboardView: View {
     @State private var showClearErrorsConfirm = false
     @State private var showClearJobsConfirm = false
 
+    // Per-user storage quota editor (Section "Users" row action)
+    @State private var editingQuotaForUser: AdminUser? = nil
+    @State private var quotaInputGB: String = ""
+
     var body: some View {
         Group {
             if account.currentUser?.id == Self.operatorUserID {
@@ -153,6 +157,31 @@ struct AdminDashboardView: View {
                 Task { await account.clearAdminDownloadJobs() }
             }
         }
+        .alert(
+            "Storage Quota — \(editingQuotaForUser?.username ?? "")",
+            isPresented: Binding(
+                get: { editingQuotaForUser != nil },
+                set: { if !$0 { editingQuotaForUser = nil } }
+            )
+        ) {
+            TextField("GB (blank = server default)", text: $quotaInputGB)
+                .keyboardType(.numberPad)
+            Button("Save") {
+                guard let user = editingQuotaForUser else { return }
+                let gb = Double(quotaInputGB.trimmingCharacters(in: .whitespaces))
+                let bytes = gb.map { Int($0 * 1_073_741_824) }  // GB -> bytes
+                Task { await account.setAdminUserQuota(id: user.id, quotaBytes: bytes) }
+                editingQuotaForUser = nil
+            }
+            Button("Clear Override", role: .destructive) {
+                guard let user = editingQuotaForUser else { return }
+                Task { await account.setAdminUserQuota(id: user.id, quotaBytes: nil) }
+                editingQuotaForUser = nil
+            }
+            Button("Cancel", role: .cancel) { editingQuotaForUser = nil }
+        } message: {
+            Text("Enter a limit in GB for this user's uploaded music storage. Leave blank and tap Save (or tap Clear Override) to fall back to the server-wide default.")
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 if isRefreshing {
@@ -219,6 +248,14 @@ struct AdminDashboardView: View {
                 .font(.caption2)
                 .foregroundStyle(AppTheme.textSecondary)
 
+            HStack(spacing: 4) {
+                Image(systemName: "internaldrive")
+                    .font(.system(size: 10))
+                Text(quotaSummary(for: user))
+            }
+            .font(.caption2)
+            .foregroundStyle(AppTheme.textSecondary)
+
             if !user.isOperator {
                 HStack(spacing: 16) {
                     if actioningUserID == user.id {
@@ -235,6 +272,10 @@ struct AdminDashboardView: View {
                         }
                         Button("Force Logout") {
                             performUserAction(user.id) { await account.forceLogoutAdminUser(id: user.id) }
+                        }
+                        Button("Quota") {
+                            quotaInputGB = user.storageQuotaBytes.map { String(format: "%.1f", Double($0) / 1_073_741_824) } ?? ""
+                            editingQuotaForUser = user
                         }
                     }
                 }
@@ -266,6 +307,14 @@ struct AdminDashboardView: View {
 
     private func formattedBytes(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    private func quotaSummary(for user: AdminUser) -> String {
+        let used = formattedBytes(user.storageUsedBytes)
+        guard let quota = user.storageQuotaBytes, quota > 0 else {
+            return "\(used) used — server default limit"
+        }
+        return "\(used) / \(formattedBytes(quota)) used"
     }
 
     private func refresh() async {

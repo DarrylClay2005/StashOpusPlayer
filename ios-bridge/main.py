@@ -2310,8 +2310,11 @@ async def admin_users(limit: int = Query(200, ge=1, le=1000)):
             await cur.execute(
                 """
                 SELECT u.id, u.username, u.email, u.created_at, u.last_login, u.is_active,
-                       (SELECT COUNT(*) FROM ios_user_sessions s WHERE s.user_id = u.id AND s.expires_at > NOW()) AS active_sessions
+                       (SELECT COUNT(*) FROM ios_user_sessions s WHERE s.user_id = u.id AND s.expires_at > NOW()) AS active_sessions,
+                       s.storage_quota_bytes,
+                       (SELECT COALESCE(SUM(file_size_bytes), 0) FROM ios_user_music_metadata m WHERE m.user_id = u.id) AS storage_used_bytes
                 FROM ios_users u
+                LEFT JOIN ios_user_settings s ON s.user_id = u.id
                 ORDER BY u.created_at DESC
                 LIMIT %s
                 """,
@@ -2325,9 +2328,44 @@ async def admin_users(limit: int = Query(200, ge=1, le=1000)):
             "last_login": r[4].isoformat() if r[4] else None,
             "is_active": bool(r[5]), "active_sessions": r[6],
             "is_operator": r[0] == OPERATOR_USER_ID,
+            # 0/None both mean "unlimited" (falls back to the server-wide
+            # USER_MUSIC_QUOTA_BYTES default — see _get_user_quota_bytes) —
+            # surfaced as null here so the dashboard can distinguish "no
+            # override set" from "override explicitly set to 0 bytes".
+            "storage_quota_bytes": int(r[7]) if r[7] else None,
+            "storage_used_bytes": int(r[8] or 0),
         }
         for r in rows
     ]
+
+
+class AdminSetQuotaRequest(BaseModel):
+    # None/0 clears the per-user override, falling back to the server-wide
+    # USER_MUSIC_QUOTA_BYTES default (see _get_user_quota_bytes).
+    quota_bytes: Optional[int] = None
+
+
+@app.put("/admin/api/users/{user_id}/quota", dependencies=[Depends(check_admin_or_operator)])
+async def admin_set_user_quota(user_id: str, body: AdminSetQuotaRequest):
+    if body.quota_bytes is not None and body.quota_bytes < 0:
+        raise HTTPException(status_code=400, detail="quota_bytes must be >= 0")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT 1 FROM ios_users WHERE id = %s", (user_id,))
+            if not await cur.fetchone():
+                raise HTTPException(status_code=404, detail="User not found")
+            # ios_user_settings may not have a row yet for a user who's never
+            # touched any other per-user setting — upsert rather than a bare
+            # UPDATE so this doesn't silently no-op for that case.
+            await cur.execute(
+                "INSERT INTO ios_user_settings (user_id, storage_quota_bytes) VALUES (%s, %s) "
+                "ON CONFLICT (user_id) DO UPDATE SET storage_quota_bytes = EXCLUDED.storage_quota_bytes",
+                (user_id, body.quota_bytes),
+            )
+    await log_event("admin", "set_user_quota", user_id=user_id,
+                     message="storage quota set by operator", detail={"quota_bytes": body.quota_bytes})
+    return {"status": "ok", "quota_bytes": body.quota_bytes}
 
 
 @app.post("/admin/api/users/{user_id}/deactivate", dependencies=[Depends(check_admin_or_operator)])
