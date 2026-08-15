@@ -56,15 +56,32 @@ extension LibraryManager {
         appLog("Scanning local documents directory (force: \(force))", category: "library")
         guard FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first != nil else { return }
 
+        // Snapshot the current library's local file URLs before hopping off the
+        // main actor — cheap (URL/array copying, no I/O), and lets the eviction
+        // check below run in the same background pass as the enumeration
+        // instead of doing its own `fileExists` syscall per song back on the
+        // main actor afterward.
+        let existingSongURLs: [URL] = importedSongs.compactMap { $0.url }
+
         // Walk the full Documents tree OFF the main actor — LibraryManager is
         // @MainActor, so doing this enumeration inline blocked the UI every time
         // a screen scanned on appear (Subscriptions / tracked playlists / the
         // Cloud Services download flows), which is a big source of the "lag spike
         // when loading" reports on large libraries. Covers root, Imported Music/,
         // and any nested folders the user created.
-        let candidates: [URL] = await Task.detached(priority: .utility) {
+        //
+        // The eviction check (which local songs' backing files no longer exist)
+        // rides along in this same detached pass for the same reason: it used
+        // to run back on the main actor as a synchronous `fileExists` syscall
+        // per already-imported song — for a library of thousands of tracks,
+        // thousands of blocking stat() calls on the main thread on every single
+        // scan (including scans triggered very frequently, like every
+        // background-download completion) — a second, previously-unaccounted-for
+        // source of the same "lag spike" class of report as the enumeration fix
+        // above, just on the READ side of the library instead of the WRITE side.
+        let (candidates, missingURLs): ([URL], Set<URL>) = await Task.detached(priority: .utility) {
             let fm = FileManager.default
-            guard let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return [] }
+            guard let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return ([], []) }
             var result: [URL] = []
             let enumerator = fm.enumerator(
                 at: docsDir,
@@ -77,7 +94,8 @@ extension LibraryManager {
                     result.append(url)
                 }
             }
-            return result
+            let missing = existingSongURLs.filter { !fm.fileExists(atPath: $0.path) }
+            return (result, Set(missing))
         }.value
 
         // Evict songs whose backing files no longer exist (e.g. moved by the user
@@ -85,12 +103,17 @@ extension LibraryManager {
         // deleted outright). Runs even when `candidates` is empty — an early
         // return before this point used to skip eviction entirely whenever the
         // Documents tree had zero audio files left, leaving phantom entries for
-        // deleted tracks stuck in the library forever.
-        let fm2 = FileManager.default
+        // deleted tracks stuck in the library forever. Pure in-memory set
+        // membership now (no I/O) — the actual stat() calls already happened
+        // in the background pass above.
+        // Always runs (not gated on `!missingURLs.isEmpty`) — a song with a nil
+        // `url` must still be evicted every pass, same as before this change,
+        // and the filter itself is cheap in-memory set membership now (no I/O),
+        // so there's no cost to skip by short-circuiting here.
         let countBeforeEviction = importedSongs.count
         importedSongs = importedSongs.filter { song in
             guard let url = song.url else { return false }
-            return fm2.fileExists(atPath: url.path)
+            return !missingURLs.contains(url)
         }
         let evicted = countBeforeEviction != importedSongs.count
 
