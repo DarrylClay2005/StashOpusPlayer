@@ -92,6 +92,7 @@ final class AudioPlayerManager: ObservableObject {
     var preShuffleQueue: [Song]?
     @Published var audioSettings = AudioSettings() {
         didSet {
+            logAudioSettingsToggleChanges(from: oldValue, to: audioSettings)
             applyAudioSettings()
             guard !isSwitchingTrack else { return }
             if isUsingTrackAudioSettings, let id = currentSong?.id {

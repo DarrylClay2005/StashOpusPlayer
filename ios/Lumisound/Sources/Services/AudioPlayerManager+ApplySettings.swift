@@ -6,6 +6,44 @@ import UIKit
 
 extension AudioPlayerManager {
 
+    // MARK: - Audit logging for discrete settings toggles
+    //
+    // `audioSettings`'s `didSet` fires on every mutation — including every
+    // single tick of a Volume/Speed/Pitch/EQ-band slider drag, which would
+    // make an unconditional "settings changed" log call there wildly noisy
+    // (hundreds of entries per drag gesture). Diffing specifically the
+    // discrete Bool toggle fields (not the continuous Float/Double ones)
+    // naturally filters that out for free — a slider drag never touches any
+    // of these fields, so the diff below produces nothing to log for one,
+    // while still catching every toggle flip centrally, in one place,
+    // instead of needing an `.onChange` added by hand to every individual
+    // `Toggle` across every Settings screen (many, and easy to miss one).
+    // Part of the app's audit-log push to the bridge (see AppLogger).
+    func logAudioSettingsToggleChanges(from old: AudioSettings, to new: AudioSettings) {
+        let toggles: [(String, Bool, Bool)] = [
+            ("equalizerEnabled", old.equalizerEnabled, new.equalizerEnabled),
+            ("crossfadeEnabled", old.crossfadeEnabled, new.crossfadeEnabled),
+            ("smartCrossfadeEnabled", old.smartCrossfadeEnabled, new.smartCrossfadeEnabled),
+            ("gaplessEnabled", old.gaplessEnabled, new.gaplessEnabled),
+            ("replayGainEnabled", old.replayGainEnabled, new.replayGainEnabled),
+            ("bassBoostEnabled", old.bassBoostEnabled, new.bassBoostEnabled),
+            ("autoEQEnabled", old.autoEQEnabled, new.autoEQEnabled),
+            ("reverbEnabled", old.reverbEnabled, new.reverbEnabled),
+            ("spatialAudioEnabled", old.spatialAudioEnabled ?? false, new.spatialAudioEnabled ?? false),
+            ("monoAudioEnabled", old.monoAudioEnabled ?? false, new.monoAudioEnabled ?? false),
+            ("nightModeEnabled", old.nightModeEnabled ?? false, new.nightModeEnabled ?? false),
+        ]
+        for (name, wasOn, isOn) in toggles where wasOn != isOn {
+            appLog("Setting changed: \(name) -> \(isOn)", category: "settings")
+        }
+        if old.eqPreset != new.eqPreset {
+            appLog("Setting changed: eqPreset -> \(new.eqPreset)", category: "settings")
+        }
+        if old.activeEffectID != new.activeEffectID {
+            appLog("Setting changed: activeEffectID -> \(new.activeEffectID)", category: "settings")
+        }
+    }
+
     // MARK: - Apply Audio Settings
 
     func applyAudioSettings() {

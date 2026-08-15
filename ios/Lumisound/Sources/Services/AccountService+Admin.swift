@@ -38,6 +38,40 @@ extension AccountService {
         }
     }
 
+    /// General-purpose audit log browse (GET /admin/api/logs) — every
+    /// level/category, filterable, not just level='error' the way
+    /// `fetchAdminErrors` is scoped. Returns the page directly rather than
+    /// assigning to a stored property, since callers (the log browser UI)
+    /// manage their own filter state and would otherwise fight over a single
+    /// shared `adminLogs` array.
+    func fetchAdminLogs(
+        level: String? = nil,
+        category: String? = nil,
+        userID: String? = nil,
+        search: String? = nil,
+        before: String? = nil,
+        limit: Int = 100
+    ) async -> [AdminLogEntry] {
+        guard isLoggedIn else { return [] }
+        var query = "limit=\(limit)"
+        for (key, value) in [("level", level), ("category", category), ("user_id", userID), ("search", search), ("before", before)] {
+            guard let value, !value.isEmpty,
+                  let encoded = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+            else { continue }
+            query += "&\(key)=\(encoded)"
+        }
+        do {
+            let data = try await makeRequest("/admin/api/logs?\(query)")
+            return try JSONDecoder().decode([AdminLogEntry].self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return []
+        } catch {
+            errorMessage = error.localizedDescription
+            return []
+        }
+    }
+
     func fetchAdminErrors(limit: Int = 50) async {
         guard isLoggedIn else { return }
         do {

@@ -1023,6 +1023,32 @@ struct AdminErrorLogEntry: Codable, Identifiable {
     }
 }
 
+/// One row from GET /admin/api/logs — the general-purpose audit log browser
+/// (every level/category, filterable), distinct from `AdminErrorLogEntry`
+/// (which GET /admin/api/errors scopes to level='error' only).
+struct AdminLogEntry: Codable, Identifiable {
+    let level: String
+    let category: String
+    let message: String
+    let file: String?
+    let line: Int?
+    let timestamp: String?
+    let deviceModel: String?
+    let osVersion: String?
+    let appVersion: String?
+    let userId: String?
+
+    var id: String { "\(timestamp ?? "")-\(category)-\(level)-\(message.prefix(40))" }
+
+    enum CodingKeys: String, CodingKey {
+        case level, category, message, file, line, timestamp
+        case deviceModel = "device_model"
+        case osVersion = "os_version"
+        case appVersion = "app_version"
+        case userId = "user_id"
+    }
+}
+
 /// One row from GET /admin/api/users — powers the Admin Dashboard's user
 /// management list (deactivate/reactivate/force-logout).
 struct AdminUser: Codable, Identifiable {

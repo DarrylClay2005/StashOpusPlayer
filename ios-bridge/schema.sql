@@ -193,6 +193,11 @@ CREATE TABLE IF NOT EXISTS ios_app_logs (
 CREATE INDEX IF NOT EXISTS ios_app_logs_idx_level ON ios_app_logs (level);
 CREATE INDEX IF NOT EXISTS ios_app_logs_idx_created ON ios_app_logs (created_at);
 CREATE INDEX IF NOT EXISTS ios_app_logs_idx_user ON ios_app_logs (user_id);
+-- Feature: full-log admin audit browser (GET /admin/api/logs) — previously
+-- only level='error' rows were ever queryable via the dashboard
+-- (/admin/api/errors); auditing needs to filter by category too (e.g. "show
+-- me every 'account'/'admin' event for this user"), which had no index.
+CREATE INDEX IF NOT EXISTS ios_app_logs_idx_category ON ios_app_logs (category);
 ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS device_model VARCHAR(50) NULL;
 ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS os_version VARCHAR(20) NULL;
 ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS app_version VARCHAR(20) NULL;

@@ -55,6 +55,9 @@ struct AdminDashboardView: View {
                 } else {
                     ProgressView().frame(maxWidth: .infinity)
                 }
+                NavigationLink(destination: AdminLogsView()) {
+                    Label("Browse Audit Logs", systemImage: "doc.text.magnifyingglass")
+                }
             }
 
             Section("Download Jobs (last 24h)") {
