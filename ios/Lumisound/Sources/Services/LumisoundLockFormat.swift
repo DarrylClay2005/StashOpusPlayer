@@ -89,7 +89,13 @@ enum LumisoundLockFormat {
     /// call on anything this app has ever produced under either scheme,
     /// not just newly-locked files.
     static func unlock(lockedURL: URL, to outURL: URL) -> Bool {
-        guard let raw = try? Data(contentsOf: lockedURL) else { return false }
+        let raw: Data
+        do {
+            raw = try Data(contentsOf: lockedURL)
+        } catch {
+            appWarn("LumisoundLockFormat.unlock: could not read \(lockedURL.lastPathComponent): \(error.localizedDescription)", category: "audio")
+            return false
+        }
         guard raw.count >= magic.count, [UInt8](raw.prefix(magic.count)) == magic else {
             // Legacy: no magic header, so these are already plain playable
             // bytes under the pre-lock scheme — pass through unchanged.
@@ -97,6 +103,7 @@ enum LumisoundLockFormat {
                 try raw.write(to: outURL, options: .atomic)
                 return true
             } catch {
+                appWarn("LumisoundLockFormat.unlock: legacy passthrough write failed for \(lockedURL.lastPathComponent) (\(raw.count)B) -> \(outURL.path): \(error.localizedDescription)", category: "audio")
                 return false
             }
         }
@@ -106,6 +113,7 @@ enum LumisoundLockFormat {
             try Data(bytes).write(to: outURL, options: .atomic)
             return true
         } catch {
+            appWarn("LumisoundLockFormat.unlock: write failed for \(lockedURL.lastPathComponent) (\(bytes.count)B) -> \(outURL.path): \(error.localizedDescription)", category: "audio")
             return false
         }
     }

@@ -79,8 +79,38 @@ enum LumisoundExclusiveExtensionService {
     /// as the cached copy is at least as new as the locked source, so a
     /// re-lock (re-conversion, or the legacy-file migration in
     /// `relockLegacyFile`) correctly invalidates it.
+    /// Serializes unlocks per source path — `playableURL` is a plain sync
+    /// function called from many concurrent contexts for the SAME track
+    /// (the periodic `CorruptFileFinderService` integrity scan, artwork/
+    /// metadata reads, and the actual playback scheduling call can all
+    /// legitimately race each other for one file). Without this, two
+    /// threads could both see no cached copy yet and both call
+    /// `LumisoundLockFormat.unlock` concurrently, writing the SAME
+    /// destination path at once — Foundation's atomic write is safe against
+    /// torn writes, but not against the two writers' own temp files
+    /// stepping on each other, which showed up in the field as sporadic
+    /// "unlock failed" warnings (worse odds the bigger the file — e.g. a
+    /// lossless FLAC track — since that widens the race window).
+    private static let unlockLocks = NSMapTable<NSString, NSLock>(keyOptions: .strongToStrongObjects, valueOptions: .strongToStrongObjects)
+    private static let unlockLocksTableLock = NSLock()
+
+    private static func lock(for key: String) -> NSLock {
+        unlockLocksTableLock.lock()
+        defer { unlockLocksTableLock.unlock() }
+        if let existing = unlockLocks.object(forKey: key as NSString) {
+            return existing
+        }
+        let new = NSLock()
+        unlockLocks.setObject(new, forKey: key as NSString)
+        return new
+    }
+
     static func playableURL(for url: URL) -> URL {
         guard isConverted(url) else { return url }
+        let fileLock = lock(for: url.path)
+        fileLock.lock()
+        defer { fileLock.unlock() }
+
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("lumisound_lms_playable", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -94,6 +124,18 @@ enum LumisoundExclusiveExtensionService {
            cacheModDate >= sourceModDate {
             return outURL
         }
+        // A leftover partial file from an earlier failed attempt (e.g. disk
+        // pressure mid-write) would otherwise satisfy the `fileExists` check
+        // above on the NEXT call despite being garbage — clear it before
+        // retrying rather than trusting its mere presence.
+        try? fm.removeItem(at: outURL)
+        if LumisoundLockFormat.unlock(lockedURL: url, to: outURL) {
+            return outURL
+        }
+        // One retry — covers a transient failure (the old leftover-file case
+        // above, or a momentary disk-pressure write error) without silently
+        // handing back the still-locked, unplayable original on the first hiccup.
+        try? fm.removeItem(at: outURL)
         guard LumisoundLockFormat.unlock(lockedURL: url, to: outURL) else {
             appWarn("LumisoundExclusiveExtensionService.playableURL: unlock failed for \(url.lastPathComponent)", category: "audio")
             return url
