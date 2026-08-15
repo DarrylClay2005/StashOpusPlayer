@@ -75,6 +75,25 @@ extension NowPlayingView {
               let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
 
+        // `expectedDuration` was previously accepted but never actually
+        // checked here — this is the /api/get "exact match" path, which the
+        // call site's comment assumes LRCLIB always honors strictly ("matches
+        // duration within a couple seconds"). That's not guaranteed
+        // server-side for every title/artist combination (LRCLIB's own
+        // matching can fall back to a fuzzy title/artist hit when it has
+        // nothing at the exact requested duration), and unlike the /api/search
+        // fallback just above — which DOES reject a >10s-off result — nothing
+        // caught a mismatched result here. A wrong-duration match plus
+        // synced-LRC timestamps for a DIFFERENT (often shorter) recording is
+        // exactly what produces "lyrics skip straight to the end": every
+        // parsed line's timestamp falls before the real track's current
+        // position almost immediately, so `LyricsView`'s "last line whose
+        // timestamp <= currentPosition" always resolves to the final line.
+        if expectedDuration > 0, let resultDuration = result["duration"] as? Double,
+           abs(resultDuration - expectedDuration) > 10 {
+            return nil
+        }
+
         return linesFromResult(result)
     }
 
