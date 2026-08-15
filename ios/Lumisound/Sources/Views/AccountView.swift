@@ -29,6 +29,12 @@ struct AccountView: View {
     @State private var draftDisplayName = ""
     @State private var isSavingDisplayName = false
 
+    // Profile bio
+    @State private var bio = ""
+    @State private var isEditingBio = false
+    @State private var draftBio = ""
+    @State private var isSavingBio = false
+
     // Avatar
     @State private var photosPickerItem: PhotosPickerItem? = nil
     @State private var isUploadingAvatar = false
@@ -565,10 +571,65 @@ struct AccountView: View {
                         }
                     }
 
+                    // Bio — same tappable-inline-edit pattern as Display Name above.
+                    // 280-char cap enforced both here (immediate feedback) and
+                    // server-side (PUT /user/bio) — see AccountService+Bio.swift.
+                    if isEditingBio {
+                        VStack(alignment: .leading, spacing: 4) {
+                            TextField("Say something about yourself…", text: $draftBio, axis: .vertical)
+                                .lineLimit(1...3)
+                                .foregroundStyle(AppTheme.textPrimary)
+                                .onChange(of: draftBio) { newValue in
+                                    if newValue.count > 280 { draftBio = String(newValue.prefix(280)) }
+                                }
+                            HStack {
+                                Text("\(draftBio.count)/280")
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                Spacer()
+                                if isSavingBio {
+                                    ProgressView().tint(AppTheme.dynamicAccent)
+                                } else {
+                                    Button("Save") { saveBio() }
+                                        .foregroundStyle(AppTheme.dynamicAccent)
+                                        .font(.subheadline.bold())
+                                    Button("Cancel") {
+                                        isEditingBio = false
+                                        draftBio = ""
+                                    }
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .font(.subheadline)
+                                    .padding(.leading, 4)
+                                }
+                            }
+                        }
+                    } else {
+                        Button {
+                            draftBio = bio
+                            isEditingBio = true
+                        } label: {
+                            HStack(alignment: .top) {
+                                Text("Bio")
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Spacer()
+                                Text(bio.isEmpty ? "Not set" : bio)
+                                    .font(AppTheme.bodyFont(size: 13))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .multilineTextAlignment(.trailing)
+                                    .lineLimit(3)
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(AppTheme.dynamicAccent)
+                                    .padding(.leading, 4)
+                            }
+                        }
+                    }
+
                 } header: {
                     sectionHeader("Account")
                 }
                 .listRowBackground(AppTheme.surface)
+                .task { bio = await account.fetchBio() }
 
                 // MARK: Social / Discovery Section
                 Section {
@@ -825,6 +886,22 @@ struct AccountView: View {
                 draftDisplayName = ""
             }
             await account.updateDisplayName(trimmed)
+        }
+    }
+
+    private func saveBio() {
+        let trimmed = draftBio.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isSavingBio else { return }
+        isSavingBio = true
+        Task {
+            defer {
+                isSavingBio = false
+                isEditingBio = false
+                draftBio = ""
+            }
+            if await account.setBio(trimmed) {
+                bio = trimmed
+            }
         }
     }
 }

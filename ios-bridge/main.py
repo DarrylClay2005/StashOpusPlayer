@@ -14141,6 +14141,43 @@ async def delete_discord_verification(payload: dict = Depends(get_current_user))
 
 
 # ---------------------------------------------------------------------------
+# Profile bio (Feature: profile-bio)
+# ---------------------------------------------------------------------------
+
+
+class UpdateBioRequest(BaseModel):
+    bio: str
+
+
+@app.get("/user/bio")
+async def get_bio(payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT bio FROM ios_user_profile_bio WHERE user_id = %s", (user_id,))
+            row = await cur.fetchone()
+    return {"bio": row[0] if row else ""}
+
+
+@app.put("/user/bio")
+async def set_bio(body: UpdateBioRequest, payload: dict = Depends(get_current_user)):
+    user_id = payload["sub"]
+    bio = body.bio.strip()
+    if len(bio) > 280:
+        raise HTTPException(status_code=400, detail="Bio must be 280 characters or fewer")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_user_profile_bio (user_id, bio, updated_at) VALUES (%s, %s, CURRENT_TIMESTAMP) "
+                "ON CONFLICT (user_id) DO UPDATE SET bio = EXCLUDED.bio, updated_at = CURRENT_TIMESTAMP",
+                (user_id, bio),
+            )
+    return {"bio": bio}
+
+
+# ---------------------------------------------------------------------------
 # Per-user YouTube Data API key (Feature: youtube-api-key)
 # ---------------------------------------------------------------------------
 

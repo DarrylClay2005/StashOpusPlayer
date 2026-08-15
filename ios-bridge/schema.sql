@@ -1425,3 +1425,16 @@ CREATE TABLE IF NOT EXISTS ios_discord_verifications (
 -- Lumisound accounts and light up "Discord Verified" on all of them.
 CREATE UNIQUE INDEX IF NOT EXISTS ios_discord_verifications_idx_discord_user
     ON ios_discord_verifications (discord_user_id);
+
+-- Feature: profile bio — a short free-text tagline shown on the user's
+-- profile (AccountView), alongside their display name. Deliberately its own
+-- tiny table rather than another column crammed into ios_users or the
+-- already-fragile ios_user_settings upsert (that one's CASE-WHEN-per-column
+-- PUT handler is easy to get subtly wrong when adding a field by hand) — a
+-- single-column table needs no positional-column juggling at all.
+CREATE TABLE IF NOT EXISTS ios_user_profile_bio (
+    user_id VARCHAR(36) PRIMARY KEY,
+    bio VARCHAR(280) NOT NULL DEFAULT '',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES ios_users(id) ON DELETE CASCADE
+);
