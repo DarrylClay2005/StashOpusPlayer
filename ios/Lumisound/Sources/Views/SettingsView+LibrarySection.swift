@@ -154,7 +154,7 @@ extension SettingsView {
             // Force metadata sync
             Button {
                 Task {
-                    await library.forceMetadataSync(using: folderService)
+                    await library.forceMetadataSync(using: folderService, currentlyPlayingID: player.currentSong?.id)
                     // forceMetadataSync runs silently otherwise — without this the
                     // button just shows a brief spinner and nothing else, which is
                     // indistinguishable from doing nothing at all even though it

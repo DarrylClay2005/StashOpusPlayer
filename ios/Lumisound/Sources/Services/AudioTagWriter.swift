@@ -26,7 +26,10 @@ enum AudioTagWriter {
         artist: String?,
         album: String?,
         sourceTrackID: String,
-        thumbnailURL: String? = nil
+        thumbnailURL: String? = nil,
+        genre: String? = nil,
+        year: String? = nil,
+        trackNumber: Int? = nil
     ) async -> URL? {
         let startTime = Date()
         let outURL = url.deletingLastPathComponent()
@@ -42,7 +45,8 @@ enum AudioTagWriter {
         session.outputFileType = .m4a
         session.outputURL = outURL
         session.metadata = buildMetadataItems(
-            title: title, artist: artist, album: album, sourceTrackID: sourceTrackID, thumbnailURL: thumbnailURL
+            title: title, artist: artist, album: album, sourceTrackID: sourceTrackID, thumbnailURL: thumbnailURL,
+            genre: genre, year: year, trackNumber: trackNumber
         )
 
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -86,7 +90,8 @@ enum AudioTagWriter {
     }
 
     private static func buildMetadataItems(
-        title: String?, artist: String?, album: String?, sourceTrackID: String, thumbnailURL: String? = nil
+        title: String?, artist: String?, album: String?, sourceTrackID: String, thumbnailURL: String? = nil,
+        genre: String? = nil, year: String? = nil, trackNumber: Int? = nil
     ) -> [AVMetadataItem] {
         var items: [AVMetadataItem] = []
 
@@ -101,6 +106,31 @@ enum AudioTagWriter {
         if let item = commonItem(.commonIdentifierTitle, title) { items.append(item) }
         if let item = commonItem(.commonIdentifierArtist, artist) { items.append(item) }
         if let item = commonItem(.commonIdentifierAlbumName, album) { items.append(item) }
+        // iTunes-keyspace genre/year/track-number atoms — raw FourCC keys
+        // (the standard, stable MP4/iTunes metadata list: "©gen"/"©day"/
+        // "trkn"), not `AVMetadataIdentifier` enum cases, matching the same
+        // `.keySpace`/`.key` construction the LUMISOUND_ID/THUMBNAIL items
+        // below already use. `DocumentImportService.makeSong`'s generic
+        // `.metadata` scan (`idRaw.contains("genre"/"year")`) picks these up
+        // the same way it reads a bridge-downloaded file's tags, so a track
+        // re-tagged here round-trips identically.
+        func iTunesItem(_ key: String, _ value: String?) -> AVMutableMetadataItem? {
+            guard let value, !value.isEmpty else { return nil }
+            let item = AVMutableMetadataItem()
+            item.keySpace = .iTunes
+            item.key = key as NSString
+            item.value = value as NSString
+            return item
+        }
+        if let item = iTunesItem("\u{a9}gen", genre) { items.append(item) }
+        if let item = iTunesItem("\u{a9}day", year) { items.append(item) }
+        if let trackNumber, trackNumber > 0 {
+            let item = AVMutableMetadataItem()
+            item.keySpace = .iTunes
+            item.key = "trkn" as NSString
+            item.value = trackNumber as NSNumber
+            items.append(item)
+        }
 
         // Custom LUMISOUND_ID tag. Matches what the server-side ffmpeg pass
         // used to write (a generic mp4 "mdta" metadata atom, forced via
@@ -109,12 +139,16 @@ enum AudioTagWriter {
         // .quickTimeMetadata is that same generic-atom keyspace in
         // AVFoundation; its auto-derived identifier is "mdta/LUMISOUND_ID",
         // which lowercased contains "lumisound_id" — matching the reader's
-        // case-insensitive substring check exactly.
-        let idItem = AVMutableMetadataItem()
-        idItem.keySpace = .quickTimeMetadata
-        idItem.key = "LUMISOUND_ID" as NSString
-        idItem.value = sourceTrackID as NSString
-        items.append(idItem)
+        // case-insensitive substring check exactly. Skipped entirely when
+        // empty (a plain local import with no bridge-assigned source id)
+        // rather than writing a useless empty atom.
+        if !sourceTrackID.isEmpty {
+            let idItem = AVMutableMetadataItem()
+            idItem.keySpace = .quickTimeMetadata
+            idItem.key = "LUMISOUND_ID" as NSString
+            idItem.value = sourceTrackID as NSString
+            items.append(idItem)
+        }
 
         // Same purpose as the server's own `LUMISOUND_THUMBNAIL` tag (see
         // main.py's tag_cmd) — ArtworkService.fetchEmbeddedThumbnailURL
