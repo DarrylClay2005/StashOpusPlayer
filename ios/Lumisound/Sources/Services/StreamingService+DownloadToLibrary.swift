@@ -514,9 +514,13 @@ extension StreamingService {
         // yt-dlp can still emit a file AVAudioFile can't decode (corrupt remux, dropped
         // moov atom, etc.) — exactly what CorruptFileFinderService flags later. Catch it
         // immediately so the retry loop can re-fetch instead of leaving a dead file behind.
-        guard CorruptFileFinderService.isValidAudioFile(at: destURL) else {
+        // `expectedDuration` additionally catches a well-formed-but-truncated file —
+        // see that parameter's doc comment on CorruptFileFinderService.isValidAudioFile.
+        guard CorruptFileFinderService.isValidAudioFile(
+            at: destURL, expectedDuration: track.duration
+        ) else {
             try? FileManager.default.removeItem(at: destURL)
-            appWarn("downloadToLibrary: corrupt/unreadable file for \"\(track.title)\" — discarding", category: "network")
+            appWarn("downloadToLibrary: corrupt/unreadable/truncated file for \"\(track.title)\" — discarding", category: "network")
             throw StreamingError.corruptDownload
         }
 
@@ -683,9 +687,11 @@ extension StreamingService {
             throw error
         }
 
-        guard CorruptFileFinderService.isValidAudioFile(at: destURL) else {
+        guard CorruptFileFinderService.isValidAudioFile(
+            at: destURL, expectedDuration: track.duration
+        ) else {
             try? FileManager.default.removeItem(at: destURL)
-            appWarn("finalizeRelayedFile: corrupt/unreadable file for \"\(track.title)\" — discarding", category: "network")
+            appWarn("finalizeRelayedFile: corrupt/unreadable/truncated file for \"\(track.title)\" — discarding", category: "network")
             throw StreamingError.corruptDownload
         }
 

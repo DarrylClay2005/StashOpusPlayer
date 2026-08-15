@@ -3490,7 +3490,7 @@ async def _do_download_job(
                 raise HTTPException(status_code=404, detail="Downloaded file not found")
             continue
 
-        if not await _verify_downloaded_audio(candidate):
+        if not await _verify_downloaded_audio(candidate, expected_duration=float(duration) if duration else None):
             logger.warning(
                 "Downloaded file failed ffprobe integrity check (attempt %d/%d): %s",
                 attempt, max_attempts, candidate,
@@ -3582,7 +3582,7 @@ async def _do_download_job(
         # own integrity check then rejects, forcing a retry. Fall back to the
         # already-verified untagged file rather than serve a possibly-broken one.
         if (proc.returncode == 0 and tagged_file.exists() and tagged_file.stat().st_size > 0
-                and await _verify_downloaded_audio(tagged_file)):
+                and await _verify_downloaded_audio(tagged_file, expected_duration=float(duration) if duration else None)):
             output_file.unlink(missing_ok=True)
             output_file = tagged_file
         else:
@@ -3846,12 +3846,24 @@ async def list_pending_downloads(request: Request):
     })
 
 
-async def _verify_downloaded_audio(path: pathlib.Path) -> bool:
+async def _verify_downloaded_audio(path: pathlib.Path, expected_duration: Optional[float] = None) -> bool:
     """
     Returns True if ffprobe finds at least one audio stream with a non-zero
     duration in *path*. Used right after a yt-dlp download to catch truncated
     or corrupt output (interrupted remux/transcode) before serving it to the
     client — the same class of issue the iOS app's corruption finder flags.
+
+    `expected_duration` (the track's known duration, from search/resolve
+    metadata) additionally catches a truncated-but-well-formed file: one
+    that decodes fine and reports SOME positive duration, just far short of
+    the real track length (a dropped connection or killed subprocess mid-
+    fragment-download that still left a playable, non-corrupt partial file
+    behind) — "downloaded but not the full playtime" rather than
+    "downloaded and unplayable", which the has_audio/duration>0 check alone
+    can't tell apart from a legitimately short track. Generous tolerance
+    (15%, floored at 10s) to absorb ordinary metadata imprecision (YouTube's
+    reported duration vs. the actual decoded stream length routinely differ
+    by a second or two) without flagging real, complete downloads.
     """
     cmd = [
         "ffprobe", "-v", "quiet",
@@ -3881,11 +3893,23 @@ async def _verify_downloaded_audio(path: pathlib.Path) -> bool:
     has_audio = any(s.get("codec_type") == "audio" for s in streams)
 
     try:
-        duration = float((data.get("format") or {}).get("duration", 0))
+        actual_duration = float((data.get("format") or {}).get("duration", 0))
     except (TypeError, ValueError):
-        duration = 0.0
+        actual_duration = 0.0
 
-    return has_audio and duration > 0
+    if not (has_audio and actual_duration > 0):
+        return False
+
+    if expected_duration and expected_duration > 0:
+        tolerance = max(10.0, expected_duration * 0.15)
+        if actual_duration < expected_duration - tolerance:
+            logger.warning(
+                "_verify_downloaded_audio: %s decoded to %.1fs, expected ~%.1fs (tolerance %.1fs) — treating as truncated",
+                path, actual_duration, expected_duration, tolerance,
+            )
+            return False
+
+    return True
 
 
 def _download_format_args(format: str) -> tuple[list[str], str]:

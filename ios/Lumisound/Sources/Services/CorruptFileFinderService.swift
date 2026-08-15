@@ -120,7 +120,22 @@ final class CorruptFileFinderService: ObservableObject {
     /// audio for some trailing portion. Reading a real buffer from the very
     /// end of the file's declared length catches exactly that class of
     /// corruption a header-only check misses.
-    nonisolated static func isValidAudioFile(at url: URL) -> Bool {
+    ///
+    /// `expectedDuration` (the track's known real length, when the caller
+    /// has one — e.g. `StreamTrack.durationSeconds` right after a fresh
+    /// download) catches a DIFFERENT failure mode the checks above can't:
+    /// a file whose header/moov atom is entirely well-formed and internally
+    /// consistent, just short — a dropped connection that cut a download off
+    /// mid-stream can still leave behind a perfectly valid, tail-readable
+    /// file that's simply 30 seconds of a 3:45 track. Generous tolerance
+    /// (15%, floored at 10s) absorbs ordinary metadata imprecision (a
+    /// search result's reported duration vs. the actual decoded stream
+    /// length routinely differ by a second or two) without flagging real,
+    /// complete downloads. Only applied when the caller actually passes an
+    /// expected duration — every other call site (checking an EXISTING file
+    /// for reuse, where "expected" duration isn't independently known)
+    /// passes `nil` and gets exactly the previous behavior.
+    nonisolated static func isValidAudioFile(at url: URL, expectedDuration: TimeInterval? = nil) -> Bool {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = attrs[.size] as? Int64,
               size >= 1_024 else { return false }
@@ -138,7 +153,15 @@ final class CorruptFileFinderService: ObservableObject {
         } catch {
             return false
         }
-        return buffer.frameLength > 0
+        guard buffer.frameLength > 0 else { return false }
+
+        if let expectedDuration, expectedDuration > 0 {
+            let tolerance = max(10.0, expectedDuration * 0.15)
+            if file.duration < expectedDuration - tolerance {
+                return false
+            }
+        }
+        return true
     }
 
     // MARK: - Private Scan Worker (nonisolated, runs off main actor)
