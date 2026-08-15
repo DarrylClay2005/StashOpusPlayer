@@ -156,8 +156,7 @@ extension StreamingService {
                     let elapsed = Date().timeIntervalSince(attemptStart)
                     appLog("downloadToLibrary: succeeded via direct CDN fetch for \"\(track.title)\" in \(String(format: "%.2f", elapsed))s", category: "network")
                     DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
-                    LumisoundTrackVaultService.tagNewDownload(fileURL: destURL, trackID: track.sourceTrackID, sourceURL: track.youtubeURL)
-                    return destURL
+                    return await finalizeAndLockDownload(destURL: destURL, track: track)
                 } catch {
                     let elapsed = Date().timeIntervalSince(attemptStart)
                     appWarn("downloadToLibrary: direct CDN fetch failed for \"\(track.title)\" after \(String(format: "%.2f", elapsed))s: \(error) — falling back to relay", category: "network")
@@ -169,8 +168,7 @@ extension StreamingService {
                 let elapsed = Date().timeIntervalSince(relayStart)
                 appLog("downloadToLibrary: succeeded via server relay for \"\(track.title)\" in \(String(format: "%.2f", elapsed))s", category: "network")
                 DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
-                LumisoundTrackVaultService.tagNewDownload(fileURL: destURL, trackID: track.sourceTrackID, sourceURL: track.youtubeURL)
-                return destURL
+                return await finalizeAndLockDownload(destURL: destURL, track: track)
             } catch {
                 let elapsed = Date().timeIntervalSince(relayStart)
                 appWarn("downloadToLibrary: server relay failed for \"\(track.title)\" after \(String(format: "%.2f", elapsed))s: \(error) — falling back to job-based download", category: "network")
@@ -261,8 +259,7 @@ extension StreamingService {
                     appLog("downloadToLibrary: succeeded for \"\(track.title)\" on attempt \(attempt)/\(maxAttempts)", category: "network")
                 }
                 DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
-                LumisoundTrackVaultService.tagNewDownload(fileURL: destURL, trackID: track.sourceTrackID, sourceURL: track.youtubeURL)
-                return destURL
+                return await finalizeAndLockDownload(destURL: destURL, track: track)
             } catch let error as StreamingError {
                 switch error {
                 case .incompleteDownload, .corruptDownload:
@@ -277,6 +274,35 @@ extension StreamingService {
         }
 
         throw lastError
+    }
+
+    /// Tags a freshly-downloaded plain file, then converts+locks it to the
+    /// real Lumisound-exclusive format (see `LumisoundLockFormat`)
+    /// SYNCHRONOUSLY, right here, before the caller ever hands the returned
+    /// URL back to the library/UI — this is the "hold until conversion +
+    /// metadata finishes" the vault system was originally supposed to do:
+    /// a track becomes visible/playable in the library already locked, not
+    /// as a plain, unmasked file that only gets converted (and the original
+    /// only gets deleted) on some later background pass. Falls back to
+    /// returning the plain, tagged-but-not-yet-converted `destURL` if the
+    /// convert/lock/verify step fails for any reason (network hiccup mid
+    /// re-encode, disk pressure, etc.) — that's still fully playable and
+    /// self-healing: `LumisoundTrackVaultService.runExtensionConversionPass`
+    /// picks up any tagged-not-converted track on its next pass, same
+    /// safety net as before this change, just no longer the ONLY path a
+    /// normal download takes to get there.
+    func finalizeAndLockDownload(destURL: URL, track: StreamTrack) async -> URL {
+        LumisoundTrackVaultService.tagNewDownload(fileURL: destURL, trackID: track.sourceTrackID, sourceURL: track.youtubeURL)
+        guard let lockedURL = await LumisoundExclusiveExtensionService.convert(fileURL: destURL) else {
+            return destURL
+        }
+        // `convert` writes a brand new inode — re-apply the xattr vault tag
+        // here using the trackID/sourceURL we just tagged `destURL` with,
+        // same as `LibraryManager.convertToLumisoundExclusiveExtension`
+        // does for the background-pass path — otherwise every synchronously
+        // -locked download would silently lose its dedup fallback tag.
+        LumisoundTrackTagger.tag(fileURL: lockedURL, trackID: track.sourceTrackID, sourceURL: track.youtubeURL)
+        return lockedURL
     }
 
     /// Performs a single download attempt for `downloadToLibrary`, including the

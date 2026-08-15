@@ -261,6 +261,39 @@ enum LumisoundTrackVaultService {
             }
         }
         appLog("LumisoundTrackVaultService: converted \(converted)/\(candidates.count) track(s) to the Lumisound-exclusive extension" + (failedSongIDs.isEmpty ? "" : "; sample failures: \(failedSongIDs)"), category: "background")
+
+        await runLegacyRelockPass(library: library)
+    }
+
+    /// Upgrades already-`.lms`-marked tracks whose bytes are still the
+    /// legacy plain (unlocked) format — i.e. converted before
+    /// `LumisoundLockFormat` existed — into the real locked format, in
+    /// place, via `LumisoundExclusiveExtensionService.relockLegacyFile`.
+    /// Runs every pass (not gated behind a one-time flag) since it's cheap
+    /// per-file (an 8-byte header read for anything already migrated) and,
+    /// same reasoning as every other pass in this file, self-healing beats
+    /// a permanently-stuck track if a given relock attempt fails once.
+    @MainActor
+    private static func runLegacyRelockPass(library: LibraryManager) async {
+        let legacyCandidates = library.importedSongs.compactMap { song -> URL? in
+            guard let url = song.url,
+                  LumisoundExclusiveExtensionService.isConverted(url),
+                  !LumisoundLockFormat.isLocked(at: url) else { return nil }
+            return url
+        }
+        guard !legacyCandidates.isEmpty else { return }
+
+        var relocked = 0
+        for (index, url) in legacyCandidates.enumerated() {
+            if Task.isCancelled { break }
+            if LumisoundExclusiveExtensionService.relockLegacyFile(at: url) {
+                relocked += 1
+            }
+            if (index + 1) % batchSize == 0 {
+                await Task.yield()
+            }
+        }
+        appLog("LumisoundTrackVaultService: relocked \(relocked)/\(legacyCandidates.count) legacy .lms track(s) into the real locked format", category: "background")
     }
 
     /// Repair pass for tracks that ended up "converted" (see
