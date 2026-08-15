@@ -2368,6 +2368,81 @@ async def admin_set_user_quota(user_id: str, body: AdminSetQuotaRequest):
     return {"status": "ok", "quota_bytes": body.quota_bytes}
 
 
+@app.get("/admin/api/storage-integrity", dependencies=[Depends(check_admin_or_operator)])
+async def admin_storage_integrity(
+    verify_hash: bool = Query(
+        False,
+        description="Also re-hash each file's content and compare against its "
+                     "content-addressed id (the SHA-256 computed at upload time — "
+                     "see upload_user_music). Off by default: re-reading and "
+                     "hashing every file is real disk I/O that scales with total "
+                     "library size, unlike the existence check alone.",
+    ),
+    limit: int = Query(500, ge=1, le=5000, description="Max rows to check in one call"),
+):
+    """User-uploaded music ('My Library') lives only on this server's
+    filesystem (USER_MUSIC_DIR) — unlike bridge-downloaded tracks, which can
+    always be re-fetched from their source, an uploaded file lost to disk
+    failure or silent corruption is gone for good, and nothing previously
+    checked for that. `ios_user_music_metadata.id` is already the SHA-256 of
+    the original upload (a real, if incidental, integrity fingerprint) — this
+    surfaces the two failure modes that fingerprint can catch: a metadata row
+    whose file no longer exists at all, and (opt-in, since it's costlier) one
+    whose on-disk content no longer matches what was actually uploaded.
+    Doesn't fix anything — the point is turning silent data loss into a
+    reported, actionable list before it becomes a "where did my music go"
+    support case, not a data-migration tool."""
+    root = _resolve_user_music_root()
+    if root is None:
+        raise HTTPException(status_code=503, detail="USER_MUSIC_DIR/SERVER_MUSIC_DIR not configured")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, user_id, filename, relative_path, file_size_bytes "
+                "FROM ios_user_music_metadata ORDER BY uploaded_at DESC LIMIT %s",
+                (limit,),
+            )
+            rows = await cur.fetchall()
+
+    missing: list[dict] = []
+    corrupted: list[dict] = []
+    checked = 0
+
+    def _verify_one(content_id: str, path: pathlib.Path) -> Optional[str]:
+        """Runs on a thread (see asyncio.to_thread below) — returns the
+        actual hash if it differs from `content_id`, else None."""
+        with _readable_user_music_file(path) as readable:
+            actual = hashlib.sha256(readable.read_bytes()).hexdigest()
+        return actual if actual != content_id else None
+
+    for row_id, user_id, filename, relative_path, expected_size in rows:
+        user_dir = _user_music_dir(user_id)
+        if user_dir is None:
+            continue
+        path = user_dir / (relative_path or filename)
+        if not path.exists():
+            missing.append({"id": row_id, "user_id": user_id, "filename": filename})
+            continue
+        checked += 1
+        if verify_hash:
+            actual_hash = await asyncio.to_thread(_verify_one, row_id, path)
+            if actual_hash is not None:
+                corrupted.append({
+                    "id": row_id, "user_id": user_id, "filename": filename,
+                    "expected_hash": row_id, "actual_hash": actual_hash,
+                })
+
+    return {
+        "checked": checked,
+        "total_rows": len(rows),
+        "hash_verified": verify_hash,
+        "missing": missing,
+        "corrupted": corrupted,
+    }
+
+
 @app.post("/admin/api/users/{user_id}/deactivate", dependencies=[Depends(check_admin_or_operator)])
 async def admin_deactivate_user(user_id: str):
     if user_id == OPERATOR_USER_ID:

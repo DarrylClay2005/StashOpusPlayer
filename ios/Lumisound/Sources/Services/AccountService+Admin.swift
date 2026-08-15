@@ -107,6 +107,24 @@ extension AccountService {
         }
     }
 
+    /// Runs the storage-integrity check (GET /admin/api/storage-integrity —
+    /// see that endpoint's doc comment). `verifyHash` re-reads and re-hashes
+    /// every checked file (real disk I/O that scales with library size) —
+    /// off by default, just checks file existence.
+    func fetchStorageIntegrity(verifyHash: Bool = false, limit: Int = 500) async -> AdminStorageIntegrityReport? {
+        guard isLoggedIn else { return nil }
+        do {
+            let data = try await makeRequest("/admin/api/storage-integrity?verify_hash=\(verifyHash)&limit=\(limit)")
+            return try JSONDecoder().decode(AdminStorageIntegrityReport.self, from: data)
+        } catch let err as AccountError {
+            errorMessage = err.message
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     /// Sets (or clears, when `quotaBytes` is nil) a per-user storage quota
     /// override. Refetches the user list afterward so the dashboard reflects
     /// the new value immediately.

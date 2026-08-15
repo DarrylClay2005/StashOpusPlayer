@@ -1051,6 +1051,41 @@ struct AdminUser: Codable, Identifiable {
     }
 }
 
+/// One flagged row from GET /admin/api/storage-integrity — either a
+/// metadata row whose file is missing on disk, or (only when hash
+/// verification was requested) one whose content no longer matches what
+/// was actually uploaded.
+struct AdminStorageIntegrityIssue: Codable, Identifiable {
+    let id: String
+    let userId: String
+    let filename: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userId = "user_id"
+        case filename
+    }
+}
+
+/// GET /admin/api/storage-integrity's response — see that endpoint's doc
+/// comment on the bridge for why this exists (user-uploaded music lives
+/// only on this server's filesystem, with no prior way to detect a file
+/// silently lost or corrupted).
+struct AdminStorageIntegrityReport: Codable {
+    let checked: Int
+    let totalRows: Int
+    let hashVerified: Bool
+    let missing: [AdminStorageIntegrityIssue]
+    let corrupted: [AdminStorageIntegrityIssue]
+
+    enum CodingKeys: String, CodingKey {
+        case checked
+        case totalRows = "total_rows"
+        case hashVerified = "hash_verified"
+        case missing, corrupted
+    }
+}
+
 // MARK: - Cross-Device Playback Handoff
 
 /// One row from GET /user/devices (a push-token registration with display

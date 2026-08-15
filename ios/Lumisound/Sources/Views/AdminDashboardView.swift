@@ -29,6 +29,11 @@ struct AdminDashboardView: View {
     @State private var editingQuotaForUser: AdminUser? = nil
     @State private var quotaInputGB: String = ""
 
+    // Storage integrity check (Section "Storage Integrity")
+    @State private var isCheckingIntegrity = false
+    @State private var integrityReport: AdminStorageIntegrityReport? = nil
+    @State private var verifyHashOnNextCheck = false
+
     var body: some View {
         Group {
             if account.currentUser?.id == Self.operatorUserID {
@@ -111,6 +116,35 @@ struct AdminDashboardView: View {
                 }
             } header: {
                 Text("Users")
+            }
+
+            Section {
+                if isCheckingIntegrity {
+                    HStack {
+                        ProgressView()
+                        Text("Checking…").foregroundStyle(AppTheme.textSecondary)
+                    }
+                } else if let report = integrityReport {
+                    integrityReportView(report)
+                } else {
+                    Text("Checks that every uploaded ('My Library') track's file still exists on disk — user-uploaded music has no other backup, unlike bridge-downloaded tracks, which can be re-fetched from their source.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                Button {
+                    Task {
+                        isCheckingIntegrity = true
+                        defer { isCheckingIntegrity = false }
+                        integrityReport = await account.fetchStorageIntegrity(verifyHash: verifyHashOnNextCheck)
+                    }
+                } label: {
+                    Text(integrityReport == nil ? "Check Storage Integrity" : "Check Again")
+                }
+                .disabled(isCheckingIntegrity)
+                Toggle("Also verify file content (slower)", isOn: $verifyHashOnNextCheck)
+                    .font(.caption)
+            } header: {
+                Text("Storage Integrity")
             }
 
             Section {
@@ -315,6 +349,42 @@ struct AdminDashboardView: View {
             return "\(used) used — server default limit"
         }
         return "\(used) / \(formattedBytes(quota)) used"
+    }
+
+    @ViewBuilder
+    private func integrityReportView(_ report: AdminStorageIntegrityReport) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(report.checked)/\(report.totalRows) file(s) checked" + (report.hashVerified ? " (content verified)" : " (existence only)"))
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+
+            if report.missing.isEmpty && report.corrupted.isEmpty {
+                Label("No issues found", systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+            } else {
+                if !report.missing.isEmpty {
+                    Label("\(report.missing.count) file(s) missing from disk", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.red)
+                    ForEach(report.missing) { issue in
+                        Text(issue.filename)
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+                if !report.corrupted.isEmpty {
+                    Label("\(report.corrupted.count) file(s) with mismatched content", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                    ForEach(report.corrupted) { issue in
+                        Text(issue.filename)
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+            }
+        }
     }
 
     private func refresh() async {
