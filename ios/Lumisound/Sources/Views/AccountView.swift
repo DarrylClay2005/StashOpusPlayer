@@ -40,9 +40,6 @@ struct AccountView: View {
     // User ID copy feedback
     @State private var didCopyUserID = false
 
-    // Notifications badge
-    @State private var unreadNotificationCount = 0
-
     @State private var draftDOB = Date()
     @State private var isSavingDOB = false
 
@@ -394,9 +391,14 @@ struct AccountView: View {
                         HStack {
                             Label("Notifications", systemImage: "bell")
                                 .foregroundStyle(AppTheme.textPrimary)
-                            if unreadNotificationCount > 0 {
+                            // Reads AccountService's own @Published count (not a
+                            // view-local copy) so this updates live the instant a
+                            // push arrives while this screen is open — see
+                            // AppDelegate's willPresent -> refreshUnreadNotificationCount —
+                            // not just when this section's `.task` re-fires.
+                            if account.unreadNotificationCount > 0 {
                                 Spacer()
-                                Text("\(unreadNotificationCount)")
+                                Text("\(account.unreadNotificationCount)")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 7)
@@ -411,7 +413,7 @@ struct AccountView: View {
                 .listRowBackground(AppTheme.surface)
                 .task {
                     await account.fetchStats()
-                    unreadNotificationCount = await account.fetchNotifications(unreadOnly: true).count
+                    await account.refreshUnreadNotificationCount()
                 }
 
                 // MARK: Account Info Section

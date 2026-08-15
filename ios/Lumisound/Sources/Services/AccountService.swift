@@ -41,6 +41,15 @@ final class AccountService: ObservableObject {
     @Published var adminErrors: [AdminErrorLogEntry] = []
     @Published var adminUsers: [AdminUser] = []
     @Published var hasDateOfBirth: Bool = false
+    // Unread notification count for AccountView's badge — @Published (not
+    // view-local @State) so it can be refreshed the instant a push arrives
+    // while foregrounded (see AppDelegate's willPresent -> refreshUnreadNotificationCount),
+    // not just when the view re-appears. Previously this only ever refreshed
+    // on `.task` (view first-appear), so a push banner could visibly show
+    // while the app was open without the in-app badge count changing until
+    // the user navigated away and back — the "needs a tab switch to refresh"
+    // pattern.
+    @Published var unreadNotificationCount: Int = 0
     // Two-factor auth (TOTP). `pendingTOTPToken` is set by `login()` when the
     // server responds `requires_2fa` instead of a session — LoginView shows a
     // code-entry step and calls `completeTOTPLogin(code:)` while this is set,

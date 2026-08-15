@@ -142,5 +142,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .sound, .list])
+        // The banner above is purely a system-level presentation — it doesn't
+        // touch anything this app's own UI reads. Without this, AccountView's
+        // unread-notification badge (an @Published on AccountService, so any
+        // observing view updates live) only ever refreshed on that view's own
+        // first-appear `.task`, so a push banner could visibly show while the
+        // app was open with the in-app badge count staying stale until the
+        // user navigated away and back — exactly the "needs a tab switch to
+        // refresh" pattern. Best-effort/fire-and-forget: a failed refresh
+        // here just means the badge catches up next time something else
+        // triggers it, same as before this existed.
+        Task { await AccountService.shared?.refreshUnreadNotificationCount() }
     }
 }

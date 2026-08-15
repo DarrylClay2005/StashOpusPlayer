@@ -22,11 +22,29 @@ extension AccountService {
         }
     }
 
+    /// Refreshes `unreadNotificationCount` from the server. Call on app
+    /// launch/foreground and — critically — right after a push arrives while
+    /// the app is already foregrounded (see AppDelegate's `willPresent`),
+    /// since that's the case a view's own `.task`-on-first-appear can't catch:
+    /// the badge otherwise only updated once the user navigated away and
+    /// back, even though the push banner itself displayed immediately.
+    @discardableResult
+    func refreshUnreadNotificationCount() async -> Int {
+        guard isLoggedIn else {
+            unreadNotificationCount = 0
+            return 0
+        }
+        let count = await fetchNotifications(unreadOnly: true).count
+        unreadNotificationCount = count
+        return count
+    }
+
     /// Marks a single notification as read.
     func markNotificationRead(id: String) async {
         guard isLoggedIn else { return }
         do {
             _ = try await makeRequest("/user/notifications/\(id)/read", method: "POST")
+            await refreshUnreadNotificationCount()
         } catch {
             // Best-effort; the inbox will simply show it as unread next time.
         }
@@ -37,6 +55,7 @@ extension AccountService {
         guard isLoggedIn else { return }
         do {
             _ = try await makeRequest("/user/notifications/read-all", method: "POST")
+            unreadNotificationCount = 0
         } catch {
             // Best-effort.
         }
