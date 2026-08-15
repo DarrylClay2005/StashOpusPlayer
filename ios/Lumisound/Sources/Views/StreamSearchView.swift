@@ -43,6 +43,12 @@ struct StreamSearchView: View {
     // Animation: tracks results version so we can stagger the fade-in
     @State var resultsAnimationToken: UUID = UUID()
 
+    // Streaming search results layout — 1 column is the original single-row
+    // list; 2/3 switch to a compact artwork-forward grid (StreamTrackGridCell),
+    // mirroring the same user-configurable column count already used for
+    // Albums/Songs/Folders (see AlbumsTab's "library_albums_columns").
+    @AppStorage("stream_search_columns") var searchResultColumns: Int = 1
+
     // Trending searches & autocomplete suggestions
     @State var trendingQueries: [SearchQueryCount] = []
     @State var suggestions: [SearchQueryCount] = []

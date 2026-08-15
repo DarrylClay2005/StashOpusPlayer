@@ -106,73 +106,152 @@ extension StreamSearchView {
                         .overlay(Divider().opacity(0.3), alignment: .bottom)
                     }
 
-                    List {
-                        // Group results into per-source sections (YouTube / SoundCloud)
-                        // so the user can clearly tell which platform each result came
-                        // from. Most single-source searches will only populate one
-                        // section, but playlist resolves can mix sources.
-                        ForEach(groupedResults, id: \.source) { group in
-                            Section {
-                                ForEach(Array(group.tracks.enumerated()), id: \.element.id) { localIndex, track in
-                                    // Cap the stagger index: it only drives the fade-in delay, and
-                                    // the old `searchResults.firstIndex` lookup here was O(n) per
-                                    // row → O(n²) over a big playlist (a main-thread hang).
-                                    let globalIndex = min(localIndex, 12)
-                                    StreamTrackRow(
-                                        track: track,
-                                        isLoading: loadingTrackID == track.id,
-                                        isDownloading: downloadingTrackIDs.contains(track.id),
-                                        isDownloaded: downloadedTrackIDs.contains(track.id),
-                                        onPlay: { handlePlay(track: track) },
-                                        onAddToQueue: { handleAddToQueue(track: track) },
-                                        onDownload: { handleDownload(track: track) }
-                                    )
-                                    // The row now supplies its own floating glass-card
-                                    // background, so the list row itself stays transparent
-                                    // with no separator line between cards.
-                                    .listRowBackground(Color.clear)
-                                    .listRowSeparator(.hidden)
-                                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-                                    // Staggered fade-in when results first appear
-                                    .modifier(StaggeredFadeInModifier(index: globalIndex, token: resultsAnimationToken))
-                                    .contextMenu {
-                                        Button {
-                                            handlePlayNext(track: track)
-                                        } label: {
-                                            Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
-                                        }
-                                        Button {
-                                            handleAddToQueue(track: track)
-                                        } label: {
-                                            Label("Add to Queue", systemImage: "text.line.last.and.arrowtriangle.forward")
-                                        }
-                                        Button {
-                                            handleDownload(track: track)
-                                        } label: {
-                                            Label("Download", systemImage: "arrow.down.circle")
-                                        }
-                                        if !track.youtubeURL.isEmpty, let linkURL = URL(string: track.youtubeURL) {
-                                            Divider()
-                                            Button {
-                                                UIPasteboard.general.string = track.youtubeURL
-                                            } label: {
-                                                Label("Copy Link", systemImage: "link")
-                                            }
-                                            ShareLink(item: linkURL) {
-                                                Label("Share", systemImage: "square.and.arrow.up")
-                                            }
-                                        }
+                    // Result count + layout picker — always shown (not just for
+                    // playlist resolves) so the column control is reachable from
+                    // any search.
+                    HStack {
+                        Text("\(streaming.searchResults.count) result\(streaming.searchResults.count == 1 ? "" : "s")")
+                            .font(AppTheme.bodyFont(size: 12).weight(.medium))
+                            .foregroundStyle(AppTheme.textSecondary)
+                        Spacer()
+                        streamResultsColumnPicker
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 2)
+
+                    if searchResultColumns == 1 {
+                        List {
+                            // Group results into per-source sections (YouTube / SoundCloud)
+                            // so the user can clearly tell which platform each result came
+                            // from. Most single-source searches will only populate one
+                            // section, but playlist resolves can mix sources.
+                            ForEach(groupedResults, id: \.source) { group in
+                                Section {
+                                    ForEach(Array(group.tracks.enumerated()), id: \.element.id) { localIndex, track in
+                                        // Cap the stagger index: it only drives the fade-in delay, and
+                                        // the old `searchResults.firstIndex` lookup here was O(n) per
+                                        // row → O(n²) over a big playlist (a main-thread hang).
+                                        let globalIndex = min(localIndex, 12)
+                                        StreamTrackRow(
+                                            track: track,
+                                            isLoading: loadingTrackID == track.id,
+                                            isDownloading: downloadingTrackIDs.contains(track.id),
+                                            isDownloaded: downloadedTrackIDs.contains(track.id),
+                                            onPlay: { handlePlay(track: track) },
+                                            onAddToQueue: { handleAddToQueue(track: track) },
+                                            onDownload: { handleDownload(track: track) }
+                                        )
+                                        // The row now supplies its own floating glass-card
+                                        // background, so the list row itself stays transparent
+                                        // with no separator line between cards.
+                                        .listRowBackground(Color.clear)
+                                        .listRowSeparator(.hidden)
+                                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                                        // Staggered fade-in when results first appear
+                                        .modifier(StaggeredFadeInModifier(index: globalIndex, token: resultsAnimationToken))
+                                        .contextMenu { streamResultContextMenu(for: track) }
                                     }
+                                } header: {
+                                    CloudSectionHeader(icon: sourceIcon(group.source), text: sourceLabel(group.source))
+                                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
                                 }
-                            } header: {
-                                CloudSectionHeader(icon: sourceIcon(group.source), text: sourceLabel(group.source))
-                                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
                             }
                         }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                    } else {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 4, pinnedViews: [.sectionHeaders]) {
+                                ForEach(groupedResults, id: \.source) { group in
+                                    Section {
+                                        LazyVGrid(columns: gridColumns, spacing: 12) {
+                                            ForEach(Array(group.tracks.enumerated()), id: \.element.id) { localIndex, track in
+                                                let globalIndex = min(localIndex, 12)
+                                                StreamTrackGridCell(
+                                                    track: track,
+                                                    isLoading: loadingTrackID == track.id,
+                                                    isDownloading: downloadingTrackIDs.contains(track.id),
+                                                    isDownloaded: downloadedTrackIDs.contains(track.id),
+                                                    onPlay: { handlePlay(track: track) },
+                                                    onAddToQueue: { handleAddToQueue(track: track) },
+                                                    onDownload: { handleDownload(track: track) }
+                                                )
+                                                .modifier(StaggeredFadeInModifier(index: globalIndex, token: resultsAnimationToken))
+                                                .contextMenu { streamResultContextMenu(for: track) }
+                                            }
+                                        }
+                                        .padding(.horizontal, 16)
+                                    } header: {
+                                        CloudSectionHeader(icon: sourceIcon(group.source), text: sourceLabel(group.source))
+                                            .padding(.horizontal, 16)
+                                            .padding(.top, 8)
+                                            .padding(.bottom, 4)
+                                            .background(Color.clear)
+                                    }
+                                }
+                            }
+                            .padding(.bottom, 24)
+                        }
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
                 }
+            }
+        }
+    }
+
+    /// Column-count control for the streaming search results grid (1/2/3),
+    /// same pattern as AlbumsTab's toolbar menu — surfaced inline above the
+    /// results (rather than in StreamSearchView's shared navigation toolbar,
+    /// which spans every sub-tab, not just streaming search).
+    var streamResultsColumnPicker: some View {
+        Menu {
+            Button { searchResultColumns = 1 } label: {
+                Label("List", systemImage: "rectangle.grid.1x2")
+            }
+            Button { searchResultColumns = 2 } label: {
+                Label("2 Columns", systemImage: "square.grid.2x2")
+            }
+            Button { searchResultColumns = 3 } label: {
+                Label("3 Columns", systemImage: "square.grid.3x3")
+            }
+        } label: {
+            Image(systemName: searchResultColumns == 1 ? "rectangle.grid.1x2" : searchResultColumns == 2 ? "square.grid.2x2" : "square.grid.3x3")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(width: 32, height: 32)
+        }
+    }
+
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 12), count: searchResultColumns)
+    }
+
+    @ViewBuilder
+    private func streamResultContextMenu(for track: StreamTrack) -> some View {
+        Button {
+            handlePlayNext(track: track)
+        } label: {
+            Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+        }
+        Button {
+            handleAddToQueue(track: track)
+        } label: {
+            Label("Add to Queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+        }
+        Button {
+            handleDownload(track: track)
+        } label: {
+            Label("Download", systemImage: "arrow.down.circle")
+        }
+        if !track.youtubeURL.isEmpty, let linkURL = URL(string: track.youtubeURL) {
+            Divider()
+            Button {
+                UIPasteboard.general.string = track.youtubeURL
+            } label: {
+                Label("Copy Link", systemImage: "link")
+            }
+            ShareLink(item: linkURL) {
+                Label("Share", systemImage: "square.and.arrow.up")
             }
         }
     }
