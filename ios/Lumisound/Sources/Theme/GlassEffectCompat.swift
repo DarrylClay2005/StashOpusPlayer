@@ -13,6 +13,15 @@ import SwiftUI
 // the BACKGROUND layer — behind the view's own content — so the "Liquid Glass"
 // Settings sliders tint the card chrome without washing over foreground
 // content like song-card album artwork.
+//
+// `GlassSettings.translucency` (the pre-iOS-26 fallback's own opacity slider
+// in GlassSettingsView) previously only drove that screen's own local live
+// preview swatch — every real `adaptiveGlass` call site across the app
+// (mini-player, toasts, FABs, song cards) ignored it entirely and always
+// rendered the fallback material/style at full opacity. Dragging the slider
+// visibly changed the preview but nothing else in the app, which is exactly
+// what "Liquid Glass... needs fixing" describes. Now applied to every
+// fallback branch below.
 
 extension View {
     /// The configured glass tint as a shape fill, sized to fill the background.
@@ -35,7 +44,7 @@ extension View {
         if #available(iOS 26.0, *) {
             self.background(glassTintLayer(in: shape)).glassEffect(.regular, in: shape)
         } else {
-            self.background(glassTintLayer(in: shape)).background(fallback, in: shape)
+            self.background(glassTintLayer(in: shape)).background(fallback.opacity(GlassSettings.shared.translucency), in: shape)
         }
     }
 
@@ -48,7 +57,7 @@ extension View {
         if #available(iOS 26.0, *) {
             self.background(glassTintLayer(in: shape)).glassEffect(.regular, in: shape)
         } else {
-            self.background(glassTintLayer(in: shape)).background(fallback, in: shape)
+            self.background(glassTintLayer(in: shape)).background(fallback.opacity(GlassSettings.shared.translucency), in: shape)
         }
     }
 
@@ -59,7 +68,7 @@ extension View {
         if #available(iOS 26.0, *) {
             self.background(glassTintLayer(in: shape)).glassEffect(.regular.tint(tint).interactive(), in: shape)
         } else {
-            self.background(glassTintLayer(in: shape)).background(fallback, in: shape)
+            self.background(glassTintLayer(in: shape)).background(fallback.opacity(GlassSettings.shared.translucency), in: shape)
         }
     }
 
@@ -70,7 +79,7 @@ extension View {
         if #available(iOS 26.0, *) {
             self.background(glassTintLayer(in: shape)).glassEffect(.regular.tint(tint).interactive(), in: shape)
         } else {
-            self.background(glassTintLayer(in: shape)).background(fallback, in: shape)
+            self.background(glassTintLayer(in: shape)).background(fallback.opacity(GlassSettings.shared.translucency), in: shape)
         }
     }
 }
