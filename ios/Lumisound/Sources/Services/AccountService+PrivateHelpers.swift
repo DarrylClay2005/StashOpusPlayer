@@ -13,6 +13,13 @@ extension AccountService {
         let token: String
     }
 
+    /// /auth/login's alternate response shape for a 2FA-enabled account —
+    /// see `login()`'s doc comment.
+    struct TOTPPendingResponse: Decodable {
+        let requires_2fa: Bool
+        let pending_token: String
+    }
+
     func saveUserLocally(_ user: AppUser) {
         if let data = try? JSONEncoder().encode(user) {
             UserDefaults.standard.set(data, forKey: Self.userKey)

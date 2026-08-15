@@ -21,6 +21,12 @@ struct LoginView: View {
     // Local validation error (e.g. passwords don't match)
     @State private var localError: String? = nil
 
+    // Two-factor auth code step — shown instead of the form below while
+    // `account.pendingTOTPToken != nil` (set by `login()` when the account
+    // has 2FA enabled; see AccountService+PublicAPI.swift).
+    @State private var totpCode = ""
+    @State private var isVerifyingTOTP = false
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -46,6 +52,117 @@ struct LoginView: View {
                         }
                         .padding(.top, 20)
 
+                        if account.pendingTOTPToken != nil {
+                            totpCodeStep
+                        } else {
+                        loginFormFields
+                        }
+
+                        Spacer(minLength: 20)
+                    }
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        account.cancelTOTPLogin()
+                        dismiss()
+                    }
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                }
+            }
+            .onChange(of: account.isLoggedIn) { loggedIn in
+                if loggedIn { dismiss() }
+            }
+            .onAppear {
+                if startOnRegister { isRegistering = true }
+            }
+        }
+    }
+
+    // MARK: - Two-factor code step
+
+    private var totpCodeStep: some View {
+        VStack(spacing: 18) {
+            Text("Two-Factor Authentication")
+                .font(.headline)
+                .foregroundStyle(AppTheme.textPrimary)
+            Text("Enter the 6-digit code from your authenticator app.")
+                .font(AppTheme.bodyFont(size: 13))
+                .foregroundStyle(AppTheme.textSecondary)
+                .multilineTextAlignment(.center)
+
+            TextField("000000", text: $totpCode)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.center)
+                .font(.title2.monospacedDigit())
+                .foregroundStyle(AppTheme.textPrimary)
+                .padding(12)
+                .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(AppTheme.dynamicAccent.opacity(0.3), lineWidth: 1)
+                )
+                .onChange(of: totpCode) { newValue in
+                    // Codes are exactly 6 digits — clamp input so a pasted
+                    // longer string (or an accidental extra tap) doesn't
+                    // silently produce a request that can never verify.
+                    let digitsOnly = newValue.filter(\.isNumber)
+                    totpCode = String(digitsOnly.prefix(6))
+                }
+
+            if let err = account.errorMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 14))
+                    Text(err)
+                        .font(AppTheme.bodyFont(size: 13))
+                        .multilineTextAlignment(.leading)
+                }
+                .foregroundStyle(AppTheme.error)
+            }
+
+            Button {
+                isVerifyingTOTP = true
+                Task {
+                    defer { isVerifyingTOTP = false }
+                    await account.completeTOTPLogin(code: totpCode)
+                    if account.isLoggedIn {
+                        await account.pullSync(library: libraryManager, player: player)
+                        account.startAutoPushTimer(library: libraryManager)
+                        await account.loadAvatar(forceRefresh: true)
+                    }
+                }
+            } label: {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(AppTheme.dynamicAccent)
+                        .frame(height: 50)
+                    if isVerifyingTOTP {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("Verify").font(.headline).foregroundStyle(.white)
+                    }
+                }
+            }
+            .disabled(isVerifyingTOTP || totpCode.count != 6)
+            .opacity((isVerifyingTOTP || totpCode.count != 6) ? 0.6 : 1.0)
+
+            Button("Use a different account") {
+                totpCode = ""
+                account.cancelTOTPLogin()
+            }
+            .font(AppTheme.bodyFont(size: 13))
+            .foregroundStyle(AppTheme.textSecondary)
+        }
+        .padding(.horizontal)
+    }
+
+    // MARK: - Sign in / register form
+
+    private var loginFormFields: some View {
+        VStack(spacing: 28) {
                         // MARK: Mode Picker
                         Picker("Mode", selection: $isRegistering) {
                             Text("Sign In").tag(false)
@@ -212,24 +329,6 @@ struct LoginView: View {
                         .disabled(isLoading || username.isEmpty || password.isEmpty)
                         .padding(.horizontal)
                         .opacity((isLoading || username.isEmpty || password.isEmpty) ? 0.6 : 1.0)
-
-                        Spacer(minLength: 20)
-                    }
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .foregroundStyle(AppTheme.dynamicAccent)
-                }
-            }
-            .onChange(of: account.isLoggedIn) { loggedIn in
-                if loggedIn { dismiss() }
-            }
-            .onAppear {
-                if startOnRegister { isRegistering = true }
-            }
         }
     }
 

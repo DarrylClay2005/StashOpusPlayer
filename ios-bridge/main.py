@@ -4776,6 +4776,21 @@ class TOTP2FALoginRequest(BaseModel):
     device_name: Optional[str] = None
 
 
+@app.get("/auth/2fa/status")
+async def get_2fa_status(payload: dict = Depends(get_current_user)):
+    """Whether 2FA is currently enabled for the logged-in account — the
+    login response (`_user_dict`) doesn't carry `totp_enabled`, so the app
+    has no other way to know whether to show "Enable" or "Disable" in
+    Account -> Security without this."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT totp_enabled FROM ios_users WHERE id = %s", (user_id,))
+            row = await cur.fetchone()
+    return {"enabled": bool(row[0]) if row else False}
+
+
 @app.post("/auth/2fa/setup")
 async def setup_2fa(payload: dict = Depends(get_current_user)):
     """Generates a new TOTP secret and returns it (plus an otpauth:// URI a

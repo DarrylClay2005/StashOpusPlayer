@@ -41,6 +41,12 @@ final class AccountService: ObservableObject {
     @Published var adminErrors: [AdminErrorLogEntry] = []
     @Published var adminUsers: [AdminUser] = []
     @Published var hasDateOfBirth: Bool = false
+    // Two-factor auth (TOTP). `pendingTOTPToken` is set by `login()` when the
+    // server responds `requires_2fa` instead of a session — LoginView shows a
+    // code-entry step and calls `completeTOTPLogin(code:)` while this is set,
+    // instead of treating that response as a login failure.
+    @Published var pendingTOTPToken: String? = nil
+    @Published var isTOTPEnabled: Bool = false
 
     // MARK: Persisted token
 

@@ -623,6 +623,18 @@ struct AccountView: View {
 
                 // MARK: Security Section
                 Section {
+                    NavigationLink(destination: TwoFactorAuthView()) {
+                        HStack {
+                            Label("Two-Factor Authentication", systemImage: "lock.shield")
+                                .foregroundStyle(AppTheme.textPrimary)
+                            Spacer()
+                            if account.isTOTPEnabled {
+                                Text("On")
+                                    .font(AppTheme.bodyFont(size: 13))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                        }
+                    }
                     NavigationLink(destination: ActiveSessionsView()) {
                         Label("Active Sessions", systemImage: "laptopcomputer.and.iphone")
                             .foregroundStyle(AppTheme.textPrimary)
@@ -635,6 +647,7 @@ struct AccountView: View {
                     sectionHeader("Security")
                 }
                 .listRowBackground(AppTheme.surface)
+                .task { await account.refreshTOTPStatus() }
 
                 // MARK: Operator Section
                 // Only ever rendered for the hardcoded operator account —

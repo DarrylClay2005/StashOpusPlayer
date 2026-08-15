@@ -9,6 +9,7 @@ extension AccountService {
     func login(username: String, password: String, deviceName: String = UIDevice.current.name) async {
         appLog("Login attempt: \(username)", category: "account")
         errorMessage = nil
+        pendingTOTPToken = nil
         struct Body: Encodable {
             let username: String
             let password: String
@@ -20,6 +21,19 @@ extension AccountService {
                 method: "POST",
                 body: Body(username: username, password: password, device_name: deviceName)
             )
+            // A 2FA-enabled account's password check alone doesn't return a
+            // session (see /auth/login's doc comment on the bridge) — it
+            // returns `requires_2fa`/`pending_token` instead, which the plain
+            // `AuthResponse` shape below can't decode (no `user`/`token`
+            // fields). Check for that shape FIRST rather than letting the
+            // AuthResponse decode fail and land in the generic error path,
+            // where this would previously have shown as an opaque decoding
+            // error instead of prompting for a code.
+            if let pending = try? JSONDecoder().decode(TOTPPendingResponse.self, from: data), pending.requires_2fa {
+                pendingTOTPToken = pending.pending_token
+                appLog("Login requires 2FA code: \(username)", category: "account")
+                return
+            }
             let response = try JSONDecoder().decode(AuthResponse.self, from: data)
             token = response.token
             currentUser = response.user
@@ -28,6 +42,7 @@ extension AccountService {
             saveUserLocally(response.user)
             appLog("Login success: \(username) (id: \(response.user.id))", category: "account")
             await loadAvatar(forceRefresh: true)
+            await refreshTOTPStatus()
         } catch let err as AccountError {
             appError("Login failed [\(err.statusCode)]: \(err.message)", category: "account")
             errorMessage = err.message
@@ -35,6 +50,58 @@ extension AccountService {
             appError("Login error: \(error.localizedDescription)", category: "account")
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Completes a login `login()` paused for a TOTP code — see
+    /// `pendingTOTPToken`. Clears `pendingTOTPToken` on any outcome (success
+    /// OR failure) other than a wrong code, since an expired/invalid pending
+    /// token means the whole flow needs to restart from `login()`, not just
+    /// a retry of this step; a wrong *code* is the one case worth letting
+    /// the user simply try again without re-entering their password.
+    func completeTOTPLogin(code: String, deviceName: String = UIDevice.current.name) async {
+        guard let pending = pendingTOTPToken else { return }
+        errorMessage = nil
+        struct Body: Encodable {
+            let pending_token: String
+            let code: String
+            let device_name: String
+        }
+        do {
+            let data = try await makeRequest(
+                "/auth/2fa/login",
+                method: "POST",
+                body: Body(pending_token: pending, code: code, device_name: deviceName)
+            )
+            let response = try JSONDecoder().decode(AuthResponse.self, from: data)
+            token = response.token
+            currentUser = response.user
+            isLoggedIn = true
+            hasDateOfBirth = response.user.dateOfBirth != nil
+            pendingTOTPToken = nil
+            saveUserLocally(response.user)
+            appLog("2FA login success: \(response.user.username)", category: "account")
+            await loadAvatar(forceRefresh: true)
+            isTOTPEnabled = true
+        } catch let err as AccountError {
+            appError("2FA login failed [\(err.statusCode)]: \(err.message)", category: "account")
+            errorMessage = err.message
+            // 401 covers both "wrong code" (retry-worthy) and "pending token
+            // expired" (not retry-worthy) per the bridge's /auth/2fa/login —
+            // it doesn't distinguish them in the status code, so treat any
+            // 401 here as retry-worthy (the common case) and only actually
+            // clear the pending token on a definitively non-recoverable error.
+            if err.statusCode != 401 {
+                pendingTOTPToken = nil
+            }
+        } catch {
+            appError("2FA login error: \(error.localizedDescription)", category: "account")
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func cancelTOTPLogin() {
+        pendingTOTPToken = nil
+        errorMessage = nil
     }
 
     func register(
