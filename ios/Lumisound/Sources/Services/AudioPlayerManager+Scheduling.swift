@@ -452,7 +452,18 @@ extension AudioPlayerManager {
                 // Build a request with a realistic browser UA so CDN servers don't reject it.
                 var req = URLRequest(url: url)
                 req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", forHTTPHeaderField: "User-Agent")
-                req.timeoutInterval = 60
+                // This is a full-file fetch (the whole track downloads to a temp
+                // cache file before AVAudioFile can read any of it — see this
+                // function's header comment), same shape as the comparable
+                // full-download paths elsewhere (StreamingService+DownloadToLibrary's
+                // job result fetch and relay download use 120s/180s) — but this one
+                // is the path EVERY direct-play/"streamed" track goes through, not
+                // an occasional background download, so it's hit far more often.
+                // 60s was tight enough to plausibly time out a larger track or a
+                // slow/cellular connection well before the whole file arrived,
+                // failing playback outright with no retry (unlike downloadToLibrary,
+                // which retries transient failures 3x). Raised to match.
+                req.timeoutInterval = 120
                 // Apply any per-song headers (e.g. Authorization for user music / server tracks).
                 if let headers = currentSong?.httpHeaders {
                     for (field, value) in headers { req.setValue(value, forHTTPHeaderField: field) }
