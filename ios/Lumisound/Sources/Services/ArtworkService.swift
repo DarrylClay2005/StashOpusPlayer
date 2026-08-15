@@ -728,10 +728,28 @@ final class ArtworkService {
 
         guard let streaming = await MainActor.run(body: { StreamingService.shared }) else { return nil }
         let results = await streaming.searchSilently(query: query)
-        guard let thumbnailURLString = results.first?.thumbnailURL,
-              !thumbnailURLString.isEmpty,
-              let thumbnailURL = URL(string: thumbnailURLString)
-        else { return nil }
+        // The first hit for an unrestricted "title artist" YouTube search is
+        // NOT necessarily the actual track — unlike the iTunes Search API
+        // just below (which at least scopes to entity=song and tends to be
+        // reliable for catalogued music), a plain YouTube search can easily
+        // top-rank a cover, a reaction video, a completely different song
+        // that happens to share words, or a same-titled track by another
+        // artist. This is a last-resort artwork fallback specifically for
+        // tracks the more targeted sources couldn't find anything for, so
+        // blindly trusting result #1 here is exactly the kind of thing that
+        // produces "wrong/unrelated thumbnail" reports. Reject anything
+        // whose own reported title doesn't at least textually overlap with
+        // what was actually searched for — same normalization
+        // DuplicateFinderService already uses to decide "is this the same
+        // song" elsewhere in this app.
+        guard let match = results.first(where: { candidate in
+            let normalizedQueryTitle = DuplicateFinderService.normalize(title)
+            let normalizedResultTitle = DuplicateFinderService.normalize(candidate.title)
+            guard !normalizedQueryTitle.isEmpty, !normalizedResultTitle.isEmpty else { return false }
+            return normalizedResultTitle.contains(normalizedQueryTitle)
+                || normalizedQueryTitle.contains(normalizedResultTitle)
+        }) else { return nil }
+        guard !match.thumbnailURL.isEmpty, let thumbnailURL = URL(string: match.thumbnailURL) else { return nil }
         return await fetchRemoteImage(url: thumbnailURL)
     }
 
