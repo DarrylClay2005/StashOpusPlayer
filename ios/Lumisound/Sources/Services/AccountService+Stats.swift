@@ -84,10 +84,18 @@ extension AccountService {
     }
 
     /// Fetches listening streaks and badge unlocks (derived server-side from play history).
+    ///
+    /// Sends the device's current UTC offset so the server groups plays by
+    /// the user's own calendar day for streaks/time-of-day badges, not the
+    /// server's (UTC) — see /user/achievements's doc comment on the bridge
+    /// for why that matters (a consistent local listening time can straddle
+    /// different UTC calendar days depending on when it crosses midnight
+    /// UTC, silently breaking a streak that never actually broke).
     func fetchAchievements() async {
         guard isLoggedIn else { return }
+        let offsetMinutes = TimeZone.current.secondsFromGMT() / 60
         do {
-            let data = try await makeRequest("/user/achievements")
+            let data = try await makeRequest("/user/achievements?tz_offset_minutes=\(offsetMinutes)")
             achievements = try JSONDecoder().decode(AchievementsData.self, from: data)
         } catch let err as AccountError {
             errorMessage = err.message

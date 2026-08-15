@@ -13418,10 +13418,36 @@ async def librefm_link_session(body: LastfmLinkRequest, payload: dict = Depends(
 
 
 @app.get("/user/achievements")
-async def get_achievements(payload: dict = Depends(get_current_user)):
+async def get_achievements(
+    payload: dict = Depends(get_current_user),
+    tz_offset_minutes: int = Query(
+        0, ge=-840, le=840,
+        description="Client's current UTC offset in minutes (e.g. -240 for "
+                     "EDT) — see doc comment below for why this matters."
+    ),
+):
     """Derives streaks and badge unlocks from ios_play_history. Computed on
-    the fly — no separate achievements table to keep in sync."""
+    the fly — no separate achievements table to keep in sync.
+
+    `played_at` is stored in server (effectively UTC) time with no per-user
+    timezone anywhere in this system — every "which calendar day did this
+    happen on" grouping below (streaks, the night-owl/early-bird hour
+    buckets, "Marathon") was computed against the UTC calendar day, not the
+    user's own. For anyone not near UTC, that silently breaks exactly the
+    thing a daily streak is supposed to reward: a user who listens every
+    evening at a consistent LOCAL time can have those plays land on
+    different UTC calendar days depending on exactly when they cross
+    midnight UTC, resetting a streak that, to them, never actually broke —
+    "achievements need fixing" is a very plausible way that shows up.
+    `tz_offset_minutes` (the device's current UTC offset — an offset, not a
+    full IANA zone, is enough here since this only ever looks at recent
+    play history, not historical spans crossing a DST transition) shifts
+    `played_at` before every DATE()/HOUR() grouping so streaks and the
+    time-of-day badges track the user's own calendar day. Defaults to 0
+    (UTC, the previous behavior) for older clients that don't send it yet.
+    """
     user_id = payload["sub"]
+    tz_shift_sql = "(%s || ' minutes')::interval"
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -13432,24 +13458,26 @@ async def get_achievements(payload: dict = Depends(get_current_user)):
             total_plays, total_seconds = await cur.fetchone()
 
             await cur.execute(
-                "SELECT DISTINCT DATE(played_at) AS d FROM ios_play_history WHERE user_id = %s ORDER BY d DESC",
-                (user_id,),
+                f"SELECT DISTINCT DATE(played_at + {tz_shift_sql}) AS d FROM ios_play_history "
+                f"WHERE user_id = %s ORDER BY d DESC",
+                (tz_offset_minutes, user_id),
             )
             play_dates = [r[0] for r in await cur.fetchall()]
 
             await cur.execute(
-                "SELECT EXTRACT(HOUR FROM played_at)::int, COUNT(*) FROM ios_play_history WHERE user_id = %s GROUP BY EXTRACT(HOUR FROM played_at)",
-                (user_id,),
+                f"SELECT EXTRACT(HOUR FROM played_at + {tz_shift_sql})::int, COUNT(*) FROM ios_play_history "
+                f"WHERE user_id = %s GROUP BY EXTRACT(HOUR FROM played_at + {tz_shift_sql})",
+                (tz_offset_minutes, user_id, tz_offset_minutes),
             )
             hour_counts = dict(await cur.fetchall())
 
             # "Marathon": busiest single calendar day, by total listen_seconds.
             await cur.execute(
-                "SELECT COALESCE(MAX(daily), 0) FROM ("
-                "  SELECT SUM(listen_seconds) AS daily FROM ios_play_history "
-                "  WHERE user_id = %s GROUP BY DATE(played_at)"
-                ") t",
-                (user_id,),
+                f"SELECT COALESCE(MAX(daily), 0) FROM ("
+                f"  SELECT SUM(listen_seconds) AS daily FROM ios_play_history "
+                f"  WHERE user_id = %s GROUP BY DATE(played_at + {tz_shift_sql})"
+                f") t",
+                (user_id, tz_offset_minutes),
             )
             row = await cur.fetchone()
             max_day_seconds = row[0] or 0
@@ -13499,7 +13527,7 @@ async def get_achievements(payload: dict = Depends(get_current_user)):
                 run = 1
         longest_streak = max(longest_streak, run)
 
-        today = datetime.now(timezone.utc).date()
+        today = (datetime.now(timezone.utc) + timedelta(minutes=tz_offset_minutes)).date()
         if play_dates[0] in (today, today - timedelta(days=1)):
             current_streak = 1
             for i in range(1, len(play_dates)):
