@@ -5492,6 +5492,131 @@ async def intelligence_metadata_resolve(
     return {**result, "memory_id": memory_id}
 
 
+_DUPLICATE_RESOLVE_SYSTEM_PROMPT = (
+    "You are helping a music library app decide which copy to KEEP when it "
+    "has found what look like duplicate copies of the same song. You are "
+    "given the song's title/artist, why the app believes these are "
+    "duplicates ('sameSourceTrack' = same exact upstream download identity, "
+    "'acousticMatch' = confirmed to sound identical throughout, "
+    "'sameTitleAndArtist' = matching text only, the weakest signal), and a "
+    "list of candidate copies with their format, bitrate, sample rate, "
+    "duration, file size, whether each still has its embedded metadata tag "
+    "intact, and whether the user has favorited that specific copy. Pick the "
+    "single candidate (by its index) to KEEP; every other candidate will be "
+    "DELETED. Prefer, in rough order: a favorited copy (never delete a "
+    "user's favorited copy if any other candidate is not favorited), a "
+    "lossless or higher-bitrate format over a lossy/lower-bitrate one, a "
+    "copy with intact embedded metadata over one missing it, and otherwise "
+    "the longer/more complete duration. If multiple candidates are "
+    "favorited, or the choice is otherwise genuinely ambiguous, return null "
+    "— a wrong deletion is destructive and far worse than no pick, and the "
+    "app already has a safe duration-based fallback for this case. You may "
+    "also be given 'recent_corrections': real past cases where a user "
+    "overrode your prior pick — treat them as evidence of the kinds of "
+    "mistakes to avoid, not as literal templates to copy."
+)
+
+_DUPLICATE_RESOLVE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "keep_index": {
+            "type": "integer",
+            "nullable": True,
+            "description": "0-based index into the candidates array to KEEP (every other candidate will be deleted), or null if genuinely ambiguous",
+        },
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+    },
+    "required": ["keep_index", "confidence"],
+}
+
+
+class DuplicateCandidate(BaseModel):
+    format: str
+    bitrate_kbps: Optional[int] = None
+    sample_rate: Optional[int] = None
+    duration_seconds: float
+    file_size_bytes: int
+    has_embedded_metadata: bool
+    is_favorite: bool
+
+
+class DuplicateResolveRequest(BaseModel):
+    title: str
+    artist: str
+    reason: str
+    candidates: list[DuplicateCandidate]
+
+
+@app.post("/user/intelligence/duplicate-resolve")
+async def intelligence_duplicate_resolve(
+    body: DuplicateResolveRequest, payload: dict = Depends(get_current_user)
+):
+    """AI-assisted pick of which copy to keep in a Duplicate Finder group —
+    see DuplicateFinderService's on-device heuristic (longest duration, then
+    prefer a known BPM) that this either confirms or refines with more
+    signal (format/bitrate, favorited status, embedded-metadata health) than
+    duration alone captures. Never called for the client's own final
+    decision without a safe fallback: a null pick (unavailable, cooling
+    down, or genuinely ambiguous) always means the client keeps using its
+    existing heuristic — this endpoint only ever narrows/confirms, never
+    forces a delete on its own authority.
+
+    Logs the suggestion to ios_aria_memory the same way metadata-resolve
+    does, returning its id as `memory_id` so a user overriding the pick
+    (keeping a different copy than Aria suggested) can be reported back via
+    the same POST /user/intelligence/feedback endpoint."""
+    if len(body.candidates) < 2:
+        return {"keep_index": None, "confidence": "low", "memory_id": None}
+
+    user_id = payload["sub"]
+    pool = await get_pool()
+
+    cache_input = {
+        "title": body.title,
+        "artist": body.artist,
+        "reason": body.reason,
+        "candidates": [c.model_dump() for c in body.candidates],
+    }
+    cache_key = hashlib.sha256(
+        json.dumps(cache_input, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT result_json FROM ios_intelligence_cache WHERE task = %s AND cache_key = %s",
+                ("duplicate_resolve", cache_key),
+            )
+            cached = await cur.fetchone()
+            if cached:
+                result = json.loads(cached[0])
+                result["memory_id"] = None
+                return result
+
+    recent_corrections = await get_recent_corrections("duplicate_resolve")
+    model_input = {**cache_input, "recent_corrections": recent_corrections}
+
+    result = await call_intelligence(
+        "duplicate_resolve",
+        _DUPLICATE_RESOLVE_SYSTEM_PROMPT,
+        model_input,
+        _DUPLICATE_RESOLVE_SCHEMA,
+    )
+    if result is None:
+        return {"keep_index": None, "confidence": "low", "memory_id": None}
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_intelligence_cache (task, cache_key, result_json) VALUES (%s, %s, %s) "
+                "ON CONFLICT (task, cache_key) DO UPDATE SET result_json = EXCLUDED.result_json",
+                ("duplicate_resolve", cache_key, json.dumps(result)),
+            )
+
+    memory_id = await record_suggestion("duplicate_resolve", user_id, cache_input, result)
+    return {**result, "memory_id": memory_id}
+
+
 class IntelligenceFeedbackRequest(BaseModel):
     memory_id: int
     correction: dict

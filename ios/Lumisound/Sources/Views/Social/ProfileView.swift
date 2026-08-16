@@ -50,6 +50,8 @@ struct ProfileView: View {
     @State private var isUploadingBanner = false
     @State private var showAvatarGifPicker = false
     @State private var showBannerGifPicker = false
+    @State private var showAvatarPhotosPicker = false
+    @State private var showBannerPhotosPicker = false
     @State private var showPublicPreview = false
     /// Guards the initial profile/banner load so it retries on every
     /// appearance until it *succeeds* (fixing data that "sometimes doesn't
@@ -116,62 +118,65 @@ struct ProfileView: View {
                         }
                     } action: {
                         VStack(spacing: 8) {
-                            HStack(spacing: 8) {
-                                PhotosPicker(selection: $photosPickerItem, matching: .images, photoLibrary: .shared()) {
-                                    HStack {
-                                        Image(systemName: "photo.badge.plus")
-                                        Text("Gallery")
-                                            .font(AppTheme.bodyFont(size: 13))
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .foregroundStyle(mainAccentColor)
-                                    .adaptiveGlass(
-                                        tint: mainAccentColor.opacity(0.14),
-                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous),
-                                        fallback: AppTheme.surface
-                                    )
+                            Menu {
+                                Button {
+                                    showAvatarPhotosPicker = true
+                                } label: {
+                                    Label("Photos", systemImage: "photo")
                                 }
-                                .onChange(of: photosPickerItem) { item in
-                                    guard let item else { return }
-                                    isUploadingAvatar = true
-                                    Task {
-                                        defer { isUploadingAvatar = false }
-                                        if let data = try? await item.loadTransferable(type: Data.self) {
-                                            await account.uploadAvatarData(data)
-                                        }
-                                        photosPickerItem = nil
-                                    }
-                                }
-
                                 Button {
                                     showAvatarGifPicker = true
                                 } label: {
-                                    HStack {
-                                        Image(systemName: "party.popper")
-                                        Text("Search GIFs")
-                                            .font(AppTheme.bodyFont(size: 13))
+                                    Label("GIFs", systemImage: "party.popper")
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "person.crop.circle")
+                                    Text("Profile Icon")
+                                        .font(AppTheme.bodyFont(size: 13))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .foregroundStyle(mainAccentColor)
+                                .adaptiveGlass(
+                                    tint: mainAccentColor.opacity(0.14),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous),
+                                    fallback: AppTheme.surface
+                                )
+                            }
+                            .photosPicker(isPresented: $showAvatarPhotosPicker, selection: $photosPickerItem, matching: .images, photoLibrary: .shared())
+                            .onChange(of: photosPickerItem) { item in
+                                guard let item else { return }
+                                isUploadingAvatar = true
+                                Task {
+                                    defer { isUploadingAvatar = false }
+                                    if let data = try? await item.loadTransferable(type: Data.self) {
+                                        await account.uploadAvatarData(data)
                                     }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .foregroundStyle(mainAccentColor)
-                                    .adaptiveGlass(
-                                        tint: mainAccentColor.opacity(0.14),
-                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous),
-                                        fallback: AppTheme.surface
-                                    )
+                                    photosPickerItem = nil
                                 }
                             }
 
                             HStack(spacing: 8) {
-                                PhotosPicker(selection: $bannerPickerItem, matching: .images, photoLibrary: .shared()) {
+                                Menu {
+                                    Button {
+                                        showBannerPhotosPicker = true
+                                    } label: {
+                                        Label("Photos", systemImage: "photo")
+                                    }
+                                    Button {
+                                        showBannerGifPicker = true
+                                    } label: {
+                                        Label("GIFs", systemImage: "party.popper")
+                                    }
+                                } label: {
                                     HStack {
                                         if isUploadingBanner {
                                             ProgressView().tint(subAccentColor)
                                         } else {
                                             Image(systemName: "photo.on.rectangle.angled")
                                         }
-                                        Text("Banner")
+                                        Text("Background Artwork")
                                             .font(AppTheme.bodyFont(size: 13))
                                     }
                                     .frame(maxWidth: .infinity)
@@ -184,6 +189,7 @@ struct ProfileView: View {
                                     )
                                 }
                                 .disabled(isUploadingBanner)
+                                .photosPicker(isPresented: $showBannerPhotosPicker, selection: $bannerPickerItem, matching: .images, photoLibrary: .shared())
                                 .onChange(of: bannerPickerItem) { item in
                                     guard let item else { return }
                                     isUploadingBanner = true
@@ -222,25 +228,6 @@ struct ProfileView: View {
                                         bannerPickerItem = nil
                                     }
                                 }
-
-                                Button {
-                                    showBannerGifPicker = true
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "party.popper")
-                                        Text("Search GIFs")
-                                            .font(AppTheme.bodyFont(size: 13))
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .foregroundStyle(subAccentColor)
-                                    .adaptiveGlass(
-                                        tint: subAccentColor.opacity(0.14),
-                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous),
-                                        fallback: AppTheme.surface
-                                    )
-                                }
-                                .disabled(isUploadingBanner)
 
                                 if bannerImage != nil {
                                     Button {

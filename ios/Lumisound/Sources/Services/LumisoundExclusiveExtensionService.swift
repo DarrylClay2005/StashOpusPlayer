@@ -375,6 +375,33 @@ enum LumisoundExclusiveExtensionService {
         }
     }
 
+    /// Reads the actual VALUE of the embedded `LUMISOUND_ID` tag (not just
+    /// whether it's present, like `hasEmbeddedSourceTag`) — the same tag
+    /// `AudioTagWriter`/the server-side ffmpeg pass embed directly into the
+    /// audio container, independent of `LumisoundTrackTagger`'s encrypted
+    /// xattr. The xattr and this embedded tag are normally redundant (both
+    /// written at download/lock time), but the xattr alone doesn't survive
+    /// every path a file can take out of and back into the sandbox — an
+    /// AirDrop, an iCloud Drive round-trip, or a Files app export/reimport
+    /// all preserve the file's bytes (and therefore this embedded tag) while
+    /// silently dropping its extended attributes. `DuplicateFinderService`
+    /// uses this as a third fallback, after `Song.sourceTrackID` and the
+    /// xattr vault tag, specifically for that case: a re-imported copy whose
+    /// xattr is gone but whose embedded identity tag isn't.
+    static func embeddedSourceTrackID(fileURL: URL) async -> String? {
+        let asset = AVURLAsset(url: playableURL(for: fileURL))
+        guard let items = try? await asset.load(.metadata) else { return nil }
+        for item in items {
+            let idRaw = item.identifier?.rawValue.lowercased() ?? ""
+            let keyRaw = (item.key as? String)?.lowercased() ?? ""
+            guard idRaw.contains("lumisound_id") || keyRaw.contains("lumisound_id") else { continue }
+            if let value = try? await item.load(.stringValue), let value, !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
     /// Same shape as `hasEmbeddedSourceTag`, for `LUMISOUND_THUMBNAIL` —
     /// used by `LumisoundTrackVaultService`'s repair migration to catch
     /// tracks that already have their ID/title/artist repaired but predate

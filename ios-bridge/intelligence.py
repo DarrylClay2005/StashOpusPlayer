@@ -2,10 +2,11 @@
 
 Aria is a persona wrapped around a Gemini structured-output call
 (call_intelligence). She upgrades a handful of the bridge's existing
-rule-based decisions (metadata disambiguation today; EQ suggestion,
-duplicate resolution, and Discover Mix curation are planned follow-ups using
-the same helper), and — unlike a stateless API call — she remembers, in two
-ways:
+rule-based decisions (metadata disambiguation and Duplicate Finder keeper
+selection today, see /user/intelligence/metadata-resolve and
+/user/intelligence/duplicate-resolve in main.py; EQ suggestion and Discover
+Mix curation are planned follow-ups using the same helper), and — unlike a
+stateless API call — she remembers, in two ways:
 
 1. Corrections (ios_aria_memory): every correction a user makes after one of
    her suggestions is logged and fed back into her next prompt for that task

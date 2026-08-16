@@ -19,6 +19,14 @@ final class DuplicateFinderService: ObservableObject {
         return ts > 0 ? Date(timeIntervalSince1970: ts) : nil
     }()
 
+    /// Aria Lumi's refined "keep this one" pick per group (group.id -> the
+    /// song ID to keep), filled in progressively AFTER a scan completes —
+    /// see `refineGroupsWithAria`. `allDuplicatesToRemove` prefers an entry
+    /// here over its own duration-only heuristic whenever one exists, since
+    /// Aria has access to signal (format/bitrate quality, favorited status,
+    /// embedded-metadata health) duration alone can't see.
+    @Published private(set) var ariaKeeperOverrides: [UUID: String] = [:]
+
     // MARK: - Cloud library check (acoustic fingerprint, server-side)
     //
     // Separate from the on-device scan above: this calls the bridge's
@@ -134,10 +142,95 @@ final class DuplicateFinderService: ObservableObject {
             category: "audio"
         )
         duplicateGroups = groups
+        ariaKeeperOverrides = [:]
         let now = Date()
         lastScanDate = now
         UserDefaults.standard.set(now.timeIntervalSince1970, forKey: "duplicateFinder_lastScanTimestamp")
         isScanning = false
+
+        // Fire-and-forget, not awaited — the scan itself is already done and
+        // its results are visible; Aria's refinement fills in
+        // `ariaKeeperOverrides` progressively afterward, same "enrich after
+        // the fact" pattern as artwork/BPM prewarming elsewhere. A logged-out
+        // user (or any failure) just leaves the plain duration heuristic in
+        // place, exactly as before this existed.
+        Task { await refineGroupsWithAria() }
+    }
+
+    /// Refines each duplicate group's "which copy to keep" decision using
+    /// Aria Lumi (`/user/intelligence/duplicate-resolve`) instead of the
+    /// duration-only heuristic alone — she sees format/bitrate/sample rate,
+    /// whether each copy's embedded custom metadata tag survived, and
+    /// whether the user has favorited that specific copy, none of which
+    /// `allDuplicatesToRemove`'s own sort considers. Populates
+    /// `ariaKeeperOverrides` group-by-group as each call resolves; never
+    /// throws, never blocks the scan, and any group she's unavailable or
+    /// unconfident for simply keeps using the existing heuristic untouched.
+    /// A small concurrency cap (not full parallelism) keeps a large library
+    /// with many groups from firing dozens of simultaneous requests at once.
+    private func refineGroupsWithAria() async {
+        guard let account = AccountService.shared, account.isLoggedIn else { return }
+        let groups = duplicateGroups
+        guard !groups.isEmpty else { return }
+
+        let maxConcurrent = 3
+        await withTaskGroup(of: (UUID, String?).self) { taskGroup in
+            var iterator = groups.makeIterator()
+            func launchNext() {
+                guard let group = iterator.next() else { return }
+                taskGroup.addTask { [weak self] in
+                    guard let self else { return (group.id, nil) }
+                    let keeperID = await self.resolveKeeperSongID(for: group, account: account)
+                    return (group.id, keeperID)
+                }
+            }
+            for _ in 0..<maxConcurrent { launchNext() }
+            for await (groupID, keeperID) in taskGroup {
+                if let keeperID {
+                    ariaKeeperOverrides[groupID] = keeperID
+                }
+                launchNext()
+            }
+        }
+    }
+
+    /// One group's Aria call — builds the candidate payload from real
+    /// on-disk/metadata signal (not just duration) and returns the song ID
+    /// she picked to keep, or `nil` if she's unavailable/unconfident/the
+    /// group isn't eligible (fewer than 2 removable copies, e.g. one copy
+    /// is an Apple Music item that can't be deleted from here anyway).
+    private func resolveKeeperSongID(for group: DuplicateGroup, account: AccountService) async -> String? {
+        let removable = group.songs.filter { $0.persistentID == nil && $0.url != nil }
+        guard removable.count > 1 else { return nil }
+
+        var candidates: [DuplicateResolveCandidate] = []
+        candidates.reserveCapacity(removable.count)
+        for song in removable {
+            guard let url = song.url else { return nil }
+            let format = LumisoundExclusiveExtensionService.effectiveExtension(for: url)
+            let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64 ?? 0
+            let hasMetadata = await LumisoundExclusiveExtensionService.hasEmbeddedSourceTag(fileURL: url)
+            let isFavorite = LibraryManager.shared?.isFavorite(songID: song.id) ?? false
+            candidates.append(DuplicateResolveCandidate(
+                format: format,
+                bitrate_kbps: song.bitrate > 0 ? song.bitrate : nil,
+                sample_rate: song.sampleRate > 0 ? song.sampleRate : nil,
+                duration_seconds: song.duration,
+                file_size_bytes: Int(fileSize),
+                has_embedded_metadata: hasMetadata,
+                is_favorite: isFavorite
+            ))
+        }
+        guard candidates.count == removable.count else { return nil }
+
+        let resolution = await account.resolveDuplicateKeeper(
+            title: group.songs.first?.title ?? "",
+            artist: group.songs.first?.artist ?? "",
+            reason: group.reason.apiValue,
+            candidates: candidates
+        )
+        guard let resolution, resolution.keepIndex < removable.count else { return nil }
+        return removable[resolution.keepIndex].id
     }
 
     /// Songs that "Delete All Duplicates" would remove: for each group, the
@@ -148,6 +241,20 @@ final class DuplicateFinderService: ObservableObject {
         duplicateGroups.flatMap { group -> [Song] in
             let removable = group.songs.filter { $0.persistentID == nil && $0.url != nil }
             guard removable.count > 1 else { return [] }
+
+            // Prefer Aria Lumi's refined pick (format/bitrate quality,
+            // favorited status, embedded-metadata health — see
+            // `refineGroupsWithAria`) when one has resolved for this group.
+            // Falls straight through to the plain duration heuristic below
+            // whenever she has no pick yet (still resolving, unavailable, or
+            // genuinely unconfident) or her picked ID isn't actually in this
+            // removable set for some reason — always a safe, defined
+            // fallback, never a missing keeper.
+            if let keeperID = ariaKeeperOverrides[group.id],
+               removable.contains(where: { $0.id == keeperID }) {
+                return removable.filter { $0.id != keeperID }
+            }
+
             let sorted = removable.sorted { a, b in
                 if abs(a.duration - b.duration) > 0.01 {
                     return a.duration > b.duration
@@ -238,6 +345,17 @@ final class DuplicateFinderService: ObservableObject {
             var sourceID = song.sourceTrackID
             if sourceID == nil || sourceID?.isEmpty == true, let url = song.url {
                 sourceID = LumisoundTrackTagger.readTag(fileURL: url)?.trackID
+            }
+            // Third fallback: the xattr vault tag doesn't survive every path
+            // a file can take out of and back into the sandbox (AirDrop,
+            // iCloud Drive, a Files app export/reimport all preserve bytes
+            // but drop extended attributes) — the embedded LUMISOUND_ID tag
+            // baked into the container itself does. Only reached when both
+            // faster checks above came up empty, since reading embedded
+            // asset metadata means actually parsing the file.
+            if sourceID == nil || sourceID?.isEmpty == true, let url = song.url,
+               FileManager.default.fileExists(atPath: url.path) {
+                sourceID = await LumisoundExclusiveExtensionService.embeddedSourceTrackID(fileURL: url)
             }
             guard let sourceID, !sourceID.isEmpty else { continue }
             bySourceID[sourceID, default: []].append(song)
@@ -617,6 +735,17 @@ enum DuplicateReason {
         case .sameSourceTrack: return "Same source track"
         case .acousticMatch: return "Sounds identical"
         case .sameTitleAndArtist: return "Same title & artist"
+        }
+    }
+
+    /// Raw identifier sent to the bridge's `/user/intelligence/duplicate-
+    /// resolve` — matches `DuplicateResolveRequest.reason`'s expected
+    /// literals server-side, distinct from `label` (human-facing UI text).
+    var apiValue: String {
+        switch self {
+        case .sameSourceTrack: return "sameSourceTrack"
+        case .acousticMatch: return "acousticMatch"
+        case .sameTitleAndArtist: return "sameTitleAndArtist"
         }
     }
 }

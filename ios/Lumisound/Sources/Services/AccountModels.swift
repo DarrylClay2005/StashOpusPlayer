@@ -907,6 +907,30 @@ struct MetadataCandidate: Codable {
     let artwork_url: String?
 }
 
+/// One copy in a Duplicate Finder group, as sent to Aria Lumi's
+/// `/user/intelligence/duplicate-resolve` (see `AccountService
+/// +Intelligence.resolveDuplicateKeeper`). Field names match the backend's
+/// Pydantic `DuplicateCandidate` literally (snake_case, no coding-strategy
+/// conversion configured), same convention `MetadataCandidate` above uses.
+struct DuplicateResolveCandidate: Codable {
+    let format: String
+    let bitrate_kbps: Int?
+    let sample_rate: Int?
+    let duration_seconds: Double
+    let file_size_bytes: Int
+    let has_embedded_metadata: Bool
+    let is_favorite: Bool
+}
+
+/// Aria Lumi's pick of which copy to KEEP in a Duplicate Finder group.
+/// Carries `memoryID` so a later manual override can be reported back via
+/// `reportDuplicateCorrection`, closing the learning loop the same way
+/// `MetadataResolution` does for metadata picks.
+struct DuplicateResolution {
+    let keepIndex: Int
+    let memoryID: Int?
+}
+
 struct SyncTrack: Codable {
     let localSongId: String?
     let trackUrl: String?

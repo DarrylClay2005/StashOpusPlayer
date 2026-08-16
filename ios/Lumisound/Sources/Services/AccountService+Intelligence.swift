@@ -49,6 +49,47 @@ extension AccountService {
         }
     }
 
+    /// Asks Aria Lumi which copy in a Duplicate Finder group to KEEP, given
+    /// more signal than the on-device heuristic (`DuplicateFinderService
+    /// .allDuplicatesToRemove`) uses on its own: format/bitrate/sample rate,
+    /// whether each copy's embedded metadata tag survived, and whether the
+    /// user has favorited that specific copy — a favorited copy should
+    /// essentially never be the one silently deleted, which the duration-
+    /// only heuristic has no way to know about. `nil` whenever logged out,
+    /// the call fails, or she has no confident pick — the caller always
+    /// falls back to the existing heuristic unchanged in that case; this is
+    /// a refinement, never the sole authority for a destructive delete.
+    func resolveDuplicateKeeper(
+        title: String, artist: String, reason: String, candidates: [DuplicateResolveCandidate]
+    ) async -> DuplicateResolution? {
+        guard isLoggedIn, candidates.count > 1 else { return nil }
+        struct Body: Encodable {
+            let title: String
+            let artist: String
+            let reason: String
+            let candidates: [DuplicateResolveCandidate]
+        }
+        struct Response: Decodable {
+            let keep_index: Int?
+            let confidence: String
+            let memory_id: Int?
+        }
+        do {
+            let data = try await makeRequest(
+                "/user/intelligence/duplicate-resolve",
+                method: "POST",
+                body: Body(title: title, artist: artist, reason: reason, candidates: candidates)
+            )
+            let result = try JSONDecoder().decode(Response.self, from: data)
+            guard let index = result.keep_index, index >= 0, index < candidates.count else {
+                return nil
+            }
+            return DuplicateResolution(keepIndex: index, memoryID: result.memory_id)
+        } catch {
+            return nil
+        }
+    }
+
     /// Reports that a user manually corrected a song's title/artist after
     /// Aria Lumi previously resolved it for this filename (see
     /// `IntelligenceSuggestionCache`). Fire-and-forget: failures are silent
@@ -63,6 +104,23 @@ extension AccountService {
             "/user/intelligence/feedback",
             method: "POST",
             body: Body(memory_id: memoryID, correction: ["title": title, "artist": artist])
+        )
+    }
+
+    /// Reports that a user manually kept a different copy than Aria Lumi
+    /// suggested in a Duplicate Finder group. Fire-and-forget, same as
+    /// `reportMetadataCorrection` — a learning signal, not a user-facing
+    /// action, so failures are silent.
+    func reportDuplicateCorrection(memoryID: Int, keptIndex: Int) async {
+        guard isLoggedIn else { return }
+        struct Body: Encodable {
+            let memory_id: Int
+            let correction: [String: Int]
+        }
+        _ = try? await makeRequest(
+            "/user/intelligence/feedback",
+            method: "POST",
+            body: Body(memory_id: memoryID, correction: ["keep_index": keptIndex])
         )
     }
 

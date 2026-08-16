@@ -33,8 +33,22 @@ final class CorruptFileFinderService: ObservableObject {
         isScanning = true
         corruptFiles = []
 
-        let found = await Task.detached(priority: .utility) { [directory] in
-            CorruptFileFinderService.scanDirectory(directory)
+        // The library's own tagged/scanned duration for each URL — sourced
+        // from the same metadata layer `sourceTrackID`/vault-tag dedup uses
+        // in DuplicateFinderService — lets the tail-read check below also
+        // catch a file that's well-formed but truncated (e.g. a dropped
+        // download that still produced a valid, readable, just much-shorter
+        // file), which a bare "does AVAudioFile open it" check can't.
+        var expectedDurations: [URL: TimeInterval] = [:]
+        if let songs = LibraryManager.shared?.allSongs {
+            for song in songs {
+                guard let url = song.url, url.isFileURL, song.duration > 0 else { continue }
+                expectedDurations[url] = song.duration
+            }
+        }
+
+        let found = await Task.detached(priority: .utility) { [directory, expectedDurations] in
+            CorruptFileFinderService.scanDirectory(directory, expectedDurations: expectedDurations)
         }.value
 
         corruptFiles = found
@@ -136,36 +150,61 @@ final class CorruptFileFinderService: ObservableObject {
     /// for reuse, where "expected" duration isn't independently known)
     /// passes `nil` and gets exactly the previous behavior.
     nonisolated static func isValidAudioFile(at url: URL, expectedDuration: TimeInterval? = nil) -> Bool {
+        if case .valid = validateAudioFile(at: url, expectedDuration: expectedDuration) { return true }
+        return false
+    }
+
+    /// Shared validation core behind both `isValidAudioFile` (the boolean
+    /// convenience callers elsewhere use) and `scanDirectory` (the Corrupt
+    /// File Finder screen's own scan) — previously `scanDirectory` only did
+    /// a bare `try AVAudioFile(forReading:)`, missing both the tail-read
+    /// check (catches a header that parses fine but has garbage/missing
+    /// audio at the end — a dropped connection mid-download or an
+    /// interrupted re-encode) and the expected-duration check (catches a
+    /// perfectly well-formed file that's simply much shorter than the track
+    /// actually is) that `isValidAudioFile` already had. Factored out so the
+    /// UI-facing scan gets the exact same thoroughness as the post-download/
+    /// post-conversion check instead of a weaker one silently drifting out
+    /// of sync with it.
+    nonisolated private static func validateAudioFile(at url: URL, expectedDuration: TimeInterval?) -> AudioValidationResult {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attrs[.size] as? Int64,
-              size >= 1_024 else { return false }
+              let size = attrs[.size] as? Int64 else {
+            return .unreadable("could not read file attributes")
+        }
+        guard size >= 1_024 else { return .tooSmall }
 
         // See LumisoundExclusiveExtensionService.playableURL's doc comment —
         // without this, every `.lms`-converted track in the library would
         // read as "corrupt" here for the same extension-recognition reason
         // playback itself hit, not any actual corruption.
-        guard let file = try? AVAudioFile(forReading: LumisoundExclusiveExtensionService.playableURL(for: url)), file.length > 0 else { return false }
+        let file: AVAudioFile
+        do {
+            file = try AVAudioFile(forReading: LumisoundExclusiveExtensionService.playableURL(for: url))
+        } catch {
+            return .unreadable(error.localizedDescription)
+        }
+        guard file.length > 0 else { return .unreadable("zero-length audio stream") }
 
         let tailFrameCount = AVAudioFrameCount(min(file.length, 4_096))
         guard tailFrameCount > 0,
               let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: tailFrameCount) else {
-            return false
+            return .unreadable("could not allocate a read buffer")
         }
         file.framePosition = max(0, file.length - AVAudioFramePosition(tailFrameCount))
         do {
             try file.read(into: buffer, frameCount: tailFrameCount)
         } catch {
-            return false
+            return .unreadable("tail read failed: \(error.localizedDescription)")
         }
-        guard buffer.frameLength > 0 else { return false }
+        guard buffer.frameLength > 0 else { return .unreadable("tail read produced no audio frames") }
 
         if let expectedDuration, expectedDuration > 0 {
             let tolerance = max(10.0, expectedDuration * 0.15)
             if file.duration < expectedDuration - tolerance {
-                return false
+                return .truncated(actual: file.duration, expected: expectedDuration)
             }
         }
-        return true
+        return .valid
     }
 
     // MARK: - Private Scan Worker (nonisolated, runs off main actor)
@@ -176,7 +215,7 @@ final class CorruptFileFinderService: ObservableObject {
         LumisoundExclusiveExtensionService.marker  // "lms" — converted tracks, see that type
     ]
 
-    nonisolated static func scanDirectory(_ directory: URL) -> [CorruptFileEntry] {
+    nonisolated static func scanDirectory(_ directory: URL, expectedDurations: [URL: TimeInterval] = [:]) -> [CorruptFileEntry] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: directory,
@@ -196,24 +235,15 @@ final class CorruptFileFinderService: ObservableObject {
 
             let fileSize = attrs.fileSize ?? 0
 
-            if fileSize < 1_024 {
-                results.append(CorruptFileEntry(
-                    url: fileURL,
-                    fileSizeBytes: Int64(fileSize),
-                    reason: .tooSmall
-                ))
+            switch validateAudioFile(at: fileURL, expectedDuration: expectedDurations[fileURL]) {
+            case .valid:
                 continue
-            }
-
-            // Try opening with AVAudioFile on a throw-catching path
-            do {
-                _ = try AVAudioFile(forReading: LumisoundExclusiveExtensionService.playableURL(for: fileURL))
-            } catch {
-                results.append(CorruptFileEntry(
-                    url: fileURL,
-                    fileSizeBytes: Int64(fileSize),
-                    reason: .unreadable(detail: error.localizedDescription)
-                ))
+            case .tooSmall:
+                results.append(CorruptFileEntry(url: fileURL, fileSizeBytes: Int64(fileSize), reason: .tooSmall))
+            case .unreadable(let detail):
+                results.append(CorruptFileEntry(url: fileURL, fileSizeBytes: Int64(fileSize), reason: .unreadable(detail: detail)))
+            case .truncated(let actual, let expected):
+                results.append(CorruptFileEntry(url: fileURL, fileSizeBytes: Int64(fileSize), reason: .truncated(actualDuration: actual, expectedDuration: expected)))
             }
         }
 
@@ -241,6 +271,10 @@ struct CorruptFileEntry: Identifiable {
             return "File is smaller than 1 KB — likely an incomplete download."
         case .unreadable(let detail):
             return "Could not open with AVAudioFile: \(detail)"
+        case .truncated(let actual, let expected):
+            let actualStr = String(format: "%.0f", actual)
+            let expectedStr = String(format: "%.0f", expected)
+            return "Opens fine but only decodes \(actualStr)s of an expected ~\(expectedStr)s — likely a dropped download or interrupted conversion."
         }
     }
 }
@@ -250,4 +284,15 @@ struct CorruptFileEntry: Identifiable {
 enum CorruptionReason {
     case tooSmall
     case unreadable(detail: String)
+    case truncated(actualDuration: TimeInterval, expectedDuration: TimeInterval)
+}
+
+/// Internal result of `CorruptFileFinderService.validateAudioFile` — richer
+/// than a plain Bool so `scanDirectory` can report which specific check
+/// failed, not just that one did.
+private enum AudioValidationResult {
+    case valid
+    case tooSmall
+    case unreadable(String)
+    case truncated(actual: TimeInterval, expected: TimeInterval)
 }
