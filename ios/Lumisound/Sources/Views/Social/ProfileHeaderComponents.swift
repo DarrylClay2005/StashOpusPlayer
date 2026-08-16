@@ -34,6 +34,15 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
     /// AvatarFrameStyle.swift. Defaults to "none" so every existing call
     /// site is unaffected.
     var avatarFrame: String = "none"
+    /// Purely cosmetic looping animation overlaid ON TOP of the avatar
+    /// itself — see AvatarDecorationStyle.swift. Distinct from `avatarFrame`
+    /// above, which draws AROUND the avatar's edge. Defaults to "none" so
+    /// every existing call site is unaffected.
+    var avatarDecoration: String = "none"
+    /// Purely cosmetic looping animation overlaid across the WHOLE banner —
+    /// see ProfileEffectStyle.swift. Defaults to "none" so every existing
+    /// call site is unaffected.
+    var profileEffect: String = "none"
     /// e.g. "she/her" — shown right after the @username, Discord-style.
     var pronouns: String? = nil
     /// A short "what I'm up to" line (emoji + text), independent of the
@@ -57,6 +66,8 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
         isOnline: Bool?,
         bannerImage: UIImage? = nil,
         avatarFrame: String = "none",
+        avatarDecoration: String = "none",
+        profileEffect: String = "none",
         pronouns: String? = nil,
         statusEmoji: String? = nil,
         statusText: String? = nil,
@@ -72,6 +83,8 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
         self.isOnline = isOnline
         self.bannerImage = bannerImage
         self.avatarFrame = avatarFrame
+        self.avatarDecoration = avatarDecoration
+        self.profileEffect = profileEffect
         self.pronouns = pronouns
         self.statusEmoji = statusEmoji
         self.statusText = statusText
@@ -104,6 +117,13 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
                 // pair or banner image, including busy/light ones.
                 LinearGradient(colors: [.clear, .black.opacity(0.32)], startPoint: .top, endPoint: .bottom)
             )
+            .overlay(
+                // Discord-style "Profile Effect" — a looping animation across
+                // the whole banner. Layered here (before the clipShape below)
+                // so it gets clipped to the same rounded-rect banner shape
+                // instead of bleeding past its corners.
+                ProfileEffectOverlay(style: ProfileEffectStyle.from(profileEffect), mainTint: mainAccent, subTint: subAccent)
+            )
             .frame(height: 108)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             // `.overlay` composites on top WITHOUT being clipped by the
@@ -133,6 +153,10 @@ struct ProfileHeaderCard<Avatar: View, Action: View>: View {
                             // in the header at all — and it wasn't using it.
                             .overlay(Circle().stroke(mainAccent, lineWidth: 4))
                             .shadow(color: .black.opacity(0.28), radius: 6, x: 0, y: 3)
+                        // Discord-style "Avatar Decoration" — layered AFTER
+                        // (on top of) the avatar image itself, unlike
+                        // AvatarFrameOverlay above which sits around/behind it.
+                        AvatarDecorationOverlay(style: AvatarDecorationStyle.from(avatarDecoration), diameter: 84, mainTint: mainAccent, subTint: subAccent)
                     }
                     if let isOnline {
                         Circle()

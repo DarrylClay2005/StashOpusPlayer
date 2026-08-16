@@ -26,6 +26,9 @@ struct ProfileView: View {
     @State private var statusEmoji: String = ""
     @State private var statusText: String = ""
     @State private var avatarFrame: AvatarFrameStyle = .none
+    // MARK: Feature: profile-customization-5
+    @State private var avatarDecoration: AvatarDecorationStyle = .none
+    @State private var profileEffect: ProfileEffectStyle = .none
     @State private var showTopGenres: Bool = false
     @State private var showGuestbook: Bool = true
     @State private var topGenres: [String] = []
@@ -88,6 +91,8 @@ struct ProfileView: View {
                         isOnline: true,
                         bannerImage: bannerImage,
                         avatarFrame: avatarFrame.rawValue,
+                        avatarDecoration: avatarDecoration.rawValue,
+                        profileEffect: profileEffect.rawValue,
                         pronouns: pronouns,
                         statusEmoji: statusEmoji,
                         statusText: statusText,
@@ -352,6 +357,21 @@ struct ProfileView: View {
                     // system-standard "leave without saving" navigation gesture.
                     ProfileInfoCard(title: "Avatar Frame", icon: "circle.dashed", tint: subAccentColor) {
                         AvatarFramePickerView(mainTint: mainAccentColor, subTint: subAccentColor, selected: $avatarFrame)
+                    }
+
+                    // MARK: Avatar decoration — a looping animation overlaid
+                    // ON TOP of the avatar itself, Discord-style, distinct
+                    // from the frame above which sits AROUND it. Same
+                    // "pick, then Save" flow as every other cosmetic picker
+                    // on this screen.
+                    ProfileInfoCard(title: "Avatar Decoration", icon: "sparkles", tint: mainAccentColor) {
+                        AvatarDecorationPickerView(mainTint: mainAccentColor, subTint: subAccentColor, selected: $avatarDecoration)
+                    }
+
+                    // MARK: Profile effect — a looping animation overlaid
+                    // across the whole banner, Discord-style.
+                    ProfileInfoCard(title: "Profile Effect", icon: "wand.and.stars", tint: subAccentColor) {
+                        ProfileEffectPickerView(mainTint: mainAccentColor, subTint: subAccentColor, selected: $profileEffect)
                     }
 
                     // MARK: Pinned favorite tracks
@@ -700,6 +720,8 @@ struct ProfileView: View {
         statusEmoji = profile.statusEmoji ?? ""
         statusText = profile.statusText ?? ""
         avatarFrame = AvatarFrameStyle.from(profile.avatarFrame)
+        avatarDecoration = AvatarDecorationStyle.from(profile.avatarDecoration)
+        profileEffect = ProfileEffectStyle.from(profile.profileEffect)
         showTopGenres = profile.showTopGenres
         showGuestbook = profile.showGuestbook
         topGenres = profile.topGenres
@@ -748,7 +770,9 @@ struct ProfileView: View {
                 statusEmoji: trimmedStatusEmoji,
                 statusText: trimmedStatusText,
                 avatarFrame: avatarFrame.rawValue,
-                accentGlowIntensity: accentGlowIntensity
+                accentGlowIntensity: accentGlowIntensity,
+                avatarDecoration: avatarDecoration.rawValue,
+                profileEffect: profileEffect.rawValue
             )
             // Re-sync local @State from whatever the server actually persisted
             // (updateProfile() already refetches into social.myProfile) rather

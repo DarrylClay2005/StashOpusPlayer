@@ -135,6 +135,8 @@ struct PublicProfileView: View {
                             isOnline: isOnline,
                             bannerImage: bannerImage,
                             avatarFrame: profile.avatarFrame,
+                            avatarDecoration: profile.avatarDecoration,
+                            profileEffect: profile.profileEffect,
                             pronouns: profile.pronouns,
                             statusEmoji: profile.statusEmoji,
                             statusText: profile.statusText,

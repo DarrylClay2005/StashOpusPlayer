@@ -62,6 +62,13 @@ struct MySocialProfile: Decodable {
     /// accent colors wash across the whole background (see
     /// `ProfileAccentBackgroundGlow`). One of "subtle"/"normal"/"vivid"/"off".
     let accentGlowIntensity: String
+    /// Feature: profile-customization-5 — Discord-style "Avatar Decoration"
+    /// (a looping animation overlaid ON the avatar itself, see
+    /// `AvatarDecorationStyle`) and "Profile Effect" (a looping animation
+    /// overlaid across the banner, see `ProfileEffectStyle`). One of each
+    /// type's raw-value strings; "none" disables the overlay entirely.
+    let avatarDecoration: String
+    let profileEffect: String
 
     enum CodingKeys: String, CodingKey {
         case userId          = "user_id"
@@ -87,6 +94,8 @@ struct MySocialProfile: Decodable {
         case recentVisitors  = "recent_visitors"
         case featuredPlaylist = "featured_playlist"
         case accentGlowIntensity = "accent_glow_intensity"
+        case avatarDecoration = "avatar_decoration"
+        case profileEffect    = "profile_effect"
     }
 }
 
@@ -125,6 +134,9 @@ struct PublicSocialProfile: Decodable, Identifiable {
     let featuredPlaylist: FeaturedPlaylist?
     /// Feature: profile-customization-4 — see `MySocialProfile`'s doc comment.
     let accentGlowIntensity: String
+    /// Feature: profile-customization-5 — see `MySocialProfile`'s doc comment.
+    let avatarDecoration: String
+    let profileEffect: String
     /// Public flair, no privacy toggle — mirrors `badges`. See
     /// `DiscordVerificationService`/the bridge's `/api/discord/oauth/callback`.
     let discordVerified: Bool
@@ -156,6 +168,8 @@ struct PublicSocialProfile: Decodable, Identifiable {
         case recentVisitors  = "recent_visitors"
         case featuredPlaylist = "featured_playlist"
         case accentGlowIntensity = "accent_glow_intensity"
+        case avatarDecoration = "avatar_decoration"
+        case profileEffect    = "profile_effect"
         case discordVerified = "discord_verified"
         case discordUsername = "discord_username"
     }

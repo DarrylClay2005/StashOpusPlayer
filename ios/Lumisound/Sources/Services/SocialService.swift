@@ -59,7 +59,8 @@ final class SocialService: ObservableObject {
         pronouns: String? = nil, statusEmoji: String? = nil, statusText: String? = nil, avatarFrame: String? = nil,
         showTopGenres: Bool? = nil, showGuestbook: Bool? = nil,
         showVisitorStats: Bool? = nil, showListeningStats: Bool? = nil,
-        accentGlowIntensity: String? = nil
+        accentGlowIntensity: String? = nil,
+        avatarDecoration: String? = nil, profileEffect: String? = nil
     ) async {
         guard let account, account.isLoggedIn else { return }
         struct Body: Encodable {
@@ -76,6 +77,8 @@ final class SocialService: ObservableObject {
             let show_visitor_stats: Bool?
             let show_listening_stats: Bool?
             let accent_glow_intensity: String?
+            let avatar_decoration: String?
+            let profile_effect: String?
         }
         do {
             _ = try await account.makeRequest(
@@ -85,7 +88,8 @@ final class SocialService: ObservableObject {
                     pronouns: pronouns, status_emoji: statusEmoji, status_text: statusText, avatar_frame: avatarFrame,
                     show_top_genres: showTopGenres, show_guestbook: showGuestbook,
                     show_visitor_stats: showVisitorStats, show_listening_stats: showListeningStats,
-                    accent_glow_intensity: accentGlowIntensity
+                    accent_glow_intensity: accentGlowIntensity,
+                    avatar_decoration: avatarDecoration, profile_effect: profileEffect
                 )
             )
             await fetchMyProfile()
