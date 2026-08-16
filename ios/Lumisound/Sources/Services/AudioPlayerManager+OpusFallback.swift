@@ -18,6 +18,22 @@ extension AudioPlayerManager {
         isPlaying = false
         errorMessage = userFacingMessage
 
+        // A local file that's simply GONE (confirmed via LumisoundLockFormat
+        // .unlock's now-specific "no such file" error — see its doc comment)
+        // is unrecoverable no matter how many playback backends are tried —
+        // AVAudioFile and this AVPlayer fallback both fail identically
+        // against a source that doesn't exist, so retrying/skipping alone
+        // just leaves a permanently-dead entry sitting in the library until
+        // someone happens to run a full rescan. Trigger one now — cheap,
+        // and self-heals by dropping the stale Song (or picking it back up
+        // if this was a transient move/replace) rather than leaving a
+        // library entry that will fail every future play attempt the same way.
+        if let url = currentSong?.url, url.isFileURL,
+           !FileManager.default.fileExists(atPath: url.path) {
+            appWarn("handleLoadFailure: \"\(currentSong?.displayName ?? "?")\" backing file is missing — triggering a library rescan to self-heal", category: "audio")
+            Task { await LibraryManager.shared?.scanLocalDocumentsAsync() }
+        }
+
         // `errorMessage` only has a visible home on StreamSearchView and
         // deep in Settings → Audio (see their `.onChange(of: player
         // .errorMessage)` handlers) — playing from the Library/Playlists/
