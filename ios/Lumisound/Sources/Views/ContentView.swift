@@ -79,6 +79,7 @@ struct ContentView: View {
     @EnvironmentObject private var account: AccountService
     @EnvironmentObject private var bridgeHealth: BridgeHealthService
     @EnvironmentObject private var social: SocialService
+    @EnvironmentObject private var library: LibraryManager
     @ObservedObject private var toastCenter = ToastCenter.shared
 
     /// Persists the last-selected tab across launches.
@@ -93,6 +94,21 @@ struct ContentView: View {
     /// Opacity dip used by the "Slide" and "Fade Only" transition styles.
     @State private var tabContentOpacity: Double = 1.0
     @AppStorage("tab_transition_style") private var tabTransitionStyleRaw: String = TabTransitionStyle.scalePop.rawValue
+
+    /// Full-view transition screen state — see `TabTransitionOverlay`/
+    /// `TransitionContext`. `shownTransitionContexts` is session-only
+    /// (plain `@State`, not persisted) so each of these fires once per
+    /// launch, the first time its tab is actually opened — not on every
+    /// return visit, which would make routine navigation feel much slower.
+    /// Always on, no Settings toggle, by design.
+    @State private var activeTransition: TransitionContext? = nil
+    @State private var shownTransitionContexts: Set<TransitionContext> = []
+    /// Locked in once, at the moment a transition starts (inside
+    /// `.onChange(of: selectedTab)`) — NOT recomputed inside `body`, which
+    /// re-evaluates on every state change and would make advancing/mutating
+    /// state from within it undefined behavior.
+    @State private var activeTransitionAnimationStyle: ProfileEffectStyle = .aurora
+    @State private var lastTransitionAnimationStyle: ProfileEffectStyle? = nil
 
     /// Set in Settings → Playback. When off, the floating Car Mode button is
     /// hidden and connecting to a car stereo no longer auto-presents it.
@@ -333,9 +349,62 @@ struct ContentView: View {
                         tabContentOpacity = 1.0
                     }
                 }
+
+                // Full-view transition screen — see `TabTransitionOverlay`.
+                // Library only qualifies while a scan is genuinely running
+                // (otherwise it's already instant, nothing to cover); Cloud
+                // Services/Friends/Profile qualify once each, the first time
+                // this session they're actually opened.
+                let qualifies: Bool
+                let context: TransitionContext?
+                switch newValue {
+                case 0:
+                    context = .library
+                    qualifies = library.isScanning
+                case 3:
+                    context = .cloudServices
+                    qualifies = true
+                case 4:
+                    context = .friends
+                    qualifies = true
+                case 5:
+                    context = .profile
+                    qualifies = true
+                default:
+                    context = nil
+                    qualifies = false
+                }
+                if let context, qualifies, !shownTransitionContexts.contains(context) {
+                    shownTransitionContexts.insert(context)
+                    // Picks a style different from whichever one played last
+                    // (when there's more than one to choose from) so two
+                    // transitions never look identical back to back.
+                    var candidates = ProfileEffectStyle.allCases.filter { $0 != .none }
+                    if candidates.count > 1, let last = lastTransitionAnimationStyle {
+                        candidates.removeAll { $0 == last }
+                    }
+                    let style = candidates.randomElement() ?? .aurora
+                    lastTransitionAnimationStyle = style
+                    activeTransitionAnimationStyle = style
+                    activeTransition = context
+                }
             }
             // No explicit .frame() on TabView — it must size itself from its content.
             // An explicit frame here can cause stretch/overflow on certain device sizes.
+
+            // MARK: Full-view transition screen — see `TabTransitionOverlay`.
+            // Above everything else (including CustomTabBar) since it's a
+            // genuine full-screen cover, not a small floating element like
+            // the toasts below.
+            if let activeTransition {
+                TabTransitionOverlay(
+                    context: activeTransition,
+                    animationStyle: activeTransitionAnimationStyle,
+                    onFinished: { self.activeTransition = nil }
+                )
+                .transition(.opacity)
+                .zIndex(10)
+            }
 
             // MARK: Bridge Health Toast — floats above all content
             if bridgeHealth.showToast {
