@@ -95,6 +95,26 @@ enum LiveActivityManager {
         } catch {
             lastRequestFailureAt = Date()
             appError("LiveActivityManager: failed to start activity: \(error.localizedDescription)", category: "widget")
+            // "Maximum number of activities for target already exists" —
+            // `self.activity` resets to nil on every fresh process launch,
+            // including a crash (no graceful shutdown path ever runs
+            // `end()`), so a Live Activity from a PRIOR crashed session
+            // stays alive on iOS's side indefinitely — this process just
+            // has no reference to it. Enough crashes across a session and
+            // these orphans pile up until iOS's own per-app cap is hit,
+            // which is exactly this error. End every activity this type
+            // has (not just the one this process happens to remember) so
+            // the NEXT attempt has room, instead of staying permanently
+            // stuck failing every future request until the user force-
+            // quits the app (the only thing that currently clears it).
+            let orphans = Activity<LumisoundActivityAttributes>.activities
+            guard !orphans.isEmpty else { return }
+            appWarn("LiveActivityManager: ending \(orphans.count) orphaned activity(s) from prior session(s)", category: "widget")
+            Task {
+                for orphan in orphans {
+                    await orphan.end(using: orphan.content.state, dismissalPolicy: .immediate)
+                }
+            }
         }
     }
 }
