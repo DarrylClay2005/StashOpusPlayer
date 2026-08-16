@@ -10,6 +10,9 @@ extension NowPlayingView {
             NowPlayingScrubber(seekerStyle: seekerStyle, seekHaptic: seekHaptic)
             NowPlayingPlaytimeCounter(style: playtimeCounterStyle)
             seekerStylePicker
+            if seekerStyle == .custom {
+                CustomScrubberSettingsPanel()
+            }
             playtimeCounterStylePicker
         }
     }
@@ -164,6 +167,34 @@ private struct NowPlayingScrubber: View {
             )
         case .dotTrack:
             DotTrackScrubberView(
+                position: progress.position,
+                duration: progress.duration,
+                isPlaying: player.isPlaying,
+                onSeek: onSeek
+            )
+        case .segmented:
+            SegmentedScrubberView(
+                position: progress.position,
+                duration: progress.duration,
+                isPlaying: player.isPlaying,
+                onSeek: onSeek
+            )
+        case .minimal:
+            MinimalScrubberView(
+                position: progress.position,
+                duration: progress.duration,
+                isPlaying: player.isPlaying,
+                onSeek: onSeek
+            )
+        case .ruler:
+            RulerScrubberView(
+                position: progress.position,
+                duration: progress.duration,
+                isPlaying: player.isPlaying,
+                onSeek: onSeek
+            )
+        case .custom:
+            CustomScrubberView(
                 position: progress.position,
                 duration: progress.duration,
                 isPlaying: player.isPlaying,
