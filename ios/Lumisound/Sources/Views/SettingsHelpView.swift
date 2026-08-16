@@ -80,6 +80,18 @@ struct SettingsHelpView: View {
                 body: "Tap the slider icon in the Home tab's toolbar to open Customize Home: drag to reorder any shelf, or toggle one off entirely if you don't want to see it (the Greeting header and Quick Actions row always stay pinned at the top). The same sheet also lets you set a custom greeting message that replaces the automatic \"Good morning/afternoon/evening\" line, and pick a Home-only accent color — separate from your profile's accent — that tints this screen's section headers and greeting text. All three are saved on this device only, not synced to your account."
             ),
         ]),
+        HelpCategory(icon: "rectangle.bottomthird.inset.filled", title: "Navigation", topics: [
+            HelpTopic(
+                icon: "rectangle.bottomthird.inset.filled",
+                title: "Navbar Mode: Tabs or Mini Player",
+                body: "Settings → Appearance → Navbar Mode switches the oval bar at the bottom of the screen between two looks, without ever changing its size. Tabs is the familiar row of destinations. Mini Player replaces that row with circular artwork, a marquee title, a seeker, and back/play-pause/forward controls whenever a song is loaded, automatically falling back to the tab row when nothing's playing. The same toggle is also in Now Playing's overflow menu (⋯) for quick access, and — fastest of all — you can just swipe up or down anywhere on the navbar itself to flip between the two instantly, no menus required."
+            ),
+            HelpTopic(
+                icon: "eye.slash",
+                title: "Hiding Tabs & Tab Bar Style",
+                body: "Settings → Appearance → Hidden Tabs lets you turn off any tab you don't use (Library, Playing, Queue, Cloud Services, Friends, Profile) — Settings itself can never be hidden, so you can always get back here to change your mind. A hidden tab's screen is still fully reachable through normal in-app navigation; it just doesn't get a button in the bar. Two more options above that control the Tabs-mode bar's look: Show Tab Labels (icon-only vs. icon+label) and Selection Style — Glass Pill (the original small bubble behind the icon), Underline, or Filled Capsule."
+            ),
+        ]),
         HelpCategory(icon: "play.circle", title: "Playback", topics: [
             HelpTopic(
                 icon: "waveform.path.ecg",
@@ -404,7 +416,7 @@ struct SettingsHelpView: View {
             HelpTopic(
                 icon: "key.viewfinder",
                 title: "Discord Rich Presence",
-                body: "Account → Discord Rich Presence sets up the companion Discord Rich Presence daemon — a small script you run on your own computer that shows \"Listening to <song> by <artist>\" on your Discord profile while Discord is open. Two steps: (1) Generate a setup token and paste it into the daemon's config as \"access_token\" — no Lumisound password needed, and it can be revoked any time from Account → Active Sessions (\"Discord RPC Bridge\"). (2) Enter your Discord Application's Client ID (and optional Rich Presence art asset name) and save — this is registered to your account, so the daemon fetches it automatically and there's nothing else to configure locally. Each user runs their own copy of the daemon with their own token, so everyone's Discord presence reflects their own listening — this is how Discord accounts are \"linked\" per user. The daemon clears your presence automatically when playback is paused or idle."
+                body: "Account → Discord Rich Presence sets up the companion Discord Rich Presence daemon — a small script you run on your own computer that shows \"Listening to <song> by <artist>\" on your Discord profile while Discord is open. Now just two steps: verify your Discord account, then flip Enable Rich Presence — a setup token generates itself automatically and Lumisound's own shared Discord Application is used, so there's no Developer Application to create or Client ID to look up. Copy the token, run \"./install.sh <token>\" from the discord-rpc folder on the computer where Discord is open, and you're done — the token can be revoked any time from Account → Active Sessions (\"Discord RPC Bridge\"). Want your own branding instead of Lumisound's? An Advanced section still lets you register a personal Discord Application, exactly like before. The daemon clears your presence automatically when playback is paused or idle."
             ),
             HelpTopic(
                 icon: "message",
@@ -422,6 +434,11 @@ struct SettingsHelpView: View {
                 icon: "person.crop.circle",
                 title: "Your Profile",
                 body: "The Profile tab shows your profile exactly as friends see it — banner, avatar, bio, pinned tracks, and what you're currently listening to. Tap Edit Profile to change any of that: avatar and banner images (including animated GIFs), accent colors, up to 5 pinned favorite tracks, and whether your \"now playing\" status is shared with friends at all."
+            ),
+            HelpTopic(
+                icon: "sparkles",
+                title: "Avatar Decoration & Profile Effect",
+                body: "Edit Profile also has two purely-animated customizations: Avatar Decoration overlays a small looping animation on top of your avatar itself (Sparkles, Fireflies, Petals, Snowfall, Embers), and Profile Effect plays a looping animation across your whole banner (Blast Off, Aurora, Shooting Stars, Confetti, Rain). Both blend your own chosen Main/Sub accent colors, so they always match the rest of your profile rather than using a fixed palette. Card Style (also in Edit Profile) lets you pick Sharp, Soft, or Round corners for every card on the profile screen, and your Bio supports light Markdown — bold, italic, and links."
             ),
             HelpTopic(
                 icon: "waveform.path.ecg",
@@ -549,6 +566,11 @@ struct SettingsHelpView: View {
                 title: "App Lock",
                 body: "Settings → General → App Lock requires Face ID, Touch ID, or your device passcode to open Lumisound after it's been backgrounded — an extra layer beyond your device's own lock screen, since your account syncs playlists and listening history. Off by default; the option only appears on a device with biometrics or a passcode set up."
             ),
+            HelpTopic(
+                icon: "key.fill",
+                title: "How Your Sign-In Is Protected",
+                body: "Your account session is stored in the iOS Keychain — the same hardware-encrypted, OS-protected storage system used for Safari passwords and Apple's own apps, not a plain settings file. It's locked to this specific device, so it can't be resurrected by restoring an iCloud/iTunes backup onto a different phone, and it's inaccessible until the device has been unlocked at least once after a restart. Separately, the app blurs its own screen the instant it loses focus — before iOS captures a thumbnail for the App Switcher — so nothing sensitive sits exposed in the multitasking view even for a moment."
+            ),
         ]),
         HelpCategory(icon: "play.circle.fill", title: "Now Playing", topics: [
             HelpTopic(
@@ -567,6 +589,11 @@ struct SettingsHelpView: View {
                 body: "The timeline slider shows your current position in the track. Drag the thumb to scrub to any point; the elapsed and remaining time labels update in real time while you drag. Release to confirm the seek. The slider is disabled while the duration is unknown (for example at the very start of a stream)."
             ),
             HelpTopic(
+                icon: "slider.horizontal.below.rectangle",
+                title: "Seeker Styles",
+                body: "The scrubber under the artwork isn't fixed — the row of style pills right below it switches between 11 presets: Waveform, Classic, Ring, Bars, Digital, Pill, Neon Line, Dot Track, Segmented, Minimal, and Ruler. Pick Custom to build your own instead of choosing the closest preset — a settings panel appears letting you tune track height, shape (rounded or sharp), color (your accent, a gradient, or plain white), whether the thumb shows at all, and how much it glows. Every change applies live."
+            ),
+            HelpTopic(
                 icon: "heart",
                 title: "Favourite Button",
                 body: "The heart icon to the right of the track title toggles the current song as a favourite. Favourited songs appear in the Favorites tab in the Library and are included in synced account data. The heart fills with the accent colour when active and springs with a subtle animation on tap."
@@ -579,7 +606,7 @@ struct SettingsHelpView: View {
             HelpTopic(
                 icon: "quote.bubble",
                 title: "Lyrics",
-                body: "Tap the lyrics icon on the Now Playing screen to show synced lyrics, if available, in a scrolling panel above the playtime counter. The current line is highlighted and the view auto-scrolls to follow playback; scrolling only animates while a track is playing, and pausing or resuming snaps the view back to the correct line instantly without overshooting."
+                body: "Tap the lyrics icon on the Now Playing screen to show synced lyrics, if available, in a scrolling panel above the playtime counter. The current line is highlighted and the view auto-scrolls to follow playback; scrolling only animates while a track is playing, and pausing or resuming snaps the view back to the correct line instantly without overshooting. Lyrics are found automatically (a manually synced version you created, a sidecar file next to the audio, then an online database) — but you can also tap Import File in the Lyrics panel to attach your own .lrc (synced) or .txt (plain) file to any track, picked straight from the Files browser. It's recognized automatically whether or not it's correctly timestamped."
             ),
         ]),
         HelpCategory(icon: "apps.iphone", title: "Widgets", topics: [

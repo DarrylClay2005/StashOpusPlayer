@@ -671,7 +671,28 @@ struct CustomTabBar: View {
         // mode silently falling back to the tab row when playback stops.
         .animation(.easeInOut(duration: 0.25), value: navbarMode)
         .animation(.easeInOut(duration: 0.25), value: player.currentSong == nil)
+        // Swipe up/down on the bar itself as a faster alternative to the
+        // Settings/Now Playing toggle for switching Navbar Mode.
+        // `.simultaneousGesture` (not `.gesture`) deliberately doesn't
+        // claim exclusive priority — a plain `.gesture` here would compete
+        // with `tabListContent`'s horizontal ScrollView and every button's
+        // own tap gesture underneath it, breaking normal tab taps/scrolling.
+        // A high minimum distance plus requiring the drag to be
+        // meaningfully MORE vertical than horizontal keeps this from
+        // firing on an ordinary horizontal scroll or tap.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24)
+                .onEnded { value in
+                    let dx = value.translation.width
+                    let dy = value.translation.height
+                    guard abs(dy) > 30, abs(dy) > abs(dx) * 1.5 else { return }
+                    navbarModeSwipeHaptic.impactOccurred()
+                    navbarMode = navbarMode == .miniPlayer ? .tabs : .miniPlayer
+                }
+        )
     }
+
+    private let navbarModeSwipeHaptic = UIImpactFeedbackGenerator(style: .medium)
 
     private var tabListContent: some View {
         GeometryReader { outerGeo in
