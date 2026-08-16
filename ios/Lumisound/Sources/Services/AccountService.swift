@@ -58,10 +58,37 @@ final class AccountService: ObservableObject {
     @Published var isTOTPEnabled: Bool = false
 
     // MARK: Persisted token
+    //
+    // Security hardening — moved from plain UserDefaults to the Keychain
+    // (see KeychainTokenStore's doc comment for why). The getter migrates
+    // any pre-existing UserDefaults-stored token into the Keychain on first
+    // read and then scrubs it from UserDefaults, so an already-logged-in
+    // user upgrading to this version stays logged in instead of silently
+    // losing their session — the old plaintext copy doesn't linger
+    // alongside the new Keychain one, which would defeat the point of
+    // moving it at all.
 
     var token: String? {
-        get { UserDefaults.standard.string(forKey: Self.tokenKey) }
-        set { UserDefaults.standard.set(newValue, forKey: Self.tokenKey) }
+        get {
+            if let migrated = UserDefaults.standard.string(forKey: Self.tokenKey) {
+                KeychainTokenStore.set(migrated, account: "auth_token")
+                UserDefaults.standard.removeObject(forKey: Self.tokenKey)
+                return migrated
+            }
+            return KeychainTokenStore.get(account: "auth_token")
+        }
+        set {
+            if let newValue {
+                KeychainTokenStore.set(newValue, account: "auth_token")
+            } else {
+                KeychainTokenStore.delete(account: "auth_token")
+            }
+            // Belt-and-suspenders: guarantees no plaintext copy survives in
+            // UserDefaults even if some future code path ever writes
+            // through this setter without going through the migration
+            // above first.
+            UserDefaults.standard.removeObject(forKey: Self.tokenKey)
+        }
     }
 
     // MARK: Debounce state

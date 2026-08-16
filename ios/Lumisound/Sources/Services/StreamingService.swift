@@ -211,9 +211,29 @@ final class StreamingService: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: Self.bridgeURLKey) }
     }
 
+    /// Security hardening — a self-hosted-bridge Bearer credential, sent
+    /// identically to the main account token (see
+    /// StreamSearchView+ServerLibraryActions.swift), so it gets the exact
+    /// same Keychain treatment AccountService.token does instead of sitting
+    /// in plain UserDefaults. Same first-read migration for anyone who
+    /// already had one saved before this change.
     var apiKey: String {
-        get { UserDefaults.standard.string(forKey: Self.apiKeyKey) ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: Self.apiKeyKey) }
+        get {
+            if let migrated = UserDefaults.standard.string(forKey: Self.apiKeyKey) {
+                KeychainTokenStore.set(migrated, account: "bridge_api_key")
+                UserDefaults.standard.removeObject(forKey: Self.apiKeyKey)
+                return migrated
+            }
+            return KeychainTokenStore.get(account: "bridge_api_key") ?? ""
+        }
+        set {
+            if newValue.isEmpty {
+                KeychainTokenStore.delete(account: "bridge_api_key")
+            } else {
+                KeychainTokenStore.set(newValue, account: "bridge_api_key")
+            }
+            UserDefaults.standard.removeObject(forKey: Self.apiKeyKey)
+        }
     }
 
     var preferredFormat: String {

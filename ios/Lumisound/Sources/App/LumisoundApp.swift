@@ -33,6 +33,19 @@ struct LumisoundApp: App {
 
     @State private var showLaunch = true
     @Environment(\.scenePhase) private var scenePhase
+    /// Security hardening — the iOS App Switcher shows a live screenshot of
+    /// whatever's on screen the instant an app resigns active, independent
+    /// of (and earlier than) App Lock's own re-entry gate below: App Lock
+    /// only re-authenticates on RETURN, so without this, a screen showing
+    /// something sensitive (the Discord Rich Presence setup token, an API
+    /// key field, a payment-adjacent screen) would still be captured
+    /// plainly in that thumbnail even with App Lock fully enabled. This
+    /// blur applies unconditionally, on every backgrounding, regardless of
+    /// the App Lock setting — a privacy measure, not an authentication one.
+    /// Keyed on `.inactive` (not `.background`) since that's the earlier of
+    /// the two transitions and closer to when the OS actually takes the
+    /// snapshot.
+    @State private var isSnapshotBlurred = false
 
     init() {
         // Must happen before the app finishes launching — too late if done
@@ -85,11 +98,36 @@ struct LumisoundApp: App {
                         .transition(.opacity)
                         .zIndex(1)
                 }
+
+                // Topmost layer, above even AppLockView — see
+                // `isSnapshotBlurred`'s doc comment. Deliberately no
+                // `.transition`/opacity animation: this has to already be
+                // fully opaque by the time the OS captures the App Switcher
+                // snapshot, not still fading in.
+                if isSnapshotBlurred {
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                        .ignoresSafeArea()
+                        .overlay(
+                            Image("AppIconDisplay")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 72, height: 72)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .opacity(0.5)
+                        )
+                        .zIndex(2)
+                }
             }
             .animation(.easeInOut(duration: 0.4), value: showLaunch)
             .animation(.easeInOut(duration: 0.25), value: appLock.isUnlocked)
             .preferredColorScheme(.dark)
             .onChange(of: scenePhase) { phase in
+                if phase == .inactive {
+                    isSnapshotBlurred = true
+                } else if phase == .active {
+                    isSnapshotBlurred = false
+                }
                 if phase == .background {
                     appLock.lock()
                     // In-app fallback for the track-vault backfill (in
