@@ -23,9 +23,20 @@ extension NowPlayingView {
             Button {
                 Task {
                     do {
-                        _ = try await ListenTogetherActivity(songTitle: song.title, artistName: song.artist).activate()
+                        let activated = try await ListenTogetherActivity(songTitle: song.title, artistName: song.artist).activate()
+                        if !activated {
+                            // No error thrown, but the system didn't hand off to a
+                            // SharePlay session — e.g. no eligible FaceTime call and
+                            // the system sharing sheet was dismissed. Previously this
+                            // was silently discarded (`_ = try await ...`), so tapping
+                            // the button did nothing visible at all — indistinguishable
+                            // from the button being broken.
+                            appWarn("SharePlay activate() returned false — no session started", category: "general")
+                            ToastCenter.shared.show("SharePlay unavailable — start a FaceTime call first", category: .info, icon: "shareplay")
+                        }
                     } catch {
                         appWarn("SharePlay activate failed: \(error.localizedDescription)", category: "general")
+                        ToastCenter.shared.show("Couldn't start SharePlay", category: .error, icon: "shareplay")
                     }
                 }
             } label: {
