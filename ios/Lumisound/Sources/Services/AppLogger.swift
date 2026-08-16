@@ -80,14 +80,17 @@ final class AppLogger: ObservableObject {
     /// `ISO8601DateFormatter` with `.withFractionalSeconds` is the
     /// reliable way to get a full, parseable date+time with sub-second
     /// precision.
-    private static let preciseISO8601Formatter: ISO8601DateFormatter = {
+    /// A fresh formatter per call, not a shared `static let` — `nonisolated`
+    /// callers can come from any thread/actor, and `ISO8601DateFormatter`
+    /// (an `NSObject` subclass) isn't `Sendable`, so a shared mutable
+    /// instance here would be a real concurrency-safety violation (and
+    /// under strict concurrency checking, a compile error) rather than just
+    /// a style choice. Constructing one per call is cheap enough for a
+    /// logger — this isn't a hot path called thousands of times/sec.
+    nonisolated static func preciseISO8601Now() -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    nonisolated static func preciseISO8601Now() -> String {
-        preciseISO8601Formatter.string(from: Date())
+        return formatter.string(from: Date())
     }
 
     // MARK: - Configuration
