@@ -72,8 +72,38 @@ extension AudioPlayerManager {
             return cleaned
         }
 
-        queue = sanitisedQueue
-        currentIndex = min(max(snapshot.currentIndex, 0), sanitisedQueue.count - 1)
+        // Drop entries whose local file is confirmably gone BEFORE ever
+        // scheduling/playing them — field logs showed a queue with several
+        // dead entries turning every launch into a rapid-fire cascade (each
+        // one running the full expensive failure path: redundant unlock
+        // attempts, AVAudioFile, AVPlayer, a library rescan trigger) right
+        // as the app was still on its loading screen, severe enough to
+        // crash before it could even finish. A plain `fileExists` check
+        // here is a cheap stat call, nowhere near the cost of actually
+        // trying to play a dead file — this is a launch-time cost win, not
+        // just a correctness one. Streaming songs (no local `url`, or a
+        // non-file URL) aren't cheaply verifiable this way and are left
+        // alone; they already fail through the normal handleLoadFailure
+        // path if their stream has genuinely gone stale.
+        let fm = FileManager.default
+        let originalCurrentID = snapshot.currentIndex >= 0 && snapshot.currentIndex < sanitisedQueue.count
+            ? sanitisedQueue[snapshot.currentIndex].id : nil
+        let liveQueue = sanitisedQueue.filter { song in
+            guard let url = song.url, url.isFileURL else { return true }
+            return fm.fileExists(atPath: url.path)
+        }
+        let droppedCount = sanitisedQueue.count - liveQueue.count
+        if droppedCount > 0 {
+            appWarn("restorePlaybackState: dropped \(droppedCount) queued song(s) with missing backing files before resuming", category: "audio")
+        }
+        guard !liveQueue.isEmpty else {
+            UserDefaults.standard.removeObject(forKey: playbackStateKey)
+            return
+        }
+
+        queue = liveQueue
+        currentIndex = originalCurrentID.flatMap { id in liveQueue.firstIndex(where: { $0.id == id }) }
+            ?? min(max(snapshot.currentIndex, 0), liveQueue.count - 1)
         currentSong = queue[currentIndex]
         // Force widget refresh on launch even if the song id hasn't changed since last run.
         Task { await updateNowPlayingArtwork(for: currentSong) }
