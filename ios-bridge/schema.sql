@@ -1217,6 +1217,18 @@ ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS featured_playlist_id VA
 -- precedent as avatar_frame) rather than trusted as arbitrary client input.
 ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS accent_glow_intensity VARCHAR(10) NOT NULL DEFAULT 'normal';
 
+-- Feature: profile-customization-5 (2026-08-16) — Discord-style "Avatar
+-- Decoration" (a small looping animation overlaid ON TOP of the avatar
+-- image itself, distinct from avatar_frame's ring which sits AROUND it —
+-- see AvatarDecorationStyle.swift) and "Profile Effect" (a looping
+-- animation overlaid across the banner, see ProfileEffectStyle.swift).
+-- Both purely cosmetic and purely client-rendered — no image/Lottie
+-- assets, no server-stored pixels — validated server-side against a
+-- curated allowlist, same "malformed value must never make a profile
+-- broken" precedent as avatar_frame/accent_glow_intensity above.
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS avatar_decoration VARCHAR(20) NOT NULL DEFAULT 'none';
+ALTER TABLE ios_social_profiles ADD COLUMN IF NOT EXISTS profile_effect VARCHAR(20) NOT NULL DEFAULT 'none';
+
 -- Profile view log backing the visitor-stats feature. One row per (viewer,
 -- profile) visit, debounced server-side to at most one row per 30 minutes
 -- per pair (see main.py's _record_profile_view) so repeatedly reopening a

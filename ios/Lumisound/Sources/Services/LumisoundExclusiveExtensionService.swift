@@ -395,7 +395,7 @@ enum LumisoundExclusiveExtensionService {
             let idRaw = item.identifier?.rawValue.lowercased() ?? ""
             let keyRaw = (item.key as? String)?.lowercased() ?? ""
             guard idRaw.contains("lumisound_id") || keyRaw.contains("lumisound_id") else { continue }
-            if let value = try? await item.load(.stringValue), let value, !value.isEmpty {
+            if let value = try? await item.load(.stringValue), !value.isEmpty {
                 return value
             }
         }

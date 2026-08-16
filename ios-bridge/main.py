@@ -15267,6 +15267,38 @@ def _valid_glow_intensity(value: Optional[str]) -> str:
     return lower
 
 
+# Feature: profile-customization-5 — Discord-style "Avatar Decoration": a
+# small looping animation overlaid ON TOP of the avatar image (distinct from
+# avatar_frame's ring, which sits AROUND it) — see AvatarDecorationStyle.swift
+# for the client-rendered particle system each value maps to. Same
+# allowlist-not-free-text validation precedent as avatar_frame.
+_VALID_AVATAR_DECORATIONS = {"none", "sparkles", "fireflies", "petals", "snowfall", "embers"}
+
+
+def _valid_avatar_decoration(value: Optional[str]) -> str:
+    if value is None:
+        return "none"
+    lower = value.lower()
+    if lower not in _VALID_AVATAR_DECORATIONS:
+        raise HTTPException(status_code=400, detail=f"Unrecognized avatar decoration: {value}")
+    return lower
+
+
+# Feature: profile-customization-5 — Discord-style "Profile Effect": a
+# looping animation overlaid across the whole banner (see
+# ProfileEffectStyle.swift). Same allowlist precedent as avatar_frame/
+# avatar_decoration above.
+_VALID_PROFILE_EFFECTS = {"none", "blastOff", "aurora", "shootingStars", "confetti", "rain"}
+
+
+def _valid_profile_effect(value: Optional[str]) -> str:
+    if value is None:
+        return "none"
+    if value not in _VALID_PROFILE_EFFECTS:
+        raise HTTPException(status_code=400, detail=f"Unrecognized profile effect: {value}")
+    return value
+
+
 async def _blocked_either_direction(cur, user_a: str, user_b: str) -> bool:
     await cur.execute(
         """
@@ -15303,6 +15335,9 @@ class SocialProfileUpdate(BaseModel):
     show_listening_stats: Optional[bool] = None
     # Feature: profile-customization-4
     accent_glow_intensity: Optional[str] = None
+    # Feature: profile-customization-5
+    avatar_decoration: Optional[str] = None
+    profile_effect: Optional[str] = None
 
 
 class PinnedTrackIn(BaseModel):
@@ -15352,7 +15387,8 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
             await cur.execute(
                 "SELECT bio, main_accent_hex, sub_accent_hex, share_now_playing, "
                 "pronouns, status_emoji, status_text, avatar_frame, show_top_genres, show_guestbook, "
-                "show_visitor_stats, show_listening_stats, featured_playlist_id, accent_glow_intensity "
+                "show_visitor_stats, show_listening_stats, featured_playlist_id, accent_glow_intensity, "
+                "avatar_decoration, profile_effect "
                 "FROM ios_social_profiles WHERE user_id = %s",
                 (user_id,),
             )
@@ -15418,6 +15454,8 @@ async def get_my_social_profile(payload: dict = Depends(get_current_user)):
         "recent_visitors": visitor_stats["recent_visitors"],
         "featured_playlist": featured_playlist,
         "accent_glow_intensity": (row[13] if row and row[13] else "normal"),
+        "avatar_decoration": (row[14] if row and row[14] else "none"),
+        "profile_effect": (row[15] if row and row[15] else "none"),
     }
 
 
@@ -15441,6 +15479,8 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
     # literal string "none" every time it's left out of a partial PATCH.
     frame = _valid_avatar_frame(body.avatar_frame) if body.avatar_frame is not None else None
     glow = _valid_glow_intensity(body.accent_glow_intensity) if body.accent_glow_intensity is not None else None
+    decoration = _valid_avatar_decoration(body.avatar_decoration) if body.avatar_decoration is not None else None
+    effect = _valid_profile_effect(body.profile_effect) if body.profile_effect is not None else None
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -15469,9 +15509,11 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
                 INSERT INTO ios_social_profiles
                     (user_id, bio, main_accent_hex, sub_accent_hex, share_now_playing,
                      pronouns, status_emoji, status_text, avatar_frame, show_top_genres, show_guestbook,
-                     show_visitor_stats, show_listening_stats, accent_glow_intensity)
+                     show_visitor_stats, show_listening_stats, accent_glow_intensity,
+                     avatar_decoration, profile_effect)
                 VALUES (%s, %s, %s, %s, COALESCE(%s, TRUE), %s, %s, %s, COALESCE(%s, 'none'), COALESCE(%s, FALSE), COALESCE(%s, TRUE),
-                        COALESCE(%s, TRUE), COALESCE(%s, FALSE), COALESCE(%s, 'normal'))
+                        COALESCE(%s, TRUE), COALESCE(%s, FALSE), COALESCE(%s, 'normal'),
+                        COALESCE(%s, 'none'), COALESCE(%s, 'none'))
                 ON CONFLICT (user_id) DO UPDATE SET
                     bio = COALESCE(EXCLUDED.bio, ios_social_profiles.bio),
                     main_accent_hex = COALESCE(EXCLUDED.main_accent_hex, ios_social_profiles.main_accent_hex),
@@ -15485,14 +15527,18 @@ async def update_social_profile(body: SocialProfileUpdate, payload: dict = Depen
                     show_guestbook = COALESCE(%s, ios_social_profiles.show_guestbook),
                     show_visitor_stats = COALESCE(%s, ios_social_profiles.show_visitor_stats),
                     show_listening_stats = COALESCE(%s, ios_social_profiles.show_listening_stats),
-                    accent_glow_intensity = COALESCE(%s, ios_social_profiles.accent_glow_intensity)
+                    accent_glow_intensity = COALESCE(%s, ios_social_profiles.accent_glow_intensity),
+                    avatar_decoration = COALESCE(%s, ios_social_profiles.avatar_decoration),
+                    profile_effect = COALESCE(%s, ios_social_profiles.profile_effect)
                 """,
                 (
                     user_id, body.bio, main_hex, sub_hex, body.share_now_playing,
                     body.pronouns, body.status_emoji, body.status_text, frame,
                     body.show_top_genres, body.show_guestbook, body.show_visitor_stats, body.show_listening_stats, glow,
+                    decoration, effect,
                     body.share_now_playing, frame, body.show_top_genres, body.show_guestbook,
                     body.show_visitor_stats, body.show_listening_stats, glow,
+                    decoration, effect,
                 ),
             )
     return {"ok": True}
@@ -15616,7 +15662,8 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
             await cur.execute(
                 "SELECT bio, main_accent_hex, sub_accent_hex, pronouns, status_emoji, status_text, "
                 "avatar_frame, show_top_genres, show_guestbook, "
-                "show_visitor_stats, show_listening_stats, featured_playlist_id, accent_glow_intensity "
+                "show_visitor_stats, show_listening_stats, featured_playlist_id, accent_glow_intensity, "
+                "avatar_decoration, profile_effect "
                 "FROM ios_social_profiles WHERE user_id = %s",
                 (user_id,),
             )
@@ -15703,6 +15750,8 @@ async def get_public_social_profile(user_id: str, payload: dict = Depends(get_cu
         "recent_visitors": visitor_stats["recent_visitors"],
         "featured_playlist": featured_playlist,
         "accent_glow_intensity": (profile_row[12] if profile_row and profile_row[12] else "normal"),
+        "avatar_decoration": (profile_row[13] if profile_row and profile_row[13] else "none"),
+        "profile_effect": (profile_row[14] if profile_row and profile_row[14] else "none"),
         "discord_verified": discord_row is not None,
         "discord_username": discord_row[0] if discord_row else None,
     }
