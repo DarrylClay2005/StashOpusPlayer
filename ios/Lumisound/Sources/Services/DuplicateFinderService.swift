@@ -122,7 +122,10 @@ final class DuplicateFinderService: ObservableObject {
         isScanning = true
         appLog("DuplicateFinderService: scan started (\(songs.count) songs)", category: "audio")
 
-        let groups = await DuplicateFinderService.findDuplicates(in: songs)
+        // Routed through the public wrapper (not the private worker
+        // directly) so this actually gets the Task.detached off-main-actor
+        // guarantee documented on `findDuplicateGroups`.
+        let groups = await DuplicateFinderService.findDuplicateGroups(among: songs)
 
         appLog(
             "DuplicateFinderService: scan finished — \(groups.count) group(s), reasons: "
@@ -183,7 +186,20 @@ final class DuplicateFinderService: ObservableObject {
     /// from a single local folder's detail screen) must never clobber them.
     /// Callers own their own result state; see `FolderDuplicatesSheet`.
     nonisolated static func findDuplicateGroups(among songs: [Song]) async -> [DuplicateGroup] {
-        await findDuplicates(in: songs)
+        // `findDuplicates` being `nonisolated` doesn't by itself guarantee
+        // this runs off whichever actor called `findDuplicateGroups` — a
+        // plain `await` on a nonisolated async func with no suspension
+        // points of its own can still execute its synchronous stretches on
+        // the CALLER's executor. Both known callers (`runScan` here,
+        // `FolderDuplicatesSheet`) are on `@MainActor` types, and this does
+        // real O(n²) Levenshtein work over the whole scanned set — genuinely
+        // capable of blocking the main thread on a large library, the same
+        // class of bug fixed in LumisoundExclusiveExtensionService.convert.
+        // `Task.detached` forces the actual work onto the cooperative pool
+        // regardless of caller.
+        await Task.detached(priority: .utility) {
+            await findDuplicates(in: songs)
+        }.value
     }
 
     // MARK: - Private Worker (nonisolated, runs off main actor)
