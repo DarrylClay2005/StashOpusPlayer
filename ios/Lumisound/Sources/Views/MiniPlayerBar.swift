@@ -32,10 +32,27 @@ struct MiniPlayerBar: View {
     @State private var heartBurstScale: CGFloat = 1.0
     @State private var heartBurstOpacity: Double = 0
 
+    /// BUG FIXED: `CustomTabBar.totalHeight`'s reservation used to live only
+    /// inside `barContent`'s own modifier chain — when nothing was playing
+    /// (or, since Navbar Mode shipped, whenever Mini Player navbar mode was
+    /// active), `body` rendered a bare `EmptyView` with NO padding at all,
+    /// silently dropping every hosting screen's bottom clearance for the
+    /// floating `CustomTabBar`. Any screen relying solely on
+    /// `.safeAreaInset(edge: .bottom) { MiniPlayerBar() }` for that
+    /// clearance (Library/Queue/Cloud Services/Friends/Profile and several
+    /// detail screens — see this type's own doc comment) could then have
+    /// its bottommost content sit unreachable behind the tab bar. The
+    /// reservation now lives on `body` itself, unconditionally, so it
+    /// always applies regardless of which branch below actually renders.
     var body: some View {
-        if player.currentSong != nil, navbarMode != .miniPlayer {
-            barContent
+        Group {
+            if player.currentSong != nil, navbarMode != .miniPlayer {
+                barContent
+            } else {
+                Color.clear.frame(height: 0)
+            }
         }
+        .padding(.bottom, CustomTabBar.totalHeight)
     }
 
     private var barContent: some View {
@@ -80,16 +97,9 @@ struct MiniPlayerBar: View {
             .frame(height: 80)
         }
         .adaptiveGlass(in: Rectangle())
-        // Reserves room for `CustomTabBar` below — every screen that hosts
-        // this via `.safeAreaInset(edge: .bottom) { MiniPlayerBar() }` sits
-        // inside a tab, and that tab bar is a separate custom view (not the
-        // native UITabBar), positioned via its own `.safeAreaInset` on the
-        // TabView itself. That doesn't propagate into each tab's own
-        // content (SwiftUI hosts each `.tabItem{}` page separately), so
-        // without this, this bar would sit flush against the real bottom
-        // safe area — exactly where the tab bar also renders — instead of
-        // stacking above it like a normal mini player does.
-        .padding(.bottom, CustomTabBar.totalHeight)
+        // `CustomTabBar.totalHeight`'s reservation now lives on `body`
+        // itself (see its doc comment) so it applies whether or not this
+        // content actually renders — no longer duplicated here.
     }
 
     private var artworkThumbnail: some View {
