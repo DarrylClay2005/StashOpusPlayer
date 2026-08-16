@@ -84,6 +84,11 @@ struct ContentView: View {
 
     /// Persists the last-selected tab across launches.
     @AppStorage("selected_tab") private var selectedTab = 0
+    /// Same key `CustomTabBar` reads to decide which tabs to render — kept
+    /// here too so this view can redirect away from a tab the user just hid
+    /// while it was the active one (see the `.onChange` below), rather than
+    /// leaving them stranded on a screen with no corresponding bar button.
+    @AppStorage("navbarHiddenTabs") private var hiddenTabsRaw: String = ""
     @State private var showCarMode = false
 
     /// Drives a quick scale "pop" on the freshly-selected tab's content —
@@ -391,6 +396,17 @@ struct ContentView: View {
             }
             // No explicit .frame() on TabView — it must size itself from its content.
             // An explicit frame here can cause stretch/overflow on certain device sizes.
+            .onChange(of: hiddenTabsRaw) { _ in
+                // A tab was just hidden while it was the active one — jump
+                // to the first still-visible tab instead of leaving the
+                // user on a screen with no corresponding bar button.
+                // Settings (6) is never hideable (see CustomTabBar.hiddenTabs)
+                // so this can always fall back to it as a last resort.
+                let hidden = Set(hiddenTabsRaw.split(separator: ",").compactMap { Int($0) })
+                if hidden.contains(selectedTab) {
+                    selectedTab = (0...6).first { !hidden.contains($0) } ?? 6
+                }
+            }
 
             // MARK: Full-view transition screen — see `TabTransitionOverlay`.
             // Above everything else (including CustomTabBar) since it's a
@@ -589,6 +605,12 @@ struct CustomTabBar: View {
     /// `NavbarSelectionStyle`'s doc comment.
     @AppStorage("navbarShowTabLabels") private var showTabLabels: Bool = true
     @AppStorage("navbarSelectionStyle") private var selectionStyle: NavbarSelectionStyle = .glassPill
+    /// "Allow users to hide different tabs" — comma-joined tag numbers, set
+    /// from Settings -> Appearance -> Hidden Tabs. Settings (tag 6) can
+    /// never actually be hidden regardless of what's stored here (see
+    /// `specs` below) — hiding the one screen that contains the toggle to
+    /// un-hide tabs would strand a user with no way back.
+    @AppStorage("navbarHiddenTabs") private var hiddenTabsRaw: String = ""
 
     /// The bar's total footprint from the true bottom safe-area edge
     /// (`.frame(height:)` + its own bottom `.padding`) — `MiniPlayerBar`
@@ -609,6 +631,13 @@ struct CustomTabBar: View {
         let systemImage: String
     }
 
+    /// Parsed from `hiddenTabsRaw` — tag 6 (Settings) is filtered back out
+    /// unconditionally even if it somehow ended up in there, since that's
+    /// the one screen containing the toggle to un-hide everything else.
+    private var hiddenTabs: Set<Int> {
+        Set(hiddenTabsRaw.split(separator: ",").compactMap { Int($0) }).subtracting([6])
+    }
+
     private var specs: [TabSpec] {
         [
             TabSpec(tag: 0, title: "Library", systemImage: "music.note.list"),
@@ -618,7 +647,7 @@ struct CustomTabBar: View {
             TabSpec(tag: 4, title: "Friends", systemImage: "person.2.fill"),
             TabSpec(tag: 5, title: "Profile", systemImage: "person.crop.circle"),
             TabSpec(tag: 6, title: "Settings", systemImage: "gearshape"),
-        ]
+        ].filter { !hiddenTabs.contains($0.tag) }
     }
 
     var body: some View {

@@ -33,6 +33,10 @@ struct SettingsView: View {
     /// Tab-bar-mode customization — see `NavbarSelectionStyle`'s doc comment.
     @AppStorage("navbarShowTabLabels") var navbarShowTabLabels: Bool = true
     @AppStorage("navbarSelectionStyle") var navbarSelectionStyle: NavbarSelectionStyle = .glassPill
+    /// "Allow users to hide different tabs" — shared with `CustomTabBar`;
+    /// comma-joined tag numbers. See `hiddenTabsSection`'s doc comment for
+    /// the tag numbering and why Settings itself is never included here.
+    @AppStorage("navbarHiddenTabs") var navbarHiddenTabsRaw: String = ""
     @AppStorage("wifiOnlyDownloads.enabled") var wifiOnlyDownloadsEnabled: Bool = false
 
     /// When on, downloads ask the bridge to use aria2 (multi-connection) as the
