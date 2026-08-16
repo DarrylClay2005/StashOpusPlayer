@@ -28,10 +28,27 @@ extension AudioPlayerManager {
         // and self-heals by dropping the stale Song (or picking it back up
         // if this was a transient move/replace) rather than leaving a
         // library entry that will fail every future play attempt the same way.
-        if let url = currentSong?.url, url.isFileURL,
+        if let deadSong = currentSong, let url = deadSong.url, url.isFileURL,
            !FileManager.default.fileExists(atPath: url.path) {
-            appWarn("handleLoadFailure: \"\(currentSong?.displayName ?? "?")\" backing file is missing — triggering a library rescan to self-heal", category: "audio")
+            appWarn("handleLoadFailure: \"\(deadSong.displayName)\" backing file is missing — triggering a library rescan to self-heal", category: "audio")
             Task { await LibraryManager.shared?.scanLocalDocumentsAsync() }
+            // The rescan above fixes LibraryManager's OWN song list, but does
+            // nothing for a copy of this same dead Song sitting in THIS
+            // player's active `queue` — struct value copies, not references,
+            // so a library-side fix never reaches an already-built queue.
+            // Left alone, repeat/replay or the natural loop-back to this
+            // index just hits the identical missing file again next time
+            // around — which is exactly what field logs showed: the same
+            // handful of dead entries cycling every single loop instead of
+            // being dropped after the first failure. Strip it directly here
+            // (queue mutation only, no `playCurrent` side effect) and let
+            // this function's own `skipToNext()` below decide what plays
+            // from the now-cleaned queue.
+            if let idx = queue.firstIndex(where: { $0.id == deadSong.id }) {
+                queue.remove(at: idx)
+                if idx < currentIndex { currentIndex -= 1 }
+                currentIndex = min(currentIndex, max(queue.count - 1, 0))
+            }
         }
 
         // `errorMessage` only has a visible home on StreamSearchView and
