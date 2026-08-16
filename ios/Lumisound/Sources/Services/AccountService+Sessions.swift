@@ -76,12 +76,15 @@ extension AccountService {
         }
     }
 
-    /// Registers (or updates) the Discord Application client ID and optional
-    /// art asset name used by the local Discord Rich Presence daemon.
-    func setDiscordRpcConfig(clientId: String, largeImage: String?, smallImage: String?, showButtons: Bool, enabled: Bool) async -> Bool {
+    /// Registers (or updates) Discord Rich Presence settings. `clientId: nil`
+    /// (the common case now) means "use Lumisound's own shared Discord
+    /// application" — nothing to register, the user just has to verify
+    /// their Discord account and press Enable. Pass a real Discord
+    /// Application ID only for a user who wants their own custom branding.
+    func setDiscordRpcConfig(clientId: String? = nil, largeImage: String? = nil, smallImage: String? = nil, showButtons: Bool = true, enabled: Bool) async -> Bool {
         guard isLoggedIn else { return false }
         struct Body: Encodable {
-            let discord_client_id: String
+            let discord_client_id: String?
             let large_image: String?
             let small_image: String?
             let show_buttons: Bool

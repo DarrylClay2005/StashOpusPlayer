@@ -222,6 +222,21 @@ DISCORD_OAUTH_REDIRECT_URI: str = os.getenv("DISCORD_OAUTH_REDIRECT_URI", "")
 GITHUB_RELEASES_TOKEN: str = os.getenv("GITHUB_RELEASES_TOKEN", "")
 VERSION = "1.0.0"
 
+# Lumisound's own shared Discord Application for Rich Presence — lets a
+# verified user turn Rich Presence on with nothing but a Discord account
+# link, instead of every single user having to create their own Discord
+# Developer Application just to get a Client ID. Registered once, by the
+# app's own developer, at discord.com/developers/applications — the "large
+# image"/"small image" values must match Rich Presence Art Assets actually
+# uploaded to THAT application. Used as the fallback in
+# get_discord_rpc_config/set_discord_rpc_config below whenever a user
+# hasn't set their own override. Empty by default (until configured) —
+# in that state a user with no custom client ID falls back to the exact
+# same "not configured" behavior as before this feature existed.
+DISCORD_RPC_DEFAULT_CLIENT_ID: str = os.getenv("DISCORD_RPC_DEFAULT_CLIENT_ID", "")
+DISCORD_RPC_DEFAULT_LARGE_IMAGE: str = os.getenv("DISCORD_RPC_DEFAULT_LARGE_IMAGE", "")
+DISCORD_RPC_DEFAULT_SMALL_IMAGE: str = os.getenv("DISCORD_RPC_DEFAULT_SMALL_IMAGE", "")
+
 # ---------------------------------------------------------------------------
 # ffprobe result cache
 # ---------------------------------------------------------------------------
@@ -2137,7 +2152,11 @@ class AcoustIDApiKeyRequest(BaseModel):
 
 
 class DiscordRpcConfigRequest(BaseModel):
-    discord_client_id: str
+    # Optional (was required) — omitting it means "use Lumisound's own
+    # shared Discord application" (see DISCORD_RPC_DEFAULT_CLIENT_ID below)
+    # instead of requiring every user to register their own Discord
+    # Developer Application just to turn Rich Presence on.
+    discord_client_id: Optional[str] = None
     large_image: Optional[str] = None
     small_image: Optional[str] = None
     show_buttons: bool = True
@@ -15153,11 +15172,23 @@ async def get_discord_rpc_config(payload: dict = Depends(get_current_user)):
         return {
             "configured": False, "enabled": False, "discord_client_id": None,
             "large_image": None, "small_image": None, "show_buttons": True,
+            "is_custom": False,
         }
 
+    # Resolve to the user's own override when they set one, otherwise fall
+    # back to Lumisound's shared application — the local daemon (which reads
+    # exactly these fields, see lumisound_discord_rpc.py's get_rpc_config)
+    # needs no changes at all for this: it already just uses whatever
+    # discord_client_id/large_image/small_image this endpoint returns.
+    is_custom = row[0] is not None
+    client_id = row[0] or (DISCORD_RPC_DEFAULT_CLIENT_ID or None)
+    large_image = row[1] if is_custom else (DISCORD_RPC_DEFAULT_LARGE_IMAGE or None)
+    small_image = row[3] if is_custom else (DISCORD_RPC_DEFAULT_SMALL_IMAGE or None)
+
     return {
-        "configured": True, "enabled": bool(row[2]), "discord_client_id": row[0],
-        "large_image": row[1], "small_image": row[3], "show_buttons": bool(row[4]),
+        "configured": True, "enabled": bool(row[2]), "discord_client_id": client_id,
+        "large_image": large_image, "small_image": small_image, "show_buttons": bool(row[4]),
+        "is_custom": is_custom,
     }
 
 
@@ -15165,8 +15196,15 @@ async def get_discord_rpc_config(payload: dict = Depends(get_current_user)):
 async def set_discord_rpc_config(body: DiscordRpcConfigRequest, payload: dict = Depends(get_current_user)):
     user_id = payload["sub"]
 
-    if not _DISCORD_CLIENT_ID_RE.match(body.discord_client_id):
-        raise HTTPException(status_code=400, detail="discord_client_id must be a numeric Discord application ID")
+    # A caller omitting discord_client_id means "use Lumisound's shared
+    # application" — only validate/store a real override when one was
+    # actually given. A caller can also send an empty string explicitly to
+    # CLEAR a previously-set custom override back to the shared default.
+    client_id: Optional[str] = None
+    if body.discord_client_id:
+        if not _DISCORD_CLIENT_ID_RE.match(body.discord_client_id):
+            raise HTTPException(status_code=400, detail="discord_client_id must be a numeric Discord application ID")
+        client_id = body.discord_client_id
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -15177,9 +15215,9 @@ async def set_discord_rpc_config(body: DiscordRpcConfigRequest, payload: dict = 
                 "ON CONFLICT (user_id) DO UPDATE SET discord_client_id = EXCLUDED.discord_client_id, "
                 "large_image = EXCLUDED.large_image, small_image = EXCLUDED.small_image, "
                 "show_buttons = EXCLUDED.show_buttons, enabled = EXCLUDED.enabled",
-                (user_id, body.discord_client_id, body.large_image, body.small_image, body.show_buttons, body.enabled),
+                (user_id, client_id, body.large_image, body.small_image, body.show_buttons, body.enabled),
             )
-    await log_event("settings", "discord_rpc_config_set", user_id=user_id, detail={"enabled": body.enabled})
+    await log_event("settings", "discord_rpc_config_set", user_id=user_id, detail={"enabled": body.enabled, "is_custom": client_id is not None})
     return {"status": "ok"}
 
 

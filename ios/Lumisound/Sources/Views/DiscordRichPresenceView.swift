@@ -7,16 +7,20 @@ import SwiftUI
 // account:
 //   1. Generate an RPC setup token (POST /user/rpc-token) — the only
 //      credential the daemon needs.
-//   2. Register a Discord Application client ID + optional Rich Presence
-//      art asset name (GET/PUT/DELETE /user/discord-rpc-config) — the
-//      daemon fetches this automatically so there's nothing else to
-//      configure locally.
+//   2. Register that Rich Presence is enabled (PUT /user/discord-rpc-config).
+//      By default this uses Lumisound's OWN shared Discord Application
+//      (discord_client_id left unset — resolved server-side, see
+//      DISCORD_RPC_DEFAULT_CLIENT_ID in main.py), so a verified user needs
+//      nothing but this one toggle. Anyone who wants their own branding can
+//      still register a personal Discord Developer Application under
+//      Advanced below.
 //
 // Rich Presence itself is still set locally by the daemon over Discord's
 // IPC (a Unix socket on Linux/macOS, a named pipe on Windows) — there is no
-// server-side API to set it remotely — but with both of these steps done,
-// the daemon needs only the token in its config file (`bridge_url` defaults
-// to the hosted Lumisound bridge).
+// server-side API to set it remotely, so the daemon still has to be
+// installed once on whichever computer runs Discord (`./install.sh <token>`
+// from the discord-rpc folder). That one-time desktop step can't be
+// automated away from the app side; everything else now is.
 
 struct DiscordRichPresenceView: View {
     @EnvironmentObject private var account: AccountService
@@ -24,112 +28,186 @@ struct DiscordRichPresenceView: View {
 
     private let discordPresentationContext = DiscordAuthPresentationContext()
 
-    @State private var isGeneratingToken = false
+    @State private var config: DiscordRpcConfig?
+    @State private var isTogglingEnabled = false
+    @State private var enabled = false
+
     @State private var generatedToken: String?
     @State private var didCopyToken = false
 
-    @State private var config: DiscordRpcConfig?
+    // Advanced: custom Discord Application override
+    @State private var showAdvanced = false
     @State private var clientIdText = ""
     @State private var largeImageText = ""
     @State private var smallImageText = ""
     @State private var showButtons = true
-    @State private var enabled = true
-    @State private var isSaving = false
+    @State private var isSavingAdvanced = false
+    @State private var isGeneratingToken = false
     @State private var errorText: String?
-    @State private var didSave = false
+    @State private var didSaveAdvanced = false
 
     var body: some View {
         List {
-            Section {
-                if discordVerification.isVerified {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color(red: 0.345, green: 0.396, blue: 0.949))
-                        Text(discordVerification.discordUsername ?? "Discord Verified")
+            discordAccountSection
+            richPresenceSection
+            if let errorText {
+                Section {
+                    Text(errorText)
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.error)
+                }
+                .listRowBackground(Color.clear)
+            }
+            advancedSection
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color.clear.ignoresSafeArea())
+        .navigationTitle("Discord Rich Presence")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+    }
+
+    // MARK: - Discord Account
+
+    private var discordAccountSection: some View {
+        Section {
+            if discordVerification.isVerified {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color(red: 0.345, green: 0.396, blue: 0.949))
+                    Text(discordVerification.discordUsername ?? "Discord Verified")
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+            } else {
+                Button {
+                    Task {
+                        await discordVerification.startVerification(presentationContext: discordPresentationContext)
+                    }
+                } label: {
+                    HStack {
+                        Label("Verify with Discord", systemImage: "checkmark.seal")
                             .foregroundStyle(AppTheme.textPrimary)
-                    }
-                } else {
-                    Button {
-                        Task {
-                            await discordVerification.startVerification(presentationContext: discordPresentationContext)
+                        if discordVerification.isLinking {
+                            Spacer()
+                            ProgressView()
                         }
-                    } label: {
-                        HStack {
-                            Label("Verify with Discord", systemImage: "checkmark.seal")
-                                .foregroundStyle(AppTheme.textPrimary)
-                            if discordVerification.isLinking {
-                                Spacer()
-                                ProgressView()
-                            }
-                        }
-                    }
-                    .disabled(discordVerification.isLinking)
-                    if let error = discordVerification.errorMessage {
-                        Text(error)
-                            .font(.footnote)
-                            .foregroundStyle(AppTheme.error)
                     }
                 }
-            } header: {
-                sectionHeader("Discord Account")
-            } footer: {
-                Text("Confirms which Discord account this is you — separate from Rich Presence itself, which is driven by whatever Discord desktop client is signed in locally and works whether or not you verify here.")
+                .disabled(discordVerification.isLinking)
+                if let error = discordVerification.errorMessage {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(AppTheme.error)
+                }
+            }
+        } header: {
+            sectionHeader("Discord Account")
+        } footer: {
+            Text("Confirms which Discord account this is you — separate from Rich Presence itself, which is driven by whatever Discord desktop client is signed in locally and works whether or not you verify here.")
+                .font(AppTheme.bodyFont(size: 12))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .listRowBackground(AppTheme.surface)
+    }
+
+    // MARK: - Rich Presence (the simplified, main flow)
+
+    private var richPresenceSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { enabled },
+                set: { newValue in Task { await toggleEnabled(newValue) } }
+            )) {
+                HStack {
+                    Label("Enable Rich Presence", systemImage: "gamecontroller.fill")
+                        .foregroundStyle(AppTheme.textPrimary)
+                    if isTogglingEnabled {
+                        ProgressView()
+                    }
+                }
+            }
+            .tint(AppTheme.dynamicAccent)
+            .disabled(!discordVerification.isVerified || isTogglingEnabled)
+
+            if let generatedToken {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("One-time setup: run this on the computer where Discord is open.")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text(generatedToken)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .lineLimit(3)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                    Button {
+                        UIPasteboard.general.string = generatedToken
+                        didCopyToken = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            didCopyToken = false
+                        }
+                    } label: {
+                        Label(didCopyToken ? "Copied" : "Copy Token", systemImage: didCopyToken ? "checkmark" : "doc.on.doc")
+                            .foregroundStyle(AppTheme.dynamicAccent)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        } header: {
+            sectionHeader("Rich Presence")
+        } footer: {
+            if !discordVerification.isVerified {
+                Text("Verify your Discord account above first.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                Text("Uses Lumisound's own Discord app — nothing to register. The token above only allows reading your own playback state, not your password, and can be revoked any time from Active Sessions (\"Discord RPC Bridge\"). Run \"./install.sh <token>\" (or install-macos.sh / install-windows.ps1) from the discord-rpc folder on GitHub once, on the computer where Discord is open — Rich Presence is set over Discord's local connection, so it can't be driven remotely.")
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }
-            .listRowBackground(AppTheme.surface)
+        }
+        .listRowBackground(AppTheme.surface)
+    }
 
-            Section {
-                if let generatedToken {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(generatedToken)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(AppTheme.textPrimary)
-                            .lineLimit(3)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
-                        Button {
-                            UIPasteboard.general.string = generatedToken
-                            didCopyToken = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                didCopyToken = false
-                            }
-                        } label: {
-                            Label(didCopyToken ? "Copied" : "Copy Token", systemImage: didCopyToken ? "checkmark" : "doc.on.doc")
-                                .foregroundStyle(AppTheme.dynamicAccent)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                } else {
-                    Button {
-                        Task {
-                            isGeneratingToken = true
-                            generatedToken = await account.generateRpcToken()
-                            isGeneratingToken = false
-                        }
-                    } label: {
-                        HStack {
-                            Label("Generate Rich Presence Token", systemImage: "key.viewfinder")
-                                .foregroundStyle(AppTheme.textPrimary)
-                            if isGeneratingToken {
-                                Spacer()
-                                ProgressView()
-                            }
-                        }
-                    }
-                    .disabled(isGeneratingToken)
-                }
-            } header: {
-                sectionHeader("Setup Token")
-            } footer: {
-                Text("Generate a token for the local Discord Rich Presence daemon — it only allows reading your own playback state, not your password, and can be revoked any time from Active Sessions (\"Discord RPC Bridge\"). The daemon must run on a computer with Discord open, since Rich Presence is set over Discord's local connection — it can't be driven remotely. Run \"./install.sh <token>\" (or install-macos.sh / install-windows.ps1) from the discord-rpc folder on GitHub — that's the only thing you need to do locally.")
-                    .font(AppTheme.bodyFont(size: 12))
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .listRowBackground(AppTheme.surface)
+    /// First-ever enable (no registration exists yet): generates a fresh RPC
+    /// token and registers `enabled = true` using Lumisound's shared Discord
+    /// app (no client ID sent). A returning user re-enabling just flips the
+    /// existing registration's `enabled` flag — their daemon already has a
+    /// token from before, so generating a new one isn't necessary and would
+    /// just be one more thing to re-copy for no reason.
+    private func toggleEnabled(_ newValue: Bool) async {
+        guard !isTogglingEnabled else { return }
+        isTogglingEnabled = true
+        errorText = nil
+        defer { isTogglingEnabled = false }
 
-            Section {
+        let isFirstTimeEnable = newValue && config?.configured != true
+        if isFirstTimeEnable {
+            generatedToken = await account.generateRpcToken()
+        }
+
+        let ok = await account.setDiscordRpcConfig(
+            clientId: (config?.isCustom == true) ? clientIdText.trimmingCharacters(in: .whitespaces) : nil,
+            largeImage: (config?.isCustom == true) ? (largeImageText.isEmpty ? nil : largeImageText) : nil,
+            smallImage: (config?.isCustom == true) ? (smallImageText.isEmpty ? nil : smallImageText) : nil,
+            showButtons: showButtons,
+            enabled: newValue
+        )
+        if ok {
+            enabled = newValue
+            config = await account.fetchDiscordRpcConfig()
+        } else {
+            errorText = account.errorMessage ?? "Failed to update Rich Presence."
+        }
+    }
+
+    // MARK: - Advanced: custom Discord Application override
+
+    private var advancedSection: some View {
+        Section {
+            DisclosureGroup(isExpanded: $showAdvanced) {
                 TextField("Discord Application Client ID", text: $clientIdText)
                     .keyboardType(.numberPad)
                     .foregroundStyle(AppTheme.textPrimary)
@@ -148,75 +226,69 @@ struct DiscordRichPresenceView: View {
                     .tint(AppTheme.dynamicAccent)
                     .foregroundStyle(AppTheme.textPrimary)
 
-                Toggle("Enabled", isOn: $enabled)
-                    .tint(AppTheme.dynamicAccent)
-                    .foregroundStyle(AppTheme.textPrimary)
-
                 Button {
-                    save()
+                    saveAdvanced()
                 } label: {
-                    if isSaving {
+                    if isSavingAdvanced {
                         ProgressView()
                     } else {
-                        Text(didSave ? "Saved" : "Save")
+                        Text(didSaveAdvanced ? "Saved" : "Use Custom Discord App")
                     }
                 }
-                .disabled(isSaving || clientIdText.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(isSavingAdvanced || clientIdText.trimmingCharacters(in: .whitespaces).isEmpty)
                 .foregroundStyle(AppTheme.dynamicAccent)
-            } header: {
-                sectionHeader("Daemon Configuration")
-            } footer: {
-                Text("Saved here, the local Rich Presence daemon fetches this automatically — you don't need to put your Discord Application Client ID in a config file. Find it on your application's page at discord.com/developers/applications. Asset names must be uploaded as \"Rich Presence Art Assets\" on that page. The button (if enabled) links to the track on YouTube/SoundCloud. While paused, the small status icon (if set) switches to a \"Paused\" label and the elapsed-time counter is hidden.")
-                    .font(AppTheme.bodyFont(size: 12))
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .listRowBackground(AppTheme.surface)
 
-            if let errorText {
-                Section {
-                    Text(errorText)
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.error)
+                if config?.isCustom == true {
+                    Button(role: .destructive) {
+                        useSharedApp()
+                    } label: {
+                        Text("Switch Back to Lumisound's Shared App")
+                    }
                 }
-                .listRowBackground(Color.clear)
-            }
 
-            if config?.configured == true {
-                Section {
+                Button {
+                    Task {
+                        isGeneratingToken = true
+                        generatedToken = await account.generateRpcToken()
+                        isGeneratingToken = false
+                    }
+                } label: {
+                    HStack {
+                        Label("Generate New Token", systemImage: "key.viewfinder")
+                            .foregroundStyle(AppTheme.textPrimary)
+                        if isGeneratingToken {
+                            Spacer()
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(isGeneratingToken)
+
+                if config?.configured == true {
                     Button(role: .destructive) {
                         removeConfig()
                     } label: {
                         Text("Remove Registration")
                     }
                 }
-                .listRowBackground(AppTheme.surface)
+            } label: {
+                Label("Advanced: Custom Discord App", systemImage: "slider.horizontal.3")
+                    .foregroundStyle(AppTheme.textPrimary)
             }
+        } footer: {
+            Text("Only needed if you want your own branding (a different Discord Application, your own Rich Presence art) instead of Lumisound's shared one. Find your Application ID at discord.com/developers/applications; asset names must be uploaded there as \"Rich Presence Art Assets\".")
+                .font(AppTheme.bodyFont(size: 12))
+                .foregroundStyle(AppTheme.textSecondary)
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(Color.clear.ignoresSafeArea())
-        .navigationTitle("Discord Rich Presence")
-        .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
+        .listRowBackground(AppTheme.surface)
     }
 
-    private func load() async {
-        config = await account.fetchDiscordRpcConfig()
-        if let config, config.configured {
-            clientIdText = config.discordClientId ?? ""
-            largeImageText = config.largeImage ?? ""
-            smallImageText = config.smallImage ?? ""
-            showButtons = config.showButtons
-            enabled = config.enabled
-        }
-    }
-
-    private func save() {
+    private func saveAdvanced() {
         let trimmedId = clientIdText.trimmingCharacters(in: .whitespaces)
         guard !trimmedId.isEmpty else { return }
         let trimmedLargeImage = largeImageText.trimmingCharacters(in: .whitespaces)
         let trimmedSmallImage = smallImageText.trimmingCharacters(in: .whitespaces)
-        isSaving = true
+        isSavingAdvanced = true
         errorText = nil
         Task {
             if await account.setDiscordRpcConfig(
@@ -226,12 +298,29 @@ struct DiscordRichPresenceView: View {
                 showButtons: showButtons,
                 enabled: enabled
             ) {
-                didSave = true
+                didSaveAdvanced = true
                 config = await account.fetchDiscordRpcConfig()
             } else {
                 errorText = account.errorMessage ?? "Failed to save configuration."
             }
-            isSaving = false
+            isSavingAdvanced = false
+        }
+    }
+
+    /// Clears a custom override back to Lumisound's shared Discord app —
+    /// sends an explicit empty client ID (distinct from omitting the field
+    /// entirely on first-ever enable) so the server drops the stored
+    /// override rather than leaving it in place.
+    private func useSharedApp() {
+        Task {
+            if await account.setDiscordRpcConfig(clientId: "", largeImage: nil, smallImage: nil, showButtons: showButtons, enabled: enabled) {
+                clientIdText = ""
+                largeImageText = ""
+                smallImageText = ""
+                config = await account.fetchDiscordRpcConfig()
+            } else {
+                errorText = account.errorMessage ?? "Failed to switch back to the shared app."
+            }
         }
     }
 
@@ -243,8 +332,23 @@ struct DiscordRichPresenceView: View {
                 largeImageText = ""
                 smallImageText = ""
                 showButtons = true
-                enabled = true
-                didSave = false
+                enabled = false
+                didSaveAdvanced = false
+                generatedToken = nil
+            }
+        }
+    }
+
+    private func load() async {
+        config = await account.fetchDiscordRpcConfig()
+        if let config {
+            enabled = config.enabled
+            showButtons = config.showButtons
+            if config.isCustom {
+                clientIdText = config.discordClientId ?? ""
+                largeImageText = config.largeImage ?? ""
+                smallImageText = config.smallImage ?? ""
+                showAdvanced = true
             }
         }
     }

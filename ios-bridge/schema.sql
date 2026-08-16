@@ -543,6 +543,15 @@ CREATE TABLE IF NOT EXISTS ios_discord_rpc_config (
 ALTER TABLE ios_discord_rpc_config ADD COLUMN IF NOT EXISTS small_image VARCHAR(255);
 ALTER TABLE ios_discord_rpc_config ADD COLUMN IF NOT EXISTS show_buttons BOOLEAN DEFAULT TRUE;
 
+-- Feature: shared Discord app for Rich Presence (2026-08-16) — a NULL
+-- discord_client_id now means "use Lumisound's own shared Discord
+-- application" (DISCORD_RPC_DEFAULT_CLIENT_ID in main.py) instead of being
+-- disallowed, so a user can enable Rich Presence with nothing but a
+-- verified Discord account — no Discord Developer Application of their own
+-- required. A non-NULL value is still a real per-user override for anyone
+-- who wants their own branding.
+ALTER TABLE ios_discord_rpc_config ALTER COLUMN discord_client_id DROP NOT NULL;
+
 -- Feature: musical key estimation (Krumhansl-Schmuckler chroma analysis)
 -- alongside BPM/loudness, for harmonic-mixing-aware automixing/crossfade.
 ALTER TABLE ios_user_music_metadata ADD COLUMN IF NOT EXISTS musical_key VARCHAR(16) NULL;

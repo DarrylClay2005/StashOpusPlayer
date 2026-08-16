@@ -743,10 +743,18 @@ struct DiscordWebhookStatus: Decodable {
 struct DiscordRpcConfig: Decodable {
     let configured: Bool
     let enabled: Bool
+    /// Resolved value the local daemon should actually use — already
+    /// falls back to Lumisound's own shared Discord application
+    /// server-side when the user hasn't set a personal override
+    /// (see `isCustom`).
     let discordClientId: String?
     let largeImage: String?
     let smallImage: String?
     let showButtons: Bool
+    /// `true` only when `discordClientId`/the art assets above are this
+    /// user's OWN registered Discord Application, not Lumisound's shared
+    /// default one.
+    let isCustom: Bool
 
     enum CodingKeys: String, CodingKey {
         case configured, enabled
@@ -754,6 +762,7 @@ struct DiscordRpcConfig: Decodable {
         case largeImage = "large_image"
         case smallImage = "small_image"
         case showButtons = "show_buttons"
+        case isCustom = "is_custom"
     }
 }
 
