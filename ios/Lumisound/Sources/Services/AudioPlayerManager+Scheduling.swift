@@ -50,6 +50,22 @@ extension AudioPlayerManager {
         startTimer()
         updateNowPlaying()
         reapplyActiveEffect()
+        startSmartCrossfadeAnalysisIfNeeded()
+    }
+
+    /// Smart Auto Crossfade reads the live analyzer's overallLevel the
+    /// instant beginCrossfade() fires (see smartFadeDuration) to react to how
+    /// the outgoing track's ending actually sounds — starting the tap here,
+    /// for the track's whole run rather than only in beginCrossfade() itself,
+    /// gives its smoothing time to settle instead of reading a
+    /// freshly-(re)started, still-zeroed reading. Only called once playback
+    /// is actually starting (not from prepareCurrent()'s restore-only path
+    /// or a paused seek) — installing the analyzer tap while nothing is
+    /// playing was spinning up engine activity on cold launch for no reason.
+    func startSmartCrossfadeAnalysisIfNeeded() {
+        if audioSettings.smartCrossfadeEnabled {
+            AudioVisualizerService.shared.start(for: .smartCrossfade)
+        }
     }
 
     /// Resets ReplayGain to neutral at the start of a new track — before that track's own
@@ -173,16 +189,6 @@ extension AudioPlayerManager {
             prewarmBPM(for: currentSong)
             prewarmBPM(for: peekNextSong())
             prewarmPlayableCache(for: peekNextSong())
-
-            // Smart Auto Crossfade reads the live analyzer's overallLevel the
-            // instant beginCrossfade() fires (see smartFadeDuration) to react
-            // to how the outgoing track's ending actually sounds — starting
-            // the tap here, for the track's whole run rather than only in
-            // beginCrossfade() itself, gives its smoothing time to settle
-            // instead of reading a freshly-(re)started, still-zeroed reading.
-            if audioSettings.smartCrossfadeEnabled {
-                AudioVisualizerService.shared.start(for: .smartCrossfade)
-            }
 
             // Schedule crossfade to begin crossfadeDuration seconds before the track ends,
             // so the incoming track fades in while the current track is still playing.
@@ -371,6 +377,7 @@ extension AudioPlayerManager {
                 node.play()
                 startTimer()
                 reapplyActiveEffect()
+                startSmartCrossfadeAnalysisIfNeeded()
             }
             updateNowPlaying()
 
@@ -545,7 +552,7 @@ extension AudioPlayerManager {
                     node.scheduleSegment(file2, startingFrame: sf, frameCount: fl, at: nil) { [weak self] in
                         Task { @MainActor in guard let self, self.scheduleGeneration == gen else { return }; self.handleTrackEnded() }
                     }
-                    if isPlaying { startEngineIfNeeded(); node.play(); startTimer(); reapplyActiveEffect() }
+                    if isPlaying { startEngineIfNeeded(); node.play(); startTimer(); reapplyActiveEffect(); startSmartCrossfadeAnalysisIfNeeded() }
                     updateNowPlaying()
                     return
                 }
@@ -584,6 +591,7 @@ extension AudioPlayerManager {
                 node.play()
                 startTimer()
                 reapplyActiveEffect()
+                startSmartCrossfadeAnalysisIfNeeded()
             }
             updateNowPlaying()
 
