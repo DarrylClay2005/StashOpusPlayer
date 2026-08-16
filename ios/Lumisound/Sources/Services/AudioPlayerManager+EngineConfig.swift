@@ -119,7 +119,21 @@ extension AudioPlayerManager {
             if pausedByRouteChange {
                 pausedByRouteChange = false
                 appLog("Audio route changed — output device available, resuming", category: "audio")
-                try? AVAudioSession.sharedInstance().setActive(true)
+                // `pause()` only paused the player nodes — `engine.isRunning` never
+                // went false while the old device was gone, so `resume()`'s
+                // `startEngineIfNeeded()` guard (`!engine.isRunning`) would see the
+                // engine as "already running" and skip restarting it. But the
+                // render graph is still bound to the OLD hardware route; playing a
+                // node against it produces no audible output even though `isPlaying`
+                // flips true. Force a real stop+restart here so the engine rebinds
+                // to the newly-connected device before we resume playback.
+                if !isUsingOpusPlayer {
+                    if engine.isRunning {
+                        engine.stop()
+                    }
+                    try? AVAudioSession.sharedInstance().setActive(true)
+                    startEngineIfNeeded()
+                }
                 resume()
             }
         default:
