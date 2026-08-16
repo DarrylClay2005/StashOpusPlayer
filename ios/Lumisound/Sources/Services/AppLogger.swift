@@ -229,7 +229,16 @@ final class AppLogger: ObservableObject {
 
     private func startFlushTimer() {
         flushTimer?.invalidate()
-        flushTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        // "More advanced real-time usage/event logging... that auto gets
+        // uploaded and updated to the server constantly" — tightened from
+        // 30s. Not tightened further than this: errors already flush
+        // immediately (see error()/log(level: .error)) regardless of this
+        // timer, so this interval only governs how promptly ordinary
+        // info/debug/warning volume lands, not how fast a real problem is
+        // reported — going much below 15s buys little for that while
+        // adding meaningfully more request/battery overhead for a
+        // background-audio app that can be running for hours at a stretch.
+        flushTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { [weak self] in await self?.flush() }
         }
     }

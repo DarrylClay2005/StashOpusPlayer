@@ -212,6 +212,21 @@ ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS os_version VARCHAR(20) NULL;
 ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS app_version VARCHAR(20) NULL;
 ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(36) NULL;
 
+-- Feature: advanced usage/event logging (2026-08-16) — "timestamps, hour
+-- stamps, and what day" as genuinely queryable dimensions, not just buried
+-- inside the `timestamp` string. Both derived from the client's own
+-- capture-time `timestamp` column (not `created_at`, for the same
+-- causal-reconstruction reasoning as the comment on that index above),
+-- computed once at insert time (GENERATED ALWAYS ... STORED) rather than
+-- repeating EXTRACT() in every analytics query. log_day_of_week follows
+-- Postgres's own EXTRACT(DOW ...) convention: 0 = Sunday .. 6 = Saturday.
+ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS log_hour SMALLINT
+    GENERATED ALWAYS AS (EXTRACT(HOUR FROM timestamp)::SMALLINT) STORED;
+ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS log_day_of_week SMALLINT
+    GENERATED ALWAYS AS (EXTRACT(DOW FROM timestamp)::SMALLINT) STORED;
+CREATE INDEX IF NOT EXISTS ios_app_logs_idx_hour ON ios_app_logs (log_hour);
+CREATE INDEX IF NOT EXISTS ios_app_logs_idx_dow ON ios_app_logs (log_day_of_week);
+
 -- Collaborative playlist sharing (snapshot-based, bridge side)
 CREATE TABLE IF NOT EXISTS ios_shared_playlists (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
