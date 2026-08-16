@@ -25,8 +25,12 @@ extension LibraryManager {
         // condition tripped instead of the earlier silent `return false`
         // making "never converts anything" indistinguishable from "nothing
         // eligible yet" in the field.
-        guard songID != currentlyPlayingID else {
-            appWarn("convertToLumisoundExclusiveExtension: skipped \(songID) — currently playing", category: "background")
+        // `currentlyPlayingID` alone is a snapshot taken once before this
+        // whole batch started — see `AudioPlayerManager.isInActiveQueue`'s
+        // doc comment for why a fresh, whole-queue check is also needed
+        // here, not just the single ID captured at batch-start.
+        guard songID != currentlyPlayingID, AudioPlayerManager.shared?.isInActiveQueue(songID: songID) != true else {
+            appWarn("convertToLumisoundExclusiveExtension: skipped \(songID) — currently playing or still in the active queue", category: "background")
             return false
         }
         guard let index = importedSongs.firstIndex(where: { $0.id == songID }) else {
@@ -140,7 +144,7 @@ extension LibraryManager {
     /// trackID from, or the currently-playing song.
     @discardableResult
     func repairEmbeddedMetadata(songID: String, currentlyPlayingID: String?) async -> Bool {
-        guard songID != currentlyPlayingID else { return false }
+        guard songID != currentlyPlayingID, AudioPlayerManager.shared?.isInActiveQueue(songID: songID) != true else { return false }
         guard let index = importedSongs.firstIndex(where: { $0.id == songID }) else { return false }
         let song = importedSongs[index]
         guard let url = song.url, url.isFileURL, LumisoundExclusiveExtensionService.isConverted(url) else {

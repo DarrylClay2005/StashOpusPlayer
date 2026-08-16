@@ -57,6 +57,22 @@ final class AudioPlayerManager: ObservableObject {
             pushQueueToBridge()
         }
     }
+
+    /// True if `songID` is anywhere in the active queue — not just the
+    /// single `currentSong`. Background maintenance passes (the
+    /// exclusive-extension conversion pass, duplicate merging) that touch
+    /// on-disk files snapshot `currentSong?.id` ONCE before iterating
+    /// potentially dozens of songs; each iteration does real async I/O, so
+    /// by the time a later song in the batch is reached, playback may have
+    /// auto-advanced past that one stale snapshot to a DIFFERENT song still
+    /// in the same queue — one the batch would otherwise treat as safe to
+    /// delete/replace despite it being about to play (or already playing)
+    /// by the time the file operation actually runs. Call this fresh at
+    /// each per-song guard instead of trusting a single snapshot for the
+    /// whole batch.
+    func isInActiveQueue(songID: String) -> Bool {
+        queue.contains { $0.id == songID }
+    }
     @Published var currentIndex = 0
     /// Which playlist (if any) the current queue was started from — lets
     /// Now Playing auto-apply that playlist's remembered artwork style.

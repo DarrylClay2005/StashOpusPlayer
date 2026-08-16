@@ -228,7 +228,13 @@ extension LibraryManager {
 
         for song in importedSongs {
             guard let url = song.url, !LumisoundExclusiveExtensionService.isConverted(url) else { continue }
-            guard song.id != currentlyPlayingID else { continue }
+            // See AudioPlayerManager.isInActiveQueue's doc comment — this
+            // loop runs synchronously (no per-song async gap the way the
+            // conversion pass has), but `currentlyPlayingID` is still only
+            // ONE song; the survivor's target `.lms` file could be earlier
+            // or later in the SAME queue as `song` without being the
+            // literal current index, so it needs the same whole-queue check.
+            guard song.id != currentlyPlayingID, AudioPlayerManager.shared?.isInActiveQueue(songID: song.id) != true else { continue }
             guard let target = LumisoundExclusiveExtensionService.expectedConvertedURL(for: url) else { continue }
             guard let survivor = convertedByTargetURL[target.standardizedFileURL] else { continue }
 
