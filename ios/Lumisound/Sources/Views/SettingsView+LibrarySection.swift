@@ -195,6 +195,6 @@ extension SettingsView {
                 .font(AppTheme.bodyFont(size: 12))
                 .foregroundStyle(AppTheme.textSecondary)
         }
-        .listRowBackground(AppTheme.surface)
+        .listRowBackground(tintedRowBackground(.pink))
     }
 }

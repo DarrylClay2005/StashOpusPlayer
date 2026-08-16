@@ -40,6 +40,6 @@ extension SettingsView {
         } header: {
             sectionHeader("Sleep Timer", icon: "moon.stars.fill", tint: .indigo)
         }
-        .listRowBackground(AppTheme.surface)
+        .listRowBackground(tintedRowBackground(.indigo))
     }
 }

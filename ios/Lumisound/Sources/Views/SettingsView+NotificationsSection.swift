@@ -20,7 +20,7 @@ extension SettingsView {
         } header: {
             sectionHeader("Notifications", icon: "bell.badge.fill", tint: .orange)
         }
-        .listRowBackground(AppTheme.surface)
+        .listRowBackground(tintedRowBackground(.orange))
         .animation(.easeInOut(duration: 0.2), value: notificationService.isEnabled)
         .animation(.easeInOut(duration: 0.2), value: notificationService.isAuthorized)
     }
@@ -124,7 +124,7 @@ struct NotificationsSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .listRowBackground(AppTheme.surface)
+        .listRowBackground(tintedRowBackground(.orange))
     }
 
     private var statusIcon: String {
@@ -170,7 +170,7 @@ struct NotificationsSettingsView: View {
                 .font(AppTheme.bodyFont(size: 12))
                 .foregroundStyle(AppTheme.textSecondary)
         }
-        .listRowBackground(AppTheme.surface)
+        .listRowBackground(tintedRowBackground(.orange))
     }
 
     // MARK: Per-topic groups (collapsible)
@@ -210,7 +210,7 @@ struct NotificationsSettingsView: View {
             }
             .buttonStyle(.plain)
         }
-        .listRowBackground(AppTheme.surface)
+        .listRowBackground(tintedRowBackground(.orange))
         .animation(.easeInOut(duration: 0.22), value: isCollapsed)
     }
 

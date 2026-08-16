@@ -417,7 +417,7 @@ extension SettingsView {
         } header: {
             sectionHeader("Playback & Audio", icon: "waveform", tint: .teal)
         }
-        .listRowBackground(AppTheme.surface)
+        .listRowBackground(tintedRowBackground(.teal))
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.crossfadeEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.gaplessEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.replayGainEnabled)

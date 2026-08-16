@@ -34,6 +34,22 @@ extension SettingsView {
         }
     }
 
+    /// Settings redesign, part 2: each section's row background gets a very
+    /// faint wash of that section's own `sectionHeader` tint (via
+    /// `Color.mixed(with:amount:)`, the same blend helper Profile
+    /// customization's decoration/effect overlays use) instead of every
+    /// section sharing one flat `AppTheme.surface` — carries the "each
+    /// category is visually its own color" idea from the header badges down
+    /// into the row itself. The mix amount is deliberately small (6%) so it
+    /// reads as a subtle color hint, not a colored card — this screen's
+    /// `.listStyle(.plain)` was chosen specifically so sections stay a
+    /// continuous surface rather than floating disconnected boxes (see
+    /// `SettingsView.body`'s doc comment), and a strong per-section tint
+    /// would fight that.
+    func tintedRowBackground(_ tint: Color) -> Color {
+        AppTheme.surface.mixed(with: tint, amount: 0.06)
+    }
+
     var mediaAccessStatusText: String {
         switch MPMediaLibrary.authorizationStatus() {
         case .authorized:    return "Allowed"

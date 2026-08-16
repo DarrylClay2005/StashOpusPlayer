@@ -26,7 +26,7 @@ extension SettingsView {
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }
-            .listRowBackground(AppTheme.surface)
+            .listRowBackground(tintedRowBackground(.yellow))
 
             // Download tuning — speed vs. ban-risk knobs that were hardcoded.
             Section {
@@ -57,7 +57,7 @@ extension SettingsView {
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }
-            .listRowBackground(AppTheme.surface)
+            .listRowBackground(tintedRowBackground(.orange))
 
             // Audio format also governs yt-dlp's output, so surface it here too.
             Section {
@@ -83,7 +83,7 @@ extension SettingsView {
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }
-            .listRowBackground(AppTheme.surface)
+            .listRowBackground(tintedRowBackground(.gray))
 
             // Custom download folder — downloads land in Imported Music/<folder>.
             Section {
@@ -100,7 +100,7 @@ extension SettingsView {
                     .font(AppTheme.bodyFont(size: 12))
                     .foregroundStyle(AppTheme.textSecondary)
             }
-            .listRowBackground(AppTheme.surface)
+            .listRowBackground(tintedRowBackground(.brown))
 
             // YouTube auth — cookies + Data API key — both feed yt-dlp lookups.
             if account.isLoggedIn {
@@ -120,7 +120,7 @@ extension SettingsView {
                         .font(AppTheme.bodyFont(size: 12))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
-                .listRowBackground(AppTheme.surface)
+                .listRowBackground(tintedRowBackground(.red))
             }
         }
         .animation(.easeInOut(duration: 0.22), value: ytdlpUseAria2)

@@ -18,6 +18,6 @@ extension SettingsView {
         } header: {
             sectionHeader("Help", icon: "questionmark.circle.fill", tint: .blue)
         }
-        .listRowBackground(AppTheme.surface)
+        .listRowBackground(tintedRowBackground(.blue))
     }
 }

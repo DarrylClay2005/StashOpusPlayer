@@ -30,7 +30,7 @@ extension SettingsView {
         } header: {
             sectionHeader("Car Mode", icon: "car.fill", tint: .green)
         }
-        .listRowBackground(AppTheme.surface)
+        .listRowBackground(tintedRowBackground(.green))
         .animation(.easeInOut(duration: 0.22), value: carModeEnabled)
     }
 }

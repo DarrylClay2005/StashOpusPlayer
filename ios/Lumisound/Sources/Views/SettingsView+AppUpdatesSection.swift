@@ -58,6 +58,6 @@ extension SettingsView {
         } header: {
             sectionHeader("App Updates", icon: "arrow.triangle.2.circlepath", tint: .green)
         }
-        .listRowBackground(AppTheme.surface)
+        .listRowBackground(tintedRowBackground(.green))
     }
 }

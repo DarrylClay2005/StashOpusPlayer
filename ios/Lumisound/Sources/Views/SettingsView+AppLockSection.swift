@@ -20,7 +20,7 @@ extension SettingsView {
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
             }
-            .listRowBackground(AppTheme.surface)
+            .listRowBackground(tintedRowBackground(.red))
         }
     }
 }

@@ -116,6 +116,6 @@ extension SettingsView {
         } header: {
             sectionHeader("Streaming & Downloads", icon: "arrow.down.circle.fill", tint: .cyan)
         }
-        .listRowBackground(AppTheme.surface)
+        .listRowBackground(tintedRowBackground(.cyan))
     }
 }
