@@ -54,7 +54,7 @@ extension SettingsView {
                 }
             }
         } header: {
-            sectionHeader("Account")
+            sectionHeader("Account", icon: "person.crop.circle.fill", tint: .blue)
         }
         .listRowBackground(AppTheme.surface)
     }

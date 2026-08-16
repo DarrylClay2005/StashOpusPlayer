@@ -82,7 +82,7 @@ extension SettingsView {
             }
 
         } header: {
-            sectionHeader("About")
+            sectionHeader("About", icon: "info.circle.fill", tint: .gray)
         }
         .listRowBackground(AppTheme.surface)
     }

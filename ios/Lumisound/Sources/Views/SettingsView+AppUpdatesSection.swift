@@ -56,7 +56,7 @@ extension SettingsView {
             .disabled(updater.isChecking)
 
         } header: {
-            sectionHeader("App Updates")
+            sectionHeader("App Updates", icon: "arrow.triangle.2.circlepath", tint: .green)
         }
         .listRowBackground(AppTheme.surface)
     }

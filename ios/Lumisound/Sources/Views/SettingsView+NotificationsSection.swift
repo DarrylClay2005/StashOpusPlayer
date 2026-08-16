@@ -18,7 +18,7 @@ extension SettingsView {
                 }
             }
         } header: {
-            sectionHeader("Notifications")
+            sectionHeader("Notifications", icon: "bell.badge.fill", tint: .orange)
         }
         .listRowBackground(AppTheme.surface)
         .animation(.easeInOut(duration: 0.2), value: notificationService.isEnabled)

@@ -12,6 +12,28 @@ extension SettingsView {
             .kerning(0.8)
     }
 
+    /// Redesigned section header — a small icon in a rounded, tinted badge
+    /// next to the label, instead of plain uppercase text alone. Each
+    /// section picks its own `tint`/`icon` so Settings' many sections read
+    /// as visually distinct categories at a glance instead of one
+    /// undifferentiated list — the core idea behind this screen's redesign.
+    /// The plain-text `sectionHeader(_:)` above is kept for any call site
+    /// that hasn't been moved to this one yet; both render at the same
+    /// height so mixing them doesn't cause list-row jitter.
+    func sectionHeader(_ text: String, icon: String, tint: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 20, height: 20)
+                .background(tint.opacity(0.16), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            Text(text.uppercased())
+                .font(AppTheme.bodyFont(size: 11))
+                .foregroundStyle(AppTheme.textSecondary)
+                .kerning(0.8)
+        }
+    }
+
     var mediaAccessStatusText: String {
         switch MPMediaLibrary.authorizationStatus() {
         case .authorized:    return "Allowed"

@@ -41,7 +41,7 @@ extension SettingsView {
                 }
             }
         } header: {
-            sectionHeader("Appearance")
+            sectionHeader("Appearance", icon: "paintbrush.fill", tint: .purple)
         }
         .listRowBackground(AppTheme.surface)
     }

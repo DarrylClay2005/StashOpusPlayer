@@ -189,7 +189,7 @@ extension SettingsView {
             .disabled(library.isForcingMetadataSync)
 
         } header: {
-            sectionHeader("Library")
+            sectionHeader("Library", icon: "music.note.list", tint: .pink)
         } footer: {
             Text("Re-scans your entire Documents folder — including \"Imported Music\" and any subfolders — plus any watched folders, then re-reads embedded tags and re-runs online metadata lookups for every imported track. Use this if tags look stale or after manually adding files outside the app.")
                 .font(AppTheme.bodyFont(size: 12))

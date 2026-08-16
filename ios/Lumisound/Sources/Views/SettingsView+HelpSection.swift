@@ -16,7 +16,7 @@ extension SettingsView {
                     .foregroundStyle(AppTheme.textPrimary)
             }
         } header: {
-            sectionHeader("Help")
+            sectionHeader("Help", icon: "questionmark.circle.fill", tint: .blue)
         }
         .listRowBackground(AppTheme.surface)
     }

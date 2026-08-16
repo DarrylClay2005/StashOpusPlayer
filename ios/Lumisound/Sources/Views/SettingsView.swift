@@ -97,9 +97,25 @@ struct SettingsView: View {
             case .app:     return "gearshape"
             }
         }
+
+        /// Each tab gets its own color (matching the icon/tint its member
+        /// sections use in `sectionHeader`) instead of every tab sharing one
+        /// flat accent — part of the same "settings' categories should read
+        /// as visually distinct at a glance" redesign as the section headers.
+        var tint: Color {
+            switch self {
+            case .general: return .blue
+            case .audio:   return .teal
+            case .library: return .pink
+            case .ytdlp:   return .yellow
+            case .app:     return .green
+            }
+        }
     }
 
     @State var selectedTab: SettingsTab = .general
+    /// Drives the tab picker's sliding selection background — see `tabPicker`.
+    @Namespace private var tabIndicatorNamespace
 
     var body: some View {
         NavigationStack {
@@ -174,22 +190,34 @@ struct SettingsView: View {
     }
 
     /// Horizontal, scrollable category selector pinned under the title.
+    /// Redesigned: each tab carries its own color (`SettingsTab.tint`) that
+    /// tints its icon even while unselected, and the selected pill's
+    /// background slides between tabs via `matchedGeometryEffect` (one
+    /// shared shape sliding to a new position) instead of each button
+    /// independently swapping its own fill color — a more deliberate,
+    /// "designed" transition than a flat capsule popping in and out.
     var tabPicker: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 ForEach(SettingsTab.allCases) { tab in
                     Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { selectedTab = tab }
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selectedTab = tab }
                     } label: {
                         Label(tab.rawValue, systemImage: tab.icon)
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(selectedTab == tab ? .white : AppTheme.textSecondary)
+                            .foregroundStyle(selectedTab == tab ? .white : tab.tint)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
-                            .background(
-                                selectedTab == tab ? AppTheme.dynamicAccent : AppTheme.surface.opacity(0.6),
-                                in: Capsule()
-                            )
+                            .background {
+                                if selectedTab == tab {
+                                    Capsule()
+                                        .fill(tab.tint.gradient)
+                                        .matchedGeometryEffect(id: "settingsTabIndicator", in: tabIndicatorNamespace)
+                                } else {
+                                    Capsule()
+                                        .fill(tab.tint.opacity(0.14))
+                                }
+                            }
                     }
                     .buttonStyle(.plain)
                 }

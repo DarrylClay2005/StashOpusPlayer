@@ -28,7 +28,7 @@ extension SettingsView {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         } header: {
-            sectionHeader("Car Mode")
+            sectionHeader("Car Mode", icon: "car.fill", tint: .green)
         }
         .listRowBackground(AppTheme.surface)
         .animation(.easeInOut(duration: 0.22), value: carModeEnabled)

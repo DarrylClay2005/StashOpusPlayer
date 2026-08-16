@@ -20,7 +20,7 @@ extension SettingsView {
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
             } header: {
-                sectionHeader("Download Engine")
+                sectionHeader("Download Engine", icon: "bolt.fill", tint: .yellow)
             } footer: {
                 Text("aria2 opens many connections per download. It bypasses per-connection throttling on some networks, but adds overhead that makes it slower when a single connection is already fast.")
                     .font(AppTheme.bodyFont(size: 12))
@@ -51,7 +51,7 @@ extension SettingsView {
                     }
                 }
             } header: {
-                sectionHeader("Download Speed")
+                sectionHeader("Download Speed", icon: "speedometer", tint: .orange)
             } footer: {
                 Text("Throttle adds a pause between requests to avoid YouTube bot checks — set it to Off for maximum speed (slightly higher risk of temporary blocks). Parallel Fragments downloads pieces of each track at once; higher is faster on big files.")
                     .font(AppTheme.bodyFont(size: 12))
@@ -77,7 +77,7 @@ extension SettingsView {
                     .tint(AppTheme.dynamicAccent)
                 }
             } header: {
-                sectionHeader("Format")
+                sectionHeader("Format", icon: "doc.fill", tint: .gray)
             } footer: {
                 Text("Preferred audio format for downloads (yt-dlp -x --audio-format). Highest quality is used for every download.")
                     .font(AppTheme.bodyFont(size: 12))
@@ -94,7 +94,7 @@ extension SettingsView {
                     DownloadFolderPicker(folderName: $ytdlpDownloadFolder)
                 }
             } header: {
-                sectionHeader("Download Folder")
+                sectionHeader("Download Folder", icon: "folder.fill", tint: .brown)
             } footer: {
                 Text("Every download goes into this folder (created automatically), so a big playlist lands together instead of in the Imported Music root. Choose an existing folder or create a new one. Downloads in any subfolder are still found and de-duplicated. Each tracked playlist can also override this with its own folder.")
                     .font(AppTheme.bodyFont(size: 12))
@@ -114,7 +114,7 @@ extension SettingsView {
                             .foregroundStyle(AppTheme.textPrimary)
                     }
                 } header: {
-                    sectionHeader("YouTube Authentication")
+                    sectionHeader("YouTube Authentication", icon: "key.fill", tint: .red)
                 } footer: {
                     Text("Upload a cookies.txt to download age-restricted content and avoid bot checks. Add a YouTube Data API key for full playlist resolution.")
                         .font(AppTheme.bodyFont(size: 12))

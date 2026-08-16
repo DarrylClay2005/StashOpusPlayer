@@ -14,7 +14,7 @@ extension SettingsView {
                 }
                 .tint(AppTheme.dynamicAccent)
             } header: {
-                sectionHeader("App Lock")
+                sectionHeader("App Lock", icon: "lock.fill", tint: .red)
             } footer: {
                 Text("Lock Lumisound behind \(appLock.biometryTypeName) whenever it's reopened from the background. Your account syncs playlists and listening history, so this adds a second layer beyond your device's own lock screen.")
                     .font(.caption)
