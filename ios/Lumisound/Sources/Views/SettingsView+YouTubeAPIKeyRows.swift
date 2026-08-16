@@ -61,7 +61,7 @@ extension SettingsView {
                             .foregroundStyle(AppTheme.dynamicAccent)
                         Spacer()
                         if isSavingYouTubeKey {
-                            ProgressView().tint(AppTheme.dynamicAccent)
+                            ProgressView().tint(.cyan)
                         }
                     }
                 }
@@ -94,7 +94,7 @@ extension SettingsView {
                     .foregroundStyle(AppTheme.dynamicAccent)
                 Spacer()
                 if isValidatingYouTubeKey {
-                    ProgressView().tint(AppTheme.dynamicAccent)
+                    ProgressView().tint(.cyan)
                 }
             }
         }

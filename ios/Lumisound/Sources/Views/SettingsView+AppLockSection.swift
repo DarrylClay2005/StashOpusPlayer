@@ -12,7 +12,7 @@ extension SettingsView {
                     Label("Require \(appLock.biometryTypeName)", systemImage: "lock.shield")
                         .foregroundStyle(AppTheme.textPrimary)
                 }
-                .tint(AppTheme.dynamicAccent)
+                .tint(.red)
             } header: {
                 sectionHeader("App Lock", icon: "lock.fill", tint: .red)
             } footer: {

@@ -14,7 +14,7 @@ extension SettingsView {
                 Label("Crossfade", systemImage: "waveform.path.ecg")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.teal)
             .onChange(of: player.audioSettings.crossfadeEnabled) { on in
                 if on { player.audioSettings.smartCrossfadeEnabled = false }
             }
@@ -34,7 +34,7 @@ extension SettingsView {
                 Label("Smart Auto Crossfade", systemImage: "metronome")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.teal)
             .onChange(of: player.audioSettings.smartCrossfadeEnabled) { on in
                 if on {
                     player.audioSettings.crossfadeEnabled = false
@@ -90,7 +90,7 @@ extension SettingsView {
                         }
                     }
                     .pickerStyle(.menu)
-                    .tint(AppTheme.dynamicAccent)
+                    .tint(.teal)
                 }
                 .padding(.leading, 16)
             }
@@ -100,7 +100,7 @@ extension SettingsView {
                 Label("Gapless Playback", systemImage: "infinity")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.teal)
 
             if player.audioSettings.gaplessEnabled {
                 Text("Tracks play back-to-back with no silence between them. Ideal for live albums and DJ mixes.")
@@ -115,7 +115,7 @@ extension SettingsView {
                 Label("ReplayGain", systemImage: "speaker.wave.3")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.teal)
 
             if player.audioSettings.replayGainEnabled {
                 Text("Normalises loudness across tracks so volume stays consistent. Reads REPLAYGAIN_TRACK_GAIN metadata when available.")
@@ -136,7 +136,7 @@ extension SettingsView {
                         .foregroundStyle(AppTheme.textSecondary)
                 }
                 Slider(value: $player.audioSettings.speed, in: 0.5...2.0, step: 0.05)
-                    .tint(AppTheme.dynamicAccent)
+                    .tint(.teal)
                 HStack {
                     Text("0.5×").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
                     Spacer()
@@ -155,7 +155,7 @@ extension SettingsView {
                         .foregroundStyle(AppTheme.textSecondary)
                 }
                 Slider(value: $player.audioSettings.pitchSemitones, in: -12...12, step: 0.5)
-                    .tint(AppTheme.dynamicAccent)
+                    .tint(.teal)
                 HStack {
                     Text("−12 st").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
                     Spacer()
@@ -168,7 +168,7 @@ extension SettingsView {
                 Label("Equalizer", systemImage: "slider.vertical.3")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.teal)
 
             // EQ Preset picker
             if player.audioSettings.equalizerEnabled {
@@ -179,7 +179,7 @@ extension SettingsView {
                     Label("Auto EQ (by genre & tempo)", systemImage: "wand.and.stars")
                         .foregroundStyle(AppTheme.textPrimary)
                 }
-                .tint(AppTheme.dynamicAccent)
+                .tint(.teal)
                 .onChange(of: player.audioSettings.autoEQEnabled) { on in
                     if !on { AudioVisualizerService.shared.stop(for: .autoEQ) }
                 }
@@ -204,7 +204,7 @@ extension SettingsView {
                             }
                         }
                         .pickerStyle(.menu)
-                        .tint(AppTheme.dynamicAccent)
+                        .tint(.teal)
                         .onChange(of: player.audioSettings.eqPreset) { newPreset in
                             player.applyEQPreset(newPreset)
                         }
@@ -217,7 +217,7 @@ extension SettingsView {
                 Label("Bass Boost", systemImage: "waveform.path")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.teal)
 
             if player.audioSettings.bassBoostEnabled {
                 Text("Boosts the 32 Hz and 64 Hz bands for deeper, punchier bass. Adjust the gain below to taste.")
@@ -240,7 +240,7 @@ extension SettingsView {
                             .foregroundStyle(AppTheme.textSecondary)
                     }
                     Slider(value: $player.audioSettings.bassBoostGain, in: 0...15, step: 0.5)
-                        .tint(AppTheme.dynamicAccent)
+                        .tint(.teal)
                     HStack {
                         Text("0 dB").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
                         Spacer()
@@ -255,7 +255,7 @@ extension SettingsView {
                 Label("Reverb", systemImage: "circle.hexagonpath")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.teal)
 
             if player.audioSettings.reverbEnabled {
                 Text("Adds a real sense of space to playback. Changes apply instantly to the current track.")
@@ -276,7 +276,7 @@ extension SettingsView {
                         }
                     }
                     .pickerStyle(.menu)
-                    .tint(AppTheme.dynamicAccent)
+                    .tint(.teal)
                 }
                 .padding(.leading, 16)
 
@@ -291,7 +291,7 @@ extension SettingsView {
                             .foregroundStyle(AppTheme.textSecondary)
                     }
                     Slider(value: $player.audioSettings.reverbWetDryMix, in: 0...100, step: 1)
-                        .tint(AppTheme.dynamicAccent)
+                        .tint(.teal)
                     HStack {
                         Text("Dry").font(AppTheme.monoFont(size: 11)).foregroundStyle(AppTheme.textSecondary)
                         Spacer()
@@ -318,7 +318,7 @@ extension SettingsView {
                 Label("Night Mode", systemImage: "moon.stars")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.teal)
 
             if player.audioSettings.nightModeEnabled ?? false {
                 Text("Evens out quiet and loud passages so quiet parts stay audible and loud parts don't jump out — useful for listening at low volume.")
@@ -344,7 +344,7 @@ extension SettingsView {
                 Label("Skip Silent Intros", systemImage: "forward.end")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.teal)
 
             if silenceTrim.isEnabled {
                 Text("Automatically skips past dead air at the very start of a local track (up to 10 seconds), analyzed on-device the first time each track plays. Doesn't apply to streamed tracks.")
@@ -370,7 +370,7 @@ extension SettingsView {
                 Label("Spatial Audio", systemImage: "airpods.pro")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.teal)
 
             if player.audioSettings.spatialAudioEnabled ?? false {
                 Text(
@@ -396,7 +396,7 @@ extension SettingsView {
                 Label("Mono Audio", systemImage: "ear")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.teal)
 
             if player.audioSettings.monoAudioEnabled ?? false {
                 Text("Combines left and right channels into one — the same audio plays from both sides. Useful for single-earbud listening.")

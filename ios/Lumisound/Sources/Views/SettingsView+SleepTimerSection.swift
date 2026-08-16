@@ -26,7 +26,7 @@ extension SettingsView {
                     }
                 }
                 .pickerStyle(.menu)
-                .tint(AppTheme.dynamicAccent)
+                .tint(.indigo)
                 .foregroundStyle(AppTheme.textPrimary)
 
                 Button {

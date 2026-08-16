@@ -55,7 +55,7 @@ extension SettingsView {
                             .foregroundStyle(AppTheme.dynamicAccent)
                         Spacer()
                         if isSavingAcoustIDKey {
-                            ProgressView().tint(AppTheme.dynamicAccent)
+                            ProgressView().tint(.cyan)
                         }
                     }
                 }

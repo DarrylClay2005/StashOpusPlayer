@@ -36,7 +36,7 @@ extension SettingsView {
                     Spacer()
                     if updater.isChecking {
                         ProgressView()
-                            .tint(AppTheme.dynamicAccent)
+                            .tint(.gray)
                     }
                 }
             }

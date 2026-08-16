@@ -164,7 +164,7 @@ struct NotificationsSettingsView: View {
                 Label("Device Notifications", systemImage: "bell.badge")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.orange)
         } footer: {
             Text("Master switch for every notification type below. Turning this off silences all of them, regardless of their individual toggle — turn it back on to restore whatever you had enabled per category.")
                 .font(AppTheme.bodyFont(size: 12))
@@ -229,7 +229,7 @@ struct NotificationsSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .tint(AppTheme.dynamicAccent)
+        .tint(.orange)
         .disabled(!service.isEnabled)
         .opacity(service.isEnabled ? 1 : 0.5)
         .animation(.easeInOut(duration: 0.18), value: service.isEnabled)

@@ -73,7 +73,7 @@ extension SettingsView {
                     }
                 }
                 .pickerStyle(.menu)
-                .tint(AppTheme.dynamicAccent)
+                .tint(.cyan)
             }
 
             // Wi-Fi Only Downloads — blocks the single downloadToLibrary
@@ -85,7 +85,7 @@ extension SettingsView {
                 Label("Wi-Fi Only Downloads", systemImage: "wifi")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.cyan)
 
             // Test connection
             Button {

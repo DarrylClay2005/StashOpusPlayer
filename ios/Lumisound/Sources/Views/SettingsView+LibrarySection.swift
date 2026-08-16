@@ -20,7 +20,7 @@ extension SettingsView {
                     .foregroundStyle(AppTheme.textPrimary)
             }
             .pickerStyle(.menu)
-            .tint(AppTheme.dynamicAccent)
+            .tint(.pink)
 
             // Access status row
             HStack {
@@ -53,7 +53,7 @@ extension SettingsView {
                         Spacer()
                         if library.isScanning {
                             ProgressView()
-                                .tint(AppTheme.dynamicAccent)
+                                .tint(.pink)
                         }
                     }
                 }
@@ -182,7 +182,7 @@ extension SettingsView {
                     Spacer()
                     if library.isForcingMetadataSync {
                         ProgressView()
-                            .tint(AppTheme.dynamicAccent)
+                            .tint(.pink)
                     }
                 }
             }

@@ -12,7 +12,7 @@ extension SettingsView {
                 Label("Car Mode", systemImage: "car.fill")
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .tint(AppTheme.dynamicAccent)
+            .tint(.green)
 
             if carModeEnabled {
                 Text("Shows a large-button driving layout, accessible from the floating car icon or automatically when connected to a car stereo.")

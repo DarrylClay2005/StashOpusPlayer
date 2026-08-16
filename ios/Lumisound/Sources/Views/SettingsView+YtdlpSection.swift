@@ -12,7 +12,7 @@ extension SettingsView {
                     Label("Use aria2 downloader", systemImage: "bolt.horizontal.circle")
                         .foregroundStyle(AppTheme.textPrimary)
                 }
-                .tint(AppTheme.dynamicAccent)
+                .tint(.yellow)
 
                 Text(ytdlpUseAria2
                      ? "Downloads use aria2 with multiple parallel connections. This can help on networks where YouTube throttles single connections — but on a fast, un-throttled connection the built-in downloader is usually faster."
@@ -74,7 +74,7 @@ extension SettingsView {
                         }
                     }
                     .pickerStyle(.menu)
-                    .tint(AppTheme.dynamicAccent)
+                    .tint(.gray)
                 }
             } header: {
                 sectionHeader("Format", icon: "doc.fill", tint: .gray)
