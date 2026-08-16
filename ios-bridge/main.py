@@ -11159,15 +11159,24 @@ async def export_user_data(payload: dict = Depends(get_current_user)):
 
 
 def _parse_log_timestamp(value) -> Optional[str]:
-    """Normalizes the iOS client's ISO-8601 timestamp (e.g. "2026-06-07T00:43:24Z",
-    from Swift's `Date().formatted(.iso8601)`) into MySQL's native
-    "YYYY-MM-DD HH:MM:SS" format. Passing the raw string through made MySQL log a
-    "Data truncated for column 'timestamp'" warning on every single insert, since
-    its TIMESTAMP parser doesn't understand the "T" separator / "Z" UTC suffix."""
+    """Normalizes the iOS client's ISO-8601 timestamp (e.g.
+    "2026-06-07T00:43:24.123Z", from Swift's `AppLogger.preciseISO8601Now()`)
+    into Postgres's native "YYYY-MM-DD HH:MM:SS.ffffff" format — Postgres's
+    TIMESTAMP parser doesn't understand the "T" separator / "Z" UTC suffix,
+    so the raw string can't be passed through as-is.
+
+    Formerly truncated to whole-second resolution via `strftime("%Y-%m-%d
+    %H:%M:%S")`, which silently discarded the client's actual millisecond
+    precision — during any burst of activity (a batch download completing,
+    a rapid track-skip cascade) this app can emit dozens of events within
+    the same second, and truncation made every one of them read as
+    simultaneous, i.e. made `timestamp` useless for reconstructing what
+    actually happened in what order. `isoformat(sep=" ")` keeps whatever
+    sub-second precision the client sent instead of discarding it."""
     if not isinstance(value, str):
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat(sep=" ")
     except ValueError:
         return None
 

@@ -59,6 +59,20 @@ final class AppLogger: ObservableObject {
 
     private init() {}
 
+    // MARK: - Timestamps
+
+    /// `Date().formatted(.iso8601)` truncates to whole-second resolution —
+    /// fine for a single log line, but this app can emit dozens of events
+    /// within the same second during a burst (a batch download completing,
+    /// a rapid track-skip cascade), which made reconstructing what actually
+    /// happened in what order effectively impossible from the timestamp
+    /// alone — every event in a burst read as simultaneous. Millisecond
+    /// resolution is enough to tell genuinely-ordered rapid events apart
+    /// without bloating the payload the way full nanosecond precision would.
+    nonisolated static func preciseISO8601Now() -> String {
+        Date().formatted(.iso8601.time(includingFractionalSeconds: true))
+    }
+
     // MARK: - Configuration
 
     /// Call once on app launch. Subsequent calls (e.g. from SwiftUI `.task` re-fires) are no-ops.
@@ -69,7 +83,7 @@ final class AppLogger: ObservableObject {
         reportPriorSessionBreadcrumbsIfAny()
         _append(LogEntry(level: "info", category: "app", message: "App launched",
                          file: "LumisoundApp.swift", line: 0,
-                         timestamp: Date().formatted(.iso8601), extra: [:]))
+                         timestamp: Self.preciseISO8601Now(), extra: [:]))
         startFlushTimer()
     }
 
@@ -88,7 +102,7 @@ final class AppLogger: ObservableObject {
     }
 
     private func _recordBreadcrumb(_ event: String) {
-        breadcrumbs.append("\(Date().formatted(.iso8601)) — \(event)")
+        breadcrumbs.append("\(Self.preciseISO8601Now()) — \(event)")
         if breadcrumbs.count > maxBreadcrumbs {
             breadcrumbs.removeFirst(breadcrumbs.count - maxBreadcrumbs)
         }
@@ -107,7 +121,7 @@ final class AppLogger: ObservableObject {
         _append(LogEntry(level: "warning", category: "app",
                          message: "Possible unclean shutdown — last actions before previous session ended: \(summary)",
                          file: "AppLogger.swift", line: 0,
-                         timestamp: Date().formatted(.iso8601), extra: [:]))
+                         timestamp: Self.preciseISO8601Now(), extra: [:]))
         UserDefaults.standard.removeObject(forKey: Self.breadcrumbsKey)
     }
 
@@ -122,7 +136,7 @@ final class AppLogger: ObservableObject {
         extra: [String: String] = [:]
     ) {
         let shortFile = URL(fileURLWithPath: file).lastPathComponent
-        let ts = Date().formatted(.iso8601)
+        let ts = Self.preciseISO8601Now()
         let entry = LogEntry(level: level, category: category, message: message,
                              file: shortFile, line: line, timestamp: ts, extra: extra)
         Task { @MainActor [weak self] in self?._append(entry) }

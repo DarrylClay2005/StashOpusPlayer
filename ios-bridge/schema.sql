@@ -193,6 +193,15 @@ CREATE TABLE IF NOT EXISTS ios_app_logs (
 CREATE INDEX IF NOT EXISTS ios_app_logs_idx_level ON ios_app_logs (level);
 CREATE INDEX IF NOT EXISTS ios_app_logs_idx_created ON ios_app_logs (created_at);
 CREATE INDEX IF NOT EXISTS ios_app_logs_idx_user ON ios_app_logs (user_id);
+-- `timestamp` (the client's own capture-time, now millisecond-precision —
+-- see AppLogger.preciseISO8601Now()) is what queries should actually sort/
+-- filter by for a true causal reconstruction of events — `created_at` is
+-- only WHEN the batch upload happened to land server-side (client batches
+-- + flushes every 30s), which can trail the real event by up to that whole
+-- window and collapses a burst of real events into one insert-time cluster.
+-- Only `created_at` had an index before, silently steering every ad-hoc
+-- debugging query onto the wrong column purely because it was the fast one.
+CREATE INDEX IF NOT EXISTS ios_app_logs_idx_timestamp ON ios_app_logs (timestamp);
 -- Feature: full-log admin audit browser (GET /admin/api/logs) — previously
 -- only level='error' rows were ever queryable via the dashboard
 -- (/admin/api/errors); auditing needs to filter by category too (e.g. "show
