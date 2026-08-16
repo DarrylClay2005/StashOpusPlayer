@@ -45,9 +45,29 @@ enum LumisoundLockFormat {
     /// XOR is its own inverse — the exact same operation both masks and
     /// unmasks, as long as it's applied to the payload starting at the same
     /// relative offset (0) both times, which `lock`/`unlock` below both do.
-    private static func xorInPlace(_ bytes: inout [UInt8]) {
-        for i in 0..<bytes.count {
-            bytes[i] ^= key[i % key.count]
+    ///
+    /// Operates directly on `data`'s own storage via an unsafe mutable
+    /// pointer instead of copying to `[UInt8]` first and indexing through
+    /// Swift's bounds-checked `Array` subscript with a `%` per byte — for a
+    /// large lossless track (hundreds of MB) that combination was slow
+    /// enough to matter: this runs on whatever thread calls `lock`/
+    /// `unlock`, and at least one call site (`playableURL(for:)`, on the
+    /// main-thread playback scheduling path) can't easily be made async
+    /// without a much larger refactor of the audio scheduling code, so
+    /// shrinking the actual wall-clock cost of the XOR pass itself is the
+    /// lower-risk lever available right now for how long that blocks the
+    /// UI. Confirmed via field logs to correlate with real freezes.
+    private static func xorInPlace(_ data: inout Data) {
+        let keyBytes = key
+        let keyCount = keyBytes.count
+        data.withUnsafeMutableBytes { (raw: UnsafeMutableRawBufferPointer) in
+            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+            var k = 0
+            for i in 0..<raw.count {
+                base[i] ^= keyBytes[k]
+                k += 1
+                if k == keyCount { k = 0 }
+            }
         }
     }
 
@@ -69,11 +89,10 @@ enum LumisoundLockFormat {
     /// verifying the locked copy actually round-trips (see
     /// `LumisoundExclusiveExtensionService.convert`).
     static func lock(plainURL: URL, to lockedURL: URL) -> Bool {
-        guard let plainData = try? Data(contentsOf: plainURL) else { return false }
-        var bytes = [UInt8](plainData)
+        guard var bytes = try? Data(contentsOf: plainURL) else { return false }
         xorInPlace(&bytes)
         var out = Data(magic)
-        out.append(contentsOf: bytes)
+        out.append(bytes)
         do {
             try out.write(to: lockedURL, options: .atomic)
             return true
@@ -107,10 +126,10 @@ enum LumisoundLockFormat {
                 return false
             }
         }
-        var bytes = [UInt8](raw.suffix(from: magic.count))
+        var bytes = raw.suffix(from: magic.count)
         xorInPlace(&bytes)
         do {
-            try Data(bytes).write(to: outURL, options: .atomic)
+            try bytes.write(to: outURL, options: .atomic)
             return true
         } catch {
             appWarn("LumisoundLockFormat.unlock: write failed for \(lockedURL.lastPathComponent) (\(bytes.count)B) -> \(outURL.path): \(error.localizedDescription)", category: "audio")
