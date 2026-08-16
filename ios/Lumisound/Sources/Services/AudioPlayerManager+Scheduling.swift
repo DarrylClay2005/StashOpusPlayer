@@ -110,6 +110,28 @@ extension AudioPlayerManager {
             return
         }
 
+        // A locked (.lms) track whose playable cache isn't warm yet would
+        // otherwise pay for the full unlock (read + XOR + write the WHOLE
+        // file — hundreds of MB for a lossless track) synchronously inline
+        // below, on whatever thread called scheduleCurrent — in practice
+        // the main thread, confirmed in the field as a real freeze/crash
+        // source. Warm it off-thread first and re-enter once ready; once
+        // warm (the common case after the very first play, or once
+        // gapless/crossfade's own next-track prewarm has already run) this
+        // check is just a cheap stat and falls straight through to the
+        // existing synchronous path unchanged.
+        if LumisoundExclusiveExtensionService.isConverted(url),
+           !LumisoundExclusiveExtensionService.hasWarmPlayableCache(for: url) {
+            let gen = scheduleGeneration &+ 1
+            scheduleGeneration = gen
+            Task { [weak self] in
+                await LumisoundExclusiveExtensionService.prewarmPlayableURL(for: url)
+                guard let self, self.scheduleGeneration == gen else { return }
+                self.scheduleCurrent(from: startTime)
+            }
+            return
+        }
+
         // Local file — schedule directly (native format, no transcoding needed).
         tearDownOpusPlayer()
         do {
@@ -150,6 +172,7 @@ extension AudioPlayerManager {
             // `beginCrossfade` can read a tempo synchronously once it fires.
             prewarmBPM(for: currentSong)
             prewarmBPM(for: peekNextSong())
+            prewarmPlayableCache(for: peekNextSong())
 
             // Smart Auto Crossfade reads the live analyzer's overallLevel the
             // instant beginCrossfade() fires (see smartFadeDuration) to react
@@ -324,6 +347,7 @@ extension AudioPlayerManager {
             // `beginCrossfade` can read a tempo synchronously once it fires.
             prewarmBPM(for: currentSong)
             prewarmBPM(for: peekNextSong())
+            prewarmPlayableCache(for: peekNextSong())
 
             // Crossfade timer — same logic as scheduleCurrent.
             if audioSettings.crossfadeActive && audioSettings.crossfadeDuration > 0 {

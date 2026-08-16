@@ -109,6 +109,7 @@ extension AudioPlayerManager {
         // started; warm the one after it now so its tempo is ready for the
         // next crossfade.
         prewarmBPM(for: peekNextSong())
+        prewarmPlayableCache(for: peekNextSong())
 
         // Arm the crossfade-start timer for the track that just became current —
         // mirroring the setup `scheduleCurrent` does for the very first track.
@@ -270,6 +271,17 @@ extension AudioPlayerManager {
                 }
             }
         }
+    }
+
+    /// Same shape/reasoning as `prewarmBPM` — unlocks a locked (.lms) song's
+    /// playable cache off-thread ahead of time, so when gapless/crossfade
+    /// (or the next `scheduleCurrent` once this song becomes current) needs
+    /// it, the synchronous `playableURL(for:)` call is guaranteed to hit
+    /// the already-warm fast path instead of doing the full unlock inline.
+    /// Fire-and-forget, no-op if already warm or not a locked track.
+    func prewarmPlayableCache(for song: Song?) {
+        guard let song, let url = song.url else { return }
+        Task { await LumisoundExclusiveExtensionService.prewarmPlayableURL(for: url) }
     }
 
     /// If "Auto EQ" is enabled, switches the EQ preset to match the current

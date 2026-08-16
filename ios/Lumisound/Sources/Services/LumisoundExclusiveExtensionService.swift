@@ -143,6 +143,41 @@ enum LumisoundExclusiveExtensionService {
         return outURL
     }
 
+    /// Cheap, synchronous check for whether `playableURL(for:)` can already
+    /// return a warm cached copy without doing any unlock work — mirrors
+    /// exactly the cache-hit condition inside `playableURL` itself (a
+    /// `stat` on the source and the cache entry, no file content read).
+    /// Lets a timing-sensitive caller (playback scheduling) decide to warm
+    /// the cache asynchronously FIRST instead of paying for the unlock
+    /// synchronously inline on its own thread — see `prewarmPlayableURL`.
+    static func hasWarmPlayableCache(for url: URL) -> Bool {
+        guard isConverted(url) else { return true }
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("lumisound_lms_playable", isDirectory: true)
+        let outURL = dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent)
+        guard fm.fileExists(atPath: outURL.path),
+              let sourceModDate = (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
+              let cacheModDate = (try? fm.attributesOfItem(atPath: outURL.path))?[.modificationDate] as? Date
+        else { return false }
+        return cacheModDate >= sourceModDate
+    }
+
+    /// Async, off-main-thread version of the unlock `playableURL(for:)`
+    /// does inline — a no-op (fast, cheap check only) if the cache is
+    /// already warm. Callers that can afford to `await` before they
+    /// actually need the file (gapless/crossfade pre-scheduling the NEXT
+    /// track, `scheduleCurrent` detecting a cold cache before its own
+    /// synchronous fast path) should call this first so the eventual
+    /// synchronous `playableURL(for:)` call is guaranteed to hit the warm
+    /// path instead of doing the full unlock on whatever thread — often the
+    /// main thread — happens to call it.
+    static func prewarmPlayableURL(for url: URL) async {
+        guard isConverted(url), !hasWarmPlayableCache(for: url) else { return }
+        _ = await Task.detached(priority: .utility) {
+            playableURL(for: url)
+        }.value
+    }
+
     /// The `<original-ext>.lms` path `convert(fileURL:)` would (or did)
     /// write `url`'s locked copy to — pure path math, no I/O. Exposed so
     /// callers (the local documents scan) can recognize "this file already
