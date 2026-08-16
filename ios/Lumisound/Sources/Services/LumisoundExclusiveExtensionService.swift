@@ -217,49 +217,67 @@ enum LumisoundExclusiveExtensionService {
         await convertLimiter.acquire()
         defer { Task { await convertLimiter.release() } }
 
-        let beforeBytes = (try? fm.attributesOfItem(atPath: fileURL.path))?[.size] as? Int64 ?? -1
-        appLog("LumisoundExclusiveExtensionService: locking \(fileURL.lastPathComponent) (\(beforeBytes) bytes, ext=\(fileURL.pathExtension.lowercased())) -> \(newURL.lastPathComponent)", category: "background")
+        // The actual lock/verify work below is synchronous CPU+I/O (XOR
+        // over the WHOLE file — up to hundreds of MB for a lossless FLAC
+        // track — plus a full unlock+AVAudioFile-decode round-trip to
+        // verify it) with no `await` inside it, so it doesn't naturally
+        // yield anywhere. `convert` itself carries no actor annotation,
+        // but callers like `finalizeAndLockDownload` are on `StreamingService`
+        // which IS `@MainActor` — a nonisolated async function called from
+        // an actor-isolated context doesn't automatically hop off that
+        // actor's executor for its synchronous stretches between
+        // suspension points, so this was running ON THE MAIN THREAD,
+        // blocking the entire UI for as long as the lock took. Confirmed
+        // in the field: a session-ending freeze/crash landed right after a
+        // 674MB FLAC lock in the log stream, with the classic "only a
+        // Core-Animation-driven spinner keeps moving" symptom of a fully
+        // blocked main thread. `Task.detached` forces genuine off-main
+        // execution regardless of what actor called this.
+        return await Task.detached(priority: .utility) {
+            let beforeBytes = (try? fm.attributesOfItem(atPath: fileURL.path))?[.size] as? Int64 ?? -1
+            appLog("LumisoundExclusiveExtensionService: locking \(fileURL.lastPathComponent) (\(beforeBytes) bytes, ext=\(fileURL.pathExtension.lowercased())) -> \(newURL.lastPathComponent)", category: "background")
 
-        guard LumisoundLockFormat.lock(plainURL: fileURL, to: newURL) else {
-            appWarn("LumisoundExclusiveExtensionService: lock failed for \(fileURL.lastPathComponent)", category: "background")
-            return nil
-        }
-        let lockedBytes = (try? fm.attributesOfItem(atPath: newURL.path))?[.size] as? Int64 ?? -1
+            guard LumisoundLockFormat.lock(plainURL: fileURL, to: newURL) else {
+                appWarn("LumisoundExclusiveExtensionService: lock failed for \(fileURL.lastPathComponent)", category: "background")
+                return nil
+            }
+            let lockedBytes = (try? fm.attributesOfItem(atPath: newURL.path))?[.size] as? Int64 ?? -1
 
-        // Verify the locked file actually round-trips before trusting it
-        // with the original's removal — never delete on faith. Must keep
-        // `fileURL`'s REAL extension (opus/flac/mp3/m4a/...), not a
-        // hardcoded ".m4a" — AVAudioFile (which `isValidAudioFile` reads
-        // through) selects its container parser from the file extension,
-        // so verifying real opus/flac bytes under a fake ".m4a" name would
-        // always misreport them as unreadable.
-        let verifyURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension(fileURL.pathExtension)
-        defer { try? fm.removeItem(at: verifyURL) }
-        guard LumisoundLockFormat.unlock(lockedURL: newURL, to: verifyURL),
-              CorruptFileFinderService.isValidAudioFile(at: verifyURL) else {
-            appWarn("LumisoundExclusiveExtensionService: locked file failed round-trip verification for \(fileURL.lastPathComponent) — removing", category: "background")
-            try? fm.removeItem(at: newURL)
-            return nil
-        }
+            // Verify the locked file actually round-trips before trusting it
+            // with the original's removal — never delete on faith. Must keep
+            // `fileURL`'s REAL extension (opus/flac/mp3/m4a/...), not a
+            // hardcoded ".m4a" — AVAudioFile (which `isValidAudioFile` reads
+            // through) selects its container parser from the file extension,
+            // so verifying real opus/flac bytes under a fake ".m4a" name would
+            // always misreport them as unreadable.
+            let verifyURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(fileURL.pathExtension)
+            defer { try? fm.removeItem(at: verifyURL) }
+            guard LumisoundLockFormat.unlock(lockedURL: newURL, to: verifyURL),
+                  CorruptFileFinderService.isValidAudioFile(at: verifyURL) else {
+                appWarn("LumisoundExclusiveExtensionService: locked file failed round-trip verification for \(fileURL.lastPathComponent) — removing", category: "background")
+                try? fm.removeItem(at: newURL)
+                return nil
+            }
 
-        // Best-effort, but no longer SILENTLY best-effort: if this fails
-        // (permissions, the file briefly busy, etc.), the old pre-conversion
-        // file is left behind on disk alongside the new .lms one — the next
-        // local documents scan used to re-import it as a brand new song,
-        // permanently duplicating every track that hit this. That scan now
-        // recognizes and cleans up exactly this leftover (see
-        // performLocalDocumentsScan), so this failing is self-healing rather
-        // than a permanent duplicate — but it's still worth knowing about.
-        var originalRemoved = true
-        do {
-            try fm.removeItem(at: fileURL)
-        } catch {
-            originalRemoved = false
-            appWarn("LumisoundExclusiveExtensionService: could not remove pre-conversion file \(fileURL.lastPathComponent) after successful convert: \(error.localizedDescription)", category: "background")
-        }
-        appLog("LumisoundExclusiveExtensionService: converted+locked \(newURL.lastPathComponent) — before=\(beforeBytes)B, locked=\(lockedBytes)B, verified=true, original-removed=\(originalRemoved)", category: "background")
-        return newURL
+            // Best-effort, but no longer SILENTLY best-effort: if this fails
+            // (permissions, the file briefly busy, etc.), the old pre-conversion
+            // file is left behind on disk alongside the new .lms one — the next
+            // local documents scan used to re-import it as a brand new song,
+            // permanently duplicating every track that hit this. That scan now
+            // recognizes and cleans up exactly this leftover (see
+            // performLocalDocumentsScan), so this failing is self-healing rather
+            // than a permanent duplicate — but it's still worth knowing about.
+            var originalRemoved = true
+            do {
+                try fm.removeItem(at: fileURL)
+            } catch {
+                originalRemoved = false
+                appWarn("LumisoundExclusiveExtensionService: could not remove pre-conversion file \(fileURL.lastPathComponent) after successful convert: \(error.localizedDescription)", category: "background")
+            }
+            appLog("LumisoundExclusiveExtensionService: converted+locked \(newURL.lastPathComponent) — before=\(beforeBytes)B, locked=\(lockedBytes)B, verified=true, original-removed=\(originalRemoved)", category: "background")
+            return newURL
+        }.value
     }
 
     /// Migrates an already-`.lms`-marked file whose bytes are still a
