@@ -154,6 +154,46 @@ enum LumisoundExclusiveExtensionService {
         return url.appendingPathExtension(marker)
     }
 
+    /// Caps how many `convert` calls do their actual lock work at once,
+    /// GLOBALLY across every call site (fresh downloads via
+    /// `finalizeAndLockDownload`, the background conversion pass, pending-
+    /// download reconciliation) — independent of how many downloads the
+    /// SERVER runs concurrently (`YTDLP_MAX_CONCURRENT`). Locking XORs the
+    /// entire file (tens of MB for a lossless FLAC track) and then does a
+    /// full unlock+decode round-trip to verify it — real, unpaced CPU/
+    /// memory work on the phone. Each download pipeline already caps its
+    /// OWN concurrent downloads, but that cap is per-pipeline: multiple
+    /// tracked playlists (or auto-download + a manual "Download All")
+    /// running at once each start their own independent pipeline, so
+    /// raising server-side concurrency multiplied how many of these could
+    /// all land and start locking on-device at the exact same moment —
+    /// confirmed in the field as a direct contributor to crashes during
+    /// heavy download bursts. This limiter is the single shared choke
+    /// point that actually bounds that, regardless of how many pipelines
+    /// are feeding it.
+    private actor ConvertConcurrencyLimiter {
+        private let limit = 2
+        private var active = 0
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func acquire() async {
+            if active < limit {
+                active += 1
+                return
+            }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func release() {
+            if !waiters.isEmpty {
+                waiters.removeFirst().resume()
+            } else {
+                active -= 1
+            }
+        }
+    }
+    private static let convertLimiter = ConvertConcurrencyLimiter()
+
     /// LOCKS `fileURL`'s existing bytes (see `LumisoundLockFormat`) as-is
     /// into `<original-name>.<original-ext>.lms` — no re-encode, so the
     /// user's actual downloaded format (opus/flac/mp3/m4a/whatever the
@@ -173,6 +213,9 @@ enum LumisoundExclusiveExtensionService {
         guard !isConverted(fileURL), let newURL = expectedConvertedURL(for: fileURL) else { return nil }
         let fm = FileManager.default
         guard !fm.fileExists(atPath: newURL.path) else { return nil }
+
+        await convertLimiter.acquire()
+        defer { Task { await convertLimiter.release() } }
 
         let beforeBytes = (try? fm.attributesOfItem(atPath: fileURL.path))?[.size] as? Int64 ?? -1
         appLog("LumisoundExclusiveExtensionService: locking \(fileURL.lastPathComponent) (\(beforeBytes) bytes, ext=\(fileURL.pathExtension.lowercased())) -> \(newURL.lastPathComponent)", category: "background")
