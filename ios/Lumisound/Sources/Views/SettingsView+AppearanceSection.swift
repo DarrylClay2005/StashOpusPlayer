@@ -40,6 +40,25 @@ extension SettingsView {
                     }
                 }
             }
+
+            // Navbar mode — same setting Now Playing's own toggle controls
+            // (see NowPlayingView's "Navbar Mode" row), sharing one
+            // @AppStorage key so either surface always reflects the other's
+            // current choice.
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Navbar Mode", systemImage: "rectangle.bottomthird.inset.filled")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Picker("Navbar Mode", selection: $navbarDisplayMode) {
+                    ForEach(NavbarDisplayMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("Mini Player replaces the tab bar with artwork, a seeker, and transport controls whenever a song is loaded — the bar's size never changes, only what's inside it.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .padding(.vertical, 4)
         } header: {
             sectionHeader("Appearance", icon: "paintbrush.fill", tint: .purple)
         }

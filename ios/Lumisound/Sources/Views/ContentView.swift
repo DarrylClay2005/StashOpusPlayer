@@ -20,6 +20,33 @@ enum TabTransitionStyle: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+// MARK: - NavbarDisplayMode
+
+/// The two modes `CustomTabBar` can render as, without ever changing the
+/// oval bar's own footprint (height/shape) — only what's drawn inside it.
+/// User-switchable from both Settings (Appearance) and Now Playing, sharing
+/// the same `@AppStorage` key so either surface always reflects the other's
+/// current choice.
+enum NavbarDisplayMode: String, CaseIterable, Identifiable {
+    /// The original always-visible 7-tab row.
+    case tabs
+    /// Replaces the tab row with a compact "Informative MiniPlayer" —
+    /// circular artwork, marquee title, seeker, and transport controls —
+    /// while a song is loaded. Falls back to `.tabs` content when nothing
+    /// is playing, since an empty mini player would be a dead end with no
+    /// way to navigate anywhere.
+    case miniPlayer
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .tabs:       return "Tabs"
+        case .miniPlayer: return "Mini Player"
+        }
+    }
+}
+
 struct ContentView: View {
 
     @EnvironmentObject private var player: AudioPlayerManager
@@ -457,6 +484,13 @@ struct CustomTabBar: View {
     let avatarImage: UIImage?
     let incomingFriendRequestCount: Int
 
+    @EnvironmentObject private var player: AudioPlayerManager
+    @EnvironmentObject private var progress: PlaybackProgress
+
+    /// Shared with Settings (Appearance) and Now Playing's own toggle — see
+    /// `NavbarDisplayMode`'s doc comment.
+    @AppStorage("navbarDisplayMode") private var navbarMode: NavbarDisplayMode = .tabs
+
     /// The bar's total footprint from the true bottom safe-area edge
     /// (`.frame(height:)` + its own bottom `.padding`) — `MiniPlayerBar`
     /// reserves this much extra bottom padding so it always renders above
@@ -489,6 +523,29 @@ struct CustomTabBar: View {
     }
 
     var body: some View {
+        // Both modes share this exact outer shape/size — height, capsule,
+        // padding — so switching modes (Settings, or Now Playing's own
+        // toggle) never changes the bar's footprint, only what's drawn
+        // inside it, per the redesign's core constraint.
+        Group {
+            if navbarMode == .miniPlayer, player.currentSong != nil {
+                miniPlayerContent
+            } else {
+                tabListContent
+            }
+        }
+        .frame(height: 58)
+        .adaptiveGlass(in: Capsule(), fallback: AppTheme.surface)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 2)
+        // Cross-fades between the two very different layouts instead of a
+        // hard cut — covers both an explicit mode switch and mini-player
+        // mode silently falling back to the tab row when playback stops.
+        .animation(.easeInOut(duration: 0.25), value: navbarMode)
+        .animation(.easeInOut(duration: 0.25), value: player.currentSong == nil)
+    }
+
+    private var tabListContent: some View {
         GeometryReader { outerGeo in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 2) {
@@ -507,10 +564,112 @@ struct CustomTabBar: View {
                 .padding(.horizontal, 6)
             }
         }
-        .frame(height: 58)
-        .adaptiveGlass(in: Capsule(), fallback: AppTheme.surface)
-        .padding(.horizontal, 10)
-        .padding(.bottom, 2)
+    }
+
+    // MARK: - Informative MiniPlayer mode
+
+    /// The compact "Informative MiniPlayer" that replaces the tab row when
+    /// `navbarMode == .miniPlayer` and a song is loaded: circular artwork,
+    /// a marquee title (auto-scrolls when too long — `MarqueeText` already
+    /// does exactly this, reused as-is) above a thin seeker, and
+    /// previous/play-pause/next transport controls — resized to fit this
+    /// bar's existing 58pt height rather than changing it.
+    private var miniPlayerContent: some View {
+        HStack(spacing: 10) {
+            miniPlayerArtwork
+                .contentShape(Rectangle())
+                .onTapGesture { selectedTab = 1 }
+
+            VStack(alignment: .leading, spacing: 4) {
+                if let song = player.currentSong {
+                    MarqueeText(text: song.displayName, font: .system(size: 12, weight: .semibold), color: AppTheme.textPrimary)
+                        .frame(height: 14)
+                }
+                miniPlayerSeeker
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { selectedTab = 1 }
+
+            miniPlayerTransportControls
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private var miniPlayerArtwork: some View {
+        Group {
+            if let song = player.currentSong {
+                ArtworkThumbnail(song: song, size: 40)
+            } else {
+                Circle().fill(AppTheme.surface)
+            }
+        }
+        .frame(width: 40, height: 40)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 1))
+    }
+
+    private var miniPlayerSeeker: some View {
+        GeometryReader { geo in
+            let fraction = progress.duration > 0 ? progress.position / progress.duration : 0
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(AppTheme.textSecondary.opacity(0.25))
+                    .frame(height: 3)
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [AppTheme.dynamicAccent, AppTheme.dynamicAccentSecondary],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
+                    .frame(width: geo.size.width * CGFloat(min(max(fraction, 0), 1)), height: 3)
+                    .animation(.linear(duration: 0.25), value: progress.position)
+            }
+        }
+        .frame(height: 3)
+    }
+
+    private var miniPlayerTransportControls: some View {
+        HStack(spacing: 14) {
+            Button {
+                player.skipToPrevious()
+            } label: {
+                Image(systemName: "backward.fill")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .buttonStyle(PressableButtonStyle())
+
+            Button {
+                player.togglePlayPause()
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [AppTheme.dynamicAccent, AppTheme.dynamicAccentSecondary],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 32, height: 32)
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .contentTransition(.opacity)
+                }
+            }
+            .buttonStyle(PressableButtonStyle())
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: player.isPlaying)
+
+            Button {
+                player.skipToNext()
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .buttonStyle(PressableButtonStyle())
+        }
     }
 
     @ViewBuilder

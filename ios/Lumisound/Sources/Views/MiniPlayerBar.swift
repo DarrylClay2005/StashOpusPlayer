@@ -15,6 +15,13 @@ struct MiniPlayerBar: View {
     // NowPlayingView instance alive.
     @AppStorage("selected_tab") private var selectedTab = 0
 
+    /// Shared with `CustomTabBar`/Settings/Now Playing — see
+    /// `NavbarDisplayMode`'s doc comment. When the oval tab bar itself is
+    /// showing the Informative MiniPlayer, this separate bar would be a
+    /// redundant second player stacked right above it, so it hides entirely
+    /// in that mode rather than just when nothing's playing.
+    @AppStorage("navbarDisplayMode") private var navbarMode: NavbarDisplayMode = .tabs
+
     private let playHaptic  = UIImpactFeedbackGenerator(style: .light)
     private let skipHaptic  = UIImpactFeedbackGenerator(style: .medium)
     private let heartHaptic = UIImpactFeedbackGenerator(style: .soft)
@@ -26,7 +33,7 @@ struct MiniPlayerBar: View {
     @State private var heartBurstOpacity: Double = 0
 
     var body: some View {
-        if player.currentSong != nil {
+        if player.currentSong != nil, navbarMode != .miniPlayer {
             barContent
         }
     }

@@ -27,6 +27,9 @@ struct SettingsView: View {
     /// Shared with `ContentView`, which hides the floating Car Mode button and
     /// disables auto-activation on car-stereo connection when this is off.
     @AppStorage("carModeEnabled") var carModeEnabled: Bool = false
+    /// Shared with `CustomTabBar`/`MiniPlayerBar`/Now Playing's own toggle —
+    /// see `NavbarDisplayMode`'s doc comment.
+    @AppStorage("navbarDisplayMode") var navbarDisplayMode: NavbarDisplayMode = .tabs
     @AppStorage("wifiOnlyDownloads.enabled") var wifiOnlyDownloadsEnabled: Bool = false
 
     /// When on, downloads ask the bridge to use aria2 (multi-connection) as the

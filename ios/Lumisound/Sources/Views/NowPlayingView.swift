@@ -211,6 +211,12 @@ struct NowPlayingView: View {
     // Queue preview panel
     @AppStorage("nowPlaying_showQueuePreview") var showQueuePreview = true
 
+    /// Shared with `CustomTabBar`/`MiniPlayerBar`/Settings' own toggle — see
+    /// `NavbarDisplayMode`'s doc comment. Exposed here too (overflow menu)
+    /// since switching to Mini Player mode is most useful right when you're
+    /// already looking at Now Playing.
+    @AppStorage("navbarDisplayMode") var navbarDisplayMode: NavbarDisplayMode = .tabs
+
     // Sleep Timer sheet
     @State var showSleepTimerSheet = false
 

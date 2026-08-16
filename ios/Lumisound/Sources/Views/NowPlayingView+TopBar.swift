@@ -97,6 +97,14 @@ extension NowPlayingView {
     var overflowMenu: some View {
         Menu {
             Button {
+                navbarDisplayMode = navbarDisplayMode == .miniPlayer ? .tabs : .miniPlayer
+            } label: {
+                Label(
+                    navbarDisplayMode == .miniPlayer ? "Switch to Tab Bar" : "Switch to Mini Player Navbar",
+                    systemImage: navbarDisplayMode == .miniPlayer ? "square.grid.2x2" : "rectangle.bottomthird.inset.filled"
+                )
+            }
+            Button {
                 showSleepTimerSheet = true
             } label: {
                 Label(sleepTimer.isActive ? "Edit Sleep Timer" : "Sleep Timer", systemImage: "moon.zzz.fill")
