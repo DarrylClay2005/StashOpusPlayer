@@ -112,7 +112,19 @@ enum LiveActivityManager {
             appWarn("LiveActivityManager: ending \(orphans.count) orphaned activity(s) from prior session(s)", category: "widget")
             Task {
                 for orphan in orphans {
-                    await orphan.end(using: orphan.content.state, dismissalPolicy: .immediate)
+                    // `.content` (to resubmit the orphan's own current state
+                    // while ending it) needs iOS 16.2 — this enum's own
+                    // minimum is 16.1, so that read isn't always available.
+                    // Ending is what actually matters here (freeing the slot
+                    // for a NEW request); a nil-state end on older OSes just
+                    // means the dismissed activity's last frame doesn't get
+                    // touched up first, which nobody sees since it's already
+                    // being dismissed immediately.
+                    if #available(iOS 16.2, *) {
+                        await orphan.end(using: orphan.content.state, dismissalPolicy: .immediate)
+                    } else {
+                        await orphan.end(using: nil, dismissalPolicy: .immediate)
+                    }
                 }
             }
         }
