@@ -228,7 +228,19 @@ final class AppLogger: ObservableObject {
         do {
             req.httpBody = try JSONEncoder().encode(entries)
             let (_, resp) = try await URLSession.shared.data(for: req)
-            if (resp as? HTTPURLResponse)?.statusCode != 200 {
+            // The bridge's /internal/logs returns 204 No Content on success
+            // (see ios-bridge/main.py), not 200 — this checked for an exact
+            // 200 match, so EVERY successful upload was misread as a
+            // failure. The "failed" branch shoves the whole just-sent batch
+            // back into `buffer`, so the same entries got endlessly
+            // re-sent every 30s flush forever (capped at maxBuffer, so it
+            // couldn't grow past that, but never actually drained either)
+            // — real client-observed symptom: log uploads appearing to
+            // stall/go silent while the app kept working fine otherwise,
+            // since this endless resend/regrow cycle could itself stall on
+            // a big enough requeued payload.
+            let statusCode = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if !(200..<300).contains(statusCode) {
                 let requeue = entries.suffix(maxBuffer - buffer.count)
                 buffer.insert(contentsOf: requeue, at: 0)
             }
