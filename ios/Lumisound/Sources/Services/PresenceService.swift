@@ -116,7 +116,14 @@ final class PresenceService: ObservableObject {
         }
         friendsPollTimer = Timer.scheduledTimer(withTimeInterval: Self.friendsPollInterval, repeats: true) { [weak self, weak account] _ in
             Task { @MainActor [weak self, weak account] in
-                guard let self, let account, account.isLoggedIn else { return }
+                // Optimization pass: this used to fire an HTTP request every
+                // 30s indefinitely while backgrounded (this app supports
+                // background audio playback, so "backgrounded" is a common,
+                // long-lived state, not a brief transient one) — matches
+                // `heartbeatTimer`'s existing `applicationState == .active`
+                // gate right above this function.
+                guard let self, let account, account.isLoggedIn,
+                      UIApplication.shared.applicationState == .active else { return }
                 await self.fetchFriendsPresence(account: account)
             }
         }

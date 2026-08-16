@@ -88,6 +88,14 @@ final class PhoneWatchSync: NSObject, ObservableObject {
         accountHandoffTimer?.invalidate()
         pushAccountHandoffIfNeeded()
         accountHandoffTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            // Optimization pass: this ticked every 15s regardless of
+            // foreground state — cheap per-tick (a couple of property
+            // comparisons once activationState is confirmed), but with no
+            // gate at all it ran indefinitely during background audio
+            // playback, a common long-lived state for this app. Same
+            // `applicationState == .active` gate PresenceService's
+            // heartbeat/friends-poll timers already use.
+            guard UIApplication.shared.applicationState == .active else { return }
             Task { @MainActor in self?.pushAccountHandoffIfNeeded() }
         }
     }
