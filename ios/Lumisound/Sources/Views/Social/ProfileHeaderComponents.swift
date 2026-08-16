@@ -338,6 +338,16 @@ struct ProfileInfoCard<Content: View>: View {
     let tint: Color
     private let content: Content
 
+    /// "Open up ALOT more customization to the profiles" — one global,
+    /// user-chosen corner radius for every info card on the profile
+    /// (Bio, Badges, Streak, About You, etc. all route through this same
+    /// type), set from ProfileView's "Card Style" picker. `@AppStorage`
+    /// directly on a leaf component (rather than threading a parameter
+    /// through every one of this type's ~15 call sites) is the same
+    /// "shared key, read wherever it's needed" pattern already used for
+    /// Navbar Mode across CustomTabBar/MiniPlayerBar/Settings/Now Playing.
+    @AppStorage("profileCardCornerRadius") private var cornerRadius: Double = 16
+
     init(title: String? = nil, icon: String? = nil, tint: Color, @ViewBuilder content: () -> Content) {
         self.title = title
         self.icon = icon
@@ -366,7 +376,7 @@ struct ProfileInfoCard<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .adaptiveGlass(
             tint: tint.opacity(0.14),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous),
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
             fallback: AppTheme.surface
         )
         .padding(.horizontal, 16)

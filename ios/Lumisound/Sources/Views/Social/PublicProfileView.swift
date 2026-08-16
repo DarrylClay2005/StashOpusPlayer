@@ -163,7 +163,7 @@ struct PublicProfileView: View {
 
                         if let bio = profile.bio, !bio.isEmpty {
                             ProfileInfoCard(title: "Bio / Status", icon: "text.quote", tint: mainAccentColor) {
-                                Text(bio)
+                                bioText(bio)
                                     .font(AppTheme.bodyFont(size: 14))
                                     .foregroundStyle(AppTheme.textPrimary)
                             }
@@ -438,6 +438,24 @@ struct PublicProfileView: View {
                 }
             }
         }
+    }
+
+    /// "Open up ALOT more customization to the profiles" — light Markdown
+    /// (bold/italic/links only, no headers/lists/block quotes — those would
+    /// look out of place in a short bio) instead of always-plain text.
+    /// `AttributedString(markdown:)` (not `Text(LocalizedStringKey:)`, which
+    /// would treat arbitrary user text as a LOCALIZATION KEY — format
+    /// specifiers like a literal "%" in someone's bio could then be
+    /// misinterpreted) falls back to the raw string on a parse failure
+    /// rather than showing nothing.
+    private func bioText(_ bio: String) -> Text {
+        if let attributed = try? AttributedString(
+            markdown: bio,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return Text(attributed)
+        }
+        return Text(bio)
     }
 
     private func postComment() async {

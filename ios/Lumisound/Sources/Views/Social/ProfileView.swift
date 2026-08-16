@@ -29,6 +29,12 @@ struct ProfileView: View {
     // MARK: Feature: profile-customization-5
     @State private var avatarDecoration: AvatarDecorationStyle = .none
     @State private var profileEffect: ProfileEffectStyle = .none
+    /// Local display preference (not synced server-side — how the cards
+    /// render on THIS device), shared with `ProfileInfoCard` directly via
+    /// the same `@AppStorage` key rather than round-tripping through the
+    /// profile save/load network cycle like the accent-color/avatar
+    /// settings above do.
+    @AppStorage("profileCardCornerRadius") private var profileCardCornerRadius: Double = 16
     @State private var showTopGenres: Bool = false
     @State private var showGuestbook: Bool = true
     @State private var topGenres: [String] = []
@@ -274,6 +280,9 @@ struct ProfileView: View {
                                 if newValue.count > 280 { draftBio = String(newValue.prefix(280)) }
                             }
                         HStack {
+                            Text("**Bold**, *italic*, and [links](url) are supported.")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.textSecondary.opacity(0.7))
                             Spacer()
                             Text("\(draftBio.count)/280")
                                 .font(AppTheme.monoFont(size: 11))
@@ -346,6 +355,19 @@ struct ProfileView: View {
                         }
                         .pickerStyle(.segmented)
                         .padding(.top, 10)
+                    }
+
+                    // MARK: Card style — corner radius for every info card
+                    // on the profile (Bio, Badges, Streak, etc. — see
+                    // ProfileInfoCard). A local display preference, not
+                    // synced/saved with the rest of this screen.
+                    ProfileInfoCard(title: "Card Style", icon: "rectangle.roundedtop", tint: mainAccentColor) {
+                        Picker("Card Style", selection: $profileCardCornerRadius) {
+                            Text("Sharp").tag(4.0)
+                            Text("Soft").tag(16.0)
+                            Text("Round").tag(28.0)
+                        }
+                        .pickerStyle(.segmented)
                     }
 
                     // MARK: Avatar frame — purely cosmetic, client-rendered.
