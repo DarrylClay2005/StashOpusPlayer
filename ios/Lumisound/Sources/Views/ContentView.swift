@@ -47,6 +47,31 @@ enum NavbarDisplayMode: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - NavbarSelectionStyle
+
+/// Customization option for `CustomTabBar`'s `.tabs` mode — how the
+/// currently-selected tab is highlighted. Part of "give users customization
+/// options" for that mode, alongside `showTabLabels` below.
+enum NavbarSelectionStyle: String, CaseIterable, Identifiable {
+    /// The original look: a small glass "bubble" behind just the icon.
+    case glassPill
+    /// A thin colored line under the whole button (icon + label).
+    case underline
+    /// A full capsule background behind the whole button, matching the
+    /// Settings screen's own tab-picker style (see `SettingsView.tabPicker`).
+    case filledCapsule
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .glassPill:     return "Glass Pill"
+        case .underline:     return "Underline"
+        case .filledCapsule: return "Filled Capsule"
+        }
+    }
+}
+
 struct ContentView: View {
 
     @EnvironmentObject private var player: AudioPlayerManager
@@ -491,6 +516,11 @@ struct CustomTabBar: View {
     /// `NavbarDisplayMode`'s doc comment.
     @AppStorage("navbarDisplayMode") private var navbarMode: NavbarDisplayMode = .tabs
 
+    /// Tab-bar-mode customization, both set from Settings (Appearance) — see
+    /// `NavbarSelectionStyle`'s doc comment.
+    @AppStorage("navbarShowTabLabels") private var showTabLabels: Bool = true
+    @AppStorage("navbarSelectionStyle") private var selectionStyle: NavbarSelectionStyle = .glassPill
+
     /// The bar's total footprint from the true bottom safe-area edge
     /// (`.frame(height:)` + its own bottom `.padding`) — `MiniPlayerBar`
     /// reserves this much extra bottom padding so it always renders above
@@ -674,6 +704,7 @@ struct CustomTabBar: View {
 
     @ViewBuilder
     private func tabButton(_ spec: TabSpec) -> some View {
+        let isSelected = selectedTab == spec.tag
         Button {
             withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
                 selectedTab = spec.tag
@@ -691,18 +722,42 @@ struct CustomTabBar: View {
                             .offset(x: 9, y: -6)
                     }
                 }
-                Text(spec.title)
-                    .font(.system(size: 10, weight: selectedTab == spec.tag ? .semibold : .regular))
-                    .lineLimit(1)
-                    .fixedSize()
+                // Tab-bar-mode customization: labels can be hidden entirely
+                // (icon-only bar) via Settings → Appearance.
+                if showTabLabels {
+                    Text(spec.title)
+                        .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                // Underline style's indicator — an empty-but-reserved-space
+                // capsule when unselected (rather than the row's height
+                // shifting depending on selection) keeps every button the
+                // same height regardless of which one is currently active.
+                if selectionStyle == .underline {
+                    Capsule()
+                        .fill(isSelected ? AppTheme.dynamicAccent : Color.clear)
+                        .frame(width: 18, height: 3)
+                }
             }
-            // Only the text/icon *color* changes for the selected tab —
-            // matching the plain native tab bar's look — the sliding glass
-            // highlight below is scoped to just the icon (see `iconView`),
-            // not this whole button, so it never covers the label.
-            .foregroundStyle(selectedTab == spec.tag ? AppTheme.dynamicAccent : AppTheme.textSecondary)
+            // Only the text/icon *color* changes for the selected tab in the
+            // default Glass Pill style — matching the plain native tab bar's
+            // look — the sliding glass highlight is scoped to just the icon
+            // (see `iconView`), not this whole button, so it never covers
+            // the label. The Filled Capsule style below is the one exception
+            // that highlights the whole button instead.
+            .foregroundStyle(isSelected ? AppTheme.dynamicAccent : AppTheme.textSecondary)
             .padding(.vertical, 6)
+            .padding(.horizontal, selectionStyle == .filledCapsule ? 6 : 0)
             .frame(minWidth: 58)
+            .background {
+                if selectionStyle == .filledCapsule, isSelected {
+                    Capsule()
+                        .fill(AppTheme.dynamicAccent.opacity(0.18))
+                        .matchedGeometryEffect(id: "selectedTabCapsule", in: selectionNamespace)
+                        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: selectedTab)
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -746,7 +801,10 @@ struct CustomTabBar: View {
         // text underneath it — this fixed frame is what prevents that.
         .frame(width: 34, height: 34)
         .background {
-            if isSelected {
+            // Scoped to the Glass Pill style specifically — the Underline
+            // and Filled Capsule styles (see `tabButton`) draw their own,
+            // differently-shaped selection indicators instead.
+            if isSelected, selectionStyle == .glassPill {
                 Color.clear
                     .adaptiveGlass(tint: AppTheme.dynamicAccent.opacity(0.5), in: Circle(), fallback: AppTheme.dynamicAccent.opacity(0.18))
                     .matchedGeometryEffect(id: "selectedTabPill", in: selectionNamespace)

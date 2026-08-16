@@ -30,6 +30,9 @@ struct SettingsView: View {
     /// Shared with `CustomTabBar`/`MiniPlayerBar`/Now Playing's own toggle —
     /// see `NavbarDisplayMode`'s doc comment.
     @AppStorage("navbarDisplayMode") var navbarDisplayMode: NavbarDisplayMode = .tabs
+    /// Tab-bar-mode customization — see `NavbarSelectionStyle`'s doc comment.
+    @AppStorage("navbarShowTabLabels") var navbarShowTabLabels: Bool = true
+    @AppStorage("navbarSelectionStyle") var navbarSelectionStyle: NavbarSelectionStyle = .glassPill
     @AppStorage("wifiOnlyDownloads.enabled") var wifiOnlyDownloadsEnabled: Bool = false
 
     /// When on, downloads ask the bridge to use aria2 (multi-connection) as the

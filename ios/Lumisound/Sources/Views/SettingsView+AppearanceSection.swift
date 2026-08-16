@@ -59,6 +59,28 @@ extension SettingsView {
                     .foregroundStyle(AppTheme.textSecondary)
             }
             .padding(.vertical, 4)
+
+            // Tab-bar-mode customization — only meaningful while Navbar Mode
+            // (above) is set to Tabs, but left always-visible/editable
+            // rather than hidden behind that choice, so switching back to
+            // Tabs mode later doesn't require re-discovering these.
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle(isOn: $navbarShowTabLabels) {
+                    Label("Show Tab Labels", systemImage: "textformat")
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .tint(.purple)
+
+                Label("Selection Style", systemImage: "circle.dashed")
+                    .foregroundStyle(AppTheme.textPrimary)
+                Picker("Selection Style", selection: $navbarSelectionStyle) {
+                    ForEach(NavbarSelectionStyle.allCases) { style in
+                        Text(style.displayName).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            .padding(.vertical, 4)
         } header: {
             sectionHeader("Appearance", icon: "paintbrush.fill", tint: .purple)
         }
