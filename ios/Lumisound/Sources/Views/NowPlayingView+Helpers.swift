@@ -89,6 +89,21 @@ extension NowPlayingView {
             }
         }
 
+        // 2b. A plain (unsynced) .txt file the user imported via "Import
+        // Lyrics File" (see importLyricsFile(from:) below) for a track
+        // whose lyrics have no timestamps to sync — LrcParser can't
+        // produce anything useful from untimed text (every line requires
+        // at least one [mm:ss] tag to survive parsing), so this is read
+        // as raw lines directly instead, same shape fetchLyricsOVH already
+        // uses for its own untimed results (time: 0 — rendered as a
+        // static, non-highlighted block by NowPlayingLyricsBody).
+        if let content = try? String(contentsOf: importedPlainLyricsURL(for: song), encoding: .utf8) {
+            lyricsLines = content.components(separatedBy: .newlines)
+                .map { LrcLine(time: 0, text: $0) }
+                .filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+            return
+        }
+
         // 3. LRCLIB — free, open lyrics database with synced LRC support
         //    Falls back to LyricsOVH if LRCLIB has no synced version.
         // Clear any lyrics left over from the previous track *before* kicking
@@ -133,5 +148,75 @@ extension NowPlayingView {
         return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Lyrics", isDirectory: true)
             .appendingPathComponent(filename)
+    }
+
+    /// Companion to `syncedLyricsURL(for:)` for a track whose imported
+    /// lyrics file had no LRC timestamps — same directory/sanitization,
+    /// just `.txt` instead of `.lrc` so the two never collide for the same
+    /// song (see `importLyricsFile(from:)` and `loadLyrics()`'s step 2b).
+    func importedPlainLyricsURL(for song: Song) -> URL {
+        let illegal  = CharacterSet(charactersIn: "/:\\*?\"<>|")
+        let filename = song.id.components(separatedBy: illegal).joined(separator: "_") + ".txt"
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Lyrics", isDirectory: true)
+            .appendingPathComponent(filename)
+    }
+
+    /// "Open up custom lyrics files injecting" — imports a user-picked
+    /// .lrc/.txt file (via the system document browser, see
+    /// `showLyricsFileImporter` on `NowPlayingView`) as this track's lyrics.
+    /// Detects which of the two it actually got by trying to parse LRC
+    /// timestamps out of it rather than trusting the file extension alone
+    /// — a renamed .txt full of real `[mm:ss]` tags still gets synced
+    /// playback, and a mislabeled .lrc with no tags still displays as plain
+    /// text instead of silently showing nothing.
+    func importLyricsFile(from pickedURL: URL) {
+        guard let song = player.currentSong else {
+            lyricsImportError = "No track is currently playing to attach these lyrics to."
+            return
+        }
+
+        // `.fileImporter` hands back a URL outside the app's own sandbox —
+        // reading it requires bracketing the read in a security-scoped
+        // resource access, matching every other document-picker import
+        // path elsewhere in this app.
+        let didStartAccess = pickedURL.startAccessingSecurityScopedResource()
+        defer { if didStartAccess { pickedURL.stopAccessingSecurityScopedResource() } }
+
+        guard let content = (try? String(contentsOf: pickedURL, encoding: .utf8))
+            ?? (try? String(contentsOf: pickedURL, encoding: .isoLatin1))
+        else {
+            lyricsImportError = "Couldn't read that file as text."
+            return
+        }
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            lyricsImportError = "That file appears to be empty."
+            return
+        }
+
+        do {
+            let lyricsDir = syncedLyricsURL(for: song).deletingLastPathComponent()
+            if !FileManager.default.fileExists(atPath: lyricsDir.path) {
+                try FileManager.default.createDirectory(at: lyricsDir, withIntermediateDirectories: true)
+            }
+
+            if !LrcParser.parse(content).isEmpty {
+                // Real synced content — save as this track's .lrc, and clear
+                // any stale plain-text import left over from a previous
+                // attempt so loadLyrics() can't find both and pick the
+                // wrong one on some future call.
+                try content.write(to: syncedLyricsURL(for: song), atomically: true, encoding: .utf8)
+                try? FileManager.default.removeItem(at: importedPlainLyricsURL(for: song))
+            } else {
+                // No LRC tags found anywhere in the file — treat as plain
+                // unsynced lyrics instead of silently discarding it.
+                try content.write(to: importedPlainLyricsURL(for: song), atomically: true, encoding: .utf8)
+                try? FileManager.default.removeItem(at: syncedLyricsURL(for: song))
+            }
+            loadLyrics()
+        } catch {
+            lyricsImportError = "Couldn't save that file: \(error.localizedDescription)"
+        }
     }
 }

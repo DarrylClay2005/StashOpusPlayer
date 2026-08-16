@@ -22,13 +22,28 @@ extension NowPlayingView {
                 }
                 .padding(.top, 8)
 
-                if !lyricsLines.isEmpty, player.currentSong != nil {
-                    Button {
-                        showLyricsSyncEditor = true
-                    } label: {
-                        Label("Sync Editor", systemImage: "waveform.and.mic")
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.dynamicAccent)
+                if player.currentSong != nil {
+                    HStack(spacing: 16) {
+                        if !lyricsLines.isEmpty {
+                            Button {
+                                showLyricsSyncEditor = true
+                            } label: {
+                                Label("Sync Editor", systemImage: "waveform.and.mic")
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.dynamicAccent)
+                            }
+                        }
+                        // Always available, even with no lyrics found yet —
+                        // "Open up custom lyrics files injecting": a user's
+                        // own .lrc (synced) or .txt (plain) file for this
+                        // track, picked from the system document browser.
+                        Button {
+                            showLyricsFileImporter = true
+                        } label: {
+                            Label("Import File", systemImage: "square.and.arrow.down")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.dynamicAccent)
+                        }
                     }
                     .padding(.top, 4)
                 }

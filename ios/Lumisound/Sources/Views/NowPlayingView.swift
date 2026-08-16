@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 // MARK: - Now Playing secondary-controls panel
 //
@@ -108,6 +109,12 @@ struct NowPlayingView: View {
     @State var showEQ = UserDefaults.standard.object(forKey: "lua_layout_eq_expanded") as? Bool ?? true
     @State var showLyrics = false
     @State var showLyricsSyncEditor = false
+    /// "Open up custom lyrics files injecting" — a user-supplied .lrc/.txt
+    /// file picked via the system document browser. See
+    /// `NowPlayingView+Lyrics.swift`'s import button and
+    /// `importLyricsFile(from:)` in NowPlayingView+Helpers.swift.
+    @State var showLyricsFileImporter = false
+    @State var lyricsImportError: String?
     // Bumped after add/remove so the view re-reads BookmarkStore (which
     // isn't an ObservableObject — it's a plain persisted store, same shape
     // as DownloadLedgerStore/PlayHistoryStore).
@@ -292,6 +299,31 @@ struct NowPlayingView: View {
             LyricsSyncEditorView(initialLines: lyricsLines)
                 .environmentObject(player)
                 .environmentObject(player.progress)
+        }
+        .fileImporter(
+            isPresented: $showLyricsFileImporter,
+            // .lrc has no registered system UTType, so it's declared here as
+            // a plain-text-conforming type by its filename extension — the
+            // same trick has no effect on files that already ARE .txt
+            // (.plainText matches those directly).
+            allowedContentTypes: [.plainText, UTType(filenameExtension: "lrc") ?? .plainText],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                importLyricsFile(from: url)
+            case .failure(let error):
+                lyricsImportError = error.localizedDescription
+            }
+        }
+        .alert("Couldn't Import Lyrics", isPresented: Binding(
+            get: { lyricsImportError != nil },
+            set: { if !$0 { lyricsImportError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(lyricsImportError ?? "")
         }
         .onChange(of: player.currentSong?.id) { newID in
             guard newID != nil else { return }
