@@ -214,18 +214,21 @@ ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(36) NULL;
 
 -- Feature: advanced usage/event logging (2026-08-16) — "timestamps, hour
 -- stamps, and what day" as genuinely queryable dimensions, not just buried
--- inside the `timestamp` string. Both derived from the client's own
--- capture-time `timestamp` column (not `created_at`, for the same
--- causal-reconstruction reasoning as the comment on that index above),
--- computed once at insert time (GENERATED ALWAYS ... STORED) rather than
--- repeating EXTRACT() in every analytics query. log_day_of_week follows
--- Postgres's own EXTRACT(DOW ...) convention: 0 = Sunday .. 6 = Saturday.
-ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS log_hour SMALLINT
-    GENERATED ALWAYS AS (EXTRACT(HOUR FROM timestamp)::SMALLINT) STORED;
-ALTER TABLE ios_app_logs ADD COLUMN IF NOT EXISTS log_day_of_week SMALLINT
-    GENERATED ALWAYS AS (EXTRACT(DOW FROM timestamp)::SMALLINT) STORED;
-CREATE INDEX IF NOT EXISTS ios_app_logs_idx_hour ON ios_app_logs (log_hour);
-CREATE INDEX IF NOT EXISTS ios_app_logs_idx_dow ON ios_app_logs (log_day_of_week);
+-- inside the `timestamp` string.
+--
+-- REVERTED same day: a first attempt used two GENERATED ALWAYS ... STORED
+-- columns (log_hour/log_day_of_week). Postgres has no "virtual" generated
+-- column option (unlike MySQL) — STORED is the only kind available, and
+-- adding one to an EXISTING table requires rewriting every row to backfill
+-- its computed value. ios_app_logs is large enough (extensive logging,
+-- short flush intervals) that this rewrite exceeded the bridge's DB query
+-- timeout during startup migration, crash-looping the whole service.
+-- log_hour/log_day_of_week are computed via plain EXTRACT() at query time
+-- instead — e.g. "SELECT EXTRACT(HOUR FROM timestamp), EXTRACT(DOW FROM
+-- timestamp) FROM ios_app_logs WHERE ..." — a small per-query cost instead
+-- of a large one-time table rewrite risk. The existing `timestamp` index
+-- (ios_app_logs_idx_timestamp, above) already makes range/bucket queries
+-- against it fast without needing dedicated hour/day-of-week columns.
 
 -- Collaborative playlist sharing (snapshot-based, bridge side)
 CREATE TABLE IF NOT EXISTS ios_shared_playlists (
