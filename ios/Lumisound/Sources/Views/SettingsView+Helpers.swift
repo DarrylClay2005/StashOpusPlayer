@@ -1,6 +1,26 @@
 import MediaPlayer
 import SwiftUI
 
+/// Settings redesign, part 2: each section's row background gets a very
+/// faint wash of that section's own `sectionHeader` tint (via
+/// `Color.mixed(with:amount:)`, the same blend helper Profile
+/// customization's decoration/effect overlays use) instead of every section
+/// sharing one flat `AppTheme.surface` — carries the "each category is
+/// visually its own color" idea from the header badges down into the row
+/// itself. The mix amount is deliberately small (6%) so it reads as a
+/// subtle color hint, not a colored card — this screen's `.listStyle(.plain)`
+/// was chosen specifically so sections stay a continuous surface rather than
+/// floating disconnected boxes (see `SettingsView.body`'s doc comment), and
+/// a strong per-section tint would fight that.
+///
+/// A free function (not a `SettingsView` extension method like
+/// `sectionHeader` above) — several settings screens (e.g.
+/// `NotificationsSettingsView`) are their own separate `View` types, not
+/// part of `SettingsView` itself, and still need this same helper.
+func tintedRowBackground(_ tint: Color) -> Color {
+    AppTheme.surface.mixed(with: tint, amount: 0.06)
+}
+
 extension SettingsView {
 
     // MARK: — Helpers
@@ -32,22 +52,6 @@ extension SettingsView {
                 .foregroundStyle(AppTheme.textSecondary)
                 .kerning(0.8)
         }
-    }
-
-    /// Settings redesign, part 2: each section's row background gets a very
-    /// faint wash of that section's own `sectionHeader` tint (via
-    /// `Color.mixed(with:amount:)`, the same blend helper Profile
-    /// customization's decoration/effect overlays use) instead of every
-    /// section sharing one flat `AppTheme.surface` — carries the "each
-    /// category is visually its own color" idea from the header badges down
-    /// into the row itself. The mix amount is deliberately small (6%) so it
-    /// reads as a subtle color hint, not a colored card — this screen's
-    /// `.listStyle(.plain)` was chosen specifically so sections stay a
-    /// continuous surface rather than floating disconnected boxes (see
-    /// `SettingsView.body`'s doc comment), and a strong per-section tint
-    /// would fight that.
-    func tintedRowBackground(_ tint: Color) -> Color {
-        AppTheme.surface.mixed(with: tint, amount: 0.06)
     }
 
     var mediaAccessStatusText: String {
