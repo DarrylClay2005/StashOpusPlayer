@@ -69,8 +69,25 @@ final class AppLogger: ObservableObject {
     /// alone — every event in a burst read as simultaneous. Millisecond
     /// resolution is enough to tell genuinely-ordered rapid events apart
     /// without bloating the payload the way full nanosecond precision would.
+    ///
+    /// NOTE: an earlier version of this used
+    /// `Date().formatted(.iso8601.time(includingFractionalSeconds: true))`
+    /// — `ISO8601FormatStyle.time(...)` is NOT additive the way it reads;
+    /// it replaces the whole format with a TIME-ONLY string ("04:19:48.331",
+    /// no date component at all), which the bridge's parser understandably
+    /// rejected outright — confirmed live via its "_parse_log_timestamp:
+    /// unparseable value" warnings, which is what caught this.
+    /// `ISO8601DateFormatter` with `.withFractionalSeconds` is the
+    /// reliable way to get a full, parseable date+time with sub-second
+    /// precision.
+    private static let preciseISO8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
     nonisolated static func preciseISO8601Now() -> String {
-        Date().formatted(.iso8601.time(includingFractionalSeconds: true))
+        preciseISO8601Formatter.string(from: Date())
     }
 
     // MARK: - Configuration

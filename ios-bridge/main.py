@@ -11174,12 +11174,10 @@ def _parse_log_timestamp(value) -> Optional[str]:
     actually happened in what order. `isoformat(sep=" ")` keeps whatever
     sub-second precision the client sent instead of discarding it."""
     if not isinstance(value, str):
-        logger.warning("_parse_log_timestamp: non-string value: %r", value)
         return None
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat(sep=" ")
     except ValueError:
-        logger.warning("_parse_log_timestamp: unparseable value: %r", value)
         return None
 
 
