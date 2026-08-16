@@ -52,7 +52,37 @@ extension LibraryManager {
         await performLocalDocumentsScan()
     }
 
+    /// Every completed download, missing-file self-heal, and several
+    /// `.onAppear`/`.task` view modifiers each trigger their own local scan
+    /// independently — under a burst of activity (a big batch download,
+    /// dozens of tracks completing within milliseconds of each other) field
+    /// logs showed FIVE OR MORE of these firing back-to-back in the same
+    /// batch, each doing a full detached filesystem walk plus per-file
+    /// metadata reads. `beginScan`/`endScan` only ever tracked a COUNT of
+    /// concurrent scans for the UI spinner — it never actually prevented
+    /// them from piling up. That's real, wasted concurrent work stacking up
+    /// exactly when the device is already under the most load, and lines up
+    /// with "the app freezes a lot with background downloads going on."
+    /// Coalesce concurrent NON-forced scans into a single shared execution
+    /// (the common case — every trigger above passes `force: false`);
+    /// `force: true` (the explicit Library "Refresh" button) always runs
+    /// its own fresh pass since that's a deliberate user action expecting
+    /// an immediate re-read, not a share of whatever else is in flight.
+    private static var inFlightScanTask: Task<Void, Never>?
+
     func performLocalDocumentsScan(force: Bool = false) async {
+        if !force, let existing = Self.inFlightScanTask {
+            appLog("performLocalDocumentsScan: already in flight, joining existing call instead of racing it", category: "library")
+            await existing.value
+            return
+        }
+        let task = Task { await self.runLocalDocumentsScan(force: force) }
+        if !force { Self.inFlightScanTask = task }
+        await task.value
+        if !force { Self.inFlightScanTask = nil }
+    }
+
+    private func runLocalDocumentsScan(force: Bool) async {
         appLog("Scanning local documents directory (force: \(force))", category: "library")
         guard FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first != nil else { return }
 
