@@ -4,11 +4,18 @@ import AVFoundation
 // MARK: - AudioEncoderService
 //
 // Converts Opus / WebM / OGG files to a format AVAudioFile can open.
-// Three-tier strategy, in order of preference:
+// Four-tier strategy, in order of preference:
 //   1. Native: AVAudioFile opens the file directly (iOS 16 handles many Opus files natively)
-//   2. Lossless: AVAssetReader decodes to 16-bit PCM → re-encoded as ALAC M4A
+//   2. Ogg-Opus, hand-decoded: AVFoundation cannot demux a raw Ogg container at all --
+//      OggOpusDemuxer + OpusPacketDecoder parse it and decode via AudioConverter's
+//      registered Opus codec ourselves, independent of AVAssetReader. Only applies to
+//      the `.opus`/`.ogg` extension case (a real Ogg container); WebM-Opus (itag 251,
+//      what "Best Quality" often resolves to) has no hand-rolled demuxer yet and falls
+//      through to tiers 3/4, which are known not to work for it -- see the doc comment
+//      on `oggOpusTranscode` for exactly why this tier is scoped this narrowly.
+//   3. Lossless: AVAssetReader decodes to 16-bit PCM → re-encoded as ALAC M4A
 //      Identical quality to the Opus decoder's output — no generation loss.
-//   3. Fallback: AVAssetExportSession → AAC M4A (for containers AVFoundation can't parse
+//   4. Fallback: AVAssetExportSession → AAC M4A (for containers AVFoundation can't parse
 //      natively, e.g. WebM). Opus is already lossy so the quality loss is negligible.
 //
 // Results are cached by file mtime + size.
@@ -46,10 +53,15 @@ final class AudioEncoderService {
             try? FileManager.default.removeItem(at: outURL)
         }
 
-        // Tier 2 — lossless: decode to PCM → ALAC (identical to Opus decoder output)
+        // Tier 2 — hand-decoded Ogg-Opus: AVFoundation can't demux a raw Ogg
+        // container at all, so this bypasses AVAssetReader/AVAssetExportSession
+        // entirely for this one container type. See `oggOpusTranscode`.
+        if await oggOpusTranscode(url, to: outURL, settings: Self.alacSettings) { return outURL }
+
+        // Tier 3 — lossless: decode to PCM → ALAC (identical to Opus decoder output)
         if await losslessTranscode(url, to: outURL) { return outURL }
 
-        // Tier 3 — fallback: AAC re-encode (works for WebM and other exotic containers)
+        // Tier 4 — fallback: AAC re-encode (works for WebM and other exotic containers)
         try? FileManager.default.removeItem(at: outURL)
         return await aacExport(url, to: outURL)
     }
@@ -82,6 +94,11 @@ final class AudioEncoderService {
     /// same depth of verification a download already gets, not less.
     func convertPermanently(_ url: URL, to destinationURL: URL) async -> Bool {
         try? FileManager.default.removeItem(at: destinationURL)
+        if await oggOpusTranscode(url, to: destinationURL, settings: Self.aacSettings),
+           CorruptFileFinderService.isValidAudioFile(at: destinationURL) {
+            return true
+        }
+        try? FileManager.default.removeItem(at: destinationURL)
         if await aacExport(url, to: destinationURL) != nil,
            CorruptFileFinderService.isValidAudioFile(at: destinationURL) {
             return true
@@ -89,6 +106,51 @@ final class AudioEncoderService {
         try? FileManager.default.removeItem(at: destinationURL)
         guard await decodeAndReencode(url, to: destinationURL, settings: Self.aacSettings) else { return false }
         return CorruptFileFinderService.isValidAudioFile(at: destinationURL)
+    }
+
+    // MARK: - Ogg-Opus hand-decoded tier
+
+    /// Demuxes a raw Ogg-Opus container (`OggOpusDemuxer`) and decodes its
+    /// packets (`OpusPacketDecoder`, via `AudioConverter`'s registered Opus
+    /// codec) entirely independent of `AVURLAsset`/`AVAssetReader`/
+    /// `AVAssetExportSession` -- none of which can open an Ogg container at
+    /// all on iOS, which is the actual root cause of Opus downloads only ever
+    /// playing through the reduced AVPlayer "compatibility mode" fallback.
+    ///
+    /// Deliberately scoped to Ogg containers only: this returns `false`
+    /// immediately (falling through to the existing AVAssetReader/
+    /// AVAssetExportSession tiers below, unchanged) for anything that isn't a
+    /// real Ogg file -- most concretely, WebM-Opus (YouTube's itag 251, what
+    /// "Best Quality" often resolves to server-side), which needs a
+    /// completely different EBML/Matroska container parser this tier does not
+    /// implement. `OggOpusDemuxer.parse` throwing `.notAnOggFile` on the
+    /// capture-pattern check is what makes this safe to just always attempt
+    /// rather than needing a separate "is this really Ogg" pre-check.
+    private func oggOpusTranscode(_ url: URL, to outURL: URL, settings: [String: Any]) async -> Bool {
+        guard let data = try? Data(contentsOf: url) else { return false }
+        guard let demuxed = try? OggOpusDemuxer.parse(data), !demuxed.packets.isEmpty else { return false }
+        guard let pcmBuffer = try? OpusPacketDecoder.decode(
+            packets: demuxed.packets,
+            opusHeadPacket: demuxed.opusHeadPacketData,
+            channelCount: demuxed.header.channelCount,
+            preSkip: demuxed.header.preSkip
+        ) else { return false }
+
+        try? FileManager.default.removeItem(at: outURL)
+        guard let outFile = try? AVAudioFile(
+            forWriting: outURL,
+            settings: settings,
+            commonFormat: .pcmFormatFloat32,
+            interleaved: false
+        ) else { return false }
+
+        do {
+            try outFile.write(from: pcmBuffer)
+        } catch {
+            try? FileManager.default.removeItem(at: outURL)
+            return false
+        }
+        return true
     }
 
     // MARK: - Lossless decode via AVAssetReader + AVAssetWriter
