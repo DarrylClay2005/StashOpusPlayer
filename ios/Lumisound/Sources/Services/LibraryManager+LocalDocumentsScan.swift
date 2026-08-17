@@ -195,18 +195,6 @@ extension LibraryManager {
         importedSongs.append(contentsOf: newSongs)
         importedSongs = Array(Dictionary(grouping: importedSongs, by: { song in song.url.map { $0.standardizedFileURL.absoluteString } ?? song.id }).compactMap { $0.value.first })
         rebuildAllSongs()
-
-        // Every downloadToLibrary() call site (search results, tracked-playlist
-        // auto-download, subscription downloads, folder restore) funnels through
-        // this scan rather than constructing a Song directly, so this is the one
-        // place that sees every freshly-downloaded file. Opus/webm/ogg downloads
-        // only ever play back through the reduced AVPlayer "compatibility mode"
-        // fallback (no EQ/pitch/crossfade/gapless/ReplayGain/effects) — silently
-        // re-encoding to AAC right away means the user never has to notice or
-        // manually hit "Convert for Compatibility" themselves.
-        for song in newSongs where song.usesCompatibilityFallbackFormat {
-            Task { await self.convertImportedSongFormat(songID: song.id) }
-        }
     }
 
     /// Shared by every local-file scan path (Documents, watched folders,
