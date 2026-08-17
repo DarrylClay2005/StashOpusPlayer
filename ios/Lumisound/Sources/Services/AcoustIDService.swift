@@ -63,9 +63,13 @@ final class AcoustIDService {
     /// reports no AcoustID key is set (HTTP 400) — see `Server error` mapping
     /// below, which surfaces the bridge's own "Add one in Settings" detail.
     func identify(song: Song) async throws -> Match {
-        guard let sourceURL = song.url, sourceURL.isFileURL else {
+        guard let rawURL = song.url, rawURL.isFileURL else {
             throw IdentifyError.noLocalFile
         }
+        // A `.lms`-locked url's on-disk bytes are XOR-masked and unreadable
+        // by AVURLAsset until unlocked -- without this, AcoustID identification
+        // threw .trimFailed for every locked track.
+        let sourceURL = LumisoundExclusiveExtensionService.playableURL(for: rawURL)
 
         let clipURL = try await trimmedClip(from: sourceURL)
         defer { try? FileManager.default.removeItem(at: clipURL) }

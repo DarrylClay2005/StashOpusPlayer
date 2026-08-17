@@ -127,7 +127,12 @@ actor BPMAnalyzerService {
     /// `PitchContourService` (hum-to-search) reuses this exact decode path
     /// rather than duplicating its own `AVAssetReader` boilerplate.
     static func decodeMono(url: URL, sampleRate: Double, maxSeconds: Double) async -> [Int16]? {
-        let asset = AVURLAsset(url: url)
+        // Shared decode path reused by tempo detection, Hum-to-Search
+        // (PitchContourService), and Skip Silent Intros (SilenceTrimAnalyzer)
+        // -- a `.lms`-locked url's on-disk bytes are XOR-masked and
+        // unreadable by AVURLAsset until unlocked, which silently defeated
+        // all three features for every locked track.
+        let asset = AVURLAsset(url: LumisoundExclusiveExtensionService.playableURL(for: url))
         guard let tracks = try? await asset.loadTracks(withMediaType: .audio),
               let track = tracks.first,
               let reader = try? AVAssetReader(asset: asset)

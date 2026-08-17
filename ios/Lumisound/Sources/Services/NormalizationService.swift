@@ -17,11 +17,16 @@ actor NormalizationService {
     /// Checks cache first; computes from audio samples on cache miss.
     /// Returns 0 if analysis is not possible (e.g. unsupported format like .opus).
     func gain(for url: URL) async -> Float {
+        // Keyed by the ORIGINAL url (stable identity across launches) even
+        // though `analyze` reads through the resolved/unlocked one below --
+        // the resolved path for a `.lms`-locked file is a temp unlock-cache
+        // location that isn't a stable identity to cache against.
         let key = stableKey(for: url)
         if let hit = cache[key] { return hit }
 
+        let readableURL = LumisoundExclusiveExtensionService.playableURL(for: url)
         let computed = await Task.detached(priority: .utility) {
-            NormalizationService.analyze(url: url)
+            NormalizationService.analyze(url: readableURL)
         }.value
 
         cache[key] = computed

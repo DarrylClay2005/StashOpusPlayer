@@ -112,8 +112,13 @@ extension LibraryManager {
     /// over automatically — re-applied at the end, same as
     /// `repairEmbeddedMetadata`/`convertToLumisoundExclusiveExtension` do.
     private func reEmbedMetadata(current: Song, url: URL, trackID: String, sourceURL: String) async -> Bool {
+        // `url`'s on-disk bytes are XOR-masked (and unreadable by
+        // AVAssetExportSession, which AudioTagWriter uses internally) if
+        // it's `.lms`-locked -- resolve before handing it off, same as every
+        // other raw-file read in this pipeline.
+        let readableURL = LumisoundExclusiveExtensionService.playableURL(for: url)
         guard let repairedURL = await AudioTagWriter.tag(
-            fileAt: url,
+            fileAt: readableURL,
             title: current.title, artist: current.artist, album: current.album,
             sourceTrackID: trackID,
             genre: current.genre, year: current.year, trackNumber: current.trackNumber
@@ -121,12 +126,49 @@ extension LibraryManager {
             appWarn("forceMetadataSync: re-embed failed for \(url.lastPathComponent)", category: "library")
             return false
         }
-        do {
-            _ = try FileManager.default.replaceItemAt(url, withItemAt: repairedURL)
-        } catch {
-            appWarn("forceMetadataSync: replaceItemAt failed for \(url.lastPathComponent): \(error.localizedDescription)", category: "library")
-            try? FileManager.default.removeItem(at: repairedURL)
-            return false
+        defer { try? FileManager.default.removeItem(at: repairedURL) }
+
+        let fm = FileManager.default
+        if LumisoundExclusiveExtensionService.isConverted(url) {
+            // `repairedURL` is PLAIN (unlocked) output -- writing it straight
+            // onto `url`'s `.lms` path would silently strip the file of its
+            // lock (no magic header), AND worse, corrupt it on the next
+            // playback attempt: `playableURL`/`LumisoundLockFormat.unlock`
+            // would XOR-mask bytes that are already plain, since it has no
+            // way to know the file stopped being genuinely locked. Re-lock
+            // to a temp file first and verify round-trip before swapping in,
+            // exactly like `LumisoundExclusiveExtensionService.relockLegacyFile`
+            // and `repairEmbeddedMetadata` do.
+            let lockedTempURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("lms")
+            let verifyURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(repairedURL.pathExtension)
+            defer {
+                try? fm.removeItem(at: lockedTempURL)
+                try? fm.removeItem(at: verifyURL)
+            }
+            let relockedOK = await Task.detached(priority: .utility) {
+                guard LumisoundLockFormat.lock(plainURL: repairedURL, to: lockedTempURL) else { return false }
+                guard LumisoundLockFormat.unlock(lockedURL: lockedTempURL, to: verifyURL),
+                      CorruptFileFinderService.isValidAudioFile(at: verifyURL) else { return false }
+                return true
+            }.value
+            guard relockedOK else {
+                appWarn("forceMetadataSync: re-lock or round-trip verification failed for \(url.lastPathComponent)", category: "library")
+                return false
+            }
+            do {
+                _ = try fm.replaceItemAt(url, withItemAt: lockedTempURL)
+            } catch {
+                appWarn("forceMetadataSync: replaceItemAt failed for \(url.lastPathComponent): \(error.localizedDescription)", category: "library")
+                return false
+            }
+        } else {
+            do {
+                _ = try fm.replaceItemAt(url, withItemAt: repairedURL)
+            } catch {
+                appWarn("forceMetadataSync: replaceItemAt failed for \(url.lastPathComponent): \(error.localizedDescription)", category: "library")
+                return false
+            }
         }
         LumisoundTrackTagger.tag(fileURL: url, trackID: trackID, sourceURL: sourceURL)
         return true

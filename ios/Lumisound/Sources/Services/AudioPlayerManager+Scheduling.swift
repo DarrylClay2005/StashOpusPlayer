@@ -258,8 +258,13 @@ extension AudioPlayerManager {
             // ReplayGain: read embedded REPLAYGAIN_TRACK_GAIN tag; fall back to RMS analysis
             // for files without a tag. Runs off the main thread to avoid blocking playback.
             if audioSettings.replayGainEnabled {
-                let asset = AVURLAsset(url: url)
-                let capturedURL = url
+                // See LumisoundExclusiveExtensionService.playableURL's doc
+                // comment -- a downloaded track's on-disk `.lms` bytes are
+                // XOR-masked and unreadable by AVURLAsset until unlocked;
+                // without this the embedded-tag read AND the RMS fallback
+                // both silently no-op for every locked track.
+                let capturedURL = LumisoundExclusiveExtensionService.playableURL(for: url)
+                let asset = AVURLAsset(url: capturedURL)
                 Task.detached(priority: .utility) { [weak self] in
                     let metadata = (try? await asset.load(.metadata)) ?? []
                     var gainDB: Float? = nil
@@ -381,10 +386,13 @@ extension AudioPlayerManager {
             }
             updateNowPlaying()
 
-            // ReplayGain from original file's metadata.
+            // ReplayGain from original file's metadata. See the matching
+            // comment on the other ReplayGain block in this file -- `url`
+            // here is the original (possibly `.lms`-locked) source, not the
+            // transcoded playback file, so it needs the same unlock.
             if audioSettings.replayGainEnabled {
-                let asset       = AVURLAsset(url: url)
-                let capturedURL = url
+                let capturedURL = LumisoundExclusiveExtensionService.playableURL(for: url)
+                let asset       = AVURLAsset(url: capturedURL)
                 Task.detached(priority: .utility) { [weak self] in
                     let metadata = (try? await asset.load(.metadata)) ?? []
                     var gainDB: Float?

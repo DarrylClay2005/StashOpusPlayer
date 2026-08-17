@@ -283,10 +283,29 @@ enum LumisoundTrackVaultService {
         }
         guard !legacyCandidates.isEmpty else { return }
 
+        // `relockLegacyFile` is a plain synchronous function (full-file XOR
+        // lock + a decode round-trip to verify) with no `await` inside it, so
+        // calling it directly here -- from this @MainActor function -- ran it
+        // ON THE MAIN THREAD with no natural yield point, exactly the bug
+        // `convert(fileURL:)` was fixed for elsewhere in this same file (see
+        // that function's doc comment: a 674MB FLAC lock froze the whole UI
+        // and was implicated in a session-ending crash). This loop had the
+        // identical shape and never got the same fix -- confirmed as the
+        // root cause of reported "track stops for 2+ seconds, UI freezes at
+        // the same time" symptoms, which fits exactly: this pass runs every
+        // 5 minutes regardless of playback state, and a multi-second
+        // synchronous block on the shared main actor stalls SwiftUI
+        // rendering AND any pending `@MainActor` audio-scheduling
+        // continuation at the same time. `Task.detached` forces genuine
+        // off-main execution for the heavy part; only the final tally/log
+        // stays on the main actor.
         var relocked = 0
         for (index, url) in legacyCandidates.enumerated() {
             if Task.isCancelled { break }
-            if LumisoundExclusiveExtensionService.relockLegacyFile(at: url) {
+            let didRelock = await Task.detached(priority: .utility) {
+                LumisoundExclusiveExtensionService.relockLegacyFile(at: url)
+            }.value
+            if didRelock {
                 relocked += 1
             }
             if (index + 1) % batchSize == 0 {

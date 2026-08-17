@@ -164,8 +164,13 @@ final class MoodPlaylistService: ObservableObject {
         // Only attempt for local file URLs to avoid slow network requests.
         guard url.isFileURL else { return nil }
 
+        // A `.lms`-locked url's on-disk bytes are XOR-masked and unreadable
+        // by AVURLAsset until unlocked -- without this, mood classification's
+        // BPM tier silently never fired for locked tracks (fell through to
+        // the keyword/duration heuristics instead).
+        let readableURL = LumisoundExclusiveExtensionService.playableURL(for: url)
         return await Task.detached(priority: .background) {
-            let asset = AVURLAsset(url: url)
+            let asset = AVURLAsset(url: readableURL)
             guard let metadata = try? await asset.load(.commonMetadata) else { return nil as Double? }
 
             for item in metadata {

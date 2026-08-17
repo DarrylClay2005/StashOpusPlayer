@@ -42,7 +42,7 @@ struct AudioFormatDetails: Equatable {
                let size = attrs[.size] as? Int64 {
                 fileSizeBytes = size
             }
-            if let file = try? AVAudioFile(forReading: url) {
+            if let file = try? AVAudioFile(forReading: LumisoundExclusiveExtensionService.playableURL(for: url)) {
                 let format = file.processingFormat
                 sampleRateHz = format.sampleRate
                 channelCount = Int(format.channelCount)

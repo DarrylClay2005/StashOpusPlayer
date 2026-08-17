@@ -194,19 +194,34 @@ extension LibraryManager {
         // pipeline exists for. Locked to a temp file first and only
         // swapped in via `replaceItemAt` once verified, matching
         // `LumisoundExclusiveExtensionService.relockLegacyFile`'s pattern.
+        //
+        // The lock/unlock/verify work itself is synchronous full-file I/O
+        // with no `await` inside it -- run via `Task.detached` rather than
+        // inline here, since `LibraryManager` is `@MainActor` and this
+        // function is called from a plain main-actor loop
+        // (`runMetadataRepairMigrationIfNeeded`'s repair phase). Same class
+        // of bug as `LumisoundTrackVaultService.runLegacyRelockPass`
+        // (confirmed root cause of reported multi-second playback stalls
+        // and UI freezes) -- this path runs far less often (once per 24h,
+        // only for tracks missing embedded metadata) but a large lossless
+        // file hitting it would produce the identical symptom.
         let fm = FileManager.default
         let lockedTempURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("lms")
-        defer { try? fm.removeItem(at: lockedTempURL) }
-        guard LumisoundLockFormat.lock(plainURL: repairedURL, to: lockedTempURL) else {
-            appWarn("repairEmbeddedMetadata: re-lock failed for \(songID) at \(url.lastPathComponent)", category: "background")
-            return false
-        }
         let verifyURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             .appendingPathExtension(repairedURL.pathExtension)
-        defer { try? fm.removeItem(at: verifyURL) }
-        guard LumisoundLockFormat.unlock(lockedURL: lockedTempURL, to: verifyURL),
-              CorruptFileFinderService.isValidAudioFile(at: verifyURL) else {
-            appWarn("repairEmbeddedMetadata: re-lock round-trip verification failed for \(songID) at \(url.lastPathComponent)", category: "background")
+        defer {
+            try? fm.removeItem(at: lockedTempURL)
+            try? fm.removeItem(at: verifyURL)
+        }
+
+        let relockedOK = await Task.detached(priority: .utility) {
+            guard LumisoundLockFormat.lock(plainURL: repairedURL, to: lockedTempURL) else { return false }
+            guard LumisoundLockFormat.unlock(lockedURL: lockedTempURL, to: verifyURL),
+                  CorruptFileFinderService.isValidAudioFile(at: verifyURL) else { return false }
+            return true
+        }.value
+        guard relockedOK else {
+            appWarn("repairEmbeddedMetadata: re-lock or round-trip verification failed for \(songID) at \(url.lastPathComponent)", category: "background")
             return false
         }
 

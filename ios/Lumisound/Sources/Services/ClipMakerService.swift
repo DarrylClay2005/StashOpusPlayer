@@ -14,7 +14,10 @@ enum ClipMakerError: Error {
 /// surface as an error rather than assume always succeeds.
 enum ClipMakerService {
     static func exportClip(from url: URL, start: TimeInterval, end: TimeInterval) async throws -> URL {
-        let asset = AVURLAsset(url: url)
+        // A `.lms`-locked url's on-disk bytes are XOR-masked and unreadable
+        // by AVURLAsset until unlocked -- without this, clip export threw
+        // .exportFailed for every locked track.
+        let asset = AVURLAsset(url: LumisoundExclusiveExtensionService.playableURL(for: url))
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
             throw ClipMakerError.exportFailed
         }

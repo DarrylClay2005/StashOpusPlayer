@@ -303,7 +303,11 @@ actor AudioFingerprintService {
     // silence, which carries little identifying spectral content).
 
     private static func decodeMono(url: URL, sampleRate: Double, maxSeconds: Double, skipSeconds: Double) async -> [Int16]? {
-        let asset = AVURLAsset(url: url)
+        // A `.lms`-locked url's on-disk bytes are XOR-masked and unreadable
+        // by AVURLAsset until unlocked -- without this, duplicate detection
+        // silently fell back to weaker title/artist text matching for every
+        // locked track instead of acoustic fingerprinting.
+        let asset = AVURLAsset(url: LumisoundExclusiveExtensionService.playableURL(for: url))
         guard let tracks = try? await asset.loadTracks(withMediaType: .audio),
               let track = tracks.first,
               let reader = try? AVAssetReader(asset: asset)
