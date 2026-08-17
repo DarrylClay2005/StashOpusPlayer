@@ -68,16 +68,30 @@ jobs:
           # ever ran, so a real compile error never actually got printed. The
           # trailing `|| true` keeps us going so it does; the `[ -z "$APP" ]`
           # check further down still fails the job correctly either way.
-          if grep -q "error:" /tmp/xcodebuild.log; then
-            echo "--- Compiler errors ---"
-            grep "error:" /tmp/xcodebuild.log | head -30
-          fi
           APP=$(find build/Lumisound.xcarchive -name "*.app" | head -1)
           if [ -z "$APP" ]; then
+            # Print generously here rather than relying on `grep "error:"` --
+            # a whole-module-optimized build batches every file into one
+            # frontend invocation, and a genuine failure (crash, diagnostic
+            # phrased without the literal substring "error:") can otherwise
+            # print nothing at all above `tail -20`'s window, exactly like it
+            # did the one time this was actually needed: silently. The `tee`d
+            # full log is also uploaded as an artifact below so it survives
+            # past this step's truncated console output.
+            echo "--- Last 200 lines of xcodebuild output ---"
+            tail -200 /tmp/xcodebuild.log
             echo "::error::Archive did not produce a .app bundle"
             exit 1
           fi
           echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+
+      - name: Upload full xcodebuild log (only on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: /tmp/xcodebuild.log
+          retention-days: 7
 
       - name: Compile asset catalogs (actool)
         working-directory: ios
