@@ -10,11 +10,27 @@ import Security
 // backup opened on a computer, certain forensic/backup-extraction tools),
 // with no OS-level protection at all. The iOS Keychain is the correct home
 // for this: hardware-backed encryption on every device with a Secure
-// Enclave, and — with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` below —
-// inaccessible before the device's first unlock after boot AND excluded
-// from ever restoring onto a DIFFERENT device via an iCloud/iTunes backup
-// (a lost/sold phone's backup restored elsewhere can't silently resurrect
-// this account's session).
+// Enclave, and — with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`
+// below — excluded from ever restoring onto a DIFFERENT device via an
+// iCloud/iTunes backup (a lost/sold phone's backup restored elsewhere
+// can't silently resurrect this account's session).
+//
+// Deliberately `AfterFirstUnlock`, NOT `WhenUnlocked`: this app registers
+// background tasks (BGAppRefreshTask in BackgroundRefreshService, the
+// LumisoundTrackVaultService relock pass) that can run while the device
+// screen is locked, and AccountService.init() — which reads this token to
+// decide isLoggedIn — runs on every one of those headless launches too.
+// `WhenUnlocked` makes the item unreadable any time the screen is merely
+// locked (not just before first-unlock-since-boot), so a background launch
+// while locked would see a read failure indistinguishable from "no token,"
+// flip isLoggedIn to false, and — because SwiftUI reuses the same
+// long-lived @StateObject rather than re-running init() on next foreground
+// — leave the user looking logged-out the next time they actually open the
+// app, even though the real Keychain item and server-side session were
+// both untouched. `AfterFirstUnlock` still fully satisfies "never usable
+// before the device is unlocked for the first time after a reboot," while
+// staying readable for the rest of the device's uptime the way a
+// background-readable session token needs to be.
 //
 // A minimal, dependency-free wrapper around the Keychain Services C API
 // rather than pulling in a third-party library for one string value —
@@ -47,16 +63,22 @@ enum KeychainTokenStore {
 
     static func set(_ value: String, account: String) {
         guard let data = value.data(using: .utf8) else { return }
+
+        // Delete-then-add rather than update-in-place: SecItemUpdate only
+        // touches kSecValueData, not kSecAttrAccessible, so an item written
+        // under an older/different accessibility attribute (e.g. an
+        // existing install's token, still stored under the old
+        // WhenUnlockedThisDeviceOnly value before this fix) would silently
+        // keep that old attribute forever if only ever updated in place.
+        // Deleting first guarantees every write picks up the current
+        // accessibility attribute below, so already-affected devices
+        // self-heal the next time this is called (login, token refresh,
+        // etc.) without needing a separate one-time migration pass.
+        SecItemDelete(baseQuery(account: account) as CFDictionary)
+
         var query = baseQuery(account: account)
-
-        // Try an update first — SecItemAdd on an already-existing item
-        // fails with errSecDuplicateItem rather than overwriting it, so a
-        // token refresh has to update in place, not blindly re-add.
-        let updateStatus = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        guard updateStatus == errSecItemNotFound else { return }
-
         query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(query as CFDictionary, nil)
     }
 

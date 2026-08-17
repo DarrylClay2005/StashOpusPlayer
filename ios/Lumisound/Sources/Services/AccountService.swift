@@ -190,7 +190,24 @@ final class AccountService: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: Self.userKey),
            let user = try? JSONDecoder().decode(AppUser.self, from: data) {
             currentUser = user
-            isLoggedIn = token != nil
+            // Deliberately NOT gated on `token != nil` here. `currentUser`
+            // and the Keychain-backed token are always cleared together --
+            // handleUnauthorized()/clearSession() both wipe userKey and the
+            // token in the same call, so restoring a cached user from
+            // UserDefaults already proves this session was valid as of the
+            // last write. Re-checking the Keychain read on every launch
+            // (including headless background launches while the device is
+            // locked -- see KeychainTokenStore's doc comment) risks a false
+            // "no token" read flipping isLoggedIn to false even though the
+            // real Keychain item and the server-side session are both still
+            // intact, which then persists in this long-lived @StateObject
+            // until the next real 401 or explicit logout corrects it -- the
+            // exact "randomly logged out on open" bug this fixes. A
+            // genuinely revoked/expired session is still caught correctly
+            // by the normal 401 handling in
+            // AccountService+PrivateHelpers.swift the next time an
+            // authenticated request actually goes out.
+            isLoggedIn = true
             hasDateOfBirth = user.dateOfBirth != nil
             // Show the cached avatar immediately so the launch screen never
             // flashes the placeholder initial circle for a returning user —
