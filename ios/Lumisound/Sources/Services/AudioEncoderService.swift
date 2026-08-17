@@ -35,6 +35,18 @@ final class AudioEncoderService {
     // MARK: - Playback Transcoding
 
     func transcodeForPlayback(_ url: URL) async -> URL? {
+        // Every tier below needs the file's REAL bytes -- a downloaded track's
+        // on-disk `.lms` copy is XOR-masked by LumisoundLockFormat and is not
+        // a valid audio container to ANY reader, including these tiers' own,
+        // until unlocked. This was missing here entirely (unlike the native
+        // AVAudioFile playback path in AudioPlayerManager+Scheduling.swift,
+        // which already calls `playableURL` correctly) -- every tier was
+        // silently being handed scrambled bytes and failing for that reason
+        // alone, independent of whatever container/codec was actually inside.
+        // `playableURL` is a no-op passthrough for anything not `.lms`-locked,
+        // so this is always safe to call.
+        let url = LumisoundExclusiveExtensionService.playableURL(for: url)
+
         // Tier 1 — native: many formats open directly on iOS 16+
         if (try? AVAudioFile(forReading: url)) != nil { return url }
 
@@ -93,6 +105,11 @@ final class AudioEncoderService {
     /// `LumisoundExclusiveExtensionService.convert`), so it deserves the
     /// same depth of verification a download already gets, not less.
     func convertPermanently(_ url: URL, to destinationURL: URL) async -> Bool {
+        // See the matching comment in `transcodeForPlayback` -- same fix, same
+        // reason (a `.lms`-locked source's on-disk bytes are XOR-masked and
+        // not a valid audio container until unlocked).
+        let url = LumisoundExclusiveExtensionService.playableURL(for: url)
+
         try? FileManager.default.removeItem(at: destinationURL)
         if await oggOpusTranscode(url, to: destinationURL, settings: Self.aacSettings),
            CorruptFileFinderService.isValidAudioFile(at: destinationURL) {
@@ -127,29 +144,69 @@ final class AudioEncoderService {
     /// capture-pattern check is what makes this safe to just always attempt
     /// rather than needing a separate "is this really Ogg" pre-check.
     private func oggOpusTranscode(_ url: URL, to outURL: URL, settings: [String: Any]) async -> Bool {
-        guard let data = try? Data(contentsOf: url) else { return false }
-        guard let demuxed = try? OggOpusDemuxer.parse(data), !demuxed.packets.isEmpty else { return false }
-        guard let pcmBuffer = try? OpusPacketDecoder.decode(
-            packets: demuxed.packets,
-            opusHeadPacket: demuxed.opusHeadPacketData,
-            channelCount: demuxed.header.channelCount,
-            preSkip: demuxed.header.preSkip
-        ) else { return false }
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            appLog("oggOpusTranscode: couldn't read \(url.lastPathComponent) -- \(error)", category: "audio-encoder")
+            return false
+        }
+
+        let demuxed: OggOpusDemuxer.Result
+        do {
+            demuxed = try OggOpusDemuxer.parse(data)
+        } catch {
+            // Expected/benign for anything that isn't a real Ogg container
+            // (e.g. WebM-Opus) -- logged at info level, not a warning, since
+            // this tier is deliberately only supposed to apply to Ogg files.
+            appLog("oggOpusTranscode: not a (supported) Ogg-Opus container for \(url.lastPathComponent) -- \(error)", category: "audio-encoder")
+            return false
+        }
+        guard !demuxed.packets.isEmpty else {
+            appWarn("oggOpusTranscode: demuxed 0 packets from \(url.lastPathComponent) (header parsed OK: \(demuxed.header))", category: "audio-encoder")
+            return false
+        }
+
+        let pcmBuffer: AVAudioPCMBuffer
+        do {
+            pcmBuffer = try OpusPacketDecoder.decode(
+                packets: demuxed.packets,
+                opusHeadPacket: demuxed.opusHeadPacketData,
+                channelCount: demuxed.header.channelCount,
+                preSkip: demuxed.header.preSkip
+            )
+        } catch {
+            appError("oggOpusTranscode: OpusPacketDecoder failed for \(url.lastPathComponent), \(demuxed.packets.count) packets, header \(demuxed.header) -- \(error)", category: "audio-encoder")
+            return false
+        }
+        guard pcmBuffer.frameLength > 0 else {
+            appError("oggOpusTranscode: decoded 0 PCM frames from \(demuxed.packets.count) packets for \(url.lastPathComponent)", category: "audio-encoder")
+            return false
+        }
 
         try? FileManager.default.removeItem(at: outURL)
-        guard let outFile = try? AVAudioFile(
-            forWriting: outURL,
-            settings: settings,
-            commonFormat: .pcmFormatFloat32,
-            interleaved: false
-        ) else { return false }
+        let outFile: AVAudioFile
+        do {
+            outFile = try AVAudioFile(
+                forWriting: outURL,
+                settings: settings,
+                commonFormat: .pcmFormatFloat32,
+                interleaved: false
+            )
+        } catch {
+            appError("oggOpusTranscode: couldn't open \(outURL.lastPathComponent) for writing -- \(error)", category: "audio-encoder")
+            return false
+        }
 
         do {
             try outFile.write(from: pcmBuffer)
         } catch {
+            appError("oggOpusTranscode: write failed for \(url.lastPathComponent) -- \(error)", category: "audio-encoder")
             try? FileManager.default.removeItem(at: outURL)
             return false
         }
+
+        appLog("oggOpusTranscode: succeeded for \(url.lastPathComponent) -- \(demuxed.packets.count) packets, \(pcmBuffer.frameLength) PCM frames", category: "audio-encoder")
         return true
     }
 
