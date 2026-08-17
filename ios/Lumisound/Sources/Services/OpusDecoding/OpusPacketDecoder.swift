@@ -87,11 +87,12 @@ enum OpusPacketDecoder {
         // component requires one, and there's no reliable way to know without
         // on-device testing which is true for this one.
         _ = opusHeadPacket.withUnsafeBytes { rawBuffer -> OSStatus in
-            AudioConverterSetProperty(
+            guard let baseAddress = rawBuffer.baseAddress else { return kAudio_ParamError }
+            return AudioConverterSetProperty(
                 converter,
                 kAudioConverterDecompressionMagicCookie,
                 UInt32(rawBuffer.count),
-                rawBuffer.baseAddress
+                baseAddress
             )
         }
 

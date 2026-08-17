@@ -79,7 +79,7 @@ enum OggOpusDemuxer {
 
             for (index, segment) in page.packets.enumerated() {
                 let isFinalSegmentOfPage = index == page.packets.count - 1
-                pendingPacket.append(segment.bytes)
+                pendingPacket.append(segment)
 
                 // A packet is "complete" once a segment shorter than 255 bytes
                 // terminates it, OR once the page itself says this was the last
@@ -87,7 +87,7 @@ enum OggOpusDemuxer {
                 // is also flagged as ending exactly on a page boundary (the
                 // `continued` flag on the NEXT page tells us definitively; until
                 // then treat a page-ending 255-byte segment as still-pending).
-                guard segment.bytes.count < 255 || (isFinalSegmentOfPage && !page.headerType.continuesOnNextPage) else {
+                guard segment.count < 255 || (isFinalSegmentOfPage && !page.headerType.continuesOnNextPage) else {
                     continue
                 }
 
@@ -143,7 +143,7 @@ enum OggOpusDemuxer {
         /// Reconstructed lacing-value segments for this page, in order -- NOT
         /// yet reassembled into packets (a segment boundary isn't always a
         /// packet boundary, see the 255-byte continuation rule above).
-        let packets: [(bytes: Data)]
+        let packets: [Data]
     }
 
     /// Reads one Ogg page starting at `offset`, advancing `offset` past it.
@@ -181,13 +181,13 @@ enum OggOpusDemuxer {
         let lacingValues = data[cursor..<data.index(cursor, offsetBy: segmentCount)].map { Int($0) }
         cursor = data.index(cursor, offsetBy: segmentCount)
 
-        var segments: [(bytes: Data)] = []
+        var segments: [Data] = []
         for length in lacingValues {
             guard data.distance(from: cursor, to: data.endIndex) >= length else {
                 throw DemuxError.truncated
             }
             let end = data.index(cursor, offsetBy: length)
-            segments.append((bytes: data[cursor..<end]))
+            segments.append(data[cursor..<end])
             cursor = end
         }
 
