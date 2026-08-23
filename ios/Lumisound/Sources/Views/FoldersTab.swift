@@ -51,7 +51,21 @@ struct FoldersTab: View {
         }
         .background(Color.clear.ignoresSafeArea())
         .task(id: library.allSongs.count) {
-            folders = MusicFolderService.localFolderGroups(from: library.allSongs)
+            // Grouping is O(n) over the whole library and, for the big
+            // libraries this tab exists for, easily large enough to be a
+            // visible main-thread stall — see `rebuildAllSongs()`'s identical
+            // off-actor pattern. `allSongs.count` changes once per rebuild
+            // *during* a scan (song-by-song, every ~0.1s — see
+            // `rebuildAllSongs`'s debounce), so without this, a long import
+            // repeatedly re-blocked the main thread doing a full re-group,
+            // which is what made scrolling here freeze and snap back to the
+            // top while a scan was still running.
+            let songs = library.allSongs
+            let grouped = await Task.detached(priority: .userInitiated) {
+                MusicFolderService.localFolderGroups(from: songs)
+            }.value
+            guard !Task.isCancelled else { return }
+            folders = grouped
         }
         .toolbar {
             // Mirrors SongsTab's column-toggle buttons (rather than a Menu) so

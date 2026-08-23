@@ -34,8 +34,15 @@ final class MusicFolderService: ObservableObject {
 
     /// Computed off the render path by callers (e.g. via `.task(id:)`) —
     /// O(n) over `songs`, not something to run on every SwiftUI body pass
-    /// for a large library.
-    static func localFolderGroups(from songs: [Song]) -> [LocalFolderGroup] {
+    /// for a large library. `nonisolated` (despite the enclosing class being
+    /// `@MainActor`) so `FoldersTab` can actually run it inside a
+    /// `Task.detached` off the main thread — it touches no instance state,
+    /// only `FileManager` and its `songs` argument, so isolating it to the
+    /// actor would just force every call back onto the main thread, which
+    /// for a large library is exactly the multi-hundred-millisecond
+    /// main-thread stall (repeated on every scan-triggered rebuild) that
+    /// made the Folders grid freeze and lose scroll position.
+    nonisolated static func localFolderGroups(from songs: [Song]) -> [LocalFolderGroup] {
         guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
             return []
         }
