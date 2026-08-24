@@ -1,7 +1,10 @@
 name: Build Platform Ports
 
-# Compile-checks the tvOS / watchOS targets in isolation from the iOS release
-# pipeline (release-ios.yml). A failure here never affects iOS releases.
+# Compile-checks the watchOS target and does a full unsigned archive + IPA
+# package for tvOS on every push that touches it, uploaded as a workflow
+# artifact — so every tvOS commit has a real, downloadable build to verify
+# against, not just a compile check. Isolated from the iOS release pipeline
+# (release-ios.yml); a failure here never affects iOS releases.
 
 on:
   push:
@@ -47,16 +50,82 @@ jobs:
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Build tvOS app (compile check, no signing)
+      - name: Archive tvOS app (unsigned)
         working-directory: ios
         run: |
           set -o pipefail
-          xcodebuild build \
+          mkdir -p build
+          xcodebuild archive \
             -project Lumisound.xcodeproj \
             -scheme LumisoundTV \
-            -destination 'generic/platform=tvOS Simulator' \
-            -configuration Debug \
-            CODE_SIGNING_ALLOWED=NO
+            -configuration Release \
+            -destination 'generic/platform=tvOS' \
+            -archivePath build/LumisoundTV.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            SKIP_INSTALL=NO 2>&1 | tee /tmp/tvbuild.log | tail -25 || true
+          # `|| true` so a real compile error's diagnostics still print below
+          # instead of the pipeline aborting the instant xcodebuild fails
+          # (same reasoning as build-ios.yml's archive step) — the `-z "$APP"`
+          # check right after still fails the job either way.
+          if grep -q "error:" /tmp/tvbuild.log; then
+            echo "--- Compiler errors ---"
+            grep "error:" /tmp/tvbuild.log | head -30
+          fi
+          APP=$(find build/LumisoundTV.xcarchive -name "*.app" | head -1)
+          if [ -z "$APP" ]; then
+            echo "--- Last 200 lines of xcodebuild output ---"
+            tail -200 /tmp/tvbuild.log
+            echo "::error::tvOS archive did not produce a .app bundle"
+            exit 1
+          fi
+          echo "TV_APP_PATH=$APP" >> "$GITHUB_ENV"
+
+      - name: Upload full tvOS build log (only on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tvos-xcodebuild-log
+          path: /tmp/tvbuild.log
+          retention-days: 7
+
+      # Unsigned archives don't run actool for the app icon, so compile the
+      # tvOS Brand Assets (App Icon + Top Shelf) into the .app manually —
+      # without this the packaged IPA would show a blank placeholder icon.
+      - name: Compile tvOS Brand Assets (actool)
+        working-directory: ios
+        run: |
+          xcrun actool \
+            --output-format human-readable-text \
+            --notices --warnings \
+            --platform appletvos \
+            --minimum-deployment-target 16.0 \
+            --target-device tv \
+            --app-icon "App Icon & Top Shelf Image" \
+            --output-partial-info-plist /tmp/tvassets.plist \
+            --compress-pngs \
+            --compile "$TV_APP_PATH" \
+            "LumisoundTV/Resources/Assets.xcassets"
+          echo "Assets.car: $(du -sh "$TV_APP_PATH/Assets.car" 2>/dev/null || echo MISSING)"
+
+      - name: Package tvOS IPA (unsigned)
+        working-directory: ios
+        run: |
+          SHA_SHORT="${GITHUB_SHA:0:8}"
+          IPA_NAME="LumisoundTV-${SHA_SHORT}-unsigned.ipa"
+          mkdir -p build/Payload/Payload
+          cp -R "$TV_APP_PATH" build/Payload/Payload/
+          (cd build/Payload && zip -r "../$IPA_NAME" Payload/ -x "*.DS_Store")
+          echo "IPA: $(du -sh "build/$IPA_NAME")"
+          echo "TV_IPA_NAME=$IPA_NAME" >> "$GITHUB_ENV"
+
+      - name: Upload tvOS IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumisoundTV-unsigned-ipa
+          path: ios/build/${{ env.TV_IPA_NAME }}
+          retention-days: 14
 
       # Validates the iOS app + PhoneWatchSync glue still compile alongside the
       # new targets — so a real ios/v* release tag is safe.

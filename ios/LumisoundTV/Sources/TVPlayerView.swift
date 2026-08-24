@@ -406,6 +406,8 @@ struct TVPlayerView: View {
     let token: String
     @StateObject private var model = TVPlayerModel()
     @State private var sidePanel: TVSidePanel = .none
+    @State private var showSleepTimerSheet = false
+    @State private var showArtworkStyleSheet = false
     @AppStorage("tv.nowPlaying.artworkStyle") private var artworkStyleRaw = TVArtworkStyle.classic.rawValue
 
     private var artworkStyle: TVArtworkStyle { TVArtworkStyle(rawValue: artworkStyleRaw) ?? .classic }
@@ -513,37 +515,34 @@ struct TVPlayerView: View {
     }
 
     private var sleepTimerMenu: some View {
-        Menu {
-            if model.sleepTimerEndDate != nil {
-                Button(role: .destructive) { model.cancelSleepTimer() } label: {
-                    Label("Cancel Sleep Timer", systemImage: "moon.slash")
-                }
-            }
-            ForEach([15, 30, 45, 60], id: \.self) { minutes in
-                Button("\(minutes) minutes") { model.setSleepTimer(minutes: minutes) }
-            }
+        Button {
+            showSleepTimerSheet = true
         } label: {
             Image(systemName: model.sleepTimerEndDate != nil ? "moon.fill" : "moon")
                 .foregroundStyle(model.sleepTimerEndDate != nil ? Color.accentColor : Color.primary)
         }
+        .sheet(isPresented: $showSleepTimerSheet) {
+            TVSleepTimerSheet(hasActiveTimer: model.sleepTimerEndDate != nil) { minutes in
+                if let minutes {
+                    model.setSleepTimer(minutes: minutes)
+                } else {
+                    model.cancelSleepTimer()
+                }
+            }
+        }
     }
 
     private var artworkStyleMenu: some View {
-        Menu {
-            ForEach(TVArtworkStyle.allCases) { style in
-                Button {
-                    artworkStyleRaw = style.rawValue
-                } label: {
-                    if style == artworkStyle {
-                        Label(style.displayName, systemImage: "checkmark")
-                    } else {
-                        Text(style.displayName)
-                    }
-                }
-            }
+        Button {
+            showArtworkStyleSheet = true
         } label: {
             Image(systemName: "paintpalette")
                 .foregroundStyle(artworkStyle == .classic ? Color.primary : Color.accentColor)
+        }
+        .sheet(isPresented: $showArtworkStyleSheet) {
+            TVArtworkStyleSheet(current: artworkStyle) { style in
+                artworkStyleRaw = style.rawValue
+            }
         }
     }
 
@@ -705,6 +704,70 @@ struct TVPlayerView: View {
             Image(systemName: symbol)
                 .font(.system(size: big ? 46 : 32, weight: .semibold))
                 .frame(width: big ? 120 : 96, height: big ? 120 : 96)
+        }
+    }
+}
+
+// MARK: - Sleep timer / artwork style pickers
+//
+// `Menu` needs tvOS 17 — this project's deployment target is tvOS 16 (see
+// project.yml) — so these use the same `.sheet` + `List` picker pattern
+// already proven elsewhere (TVAddToPlaylistSheet, TVPlaylistNameSheet)
+// instead.
+
+private struct TVSleepTimerSheet: View {
+    let hasActiveTimer: Bool
+    /// `nil` selection means "cancel the active timer".
+    let onSelect: (Int?) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if hasActiveTimer {
+                    Button(role: .destructive) {
+                        onSelect(nil)
+                        dismiss()
+                    } label: {
+                        Label("Cancel Sleep Timer", systemImage: "moon.slash")
+                    }
+                }
+                ForEach([15, 30, 45, 60], id: \.self) { minutes in
+                    Button("\(minutes) minutes") {
+                        onSelect(minutes)
+                        dismiss()
+                    }
+                }
+            }
+            .navigationTitle("Sleep Timer")
+        }
+    }
+}
+
+private struct TVArtworkStyleSheet: View {
+    let current: TVArtworkStyle
+    let onSelect: (TVArtworkStyle) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(TVArtworkStyle.allCases) { style in
+                    Button {
+                        onSelect(style)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Text(style.displayName)
+                            if style == current {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Artwork Style")
         }
     }
 }
