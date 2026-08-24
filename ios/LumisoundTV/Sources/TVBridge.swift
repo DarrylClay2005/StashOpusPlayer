@@ -715,7 +715,7 @@ final class TVBridgeClient: ObservableObject {
             if wasFavorite { favoriteSongIDs.insert(songID) } else { favoriteSongIDs.remove(songID) }
         } else {
             TVRemoteLogger.log(category: "favorites", event: wasFavorite ? "favorite_removed" : "favorite_added",
-                                authToken: token, detail: ["song_id": songID])
+                                detail: ["song_id": songID], authToken: token)
         }
     }
 
@@ -877,8 +877,8 @@ final class TVBridgeClient: ObservableObject {
         if ok {
             sessions.removeAll { $0.tokenID == tokenID }
             tvLog("Session revoked", category: "auth", extra: ["was_current": "\(wasCurrent)"])
-            TVRemoteLogger.log(category: "auth", event: "session_revoked", authToken: token,
-                                detail: ["was_current_device": wasCurrent])
+            TVRemoteLogger.log(category: "auth", event: "session_revoked",
+                                detail: ["was_current_device": wasCurrent], authToken: token)
         }
         return ok && wasCurrent
     }
