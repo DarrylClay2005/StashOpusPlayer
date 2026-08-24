@@ -42,14 +42,38 @@ final class TVPlayerModel: ObservableObject {
     @Published private(set) var isShuffled = false
     @Published var repeatMode: TVRepeatMode = .off
     @Published private(set) var sleepTimerEndDate: Date?
+    @Published private(set) var lyrics: [TVLyricLine] = []
+    @Published private(set) var isLoadingLyrics = false
+    @Published var crossfadeEnabled: Bool = UserDefaults.standard.bool(forKey: "tv.player.crossfadeEnabled") {
+        didSet { UserDefaults.standard.set(crossfadeEnabled, forKey: "tv.player.crossfadeEnabled") }
+    }
 
-    let player = AVPlayer()
+    // MARK: Dual-player crossfade
+    //
+    // Two fixed AVPlayer instances rather than one — crossfading means the
+    // outgoing track's player and the incoming track's player must both be
+    // audible and advancing at once for `crossfadeDuration` seconds, which a
+    // single `replaceCurrentItem` swap can't do. `player` always means
+    // "whichever one is currently the audible/active track"; observers (time/
+    // status/end) are attached to BOTH once, each self-filtering to only act
+    // when it's the currently-active instance — simpler and safer than tearing
+    // down and reattaching observers every time the active player changes.
+    private let playerA = AVPlayer()
+    private let playerB = AVPlayer()
+    private var activeIsA = true
+    var player: AVPlayer { activeIsA ? playerA : playerB }
+    private var inactivePlayer: AVPlayer { activeIsA ? playerB : playerA }
+    private let crossfadeDuration: TimeInterval = 6
+    private var crossfadeTask: Task<Void, Never>?
+    private var hasCrossfadedForCurrentTrack = false
+
     /// Queue order before shuffling — restored when shuffle is toggled off.
     private var originalQueue: [TVPlayable] = []
-    private var endObserver: NSObjectProtocol?
-    private var timeObserver: Any?
-    private var statusObservation: NSKeyValueObservation?
+    private var endObservers: [NSObjectProtocol] = []
+    private var timeObservers: [(AVPlayer, Any)] = []
+    private var statusObservations: [NSKeyValueObservation] = []
     private var sleepTimerTask: Task<Void, Never>?
+    private var lyricsTask: Task<Void, Never>?
 
     var current: TVPlayable? { queue.indices.contains(currentIndex) ? queue[currentIndex] : nil }
 
@@ -65,49 +89,183 @@ final class TVPlayerModel: ObservableObject {
     }
 
     private func setupObservers() {
-        if endObserver == nil {
-            endObserver = NotificationCenter.default.addObserver(
+        guard endObservers.isEmpty else { return }  // set up once, on both players
+
+        for p in [playerA, playerB] {
+            // Only reacts when `p` is the currently-active player AND the item
+            // that ended is still that player's current item — guards against
+            // a stale notification from a player that's since been reused/
+            // reset (e.g. a cancelled crossfade's incoming player).
+            let endObs = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor in self?.advanceOnEnd() }
-            }
-        }
-        // Drives the scrubber + elapsed/remaining time.
-        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
-        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            Task { @MainActor in
-                guard let self else { return }
-                self.position = time.seconds.isFinite ? time.seconds : 0
-                if let d = self.player.currentItem?.duration.seconds, d.isFinite, d > 0 {
-                    self.duration = d
+            ) { [weak self, weak p] note in
+                Task { @MainActor in
+                    guard let self, let p, self.player === p,
+                          let endedItem = note.object as? AVPlayerItem, endedItem === p.currentItem
+                    else { return }
+                    self.handleNaturalEnd()
                 }
             }
-        }
-        // Keeps play/pause + the loading spinner in sync with real playback.
-        statusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
-            Task { @MainActor in
-                guard let self else { return }
-                self.isPlaying = player.timeControlStatus == .playing
-                self.isBuffering = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+            endObservers.append(endObs)
+
+            // Drives the scrubber + elapsed/remaining time, and the crossfade trigger.
+            let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+            let timeObs = p.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self, weak p] time in
+                Task { @MainActor in
+                    guard let self, let p, self.player === p else { return }
+                    self.position = time.seconds.isFinite ? time.seconds : 0
+                    if let d = p.currentItem?.duration.seconds, d.isFinite, d > 0 {
+                        self.duration = d
+                    }
+                    self.checkCrossfadeTrigger()
+                }
             }
+            timeObservers.append((p, timeObs))
+
+            // Keeps play/pause + the loading spinner in sync with real playback.
+            let statusObs = p.observe(\.timeControlStatus, options: [.new]) { [weak self, weak p] observed, _ in
+                Task { @MainActor in
+                    guard let self, let p, self.player === p else { return }
+                    self.isPlaying = observed.timeControlStatus == .playing
+                    self.isBuffering = observed.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                }
+            }
+            statusObservations.append(statusObs)
         }
+    }
+
+    private func asset(for item: TVPlayable) -> AVURLAsset {
+        if let token = item.authToken {
+            return AVURLAsset(url: item.streamURL, options: [
+                "AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer \(token)"]
+            ])
+        }
+        return AVURLAsset(url: item.streamURL)
     }
 
     private func loadCurrent() {
         guard let item = current else { return }
+        cancelCrossfade()
         position = 0
         duration = 0
         isBuffering = true
-        let asset: AVURLAsset
-        if let token = item.authToken {
-            asset = AVURLAsset(url: item.streamURL, options: [
-                "AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer \(token)"]
-            ])
-        } else {
-            asset = AVURLAsset(url: item.streamURL)
-        }
-        player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
+        player.volume = 1
+        player.replaceCurrentItem(with: AVPlayerItem(asset: asset(for: item)))
         player.play()
+        loadLyrics(for: item)
+    }
+
+    // MARK: Crossfade
+
+    /// Only the natural end of the *active* player's item reaches here — if
+    /// a crossfade already claimed this transition (`hasCrossfadedForCurrentTrack`),
+    /// `completeCrossfade` handles advancing instead, so this no-ops to avoid
+    /// double-advancing.
+    private func handleNaturalEnd() {
+        guard !hasCrossfadedForCurrentTrack else { return }
+        advanceOnEnd()
+    }
+
+    private func nextIndexForCrossfade() -> Int? {
+        guard crossfadeEnabled, queue.count > 1, repeatMode != .one else { return nil }
+        if currentIndex + 1 < queue.count { return currentIndex + 1 }
+        if repeatMode == .all { return 0 }
+        return nil
+    }
+
+    private func checkCrossfadeTrigger() {
+        guard !hasCrossfadedForCurrentTrack, duration > crossfadeDuration,
+              duration - position <= crossfadeDuration,
+              nextIndexForCrossfade() != nil
+        else { return }
+        hasCrossfadedForCurrentTrack = true
+        beginCrossfade()
+    }
+
+    private func beginCrossfade() {
+        guard let nextIndex = nextIndexForCrossfade(), queue.indices.contains(nextIndex) else { return }
+        let nextItem = queue[nextIndex]
+        let outgoing = player
+        let incoming = inactivePlayer
+
+        incoming.pause()
+        incoming.volume = 0
+        incoming.replaceCurrentItem(with: AVPlayerItem(asset: asset(for: nextItem)))
+        incoming.play()
+
+        let steps = 30
+        let stepNanoseconds = UInt64(crossfadeDuration / Double(steps) * 1_000_000_000)
+        crossfadeTask = Task { [weak self] in
+            for i in 0...steps {
+                guard !Task.isCancelled else { return }
+                let t = Double(i) / Double(steps)
+                // Equal-power curve so the perceived combined loudness stays
+                // roughly constant through the fade, rather than dipping in
+                // the middle the way a plain linear crossfade would.
+                outgoing.volume = Float(cos(t * .pi / 2))
+                incoming.volume = Float(sin(t * .pi / 2))
+                try? await Task.sleep(nanoseconds: stepNanoseconds)
+            }
+            guard !Task.isCancelled, let self else { return }
+            self.completeCrossfade(to: nextIndex)
+        }
+    }
+
+    private func completeCrossfade(to index: Int) {
+        let finishedOutgoing = player
+        activeIsA.toggle()
+        currentIndex = index
+        position = 0
+        duration = 0
+        isBuffering = false
+        hasCrossfadedForCurrentTrack = false
+        crossfadeTask = nil
+        player.volume = 1
+        finishedOutgoing.pause()
+        finishedOutgoing.replaceCurrentItem(with: nil)
+        loadLyrics(for: queue[index])
+    }
+
+    /// Stops and silences an in-flight crossfade (the not-yet-promoted
+    /// incoming player is fully paused/cleared, not just volume-reset —
+    /// leaving it playing at any nonzero volume would mean two tracks
+    /// audible at once until something else resolved it). Safe to call any
+    /// time; a no-op when no crossfade is in flight.
+    private func cancelCrossfade() {
+        guard crossfadeTask != nil else { return }
+        crossfadeTask?.cancel()
+        crossfadeTask = nil
+        hasCrossfadedForCurrentTrack = false
+        player.volume = 1
+        inactivePlayer.pause()
+        inactivePlayer.replaceCurrentItem(with: nil)
+        inactivePlayer.volume = 1
+    }
+
+    // MARK: Lyrics
+
+    /// Waits briefly for the asset's real duration to load (used to reject a
+    /// same-titled-but-wrong recording/song — see TVLyricsService) before
+    /// fetching, falling back to an undisambiguated search if it takes too
+    /// long. Re-checks `current?.id == item.id` after every suspension point
+    /// since the user may have skipped tracks while this was waiting/in flight.
+    private func loadLyrics(for item: TVPlayable) {
+        lyricsTask?.cancel()
+        lyrics = []
+        isLoadingLyrics = true
+        lyricsTask = Task { [weak self] in
+            guard let self else { return }
+            var waited = 0.0
+            while self.duration <= 0, waited < 5, !Task.isCancelled, self.current?.id == item.id {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                waited += 0.2
+            }
+            guard !Task.isCancelled, self.current?.id == item.id else { return }
+            let fetched = await TVLyricsService.fetch(title: item.title, artist: item.artist, duration: self.duration)
+            guard !Task.isCancelled, self.current?.id == item.id else { return }
+            self.lyrics = fetched ?? []
+            self.isLoadingLyrics = false
+        }
     }
 
     func togglePlayPause() {
@@ -118,6 +276,7 @@ final class TVPlayerModel: ObservableObject {
     /// non-repeating queue), regardless of repeat mode. Repeat-one only
     /// affects what happens when a track ends on its own; see `advanceOnEnd`.
     func next() {
+        cancelCrossfade()
         guard currentIndex + 1 < queue.count else {
             if repeatMode == .all, !queue.isEmpty {
                 currentIndex = 0
@@ -146,11 +305,13 @@ final class TVPlayerModel: ObservableObject {
     /// `next()` one at a time.
     func jump(to index: Int) {
         guard queue.indices.contains(index), index != currentIndex else { return }
+        cancelCrossfade()
         currentIndex = index
         loadCurrent()
     }
 
     func previous() {
+        cancelCrossfade()
         // If we're more than 3s in, restart the track instead of skipping back.
         if position > 3 {
             player.seek(to: .zero); return
@@ -164,6 +325,10 @@ final class TVPlayerModel: ObservableObject {
     /// removed this way — skip to another track first.
     func removeFromQueue(at index: Int) {
         guard queue.indices.contains(index), index != currentIndex else { return }
+        // A removal could invalidate the index an in-flight crossfade is
+        // ramping toward — simplest safe response is to cancel it; the
+        // transition falls back to an instant swap when this track ends.
+        cancelCrossfade()
         let removedID = queue[index].id
         queue.remove(at: index)
         if index < currentIndex { currentIndex -= 1 }
@@ -213,26 +378,37 @@ final class TVPlayerModel: ObservableObject {
     }
 
     func stop() {
-        player.pause()
-        player.replaceCurrentItem(with: nil)
-        if let timeObserver { player.removeTimeObserver(timeObserver); self.timeObserver = nil }
-        statusObservation?.invalidate(); statusObservation = nil
-        if let endObserver {
-            NotificationCenter.default.removeObserver(endObserver)
-            self.endObserver = nil
+        crossfadeTask?.cancel()
+        crossfadeTask = nil
+        for p in [playerA, playerB] {
+            p.pause()
+            p.replaceCurrentItem(with: nil)
         }
+        for (p, observer) in timeObservers { p.removeTimeObserver(observer) }
+        timeObservers.removeAll()
+        statusObservations.forEach { $0.invalidate() }
+        statusObservations.removeAll()
+        endObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        endObservers.removeAll()
         cancelSleepTimer()
+        lyricsTask?.cancel()
+        lyricsTask = nil
     }
 }
 
 // MARK: - TVPlayerView
+
+private enum TVSidePanel { case none, upNext, lyrics }
 
 struct TVPlayerView: View {
     let context: TVPlayContext
     @ObservedObject var client: TVBridgeClient
     let token: String
     @StateObject private var model = TVPlayerModel()
-    @State private var showUpNext = false
+    @State private var sidePanel: TVSidePanel = .none
+    @AppStorage("tv.nowPlaying.artworkStyle") private var artworkStyleRaw = TVArtworkStyle.classic.rawValue
+
+    private var artworkStyle: TVArtworkStyle { TVArtworkStyle(rawValue: artworkStyleRaw) ?? .classic }
 
     private var displayed: TVPlayable? {
         model.current ?? context.queue.first(where: { $0.id == context.startID })
@@ -270,28 +446,46 @@ struct TVPlayerView: View {
             }
             .padding(.horizontal, 110)
 
-            if showUpNext {
+            if sidePanel == .upNext {
                 upNextPanel
                     .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else if sidePanel == .lyrics {
+                TVLyricsPanel(
+                    lines: model.lyrics,
+                    currentPosition: model.position,
+                    isPlaying: model.isPlaying,
+                    isLoading: model.isLoadingLyrics,
+                    onClose: { withAnimation(.easeInOut(duration: 0.25)) { sidePanel = .none } }
+                )
+                .transition(.opacity)
             }
         }
         .onAppear { model.start(context: context) }
         .onDisappear { model.stop() }
     }
 
-    // MARK: Utility row (shuffle / repeat / sleep timer / up next)
+    private func togglePanel(_ panel: TVSidePanel) {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            sidePanel = sidePanel == panel ? .none : panel
+        }
+    }
+
+    // MARK: Utility row (shuffle / repeat / sleep timer / lyrics / artwork style / up next)
 
     private var utilityRow: some View {
         HStack(spacing: 30) {
             toggleIconButton("shuffle", isOn: model.isShuffled) { model.toggleShuffle() }
             toggleIconButton(model.repeatMode.symbol, isOn: model.repeatMode != .off) { model.cycleRepeatMode() }
+            toggleIconButton("arrow.triangle.merge", isOn: model.crossfadeEnabled) { model.crossfadeEnabled.toggle() }
             sleepTimerMenu
+            toggleIconButton("quote.bubble", isOn: sidePanel == .lyrics) { togglePanel(.lyrics) }
+            artworkStyleMenu
             if model.queue.count > 1 {
                 Text("\(model.currentIndex + 1) of \(model.queue.count)")
                     .font(.system(size: 20, weight: .medium))
                     .foregroundStyle(.secondary)
                 Button {
-                    withAnimation(.easeInOut(duration: 0.25)) { showUpNext.toggle() }
+                    togglePanel(.upNext)
                 } label: {
                     Label("Up Next", systemImage: "list.bullet")
                 }
@@ -334,6 +528,25 @@ struct TVPlayerView: View {
         }
     }
 
+    private var artworkStyleMenu: some View {
+        Menu {
+            ForEach(TVArtworkStyle.allCases) { style in
+                Button {
+                    artworkStyleRaw = style.rawValue
+                } label: {
+                    if style == artworkStyle {
+                        Label(style.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(style.displayName)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "paintpalette")
+                .foregroundStyle(artworkStyle == .classic ? Color.primary : Color.accentColor)
+        }
+    }
+
     // MARK: Up Next panel
     //
     // Slides over the artwork/transport rather than using `.sheet` — tvOS's
@@ -349,7 +562,7 @@ struct TVPlayerView: View {
                         .font(.system(size: 30, weight: .bold))
                     Spacer()
                     Button {
-                        withAnimation(.easeInOut(duration: 0.25)) { showUpNext = false }
+                        withAnimation(.easeInOut(duration: 0.25)) { sidePanel = .none }
                     } label: {
                         Image(systemName: "xmark")
                     }
@@ -421,12 +634,15 @@ struct TVPlayerView: View {
 
     @ViewBuilder private var artwork: some View {
         ZStack {
-            TVAuthImage(url: displayed?.artworkURL, token: displayed?.authToken) {
-                ZStack {
-                    Color.gray.opacity(0.3)
-                    Image(systemName: "music.note").font(.system(size: 90)).foregroundStyle(.secondary)
-                }
+            switch artworkStyle {
+            case .classic:
+                classicArtwork
+            case .circuitPulse:
+                TVCircuitPulseArtworkView(artworkURL: displayed?.artworkURL, authToken: displayed?.authToken, isPlaying: model.isPlaying)
+            case .radarSweep:
+                TVRadarSweepArtworkView(artworkURL: displayed?.artworkURL, authToken: displayed?.authToken, isPlaying: model.isPlaying)
             }
+
             if model.isBuffering {
                 ZStack {
                     Color.black.opacity(0.45)
@@ -435,6 +651,18 @@ struct TVPlayerView: View {
                         Text("Loading…").font(.system(size: 22, weight: .medium)).foregroundStyle(.white)
                     }
                 }
+                .frame(width: 440, height: 440)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            }
+        }
+        .frame(width: 440, height: 440)
+    }
+
+    private var classicArtwork: some View {
+        TVAuthImage(url: displayed?.artworkURL, token: displayed?.authToken) {
+            ZStack {
+                Color.gray.opacity(0.3)
+                Image(systemName: "music.note").font(.system(size: 90)).foregroundStyle(.secondary)
             }
         }
         .frame(width: 440, height: 440)
