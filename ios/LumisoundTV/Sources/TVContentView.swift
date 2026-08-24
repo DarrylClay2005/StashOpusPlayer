@@ -14,13 +14,13 @@ struct TVContentView: View {
                         .tabItem { Label("My Library", systemImage: "music.note.house") }
                     TVPlaylistsView(client: client, token: token)
                         .tabItem { Label("Playlists", systemImage: "music.note.list") }
-                    TVSearchView(client: client)
+                    TVSearchView(client: client, token: token)
                         .tabItem { Label("Search", systemImage: "magnifyingglass") }
                     TVAccountView(account: account)
                         .tabItem { Label(account.user?.name ?? "Account", systemImage: "person.crop.circle") }
                 }
                 .navigationDestination(for: TVPlayContext.self) { ctx in
-                    TVPlayerView(context: ctx)
+                    TVPlayerView(context: ctx, client: client, token: token)
                 }
             }
         } else {
@@ -33,6 +33,7 @@ struct TVContentView: View {
 
 struct TVSearchView: View {
     @ObservedObject var client: TVBridgeClient
+    let token: String
     @State private var query = ""
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: 48)]
@@ -59,6 +60,7 @@ struct TVSearchView: View {
                             TVTrackCard(track: track)
                         }
                         .buttonStyle(.card)
+                        .tvSearchTrackActions(client: client, token: token, track: track)
                     }
                 }
                 .padding(60)

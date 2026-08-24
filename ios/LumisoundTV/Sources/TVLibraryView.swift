@@ -10,15 +10,32 @@ struct TVLibraryView: View {
         case songs = "Songs"
         case albums = "Albums"
         case artists = "Artists"
+        case genres = "Genres"
+        case favorites = "Favorites"
         var id: String { rawValue }
     }
     @State private var mode: Mode = .songs
+    @State private var searchText = ""
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: 48)]
 
+    /// Local, in-memory filter over the already-loaded library — cheaper and
+    /// far more responsive than re-hitting `/user/music` per keystroke,
+    /// which does a full filesystem walk + ffprobe pass on every request.
+    /// Only the Songs tab is filtered by it; Albums/Artists/Genres still
+    /// group the whole library so browsing by those dimensions isn't
+    /// truncated by an unrelated in-progress search.
+    private var filteredSongs: [UserMusicTrack] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return client.library }
+        return client.library.filter {
+            $0.title.lowercased().contains(q) || $0.artist.lowercased().contains(q) || $0.album.lowercased().contains(q)
+        }
+    }
+
     /// The whole library mapped to playables — used as the queue when a track is picked.
     private var queue: [TVPlayable] {
-        client.library.compactMap { client.playable(from: $0, token: token) }
+        filteredSongs.compactMap { client.playable(from: $0, token: token) }
     }
 
     var body: some View {
@@ -28,7 +45,7 @@ struct TVLibraryView: View {
                     ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 700)
+                .frame(maxWidth: 900)
                 .padding(.top, 40)
                 .padding(.bottom, 10)
             }
@@ -50,41 +67,62 @@ struct TVLibraryView: View {
                 } else {
                     switch mode {
                     case .songs: songsGrid
-                    case .albums: TVAlbumsGridView(client: client, token: token)
-                    case .artists: TVArtistsGridView(client: client, token: token)
+                    case .albums: TVAlbumsGridView(client: client, token: token, library: client.library)
+                    case .artists: TVArtistsGridView(client: client, token: token, library: client.library)
+                    case .genres: TVGenresGridView(client: client, token: token, library: client.library)
+                    case .favorites: TVFavoritesGridView(client: client, token: token)
                     }
                 }
             }
         }
+        .searchable(text: $searchText, prompt: "Search your library")
         .task {
             if client.library.isEmpty { await client.fetchLibrary(token: token) }
+            if client.favoriteSongIDs.isEmpty { await client.fetchFavorites(token: token) }
         }
     }
 
     private var songsGrid: some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: 48) {
-                ForEach(client.library) { track in
-                    NavigationLink(value: TVPlayContext(queue: queue, startID: track.id)) {
-                        libraryCard(track)
+            if filteredSongs.isEmpty {
+                Text("No songs match “\(searchText)”.")
+                    .font(.title3).foregroundStyle(.secondary).padding(.top, 100)
+            } else {
+                LazyVGrid(columns: columns, spacing: 48) {
+                    ForEach(filteredSongs) { track in
+                        NavigationLink(value: TVPlayContext(queue: queue, startID: track.id)) {
+                            libraryCard(track)
+                        }
+                        .buttonStyle(.card)
+                        .tvTrackActions(client: client, token: token, track: track)
                     }
-                    .buttonStyle(.card)
                 }
+                .padding(60)
             }
-            .padding(60)
         }
     }
 
     private func libraryCard(_ track: UserMusicTrack) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            TVAuthImage(url: client.userMusicArtworkURL(for: track), token: token) {
-                ZStack {
-                    Color.gray.opacity(0.3)
-                    Image(systemName: "music.note").font(.system(size: 40)).foregroundStyle(.secondary)
+            ZStack(alignment: .topTrailing) {
+                TVAuthImage(url: client.userMusicArtworkURL(for: track), token: token) {
+                    ZStack {
+                        Color.gray.opacity(0.3)
+                        Image(systemName: "music.note").font(.system(size: 40)).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 280, height: 280)
+                .clipped()
+
+                if client.isFavorite(track.id) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.yellow)
+                        .padding(10)
+                        .background(.black.opacity(0.45), in: Circle())
+                        .padding(8)
                 }
             }
-            .frame(width: 280, height: 280)
-            .clipped()
 
             Text(track.title.isEmpty ? track.filename : track.title)
                 .font(.headline).lineLimit(2, reservesSpace: true)

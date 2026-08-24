@@ -13451,6 +13451,43 @@ async def add_playlist_track(
     return {"id": track_id, "position": next_position}
 
 
+@app.delete("/user/playlists/{playlist_id}/tracks/{track_id}", status_code=204)
+async def remove_playlist_track(
+    playlist_id: str,
+    track_id: str,
+    payload: dict = Depends(get_current_user),
+):
+    """Removes a single track from a playlist. Allowed for the owner or any
+    collaborator with the 'editor' role — same access rule as adding a track.
+    (There was previously no per-track removal endpoint; editing a playlist's
+    track list required a full /user/sync snapshot push, which also
+    overwrites the user's other settings/history/badges — too destructive
+    for a simple "remove this track" action.)"""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            role = await _playlist_role(cur, playlist_id, user_id)
+            if role is None:
+                raise HTTPException(status_code=404, detail="Playlist not found")
+            if role == "viewer":
+                raise HTTPException(status_code=403, detail="You only have view access to this playlist")
+
+            await cur.execute(
+                "DELETE FROM ios_playlist_tracks WHERE id = %s AND playlist_id = %s",
+                (track_id, playlist_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Track not found in playlist")
+            await cur.execute(
+                "UPDATE ios_user_playlists SET updated_at = NOW() WHERE id = %s",
+                (playlist_id,),
+            )
+
+    asyncio.create_task(log_event("playlist", "track_removed", user_id=user_id,
+                                   detail={"playlist_id": playlist_id, "track_id": track_id}))
+
+
 # ---------------------------------------------------------------------------
 # Persistent Play Queue (Feature: user-queue)
 # ---------------------------------------------------------------------------

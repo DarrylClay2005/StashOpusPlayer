@@ -27,6 +27,7 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
     let artist: String
     let album: String
     let duration: Double
+    let genre: String
     let trackNumber: String
     let hasArtwork: Bool
     let serverPath: String
@@ -39,10 +40,31 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, artist, album, duration, filename, ext
+        case id, title, artist, album, duration, genre, filename, ext
         case trackNumber = "track_number"
         case hasArtwork  = "has_artwork"
         case serverPath  = "server_path"
+    }
+}
+
+// MARK: - TVFavorite (GET /user/favorites row)
+//
+// Favoriting on tvOS is scoped to Personal Cloud Library tracks only — a
+// UserMusicTrack.id is a stable hash of its server path (see `_stable_id` in
+// ios-bridge/main.py), so it round-trips as the same `song_id` iOS uses when
+// favoriting the same cloud track. Search results and playlist entries don't
+// have a similarly stable, source-independent id, so they aren't favoritable
+// here (mirrors why they aren't included in `TVPlayable.favoriteSongID`).
+
+struct TVFavorite: Codable, Hashable {
+    let songID: String
+    let title: String?
+    let artist: String?
+    let album: String?
+
+    enum CodingKeys: String, CodingKey {
+        case songID = "song_id"
+        case title, artist, album
     }
 }
 
@@ -87,7 +109,7 @@ struct TVPlaylist: Codable, Hashable, Identifiable {
     let name: String
     let description: String?
     let folder: String?
-    let tracks: [TVPlaylistTrack]
+    var tracks: [TVPlaylistTrack]
 }
 
 // MARK: - TVPlayable (unified playback item)
@@ -103,6 +125,28 @@ struct TVPlayable: Identifiable, Hashable {
     let streamURL: URL
     let artworkURL: URL?
     let authToken: String?
+    /// Set only when this item came from the Personal Cloud Library, where
+    /// `id` is already the stable favoritable song id — see `TVFavorite`.
+    var favoriteSongID: String?
+}
+
+// MARK: - TVSyncTrackBody (POST /user/playlists/{id}/tracks request body —
+// mirrors the bridge's `SyncTrack` Pydantic model)
+
+struct TVSyncTrackBody: Encodable {
+    let localSongID: String? = nil
+    let trackURL: String?
+    let title: String
+    let artist: String?
+    let album: String?
+    let durationSeconds: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case localSongID = "local_song_id"
+        case trackURL = "track_url"
+        case title, artist, album
+        case durationSeconds = "duration_seconds"
+    }
 }
 
 // MARK: - TVBridgeClient
@@ -129,6 +173,11 @@ final class TVBridgeClient: ObservableObject {
     @Published var playlists: [TVPlaylist] = []
     @Published var isLoadingPlaylists = false
     @Published var playlistsError: String?
+    @Published var playlistMutationError: String?
+
+    // Favorites (Personal Cloud Library tracks only — see `TVFavorite`)
+    @Published var favoriteSongIDs: Set<String> = []
+    @Published var isLoadingFavorites = false
 
     /// In-flight search query, so a stale/slower response can't overwrite a newer one.
     private var activeSearch = ""
@@ -264,6 +313,141 @@ final class TVBridgeClient: ObservableObject {
         }
     }
 
+    /// Bare mutation request — used for create/rename/delete/add-track/
+    /// remove-track. Deliberately doesn't use `dataWithRetry`: those retry a
+    /// transient 5xx, which is safe for idempotent GETs but could double a
+    /// non-idempotent create/add on a slow success that looked like a
+    /// failure at the gateway.
+    @discardableResult
+    private func mutate(_ path: String, method: String, token: String, jsonBody: Data? = nil) async -> Bool {
+        guard let url = URL(string: baseURL + path) else { return false }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 30
+        if let jsonBody {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = jsonBody
+        }
+        do {
+            let (_, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse else { return false }
+            return (200..<300).contains(http.statusCode)
+        } catch {
+            return false
+        }
+    }
+
+    // MARK: Playlist mutations
+
+    func createPlaylist(name: String, token: String) async -> Bool {
+        playlistMutationError = nil
+        guard let body = try? JSONEncoder().encode(["name": name]) else { return false }
+        let ok = await mutate("/user/playlists", method: "POST", token: token, jsonBody: body)
+        if ok {
+            await fetchPlaylists(token: token)
+        } else {
+            playlistMutationError = "Couldn’t create the playlist. Try again."
+        }
+        return ok
+    }
+
+    func renamePlaylist(id: String, name: String, token: String) async -> Bool {
+        playlistMutationError = nil
+        guard let body = try? JSONEncoder().encode(["name": name]) else { return false }
+        let ok = await mutate("/user/playlists/\(id)", method: "PUT", token: token, jsonBody: body)
+        if ok {
+            await fetchPlaylists(token: token)
+        } else {
+            playlistMutationError = "Couldn’t rename the playlist. Try again."
+        }
+        return ok
+    }
+
+    func deletePlaylist(id: String, token: String) async -> Bool {
+        playlistMutationError = nil
+        let ok = await mutate("/user/playlists/\(id)", method: "DELETE", token: token)
+        if ok {
+            playlists.removeAll { $0.id == id }
+        } else {
+            playlistMutationError = "Couldn’t delete the playlist. Try again."
+        }
+        return ok
+    }
+
+    /// Adds a track to a playlist, then refreshes so the detail view reflects
+    /// the server-assigned position/id immediately.
+    func addTrack(_ body: TVSyncTrackBody, toPlaylist playlistID: String, token: String) async -> Bool {
+        playlistMutationError = nil
+        guard let json = try? JSONEncoder().encode(body) else { return false }
+        let ok = await mutate("/user/playlists/\(playlistID)/tracks", method: "POST", token: token, jsonBody: json)
+        if ok {
+            await fetchPlaylists(token: token)
+        } else {
+            playlistMutationError = "Couldn’t add that track. Try again."
+        }
+        return ok
+    }
+
+    func removeTrack(_ trackID: String, fromPlaylist playlistID: String, token: String) async -> Bool {
+        playlistMutationError = nil
+        let ok = await mutate("/user/playlists/\(playlistID)/tracks/\(trackID)", method: "DELETE", token: token)
+        if ok {
+            if let idx = playlists.firstIndex(where: { $0.id == playlistID }) {
+                playlists[idx].tracks.removeAll { $0.id == trackID }
+            }
+        } else {
+            playlistMutationError = "Couldn’t remove that track. Try again."
+        }
+        return ok
+    }
+
+    // MARK: Favorites
+
+    func fetchFavorites(token: String) async {
+        isLoadingFavorites = true
+        defer { isLoadingFavorites = false }
+        guard let url = URL(string: baseURL + "/user/favorites") else { return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 30
+        guard let (data, response) = try? await dataWithRetry(req),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let favorites = try? JSONDecoder().decode([TVFavorite].self, from: data)
+        else { return }
+        favoriteSongIDs = Set(favorites.map { $0.songID })
+    }
+
+    func isFavorite(_ songID: String) -> Bool { favoriteSongIDs.contains(songID) }
+
+    /// Optimistically flips local state, then reconciles with the server —
+    /// keeps the star responsive to remote-click without waiting on a
+    /// round-trip, but self-heals if the request actually failed.
+    func toggleFavorite(track: UserMusicTrack, token: String) async {
+        let songID = track.id
+        let wasFavorite = favoriteSongIDs.contains(songID)
+        if wasFavorite {
+            favoriteSongIDs.remove(songID)
+        } else {
+            favoriteSongIDs.insert(songID)
+        }
+
+        let ok: Bool
+        if wasFavorite {
+            ok = await mutate("/user/favorites/\(songID)", method: "DELETE", token: token)
+        } else {
+            let payload: [String: String] = [
+                "song_id": songID, "title": track.title, "artist": track.artist, "album": track.album,
+            ]
+            guard let body = try? JSONEncoder().encode(payload) else { return }
+            ok = await mutate("/user/favorites", method: "POST", token: token, jsonBody: body)
+        }
+        if !ok {
+            // Revert the optimistic flip.
+            if wasFavorite { favoriteSongIDs.insert(songID) } else { favoriteSongIDs.remove(songID) }
+        }
+    }
+
     // MARK: URL builders
 
     /// Bridge proxy stream URL for a search result — AVPlayer streams this directly.
@@ -314,7 +498,8 @@ final class TVBridgeClient: ObservableObject {
             artist: track.artist,
             streamURL: url,
             artworkURL: userMusicArtworkURL(for: track),
-            authToken: token
+            authToken: token,
+            favoriteSongID: track.id
         )
     }
 
@@ -334,6 +519,36 @@ final class TVBridgeClient: ObservableObject {
             streamURL: url,
             artworkURL: nil,
             authToken: token
+        )
+    }
+
+    // MARK: Add-to-playlist payload mappers
+    //
+    // A playlist track is stored server-side as a denormalized snapshot
+    // (title/artist/album/url), not a reference back to the library — so
+    // these just carry the streamable URL forward as `track_url`, the same
+    // shape a playlist entry created on iOS would have for a cloud-library
+    // or streamed track.
+
+    func syncTrackBody(from track: UserMusicTrack) -> TVSyncTrackBody? {
+        guard let url = userMusicStreamURL(for: track) else { return nil }
+        return TVSyncTrackBody(
+            trackURL: url.absoluteString,
+            title: track.title.isEmpty ? track.filename : track.title,
+            artist: track.artist.isEmpty ? nil : track.artist,
+            album: track.album.isEmpty ? nil : track.album,
+            durationSeconds: Int(track.duration)
+        )
+    }
+
+    func syncTrackBody(from track: TVTrack) -> TVSyncTrackBody? {
+        guard let url = streamURL(for: track) else { return nil }
+        return TVSyncTrackBody(
+            trackURL: url.absoluteString,
+            title: track.title,
+            artist: track.artist.isEmpty ? nil : track.artist,
+            album: nil,
+            durationSeconds: track.durationSeconds
         )
     }
 }

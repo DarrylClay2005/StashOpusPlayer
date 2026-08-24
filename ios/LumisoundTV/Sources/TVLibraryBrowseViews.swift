@@ -26,6 +26,12 @@ struct TVArtistGroup: Identifiable, Hashable {
     var albumCount: Int { Set(tracks.map { $0.album.isEmpty ? "Unknown Album" : $0.album }).count }
 }
 
+struct TVGenreGroup: Identifiable, Hashable {
+    let name: String
+    let tracks: [UserMusicTrack]
+    var id: String { name }
+}
+
 /// Track order within an album: by track number (untagged tracks sort last),
 /// then title — matches `AlbumDetailView`'s ordering on iOS.
 private func albumSortKey(_ t: UserMusicTrack) -> (Int, String) {
@@ -55,16 +61,33 @@ func tvArtistGroups(from library: [UserMusicTrack]) -> [TVArtistGroup] {
         }
 }
 
+/// Tracks with no genre tag are omitted entirely (rather than grouped under
+/// "Unknown Genre") — unlike album/artist, most uploads simply won't have a
+/// genre tag, so an "Unknown Genre" bucket would just become a second,
+/// noisier copy of the Songs tab instead of a useful browse dimension.
+func tvGenreGroups(from library: [UserMusicTrack]) -> [TVGenreGroup] {
+    let tagged = library.filter { !$0.genre.trimmingCharacters(in: .whitespaces).isEmpty }
+    let groups = Dictionary(grouping: tagged) { $0.genre.trimmingCharacters(in: .whitespaces) }
+    return groups.keys
+        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        .map { name in
+            TVGenreGroup(name: name, tracks: (groups[name] ?? []).sorted {
+                $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            })
+        }
+}
+
 // MARK: - Albums grid
 
 struct TVAlbumsGridView: View {
     @ObservedObject var client: TVBridgeClient
     let token: String
+    let library: [UserMusicTrack]
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: 48)]
 
     var body: some View {
-        let albums = tvAlbumGroups(from: client.library)
+        let albums = tvAlbumGroups(from: library)
         ScrollView {
             if albums.isEmpty {
                 Text("No albums yet.").font(.title3).foregroundStyle(.secondary).padding(.top, 100)
@@ -161,6 +184,7 @@ struct TVAlbumDetailView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.card)
+                        .tvTrackActions(client: client, token: token, track: track)
                     }
                 }
             }
@@ -174,11 +198,12 @@ struct TVAlbumDetailView: View {
 struct TVArtistsGridView: View {
     @ObservedObject var client: TVBridgeClient
     let token: String
+    let library: [UserMusicTrack]
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: 48)]
 
     var body: some View {
-        let artists = tvArtistGroups(from: client.library)
+        let artists = tvArtistGroups(from: library)
         ScrollView {
             if artists.isEmpty {
                 Text("No artists yet.").font(.title3).foregroundStyle(.secondary).padding(.top, 100)
@@ -258,6 +283,168 @@ struct TVArtistDetailView: View {
                 }
                 .padding(60)
             }
+        }
+    }
+}
+
+// MARK: - Genres grid
+
+struct TVGenresGridView: View {
+    @ObservedObject var client: TVBridgeClient
+    let token: String
+    let library: [UserMusicTrack]
+
+    private let columns = [GridItem(.adaptive(minimum: 280), spacing: 48)]
+
+    var body: some View {
+        let genres = tvGenreGroups(from: library)
+        ScrollView {
+            if genres.isEmpty {
+                Text("No genre-tagged songs yet.").font(.title3).foregroundStyle(.secondary).padding(.top, 100)
+            } else {
+                LazyVGrid(columns: columns, spacing: 48) {
+                    ForEach(genres) { genre in
+                        NavigationLink {
+                            TVGenreDetailView(client: client, token: token, genre: genre)
+                        } label: {
+                            genreCard(genre)
+                        }
+                        .buttonStyle(.card)
+                    }
+                }
+                .padding(60)
+            }
+        }
+    }
+
+    private func genreCard(_ genre: TVGenreGroup) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ZStack {
+                Color.gray.opacity(0.3)
+                Image(systemName: "guitars").font(.system(size: 50)).foregroundStyle(.secondary)
+            }
+            .frame(width: 280, height: 280)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            Text(genre.name).font(.headline).lineLimit(2, reservesSpace: true)
+            Text("\(genre.tracks.count) \(genre.tracks.count == 1 ? "song" : "songs")")
+                .font(.subheadline).foregroundStyle(.secondary)
+        }
+        .frame(width: 280)
+    }
+}
+
+// MARK: - Genre detail
+
+struct TVGenreDetailView: View {
+    @ObservedObject var client: TVBridgeClient
+    let token: String
+    let genre: TVGenreGroup
+
+    private var queue: [TVPlayable] {
+        genre.tracks.compactMap { client.playable(from: $0, token: token) }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(genre.name).font(.system(size: 40, weight: .bold))
+                    Text("\(genre.tracks.count) \(genre.tracks.count == 1 ? "song" : "songs")")
+                        .font(.title3).foregroundStyle(.secondary)
+                    if let first = queue.first {
+                        NavigationLink(value: TVPlayContext(queue: queue, startID: first.id)) {
+                            Label("Play", systemImage: "play.fill")
+                        }
+                        .buttonStyle(.card)
+                        .padding(.top, 10)
+                    }
+                }
+
+                VStack(spacing: 0) {
+                    ForEach(genre.tracks) { track in
+                        NavigationLink(value: TVPlayContext(queue: queue, startID: track.id)) {
+                            HStack(spacing: 24) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(track.title.isEmpty ? track.filename : track.title).font(.title3)
+                                    Text(track.artist.isEmpty ? "Unknown Artist" : track.artist)
+                                        .font(.callout).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(track.durationText).font(.callout).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 14)
+                            .padding(.horizontal, 20)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.card)
+                        .tvTrackActions(client: client, token: token, track: track)
+                    }
+                }
+            }
+            .padding(60)
+        }
+    }
+}
+
+// MARK: - Favorites grid
+
+struct TVFavoritesGridView: View {
+    @ObservedObject var client: TVBridgeClient
+    let token: String
+
+    private let columns = [GridItem(.adaptive(minimum: 280), spacing: 48)]
+
+    /// Favorites resolved against the already-loaded library — a favorite
+    /// whose track no longer exists in the cloud library (deleted since) is
+    /// silently dropped rather than shown unplayable.
+    private var favoriteTracks: [UserMusicTrack] {
+        client.library.filter { client.favoriteSongIDs.contains($0.id) }
+    }
+    private var queue: [TVPlayable] {
+        favoriteTracks.compactMap { client.playable(from: $0, token: token) }
+    }
+
+    var body: some View {
+        ScrollView {
+            if client.isLoadingFavorites && client.favoriteSongIDs.isEmpty {
+                ProgressView("Loading favorites…").padding(.top, 100)
+            } else if favoriteTracks.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "star").font(.system(size: 70)).foregroundStyle(.secondary)
+                    Text("No favorites yet.\nHold select on a song to add one.")
+                        .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
+                .padding(.top, 120)
+            } else {
+                LazyVGrid(columns: columns, spacing: 48) {
+                    ForEach(favoriteTracks) { track in
+                        NavigationLink(value: TVPlayContext(queue: queue, startID: track.id)) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                TVAuthImage(url: client.userMusicArtworkURL(for: track), token: token) {
+                                    ZStack {
+                                        Color.gray.opacity(0.3)
+                                        Image(systemName: "music.note").font(.system(size: 40)).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(width: 280, height: 280)
+                                .clipped()
+                                Text(track.title.isEmpty ? track.filename : track.title)
+                                    .font(.headline).lineLimit(2, reservesSpace: true)
+                                Text(track.artist.isEmpty ? "Unknown Artist" : track.artist)
+                                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            .frame(width: 280)
+                        }
+                        .buttonStyle(.card)
+                        .tvTrackActions(client: client, token: token, track: track)
+                    }
+                }
+                .padding(60)
+            }
+        }
+        .task {
+            if client.favoriteSongIDs.isEmpty { await client.fetchFavorites(token: token) }
         }
     }
 }

@@ -8,12 +8,19 @@ import SwiftUI
 // TVOS_WATCHOS_FEASIBILITY.md), so those entries are shown but not playable
 // here. Entries backed by a Personal Cloud Library upload carry the bridge's
 // own `/user/music/stream` URL as `track_url` and play like any other track.
+//
+// Create/rename/delete/add/remove all go through the bridge's dedicated
+// playlist-mutation endpoints (not the wholesale `/user/sync` snapshot push,
+// which would also overwrite the user's other settings) — see
+// `TVBridgeClient`'s "Playlist mutations" section.
 
 struct TVPlaylistsView: View {
     @ObservedObject var client: TVBridgeClient
     let token: String
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: 48)]
+    @State private var showNewPlaylist = false
+    @State private var renamingPlaylist: TVPlaylist?
 
     var body: some View {
         ScrollView {
@@ -30,12 +37,14 @@ struct TVPlaylistsView: View {
             } else if client.playlists.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "music.note.list").font(.system(size: 70)).foregroundStyle(.secondary)
-                    Text("No playlists yet.\nCreate one on your iPhone or iPad.")
+                    Text("No playlists yet.")
                         .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    newPlaylistButton
                 }
                 .padding(.top, 120)
             } else {
                 LazyVGrid(columns: columns, spacing: 48) {
+                    newPlaylistCard
                     ForEach(client.playlists) { playlist in
                         NavigationLink {
                             TVPlaylistDetailView(client: client, token: token, playlist: playlist)
@@ -43,6 +52,18 @@ struct TVPlaylistsView: View {
                             playlistCard(playlist)
                         }
                         .buttonStyle(.card)
+                        .contextMenu {
+                            Button {
+                                renamingPlaylist = playlist
+                            } label: {
+                                Label("Rename", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) {
+                                Task { await client.deletePlaylist(id: playlist.id, token: token) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                     }
                 }
                 .padding(60)
@@ -51,6 +72,43 @@ struct TVPlaylistsView: View {
         .task {
             if client.playlists.isEmpty { await client.fetchPlaylists(token: token) }
         }
+        .sheet(isPresented: $showNewPlaylist) {
+            TVPlaylistNameSheet(title: "New Playlist", initialName: "") { name in
+                _ = await client.createPlaylist(name: name, token: token)
+            }
+        }
+        .sheet(item: $renamingPlaylist) { playlist in
+            TVPlaylistNameSheet(title: "Rename Playlist", initialName: playlist.name) { name in
+                _ = await client.renamePlaylist(id: playlist.id, name: name, token: token)
+            }
+        }
+    }
+
+    private var newPlaylistButton: some View {
+        Button {
+            showNewPlaylist = true
+        } label: {
+            Label("New Playlist", systemImage: "plus")
+        }
+        .buttonStyle(.card)
+    }
+
+    private var newPlaylistCard: some View {
+        Button {
+            showNewPlaylist = true
+        } label: {
+            VStack(spacing: 10) {
+                ZStack {
+                    Color.gray.opacity(0.2)
+                    Image(systemName: "plus").font(.system(size: 50)).foregroundStyle(.secondary)
+                }
+                .frame(width: 280, height: 280)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                Text("New Playlist").font(.headline)
+            }
+            .frame(width: 280)
+        }
+        .buttonStyle(.card)
     }
 
     private func playlistCard(_ playlist: TVPlaylist) -> some View {
@@ -77,19 +135,25 @@ struct TVPlaylistDetailView: View {
     let token: String
     let playlist: TVPlaylist
 
+    /// Re-reads the live copy out of `client.playlists` so a track removal
+    /// (which mutates that array) is reflected here without a separate fetch.
+    private var current: TVPlaylist {
+        client.playlists.first(where: { $0.id == playlist.id }) ?? playlist
+    }
+
     /// Only remotely-playable tracks form the actual playback queue; a track
     /// that isn't playable here is skipped over entirely rather than queued
     /// and immediately failing.
     private var queue: [TVPlayable] {
-        playlist.tracks.compactMap { client.playable(from: $0, token: token) }
+        current.tracks.compactMap { client.playable(from: $0, token: token) }
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(playlist.name).font(.system(size: 40, weight: .bold))
-                    if let description = playlist.description, !description.isEmpty {
+                    Text(current.name).font(.system(size: 40, weight: .bold))
+                    if let description = current.description, !description.isEmpty {
                         Text(description).font(.title3).foregroundStyle(.secondary)
                     }
                     if let first = queue.first {
@@ -101,11 +165,11 @@ struct TVPlaylistDetailView: View {
                     }
                 }
 
-                if playlist.tracks.isEmpty {
+                if current.tracks.isEmpty {
                     Text("This playlist is empty.").font(.title3).foregroundStyle(.secondary)
                 } else {
                     VStack(spacing: 0) {
-                        ForEach(playlist.tracks) { track in
+                        ForEach(current.tracks) { track in
                             row(for: track)
                         }
                     }
@@ -137,13 +201,65 @@ struct TVPlaylistDetailView: View {
         .padding(.horizontal, 20)
         .contentShape(Rectangle())
 
-        if track.isRemotelyPlayable, let playable = client.playable(from: track, token: token) {
-            NavigationLink(value: TVPlayContext(queue: queue, startID: playable.id)) {
-                content
+        Group {
+            if track.isRemotelyPlayable, let playable = client.playable(from: track, token: token) {
+                NavigationLink(value: TVPlayContext(queue: queue, startID: playable.id)) {
+                    content
+                }
+                .buttonStyle(.card)
+            } else {
+                content.opacity(0.5)
             }
-            .buttonStyle(.card)
-        } else {
-            content.opacity(0.5)
         }
+        .contextMenu {
+            Button(role: .destructive) {
+                Task { await client.removeTrack(track.id, fromPlaylist: playlist.id, token: token) }
+            } label: {
+                Label("Remove from Playlist", systemImage: "minus.circle")
+            }
+        }
+    }
+}
+
+// MARK: - TVPlaylistNameSheet
+//
+// Shared name-entry sheet for both create and rename. A plain `TextField` in
+// a `List` (not a `TextField` embedded in `.alert`, which tvOS's on-screen
+// keyboard flow doesn't drive reliably) — same pattern as the "New Playlist"
+// row in `TVAddToPlaylistSheet`.
+
+struct TVPlaylistNameSheet: View {
+    let title: String
+    let initialName: String
+    let onSave: (String) async -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name = ""
+    @State private var isSaving = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                TextField("Playlist name", text: $name)
+            }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        Task {
+                            isSaving = true
+                            await onSave(name.trimmingCharacters(in: .whitespaces))
+                            isSaving = false
+                            dismiss()
+                        }
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .onAppear { name = initialName }
     }
 }
