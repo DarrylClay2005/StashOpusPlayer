@@ -118,22 +118,64 @@ struct TVAccountView: View {
     @ObservedObject var account: TVAccount
     let token: String
 
+    private var unreadNotificationCount: Int {
+        client.notifications.filter(\.isUnread).count
+    }
+
     var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "person.crop.circle.fill").font(.system(size: 90)).foregroundStyle(.tint)
-            Text(account.user?.name ?? "Signed in").font(.title)
+        ScrollView {
+            VStack(spacing: 36) {
+                VStack(spacing: 12) {
+                    Image(systemName: "person.crop.circle.fill").font(.system(size: 90)).foregroundStyle(.tint)
+                    Text(account.user?.name ?? "Signed in").font(.title)
+                }
+                .padding(.top, 60)
 
-            NavigationLink {
-                TVStatsView(client: client, token: token)
-            } label: {
-                Label("Listening Stats", systemImage: "chart.bar.fill")
+                VStack(spacing: 16) {
+                    accountLink("Listening Stats", systemImage: "chart.bar.fill") {
+                        TVStatsView(client: client, token: token)
+                    }
+                    accountLink("Notifications", systemImage: "bell.fill", badge: unreadNotificationCount) {
+                        TVNotificationsView(client: client, token: token)
+                    }
+                    accountLink("Active Sessions", systemImage: "list.bullet.rectangle") {
+                        TVSessionsView(client: client, account: account, token: token)
+                    }
+                }
+                .frame(width: 420)
+
+                TVFriendsListeningCard(friendsListening: client.friendsListening)
+                    .frame(width: 420)
+
+                Button("Sign Out", role: .destructive) { account.logout() }
+                    .frame(width: 320)
+                    .padding(.bottom, 60)
             }
-            .buttonStyle(.card)
-            .frame(width: 320)
-
-            Button("Sign Out", role: .destructive) { account.logout() }
-                .frame(width: 320)
         }
-        .padding(80)
+        .task {
+            if client.notifications.isEmpty { await client.fetchNotifications(token: token) }
+            await client.fetchFriendsListening(token: token)
+        }
+    }
+
+    @ViewBuilder
+    private func accountLink<Destination: View>(
+        _ title: String, systemImage: String, badge: Int = 0, @ViewBuilder destination: () -> Destination
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack {
+                Label(title, systemImage: systemImage)
+                Spacer()
+                if badge > 0 {
+                    Text("\(badge)")
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.accentColor, in: Capsule())
+                }
+            }
+        }
+        .buttonStyle(.card)
     }
 }

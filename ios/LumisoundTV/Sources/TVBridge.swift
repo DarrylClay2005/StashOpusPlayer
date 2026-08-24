@@ -175,6 +175,113 @@ private struct TVSmartPlaylistsResponse: Decodable {
     let playlists: [TVSmartPlaylistBucket]
 }
 
+// MARK: - Round 4: sessions, notifications, subscriptions, friends/presence
+//
+// Scoped down from the full iOS feature set — see the round-4 research
+// notes. Skipped entirely: Listen Together (Apple SharePlay/GroupActivities,
+// no tvOS path), push-notification registration (no APNs setup here, but the
+// notification *inbox* below is a separate plain GET, unaffected), and
+// account actions poorly suited to a remote-typed 10-foot UI (change
+// password, 2FA setup, delete account).
+
+struct TVSession: Decodable, Hashable, Identifiable {
+    let tokenID: String
+    let deviceName: String?
+    let createdAt: String?
+    let expiresAt: String?
+    let isCurrent: Bool
+    var id: String { tokenID }
+
+    enum CodingKeys: String, CodingKey {
+        case tokenID = "token_id"
+        case deviceName = "device_name"
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+        case isCurrent = "is_current"
+    }
+}
+
+private struct TVSessionsResponse: Decodable {
+    let sessions: [TVSession]
+}
+
+struct TVNotification: Decodable, Hashable, Identifiable {
+    let id: String
+    let type: String
+    let title: String?
+    let body: String?
+    let createdAt: String?
+    let readAt: String?
+    var isUnread: Bool { readAt == nil }
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, title, body
+        case createdAt = "created_at"
+        case readAt = "read_at"
+    }
+}
+
+struct TVSubscriptionFeedItem: Decodable, Hashable, Identifiable {
+    let id: String
+    let track: TVTrack?
+    let discoveredAt: String?
+    let isRead: Bool
+    let channelName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, track
+        case discoveredAt = "discovered_at"
+        case isRead = "is_read"
+        case channelName = "channel_name"
+    }
+}
+
+struct TVFriend: Decodable, Hashable, Identifiable {
+    let userID: String
+    let username: String?
+    let displayName: String?
+    var id: String { userID }
+    var name: String { displayName ?? username ?? "Friend" }
+
+    enum CodingKeys: String, CodingKey {
+        case userID = "user_id"
+        case username
+        case displayName = "display_name"
+    }
+}
+
+private struct TVFriendsResponse: Decodable {
+    let friends: [TVFriend]
+}
+
+struct TVFriendPresence: Decodable, Hashable {
+    let userID: String
+    let online: Bool
+    let isPlaying: Bool
+    let nowPlayingTitle: String?
+    let nowPlayingArtist: String?
+
+    enum CodingKeys: String, CodingKey {
+        case userID = "user_id"
+        case online
+        case isPlaying = "is_playing"
+        case nowPlayingTitle = "now_playing_title"
+        case nowPlayingArtist = "now_playing_artist"
+    }
+}
+
+private struct TVFriendsPresenceResponse: Decodable {
+    let presence: [TVFriendPresence]
+}
+
+/// A friend currently listening, paired with their presence — what "Friends
+/// Listening Now" actually renders (only friends where `presence.isPlaying`).
+struct TVFriendListening: Identifiable {
+    let friend: TVFriend
+    let presence: TVFriendPresence
+    var id: String { friend.id }
+}
+
 // MARK: - TVPlaylist / TVPlaylistTrack (cross-device synced playlists)
 //
 // Mirrors GET /user/playlists (see AccountModels.swift's `SharedPlaylistTrack`
@@ -297,6 +404,15 @@ final class TVBridgeClient: ObservableObject {
     @Published var weeklyStats: [TVWeeklyStatDay] = []
     @Published var achievements: TVAchievements?
     @Published var isLoadingStats = false
+
+    // Round 4: sessions, notifications, subscriptions, friends
+    @Published var sessions: [TVSession] = []
+    @Published var isLoadingSessions = false
+    @Published var notifications: [TVNotification] = []
+    @Published var isLoadingNotifications = false
+    @Published var subscriptionFeed: [TVSubscriptionFeedItem] = []
+    @Published var isLoadingSubscriptionFeed = false
+    @Published var friendsListening: [TVFriendListening] = []
 
     /// In-flight search query, so a stale/slower response can't overwrite a newer one.
     private var activeSearch = ""
@@ -697,6 +813,111 @@ final class TVBridgeClient: ObservableObject {
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
         else { return nil }
         return try? JSONDecoder().decode(TVAchievements.self, from: data)
+    }
+
+    // MARK: Sessions
+
+    func fetchSessions(token: String) async {
+        isLoadingSessions = true
+        defer { isLoadingSessions = false }
+        guard let url = URL(string: baseURL + "/auth/sessions") else { return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 30
+        guard let (data, response) = try? await dataWithRetry(req),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode(TVSessionsResponse.self, from: data)
+        else { return }
+        sessions = decoded.sessions
+    }
+
+    /// Returns true if the revoked session was this device's own current one
+    /// — the caller should log out locally, since the token backing this
+    /// very session no longer exists server-side.
+    @discardableResult
+    func revokeSession(_ tokenID: String, token: String) async -> Bool {
+        let wasCurrent = sessions.first(where: { $0.tokenID == tokenID })?.isCurrent ?? false
+        let ok = await mutate("/auth/sessions/\(tokenID)", method: "DELETE", token: token)
+        if ok {
+            sessions.removeAll { $0.tokenID == tokenID }
+        }
+        return ok && wasCurrent
+    }
+
+    // MARK: Notifications
+
+    func fetchNotifications(token: String) async {
+        isLoadingNotifications = true
+        defer { isLoadingNotifications = false }
+        guard let url = URL(string: baseURL + "/user/notifications") else { return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 30
+        guard let (data, response) = try? await dataWithRetry(req),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode([TVNotification].self, from: data)
+        else { return }
+        notifications = decoded
+    }
+
+    func markNotificationRead(_ id: String, token: String) async {
+        guard await mutate("/user/notifications/\(id)/read", method: "POST", token: token) else { return }
+        await fetchNotifications(token: token)
+    }
+
+    func markAllNotificationsRead(token: String) async {
+        guard await mutate("/user/notifications/read-all", method: "POST", token: token) else { return }
+        await fetchNotifications(token: token)
+    }
+
+    // MARK: Subscriptions feed (read-only — see round-4 scope note above)
+
+    func fetchSubscriptionFeed(token: String) async {
+        isLoadingSubscriptionFeed = true
+        defer { isLoadingSubscriptionFeed = false }
+        guard let url = URL(string: baseURL + "/user/subscriptions/feed?limit=40") else { return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 30
+        guard let (data, response) = try? await dataWithRetry(req),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode([TVSubscriptionFeedItem].self, from: data)
+        else { return }
+        subscriptionFeed = decoded
+    }
+
+    // MARK: Friends listening now (read-only — no add/accept/decline UI;
+    // see round-4 scope note above on why a full social tab doesn't fit a
+    // shared living-room screen)
+
+    func fetchFriendsListening(token: String) async {
+        guard let friendsURL = URL(string: baseURL + "/api/social/friends") else { return }
+        var friendsReq = URLRequest(url: friendsURL)
+        friendsReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        friendsReq.timeoutInterval = 30
+        guard let (friendsData, friendsResp) = try? await dataWithRetry(friendsReq),
+              let friendsHTTP = friendsResp as? HTTPURLResponse, (200..<300).contains(friendsHTTP.statusCode),
+              let friendsDecoded = try? JSONDecoder().decode(TVFriendsResponse.self, from: friendsData),
+              !friendsDecoded.friends.isEmpty
+        else {
+            friendsListening = []
+            return
+        }
+
+        guard let presenceURL = URL(string: baseURL + "/api/social/presence/friends") else { return }
+        var presenceReq = URLRequest(url: presenceURL)
+        presenceReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        presenceReq.timeoutInterval = 30
+        guard let (presenceData, presenceResp) = try? await dataWithRetry(presenceReq),
+              let presenceHTTP = presenceResp as? HTTPURLResponse, (200..<300).contains(presenceHTTP.statusCode),
+              let presenceDecoded = try? JSONDecoder().decode(TVFriendsPresenceResponse.self, from: presenceData)
+        else { return }
+
+        let presenceByID = Dictionary(uniqueKeysWithValues: presenceDecoded.presence.map { ($0.userID, $0) })
+        friendsListening = friendsDecoded.friends.compactMap { friend in
+            guard let presence = presenceByID[friend.userID], presence.isPlaying else { return nil }
+            return TVFriendListening(friend: friend, presence: presence)
+        }
     }
 
     // MARK: URL builders

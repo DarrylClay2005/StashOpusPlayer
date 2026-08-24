@@ -21,6 +21,7 @@ struct TVDiscoverView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 50) {
+                subscriptionFeedSection
                 discoverMixSection
                 onThisDaySection
                 smartPlaylistsSection
@@ -31,6 +32,34 @@ struct TVDiscoverView: View {
             if client.discoverMix.isEmpty { await client.fetchDiscoverMix(token: token) }
             if client.onThisDay.isEmpty { await client.fetchOnThisDay(token: token) }
             if client.smartPlaylists.isEmpty { await client.fetchSmartPlaylists(token: token) }
+            if client.subscriptionFeed.isEmpty { await client.fetchSubscriptionFeed(token: token) }
+        }
+    }
+
+    // MARK: Subscriptions feed (new uploads from channels you follow —
+    // read-only on tvOS; managing subscriptions/auto-download stays iOS-only)
+
+    @ViewBuilder
+    private var subscriptionFeedSection: some View {
+        if client.isLoadingSubscriptionFeed || !client.subscriptionFeed.isEmpty {
+            sectionShell(title: "New From Your Subscriptions", subtitle: "Recent uploads from channels you follow") {
+                if client.isLoadingSubscriptionFeed {
+                    ProgressView().padding(.horizontal, 60)
+                } else {
+                    horizontalGrid {
+                        let queue = client.subscriptionFeed.compactMap { $0.track }.compactMap { client.playable(from: $0) }
+                        ForEach(client.subscriptionFeed) { item in
+                            if let track = item.track {
+                                NavigationLink(value: TVPlayContext(queue: queue, startID: track.id)) {
+                                    TVTrackCard(track: track)
+                                }
+                                .buttonStyle(.card)
+                                .tvSearchTrackActions(client: client, token: token, track: track)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
