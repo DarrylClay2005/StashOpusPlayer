@@ -9,6 +9,10 @@ import SwiftUI
 
 @main
 struct LumisoundTVApp: App {
+    init() {
+        TVAppLogger.shared.configure(bridgeURL: TVBridgeClient.shared.baseURL)
+    }
+
     var body: some Scene {
         WindowGroup {
             TVContentView()

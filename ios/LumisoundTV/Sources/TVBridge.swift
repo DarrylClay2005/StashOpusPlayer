@@ -429,9 +429,22 @@ final class TVBridgeClient: ObservableObject {
             if let http = response as? HTTPURLResponse, http.statusCode >= 500, retries > 0 {
                 return try await dataWithRetry(request, retries: retries - 1)
             }
+            // Centralized "app activity" error logging — every GET call site
+            // in this file routes through here, so this one spot catches
+            // most network failures without needing a log call at each of
+            // the ~15 call sites individually. Only fires once per real
+            // failure (the terminal give-up point, not every retry attempt).
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                tvWarn("Request failed", category: "network", extra: [
+                    "path": request.url?.path ?? "?", "status": "\(http.statusCode)",
+                ])
+            }
             return (data, response)
         } catch {
             if retries > 0 { return try await dataWithRetry(request, retries: retries - 1) }
+            tvError("Request failed after retries: \(error.localizedDescription)", category: "network", extra: [
+                "path": request.url?.path ?? "?",
+            ])
             throw error
         }
     }
@@ -564,11 +577,26 @@ final class TVBridgeClient: ObservableObject {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = jsonBody
         }
+        // Centralized "app activity" error logging — every mutation call
+        // site (playlist CRUD, favorites, sessions, notifications, play
+        // history) routes through here.
         do {
             let (_, response) = try await URLSession.shared.data(for: req)
-            guard let http = response as? HTTPURLResponse else { return false }
-            return (200..<300).contains(http.statusCode)
+            guard let http = response as? HTTPURLResponse else {
+                tvWarn("Mutation returned no HTTP response", category: "network", extra: ["path": path, "method": method])
+                return false
+            }
+            let ok = (200..<300).contains(http.statusCode)
+            if !ok {
+                tvWarn("Mutation failed", category: "network", extra: [
+                    "path": path, "method": method, "status": "\(http.statusCode)",
+                ])
+            }
+            return ok
         } catch {
+            tvError("Mutation request failed: \(error.localizedDescription)", category: "network", extra: [
+                "path": path, "method": method,
+            ])
             return false
         }
     }
@@ -581,6 +609,7 @@ final class TVBridgeClient: ObservableObject {
         let ok = await mutate("/user/playlists", method: "POST", token: token, jsonBody: body)
         if ok {
             await fetchPlaylists(token: token)
+            TVRemoteLogger.log(category: "playlist", event: "playlist_created", authToken: token)
         } else {
             playlistMutationError = "Couldn’t create the playlist. Try again."
         }
@@ -593,6 +622,7 @@ final class TVBridgeClient: ObservableObject {
         let ok = await mutate("/user/playlists/\(id)", method: "PUT", token: token, jsonBody: body)
         if ok {
             await fetchPlaylists(token: token)
+            TVRemoteLogger.log(category: "playlist", event: "playlist_renamed", authToken: token)
         } else {
             playlistMutationError = "Couldn’t rename the playlist. Try again."
         }
@@ -604,6 +634,7 @@ final class TVBridgeClient: ObservableObject {
         let ok = await mutate("/user/playlists/\(id)", method: "DELETE", token: token)
         if ok {
             playlists.removeAll { $0.id == id }
+            TVRemoteLogger.log(category: "playlist", event: "playlist_deleted", authToken: token)
         } else {
             playlistMutationError = "Couldn’t delete the playlist. Try again."
         }
@@ -618,6 +649,7 @@ final class TVBridgeClient: ObservableObject {
         let ok = await mutate("/user/playlists/\(playlistID)/tracks", method: "POST", token: token, jsonBody: json)
         if ok {
             await fetchPlaylists(token: token)
+            TVRemoteLogger.log(category: "playlist", event: "playlist_track_added", authToken: token)
         } else {
             playlistMutationError = "Couldn’t add that track. Try again."
         }
@@ -631,6 +663,7 @@ final class TVBridgeClient: ObservableObject {
             if let idx = playlists.firstIndex(where: { $0.id == playlistID }) {
                 playlists[idx].tracks.removeAll { $0.id == trackID }
             }
+            TVRemoteLogger.log(category: "playlist", event: "playlist_track_removed", authToken: token)
         } else {
             playlistMutationError = "Couldn’t remove that track. Try again."
         }
@@ -680,6 +713,9 @@ final class TVBridgeClient: ObservableObject {
         if !ok {
             // Revert the optimistic flip.
             if wasFavorite { favoriteSongIDs.insert(songID) } else { favoriteSongIDs.remove(songID) }
+        } else {
+            TVRemoteLogger.log(category: "favorites", event: wasFavorite ? "favorite_removed" : "favorite_added",
+                                authToken: token, detail: ["song_id": songID])
         }
     }
 
@@ -840,6 +876,9 @@ final class TVBridgeClient: ObservableObject {
         let ok = await mutate("/auth/sessions/\(tokenID)", method: "DELETE", token: token)
         if ok {
             sessions.removeAll { $0.tokenID == tokenID }
+            tvLog("Session revoked", category: "auth", extra: ["was_current": "\(wasCurrent)"])
+            TVRemoteLogger.log(category: "auth", event: "session_revoked", authToken: token,
+                                detail: ["was_current_device": wasCurrent])
         }
         return ok && wasCurrent
     }
@@ -863,11 +902,13 @@ final class TVBridgeClient: ObservableObject {
     func markNotificationRead(_ id: String, token: String) async {
         guard await mutate("/user/notifications/\(id)/read", method: "POST", token: token) else { return }
         await fetchNotifications(token: token)
+        TVRemoteLogger.log(category: "notifications", event: "notification_read", authToken: token)
     }
 
     func markAllNotificationsRead(token: String) async {
         guard await mutate("/user/notifications/read-all", method: "POST", token: token) else { return }
         await fetchNotifications(token: token)
+        TVRemoteLogger.log(category: "notifications", event: "notifications_read_all", authToken: token)
     }
 
     // MARK: Subscriptions feed (read-only — see round-4 scope note above)

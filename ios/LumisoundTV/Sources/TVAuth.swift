@@ -62,12 +62,16 @@ final class TVAccount: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: req)
             guard let http = response as? HTTPURLResponse else {
                 errorText = "Login failed. Try again."
+                tvWarn("Login failed: no HTTP response", category: "auth")
                 return
             }
             guard (200..<300).contains(http.statusCode) else {
                 errorText = http.statusCode == 401
                     ? "Incorrect username or password."
                     : "Login failed (HTTP \(http.statusCode))."
+                tvWarn("Login failed", category: "auth", extra: ["status": "\(http.statusCode)"])
+                TVRemoteLogger.logError(category: "auth", event: "login_failed",
+                                         message: "HTTP \(http.statusCode)")
                 return
             }
             let decoded = try JSONDecoder().decode(TVAuthResponse.self, from: data)
@@ -77,12 +81,25 @@ final class TVAccount: ObservableObject {
             if let user = decoded.user, let enc = try? JSONEncoder().encode(user) {
                 UserDefaults.standard.set(enc, forKey: userKey)
             }
+            tvBreadcrumb("Logged in")
+            tvLog("Login succeeded", category: "auth")
+            TVRemoteLogger.log(category: "auth", event: "login_succeeded", authToken: decoded.token)
         } catch {
             errorText = error.localizedDescription
+            tvWarn("Login failed: \(error.localizedDescription)", category: "auth")
+            TVRemoteLogger.logError(category: "auth", event: "login_failed", message: error.localizedDescription)
         }
     }
 
     func logout() {
+        // Snapshot before clearing — the remote event's network call runs on
+        // a later run-loop turn, after `token` below is already nil, so
+        // without this the event would lose its user attribution entirely
+        // (see TVRemoteLogger's authToken doc comment).
+        let priorToken = token
+        tvBreadcrumb("Logged out")
+        tvLog("Logout", category: "auth")
+        TVRemoteLogger.log(category: "auth", event: "logout", authToken: priorToken)
         token = nil
         user = nil
         UserDefaults.standard.removeObject(forKey: tokenKey)

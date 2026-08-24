@@ -70,6 +70,7 @@ final class TVPlayerModel: ObservableObject {
     /// Queue order before shuffling — restored when shuffle is toggled off.
     private var originalQueue: [TVPlayable] = []
     private var endObservers: [NSObjectProtocol] = []
+    private var failureObservers: [NSObjectProtocol] = []
     private var timeObservers: [(AVPlayer, Any)] = []
     private var statusObservations: [NSKeyValueObservation] = []
     private var sleepTimerTask: Task<Void, Never>?
@@ -107,6 +108,25 @@ final class TVPlayerModel: ObservableObject {
                 }
             }
             endObservers.append(endObs)
+
+            // Playback failures (bad stream, dropped connection mid-track)
+            // previously went completely unlogged — the UI would just spin
+            // forever with nothing surfaced anywhere, client or server.
+            let failureObs = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemFailedToPlayToEndTime, object: nil, queue: .main
+            ) { [weak self, weak p] note in
+                Task { @MainActor in
+                    guard let self, let p, self.player === p,
+                          let failedItem = note.object as? AVPlayerItem, failedItem === p.currentItem
+                    else { return }
+                    let underlying = (note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription
+                        ?? p.currentItem?.error?.localizedDescription ?? "unknown error"
+                    tvError("Playback failed: \(underlying)", category: "playback",
+                            extra: ["title": self.current?.title ?? "?"])
+                    TVRemoteLogger.logError(category: "playback", event: "playback_failed", message: underlying)
+                }
+            }
+            failureObservers.append(failureObs)
 
             // Drives the scrubber + elapsed/remaining time, and the crossfade trigger.
             let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
@@ -153,6 +173,12 @@ final class TVPlayerModel: ObservableObject {
         player.replaceCurrentItem(with: AVPlayerItem(asset: asset(for: item)))
         player.play()
         loadLyrics(for: item)
+        // Single chokepoint for every track transition (initial start, skip,
+        // repeat-all wrap, Up Next jump) — logging once here instead of at
+        // each caller avoids duplicating this at four call sites.
+        tvBreadcrumb("Playing: \(item.title)")
+        TVRemoteLogger.log(category: "playback", event: "track_started",
+                            detail: ["title": item.title, "artist": item.artist])
     }
 
     // MARK: Crossfade
@@ -192,6 +218,7 @@ final class TVPlayerModel: ObservableObject {
         incoming.volume = 0
         incoming.replaceCurrentItem(with: AVPlayerItem(asset: asset(for: nextItem)))
         incoming.play()
+        tvLog("Crossfade started into: \(nextItem.title)", category: "playback")
 
         let steps = 30
         let stepNanoseconds = UInt64(crossfadeDuration / Double(steps) * 1_000_000_000)
@@ -225,6 +252,10 @@ final class TVPlayerModel: ObservableObject {
         finishedOutgoing.pause()
         finishedOutgoing.replaceCurrentItem(with: nil)
         loadLyrics(for: queue[index])
+        let newItem = queue[index]
+        tvBreadcrumb("Crossfaded to: \(newItem.title)")
+        TVRemoteLogger.log(category: "playback", event: "track_started",
+                            detail: ["title": newItem.title, "artist": newItem.artist, "via": "crossfade"])
     }
 
     /// Stops and silences an in-flight crossfade (the not-yet-promoted
@@ -372,10 +403,12 @@ final class TVPlayerModel: ObservableObject {
         if let currentID {
             currentIndex = queue.firstIndex(where: { $0.id == currentID }) ?? 0
         }
+        TVRemoteLogger.log(category: "playback", event: "shuffle_toggled", detail: ["enabled": isShuffled])
     }
 
     func cycleRepeatMode() {
         repeatMode = repeatMode.next
+        TVRemoteLogger.log(category: "playback", event: "repeat_mode_changed", detail: ["mode": "\(repeatMode)"])
     }
 
     // MARK: Sleep timer
@@ -384,6 +417,8 @@ final class TVPlayerModel: ObservableObject {
         sleepTimerTask?.cancel()
         let end = Date().addingTimeInterval(Double(minutes) * 60)
         sleepTimerEndDate = end
+        tvLog("Sleep timer set for \(minutes) minutes", category: "playback")
+        TVRemoteLogger.log(category: "playback", event: "sleep_timer_set", detail: ["minutes": minutes])
         sleepTimerTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -391,6 +426,8 @@ final class TVPlayerModel: ObservableObject {
                 if remaining <= 0 {
                     self.player.pause()
                     self.sleepTimerEndDate = nil
+                    tvBreadcrumb("Sleep timer paused playback")
+                    TVRemoteLogger.log(category: "playback", event: "sleep_timer_fired")
                     return
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -399,9 +436,15 @@ final class TVPlayerModel: ObservableObject {
     }
 
     func cancelSleepTimer() {
+        // `sleepTimerEndDate` (not `sleepTimerTask`) is the accurate "is a
+        // timer genuinely pending" check — the task reference itself stays
+        // non-nil even after firing naturally, which would otherwise log a
+        // misleading "cancelled" event for a timer that already fired.
+        guard sleepTimerEndDate != nil else { return }
         sleepTimerTask?.cancel()
         sleepTimerTask = nil
         sleepTimerEndDate = nil
+        TVRemoteLogger.log(category: "playback", event: "sleep_timer_cancelled")
     }
 
     func stop() {
@@ -418,6 +461,8 @@ final class TVPlayerModel: ObservableObject {
         statusObservations.removeAll()
         endObservers.forEach { NotificationCenter.default.removeObserver($0) }
         endObservers.removeAll()
+        failureObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        failureObservers.removeAll()
         cancelSleepTimer()
         lyricsTask?.cancel()
         lyricsTask = nil
@@ -506,7 +551,11 @@ struct TVPlayerView: View {
         HStack(spacing: 30) {
             toggleIconButton("shuffle", isOn: model.isShuffled) { model.toggleShuffle() }
             toggleIconButton(model.repeatMode.symbol, isOn: model.repeatMode != .off) { model.cycleRepeatMode() }
-            toggleIconButton("arrow.triangle.merge", isOn: model.crossfadeEnabled) { model.crossfadeEnabled.toggle() }
+            toggleIconButton("arrow.triangle.merge", isOn: model.crossfadeEnabled) {
+                model.crossfadeEnabled.toggle()
+                TVRemoteLogger.log(category: "playback", event: "crossfade_toggled",
+                                    detail: ["enabled": model.crossfadeEnabled])
+            }
             sleepTimerMenu
             toggleIconButton("quote.bubble", isOn: sidePanel == .lyrics) { togglePanel(.lyrics) }
             artworkStyleMenu
@@ -570,6 +619,8 @@ struct TVPlayerView: View {
         .sheet(isPresented: $showArtworkStyleSheet) {
             TVArtworkStyleSheet(current: artworkStyle) { style in
                 artworkStyleRaw = style.rawValue
+                TVRemoteLogger.log(category: "playback", event: "artwork_style_changed",
+                                    detail: ["style": style.rawValue])
             }
         }
     }
