@@ -212,6 +212,7 @@ final class TVPlayerModel: ObservableObject {
     }
 
     private func completeCrossfade(to index: Int) {
+        logPlayForCurrentTrackIfNeeded()
         let finishedOutgoing = player
         activeIsA.toggle()
         currentIndex = index
@@ -240,6 +241,26 @@ final class TVPlayerModel: ObservableObject {
         inactivePlayer.pause()
         inactivePlayer.replaceCurrentItem(with: nil)
         inactivePlayer.volume = 1
+    }
+
+    // MARK: Play history
+
+    /// Reports the currently-loaded track's play to the bridge — called
+    /// right before advancing/stopping, while `current`/`position` still
+    /// describe the track that's ending. Skips near-instant skips (<2s of
+    /// real listening) so scrubbing through a queue doesn't inflate stats;
+    /// requires a signed-in token (always true in practice — the player is
+    /// only reachable from behind TVAccount's login gate).
+    private func logPlayForCurrentTrackIfNeeded() {
+        guard let item = current, position > 2, let token = TVAccount.shared.token else { return }
+        let listenSeconds = Int(position)
+        Task {
+            await TVBridgeClient.shared.logPlay(
+                title: item.title, artist: item.artist,
+                trackURL: item.streamURL.absoluteString,
+                listenSeconds: listenSeconds, token: token
+            )
+        }
     }
 
     // MARK: Lyrics
@@ -279,13 +300,16 @@ final class TVPlayerModel: ObservableObject {
         cancelCrossfade()
         guard currentIndex + 1 < queue.count else {
             if repeatMode == .all, !queue.isEmpty {
+                logPlayForCurrentTrackIfNeeded()
                 currentIndex = 0
                 loadCurrent()
             } else {
+                logPlayForCurrentTrackIfNeeded()
                 player.pause()
             }
             return
         }
+        logPlayForCurrentTrackIfNeeded()
         currentIndex += 1
         loadCurrent()
     }
@@ -293,6 +317,7 @@ final class TVPlayerModel: ObservableObject {
     /// Called when the current item finishes playing on its own.
     private func advanceOnEnd() {
         if repeatMode == .one {
+            logPlayForCurrentTrackIfNeeded()
             player.seek(to: .zero)
             player.play()
             return
@@ -306,6 +331,7 @@ final class TVPlayerModel: ObservableObject {
     func jump(to index: Int) {
         guard queue.indices.contains(index), index != currentIndex else { return }
         cancelCrossfade()
+        logPlayForCurrentTrackIfNeeded()
         currentIndex = index
         loadCurrent()
     }
@@ -317,6 +343,7 @@ final class TVPlayerModel: ObservableObject {
             player.seek(to: .zero); return
         }
         guard currentIndex > 0 else { player.seek(to: .zero); return }
+        logPlayForCurrentTrackIfNeeded()
         currentIndex -= 1
         loadCurrent()
     }
@@ -378,6 +405,7 @@ final class TVPlayerModel: ObservableObject {
     }
 
     func stop() {
+        logPlayForCurrentTrackIfNeeded()
         crossfadeTask?.cancel()
         crossfadeTask = nil
         for p in [playerA, playerB] {

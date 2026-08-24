@@ -14,9 +14,11 @@ struct TVContentView: View {
                         .tabItem { Label("My Library", systemImage: "music.note.house") }
                     TVPlaylistsView(client: client, token: token)
                         .tabItem { Label("Playlists", systemImage: "music.note.list") }
+                    TVDiscoverView(client: client, token: token)
+                        .tabItem { Label("Discover", systemImage: "sparkles") }
                     TVSearchView(client: client, token: token)
                         .tabItem { Label("Search", systemImage: "magnifyingglass") }
-                    TVAccountView(account: account)
+                    TVAccountView(client: client, account: account, token: token)
                         .tabItem { Label(account.user?.name ?? "Account", systemImage: "person.crop.circle") }
                 }
                 .navigationDestination(for: TVPlayContext.self) { ctx in
@@ -112,12 +114,23 @@ struct TVTrackCard: View {
 // MARK: - Account tab
 
 struct TVAccountView: View {
+    @ObservedObject var client: TVBridgeClient
     @ObservedObject var account: TVAccount
+    let token: String
 
     var body: some View {
         VStack(spacing: 24) {
             Image(systemName: "person.crop.circle.fill").font(.system(size: 90)).foregroundStyle(.tint)
             Text(account.user?.name ?? "Signed in").font(.title)
+
+            NavigationLink {
+                TVStatsView(client: client, token: token)
+            } label: {
+                Label("Listening Stats", systemImage: "chart.bar.fill")
+            }
+            .buttonStyle(.card)
+            .frame(width: 320)
+
             Button("Sign Out", role: .destructive) { account.logout() }
                 .frame(width: 320)
         }

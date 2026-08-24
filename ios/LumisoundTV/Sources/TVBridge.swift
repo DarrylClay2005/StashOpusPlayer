@@ -68,6 +68,113 @@ struct TVFavorite: Codable, Hashable {
     }
 }
 
+// MARK: - Discovery / stats models (GET /user/on-this-day, /user/stats*, /user/achievements)
+
+/// GET /user/on-this-day — its `tracks` are already exactly TVTrack-shaped
+/// (id/title/artist/duration_seconds/thumbnail_url/source/youtube_url), so
+/// this reuses that type directly rather than a parallel one.
+struct TVOnThisDayGroup: Codable, Hashable, Identifiable {
+    let yearsAgo: Int
+    let year: Int
+    let tracks: [TVTrack]
+    var id: Int { year }
+
+    enum CodingKeys: String, CodingKey {
+        case yearsAgo = "years_ago"
+        case year, tracks
+    }
+}
+
+struct TVStatArtist: Decodable, Hashable, Identifiable {
+    let artist: String
+    let playCount: Int
+    var id: String { artist }
+
+    enum CodingKeys: String, CodingKey {
+        case artist
+        case playCount = "play_count"
+    }
+}
+
+struct TVStatTrack: Decodable, Hashable, Identifiable {
+    let title: String
+    let artist: String?
+    let playCount: Int
+    var id: String { "\(title)|\(artist ?? "")" }
+
+    enum CodingKeys: String, CodingKey {
+        case title, artist
+        case playCount = "play_count"
+    }
+}
+
+struct TVStatsSummary: Decodable, Hashable {
+    let totalPlays: Int
+    let totalListenSeconds: Int
+    let topArtists: [TVStatArtist]
+    let topTracks: [TVStatTrack]
+
+    enum CodingKeys: String, CodingKey {
+        case totalPlays = "total_plays"
+        case totalListenSeconds = "total_listen_seconds"
+        case topArtists = "top_artists"
+        case topTracks = "top_tracks"
+    }
+}
+
+struct TVWeeklyStatDay: Decodable, Hashable, Identifiable {
+    let date: String
+    let plays: Int
+    let listenSeconds: Int
+    var id: String { date }
+
+    enum CodingKeys: String, CodingKey {
+        case date, plays
+        case listenSeconds = "listen_seconds"
+    }
+}
+
+struct TVAchievements: Decodable, Hashable {
+    let currentStreakDays: Int
+    let longestStreakDays: Int
+    let totalPlays: Int
+    let totalListenSeconds: Int
+    let badges: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case currentStreakDays = "current_streak_days"
+        case longestStreakDays = "longest_streak_days"
+        case totalPlays = "total_plays"
+        case totalListenSeconds = "total_listen_seconds"
+        case badges
+    }
+}
+
+// MARK: - Smart playlists (GET /user/music/smart-playlists — server-computed
+// BPM buckets over the Personal Cloud Library; distinct from iOS's on-device
+// Lua smart-playlist engine, which needs a local library scan tvOS doesn't
+// have — see TVOS round-3 research notes)
+
+struct TVSmartPlaylistTrack: Decodable, Hashable {
+    let id: String
+    let filename: String
+    let title: String?
+    let artist: String?
+    let album: String?
+    let bpm: Double
+}
+
+struct TVSmartPlaylistBucket: Decodable, Hashable, Identifiable {
+    let name: String
+    let key: String
+    let tracks: [TVSmartPlaylistTrack]
+    var id: String { key }
+}
+
+private struct TVSmartPlaylistsResponse: Decodable {
+    let playlists: [TVSmartPlaylistBucket]
+}
+
 // MARK: - TVPlaylist / TVPlaylistTrack (cross-device synced playlists)
 //
 // Mirrors GET /user/playlists (see AccountModels.swift's `SharedPlaylistTrack`
@@ -178,6 +285,18 @@ final class TVBridgeClient: ObservableObject {
     // Favorites (Personal Cloud Library tracks only — see `TVFavorite`)
     @Published var favoriteSongIDs: Set<String> = []
     @Published var isLoadingFavorites = false
+
+    // Discovery / stats
+    @Published var discoverMix: [TVTrack] = []
+    @Published var isLoadingDiscoverMix = false
+    @Published var onThisDay: [TVOnThisDayGroup] = []
+    @Published var isLoadingOnThisDay = false
+    @Published var smartPlaylists: [TVSmartPlaylistBucket] = []
+    @Published var isLoadingSmartPlaylists = false
+    @Published var stats: TVStatsSummary?
+    @Published var weeklyStats: [TVWeeklyStatDay] = []
+    @Published var achievements: TVAchievements?
+    @Published var isLoadingStats = false
 
     /// In-flight search query, so a stale/slower response can't overwrite a newer one.
     private var activeSearch = ""
@@ -446,6 +565,138 @@ final class TVBridgeClient: ObservableObject {
             // Revert the optimistic flip.
             if wasFavorite { favoriteSongIDs.insert(songID) } else { favoriteSongIDs.remove(songID) }
         }
+    }
+
+    // MARK: Play history / stats
+
+    /// Reports a play to the bridge (POST /user/history) — powers Discover
+    /// Mix, On This Day, and Stats, none of which have anything to show
+    /// until tvOS starts logging plays itself (mirrors what iOS already
+    /// does elsewhere in its playback path).
+    func logPlay(title: String, artist: String, trackURL: String, listenSeconds: Int, token: String) async {
+        struct Body: Encodable {
+            let title: String
+            let artist: String?
+            let trackURL: String?
+            let listenSeconds: Int
+            enum CodingKeys: String, CodingKey {
+                case title, artist
+                case trackURL = "track_url"
+                case listenSeconds = "listen_seconds"
+            }
+        }
+        let body = Body(
+            title: title,
+            artist: artist.isEmpty ? nil : artist,
+            trackURL: trackURL,
+            listenSeconds: listenSeconds
+        )
+        guard let json = try? JSONEncoder().encode(body) else { return }
+        await mutate("/user/history", method: "POST", token: token, jsonBody: json)
+    }
+
+    func fetchDiscoverMix(token: String) async {
+        isLoadingDiscoverMix = true
+        defer { isLoadingDiscoverMix = false }
+        guard let url = URL(string: baseURL + "/user/discover-mix?limit=30") else { return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 60
+        guard let (data, response) = try? await dataWithRetry(req),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let tracks = try? JSONDecoder().decode([TVTrack].self, from: data)
+        else { return }
+        discoverMix = tracks
+    }
+
+    func fetchOnThisDay(token: String) async {
+        isLoadingOnThisDay = true
+        defer { isLoadingOnThisDay = false }
+        guard let url = URL(string: baseURL + "/user/on-this-day") else { return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 30
+        guard let (data, response) = try? await dataWithRetry(req),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let groups = try? JSONDecoder().decode([TVOnThisDayGroup].self, from: data)
+        else { return }
+        onThisDay = groups
+    }
+
+    func fetchSmartPlaylists(token: String) async {
+        isLoadingSmartPlaylists = true
+        defer { isLoadingSmartPlaylists = false }
+        guard let url = URL(string: baseURL + "/user/music/smart-playlists") else { return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 30
+        guard let (data, response) = try? await dataWithRetry(req),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode(TVSmartPlaylistsResponse.self, from: data)
+        else { return }
+        smartPlaylists = decoded.playlists
+    }
+
+    /// Cross-references a smart-playlist entry against the already-loaded
+    /// Personal Cloud Library by filename — `/user/music/smart-playlists`
+    /// returns `ios_user_music_metadata.id` (a content hash), not the
+    /// `_stable_id(path)` `/user/music` (and `UserMusicTrack.id`) uses, so
+    /// they aren't directly joinable by id. Filename is effectively unique
+    /// within one user's music directory in practice; a track that doesn't
+    /// resolve is simply skipped rather than shown unplayable.
+    func resolvedTrack(for smart: TVSmartPlaylistTrack) -> UserMusicTrack? {
+        library.first { $0.filename.caseInsensitiveCompare(smart.filename) == .orderedSame }
+    }
+
+    /// Sequential rather than parallel fetches — simpler and lower-risk than
+    /// coordinating concurrent requests for a screen that's visited
+    /// occasionally, not a hot path where the extra latency would matter.
+    func fetchStats(token: String) async {
+        isLoadingStats = true
+        defer { isLoadingStats = false }
+        stats = await fetchStatsSummary(token: token)
+        weeklyStats = await fetchWeeklyStatsRaw(token: token)
+        achievements = await fetchAchievementsRaw(token: token)
+    }
+
+    private func fetchStatsSummary(token: String) async -> TVStatsSummary? {
+        guard let url = URL(string: baseURL + "/user/stats") else { return nil }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 30
+        guard let (data, response) = try? await dataWithRetry(req),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
+        else { return nil }
+        return try? JSONDecoder().decode(TVStatsSummary.self, from: data)
+    }
+
+    private func fetchWeeklyStatsRaw(token: String) async -> [TVWeeklyStatDay] {
+        guard let url = URL(string: baseURL + "/user/stats/weekly") else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 30
+        guard let (data, response) = try? await dataWithRetry(req),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
+        else { return [] }
+        return (try? JSONDecoder().decode([TVWeeklyStatDay].self, from: data)) ?? []
+    }
+
+    private func fetchAchievementsRaw(token: String) async -> TVAchievements? {
+        // Streaks/time-of-day badges are computed against the device's local
+        // calendar day server-side — see the endpoint's own doc comment for
+        // why an omitted offset (defaulting to UTC) can silently break a
+        // streak that never actually broke for a non-UTC user.
+        let offsetMinutes = TimeZone.current.secondsFromGMT() / 60
+        guard var comps = URLComponents(string: baseURL + "/user/achievements") else { return nil }
+        comps.queryItems = [URLQueryItem(name: "tz_offset_minutes", value: String(offsetMinutes))]
+        guard let url = comps.url else { return nil }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 30
+        guard let (data, response) = try? await dataWithRetry(req),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
+        else { return nil }
+        return try? JSONDecoder().decode(TVAchievements.self, from: data)
     }
 
     // MARK: URL builders
