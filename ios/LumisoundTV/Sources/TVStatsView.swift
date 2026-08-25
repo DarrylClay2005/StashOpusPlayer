@@ -19,11 +19,16 @@ struct TVStatsView: View {
                 ProgressView("Loading your stats…").padding(.top, 100)
             } else {
                 VStack(alignment: .leading, spacing: 50) {
-                    lifetimeSection
-                    weeklySection
-                    badgesSection
+                    lifetimeSection.padding(.horizontal, 70)
+                    topArtistsShelf
+                    topTracksShelf
+                    VStack(alignment: .leading, spacing: 50) {
+                        weeklySection
+                        badgesSection
+                    }
+                    .padding(.horizontal, 70)
                 }
-                .padding(60)
+                .padding(.vertical, 60)
             }
         }
         .tvAmbientBackground()
@@ -44,27 +49,50 @@ struct TVStatsView: View {
                 statTile("Current Streak", value: streakLabel(client.achievements?.currentStreakDays ?? 0))
                 statTile("Longest Streak", value: streakLabel(client.achievements?.longestStreakDays ?? 0))
             }
+        }
+    }
 
-            if let stats = client.stats, !stats.topArtists.isEmpty || !stats.topTracks.isEmpty {
-                HStack(alignment: .top, spacing: 60) {
-                    if !stats.topArtists.isEmpty {
-                        topList(title: "Top Artists") {
-                            ForEach(stats.topArtists) { artist in
-                                topRow(primary: artist.artist, count: artist.playCount)
-                            }
-                        }
-                    }
-                    if !stats.topTracks.isEmpty {
-                        topList(title: "Top Tracks") {
-                            ForEach(stats.topTracks) { track in
-                                topRow(primary: track.title, secondary: track.artist, count: track.playCount)
-                            }
-                        }
-                    }
+    @ViewBuilder
+    private var topArtistsShelf: some View {
+        if let stats = client.stats, !stats.topArtists.isEmpty {
+            TVShelfSection(title: "Top Artists") {
+                ForEach(Array(stats.topArtists.enumerated()), id: \.element.id) { index, artist in
+                    rankCard(rank: index + 1, primary: artist.artist, secondary: nil, count: artist.playCount)
                 }
-                .padding(.top, 10)
             }
         }
+    }
+
+    @ViewBuilder
+    private var topTracksShelf: some View {
+        if let stats = client.stats, !stats.topTracks.isEmpty {
+            TVShelfSection(title: "Top Tracks") {
+                ForEach(Array(stats.topTracks.enumerated()), id: \.element.id) { index, track in
+                    rankCard(rank: index + 1, primary: track.title, secondary: track.artist, count: track.playCount)
+                }
+            }
+        }
+    }
+
+    private func rankCard(rank: Int, primary: String, secondary: String?, count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("#\(rank)")
+                    .font(.system(size: 30, weight: .heavy).monospacedDigit())
+                    .foregroundStyle(Color.accentColor)
+                Spacer()
+                Text("\(count) plays")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            Text(primary).font(.headline).lineLimit(2)
+            if let secondary, !secondary.isEmpty {
+                Text(secondary).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .padding(20)
+        .frame(width: 240, height: 200, alignment: .topLeading)
+        .tvGlassPanel()
     }
 
     private func statTile(_ label: String, value: String) -> some View {
@@ -80,28 +108,6 @@ struct TVStatsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
         .tvGlassPanel()
-    }
-
-    @ViewBuilder
-    private func topList<Content: View>(title: String, @ViewBuilder rows: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.title3.weight(.semibold))
-            VStack(alignment: .leading, spacing: 6) { rows() }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func topRow(primary: String, secondary: String? = nil, count: Int) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(primary).lineLimit(1)
-                if let secondary, !secondary.isEmpty {
-                    Text(secondary).font(.callout).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            Spacer()
-            Text("\(count)").foregroundStyle(.secondary).monospacedDigit()
-        }
     }
 
     // MARK: Weekly activity

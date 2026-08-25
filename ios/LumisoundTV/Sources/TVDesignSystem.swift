@@ -239,6 +239,50 @@ struct TVTopNavBar: View {
     }
 }
 
+// MARK: - Chip (filter pills — Library's Songs/Albums/Artists/… selector,
+// Search's suggestion row, anywhere a stock `Picker`/segmented control would
+// otherwise be the only focus-driven option on tvOS)
+
+struct TVChip: View {
+    let title: String
+    let isSelected: Bool
+    var systemImage: String? = nil
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        Group {
+            if let systemImage {
+                Label(title, systemImage: systemImage)
+            } else {
+                Text(title)
+            }
+        }
+        .font(.system(size: 22, weight: isSelected || isFocused ? .bold : .medium))
+        .foregroundStyle(
+            isFocused ? Color.black
+            : isSelected ? Color.white
+            : Color.white.opacity(0.6)
+        )
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .background(
+            Capsule().fill(
+                isFocused ? Color.white
+                : isSelected ? Color.accentColor.opacity(0.35)
+                : Color.white.opacity(0.08)
+            )
+        )
+        .overlay(
+            Capsule().strokeBorder(
+                isSelected && !isFocused ? Color.accentColor.opacity(0.7) : .clear,
+                lineWidth: 2
+            )
+        )
+        .scaleEffect(isFocused ? 1.08 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isFocused)
+    }
+}
+
 // MARK: - Hero banner
 
 /// The big featured treatment at the top of the Home hub — a blown-up piece

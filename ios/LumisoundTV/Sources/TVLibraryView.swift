@@ -13,6 +13,16 @@ struct TVLibraryView: View {
         case genres = "Genres"
         case favorites = "Favorites"
         var id: String { rawValue }
+
+        var systemImage: String {
+            switch self {
+            case .songs: return "music.note"
+            case .albums: return "square.stack"
+            case .artists: return "music.mic"
+            case .genres: return "guitars"
+            case .favorites: return "star.fill"
+            }
+        }
     }
     @State private var mode: Mode = .songs
     @State private var searchText = ""
@@ -41,13 +51,9 @@ struct TVLibraryView: View {
     var body: some View {
         VStack(spacing: 0) {
             if !client.isLoadingLibrary && client.libraryError == nil && !client.library.isEmpty {
-                Picker("View", selection: $mode) {
-                    ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 900)
-                .padding(.top, 40)
-                .padding(.bottom, 10)
+                modeChips
+                    .padding(.top, 40)
+                    .padding(.bottom, 30)
             }
 
             Group {
@@ -80,6 +86,25 @@ struct TVLibraryView: View {
         .task {
             if client.library.isEmpty { await client.fetchLibrary(token: token) }
             if client.favoriteSongIDs.isEmpty { await client.fetchFavorites(token: token) }
+        }
+    }
+
+    /// Custom chip row replacing the stock segmented `Picker` — matches the
+    /// filter/pill visual language used across the rest of the redesign
+    /// instead of a plain system control.
+    private var modeChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 16) {
+                ForEach(Mode.allCases) { m in
+                    Button {
+                        mode = m
+                    } label: {
+                        TVChip(title: m.rawValue, isSelected: mode == m, systemImage: m.systemImage)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 70)
         }
     }
 

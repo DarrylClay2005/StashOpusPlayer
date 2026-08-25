@@ -67,12 +67,7 @@ struct TVSearchView: View {
             } else if let err = client.searchError {
                 Text(err).foregroundStyle(.secondary).padding(.top, 80)
             } else if client.results.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 70)).foregroundStyle(.secondary)
-                    Text("Search YouTube to play on your Apple TV")
-                        .font(.title3).foregroundStyle(.secondary)
-                }
-                .padding(.top, 120)
+                emptyState
             } else {
                 LazyVGrid(columns: columns, spacing: 48) {
                     ForEach(client.results) { track in
@@ -104,6 +99,39 @@ struct TVSearchView: View {
                     await client.search(v)
                 }
             }
+        }
+    }
+
+    /// Instead of a bare "search to play" placeholder, an empty query
+    /// surfaces something real to browse straight away — the same Discover
+    /// Mix data the Discover tab shows, framed as search suggestions.
+    @ViewBuilder
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 40) {
+            VStack(spacing: 16) {
+                Image(systemName: "magnifyingglass").font(.system(size: 70)).foregroundStyle(.secondary)
+                Text("Search YouTube to play on your Apple TV")
+                    .font(.title3).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 100)
+            .padding(.bottom, 20)
+
+            if !client.discoverMix.isEmpty {
+                let suggestQueue = client.discoverMix.compactMap { client.playable(from: $0) }
+                TVShelfSection(title: "Try One Of These", subtitle: "Based on your most-played artists") {
+                    ForEach(client.discoverMix) { track in
+                        NavigationLink(value: TVPlayContext(queue: suggestQueue, startID: track.id)) {
+                            TVTrackCard(track: track)
+                        }
+                        .buttonStyle(.card)
+                        .tvSearchTrackActions(client: client, token: token, track: track)
+                    }
+                }
+            }
+        }
+        .task {
+            if client.discoverMix.isEmpty { await client.fetchDiscoverMix(token: token) }
         }
     }
 }
@@ -141,42 +169,61 @@ struct TVAccountView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 36) {
-                VStack(spacing: 12) {
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 90))
-                        .foregroundStyle(.tint)
-                        .shadow(color: Color.accentColor.opacity(0.6), radius: 24)
-                    Text(account.user?.name ?? "Signed in").font(.title)
-                }
-                .padding(.top, 60)
-
-                VStack(spacing: 16) {
-                    accountLink("Listening Stats", systemImage: "chart.bar.fill") {
-                        TVStatsView(client: client, token: token)
-                    }
-                    accountLink("Notifications", systemImage: "bell.fill", badge: unreadNotificationCount) {
-                        TVNotificationsView(client: client, token: token)
-                    }
-                    accountLink("Active Sessions", systemImage: "list.bullet.rectangle") {
-                        TVSessionsView(client: client, account: account, token: token)
-                    }
-                }
-                .frame(width: 420)
-
-                TVFriendsListeningCard(friendsListening: client.friendsListening)
+            // Two-pane layout — a fixed profile card on the left, settings/
+            // links and the friends-listening card filling the rest — instead
+            // of everything stacked single-file down the middle of the screen.
+            HStack(alignment: .top, spacing: 60) {
+                profileCard
                     .frame(width: 420)
 
-                Button("Sign Out", role: .destructive) { account.logout() }
-                    .frame(width: 320)
-                    .padding(.bottom, 60)
+                VStack(alignment: .leading, spacing: 30) {
+                    TVSectionHeader(title: "Account")
+                    VStack(spacing: 16) {
+                        accountLink("Listening Stats", systemImage: "chart.bar.fill") {
+                            TVStatsView(client: client, token: token)
+                        }
+                        accountLink("Notifications", systemImage: "bell.fill", badge: unreadNotificationCount) {
+                            TVNotificationsView(client: client, token: token)
+                        }
+                        accountLink("Active Sessions", systemImage: "list.bullet.rectangle") {
+                            TVSessionsView(client: client, account: account, token: token)
+                        }
+                    }
+
+                    if !client.friendsListening.isEmpty {
+                        TVSectionHeader(title: "Friends Listening")
+                            .padding(.top, 10)
+                        TVFriendsListeningCard(friendsListening: client.friendsListening)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .padding(70)
         }
         .tvAmbientBackground()
         .task {
             if client.notifications.isEmpty { await client.fetchNotifications(token: token) }
             await client.fetchFriendsListening(token: token)
         }
+    }
+
+    private var profileCard: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "person.crop.circle.fill")
+                .font(.system(size: 100))
+                .foregroundStyle(.tint)
+                .shadow(color: Color.accentColor.opacity(0.6), radius: 24)
+            Text(account.user?.name ?? "Signed in")
+                .font(.title2.weight(.semibold))
+                .multilineTextAlignment(.center)
+
+            Spacer(minLength: 20)
+
+            Button("Sign Out", role: .destructive) { account.logout() }
+        }
+        .padding(30)
+        .frame(minHeight: 360)
+        .tvGlassPanel()
     }
 
     @ViewBuilder

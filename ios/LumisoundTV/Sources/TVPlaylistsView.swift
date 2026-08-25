@@ -43,30 +43,40 @@ struct TVPlaylistsView: View {
                 }
                 .padding(.top, 120)
             } else {
-                LazyVGrid(columns: columns, spacing: 48) {
-                    newPlaylistCard
-                    ForEach(client.playlists) { playlist in
-                        NavigationLink {
-                            TVPlaylistDetailView(client: client, token: token, playlist: playlist)
-                        } label: {
-                            playlistCard(playlist)
-                        }
-                        .buttonStyle(.card)
-                        .contextMenu {
-                            Button {
-                                renamingPlaylist = playlist
+                VStack(alignment: .leading, spacing: 40) {
+                    if let featured = client.playlists.first, !featured.tracks.isEmpty {
+                        featuredHero(featured)
+                    }
+
+                    let rest = client.playlists.first?.tracks.isEmpty == false
+                        ? Array(client.playlists.dropFirst())
+                        : client.playlists
+                    LazyVGrid(columns: columns, spacing: 48) {
+                        newPlaylistCard
+                        ForEach(rest) { playlist in
+                            NavigationLink {
+                                TVPlaylistDetailView(client: client, token: token, playlist: playlist)
                             } label: {
-                                Label("Rename", systemImage: "pencil")
+                                playlistCard(playlist)
                             }
-                            Button(role: .destructive) {
-                                Task { await client.deletePlaylist(id: playlist.id, token: token) }
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                            .buttonStyle(.card)
+                            .contextMenu {
+                                Button {
+                                    renamingPlaylist = playlist
+                                } label: {
+                                    Label("Rename", systemImage: "pencil")
+                                }
+                                Button(role: .destructive) {
+                                    Task { await client.deletePlaylist(id: playlist.id, token: token) }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                     }
+                    .padding(.horizontal, 60)
                 }
-                .padding(60)
+                .padding(.vertical, 50)
             }
         }
         .tvAmbientBackground()
@@ -110,6 +120,33 @@ struct TVPlaylistsView: View {
             .frame(width: 280)
         }
         .buttonStyle(.card)
+    }
+
+    /// A big top-of-screen treatment for the first (most recently created)
+    /// playlist — same `TVHeroBanner` component the Home hub uses, so
+    /// Playlists doesn't read as "just a grid" either.
+    private func featuredHero(_ playlist: TVPlaylist) -> some View {
+        let queue = playlist.tracks.compactMap { client.playable(from: $0, token: token) }
+        return Group {
+            if let first = queue.first {
+                TVHeroBanner(
+                    eyebrow: "Featured Playlist",
+                    title: playlist.name,
+                    subtitle: "\(playlist.tracks.count) \(playlist.tracks.count == 1 ? "song" : "songs")",
+                    art: {
+                        TVArtPlaceholder(systemImage: "music.note.list", iconScale: 2.4)
+                    },
+                    playButton: {
+                        NavigationLink(value: TVPlayContext(queue: queue, startID: first.id)) {
+                            Label("Play", systemImage: "play.fill")
+                                .font(.system(size: 24, weight: .bold))
+                                .padding(.horizontal, 12)
+                        }
+                        .buttonStyle(.card)
+                    }
+                )
+            }
+        }
     }
 
     private func playlistCard(_ playlist: TVPlaylist) -> some View {

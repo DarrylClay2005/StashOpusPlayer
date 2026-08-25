@@ -43,20 +43,18 @@ struct TVDiscoverView: View {
     @ViewBuilder
     private var subscriptionFeedSection: some View {
         if client.isLoadingSubscriptionFeed || !client.subscriptionFeed.isEmpty {
-            sectionShell(title: "New From Your Subscriptions", subtitle: "Recent uploads from channels you follow") {
+            TVShelfSection(title: "New From Your Subscriptions", subtitle: "Recent uploads from channels you follow") {
                 if client.isLoadingSubscriptionFeed {
                     ProgressView().padding(.horizontal, 60)
                 } else {
-                    horizontalGrid {
-                        let queue = client.subscriptionFeed.compactMap { $0.track }.compactMap { client.playable(from: $0) }
-                        ForEach(client.subscriptionFeed) { item in
-                            if let track = item.track {
-                                NavigationLink(value: TVPlayContext(queue: queue, startID: track.id)) {
-                                    TVTrackCard(track: track)
-                                }
-                                .buttonStyle(.card)
-                                .tvSearchTrackActions(client: client, token: token, track: track)
+                    let queue = client.subscriptionFeed.compactMap { $0.track }.compactMap { client.playable(from: $0) }
+                    ForEach(client.subscriptionFeed) { item in
+                        if let track = item.track {
+                            NavigationLink(value: TVPlayContext(queue: queue, startID: track.id)) {
+                                TVTrackCard(track: track)
                             }
+                            .buttonStyle(.card)
+                            .tvSearchTrackActions(client: client, token: token, track: track)
                         }
                     }
                 }
@@ -67,20 +65,18 @@ struct TVDiscoverView: View {
     // MARK: Discover Mix
 
     private var discoverMixSection: some View {
-        sectionShell(title: "Discover Mix", subtitle: "Suggested based on your most-played artists") {
+        TVShelfSection(title: "Discover Mix", subtitle: "Suggested based on your most-played artists") {
             if client.isLoadingDiscoverMix {
                 ProgressView().padding(.horizontal, 60)
             } else if client.discoverMix.isEmpty {
                 emptyRow("Keep listening — suggestions show up once you've built some play history.")
             } else {
-                horizontalGrid {
-                    ForEach(client.discoverMix) { track in
-                        NavigationLink(value: TVPlayContext(queue: discoverQueue, startID: track.id)) {
-                            TVTrackCard(track: track)
-                        }
-                        .buttonStyle(.card)
-                        .tvSearchTrackActions(client: client, token: token, track: track)
+                ForEach(client.discoverMix) { track in
+                    NavigationLink(value: TVPlayContext(queue: discoverQueue, startID: track.id)) {
+                        TVTrackCard(track: track)
                     }
+                    .buttonStyle(.card)
+                    .tvSearchTrackActions(client: client, token: token, track: track)
                 }
             }
         }
@@ -89,28 +85,24 @@ struct TVDiscoverView: View {
     // MARK: On This Day
 
     private var onThisDaySection: some View {
-        sectionShell(title: "On This Day", subtitle: "What you were playing on this date in years past") {
+        VStack(alignment: .leading, spacing: 40) {
             if client.isLoadingOnThisDay {
-                ProgressView().padding(.horizontal, 60)
+                TVSectionHeader(title: "On This Day").padding(.horizontal, 70)
+                ProgressView().padding(.horizontal, 70)
             } else if client.onThisDay.isEmpty {
+                TVSectionHeader(title: "On This Day", subtitle: "What you were playing on this date in years past")
+                    .padding(.horizontal, 70)
                 emptyRow("Nothing played on this date yet — check back as your history grows.")
             } else {
-                VStack(alignment: .leading, spacing: 40) {
-                    ForEach(client.onThisDay) { group in
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text(group.yearsAgo == 1 ? "1 Year Ago" : "\(group.yearsAgo) Years Ago")
-                                .font(.title2.weight(.semibold))
-                                .padding(.horizontal, 60)
-                            horizontalGrid {
-                                let queue = group.tracks.compactMap { client.playable(from: $0) }
-                                ForEach(group.tracks) { track in
-                                    NavigationLink(value: TVPlayContext(queue: queue, startID: track.id)) {
-                                        TVTrackCard(track: track)
-                                    }
-                                    .buttonStyle(.card)
-                                    .tvSearchTrackActions(client: client, token: token, track: track)
-                                }
+                ForEach(client.onThisDay) { group in
+                    let queue = group.tracks.compactMap { client.playable(from: $0) }
+                    TVShelfSection(title: group.yearsAgo == 1 ? "On This Day: 1 Year Ago" : "On This Day: \(group.yearsAgo) Years Ago") {
+                        ForEach(group.tracks) { track in
+                            NavigationLink(value: TVPlayContext(queue: queue, startID: track.id)) {
+                                TVTrackCard(track: track)
                             }
+                            .buttonStyle(.card)
+                            .tvSearchTrackActions(client: client, token: token, track: track)
                         }
                     }
                 }
@@ -121,21 +113,19 @@ struct TVDiscoverView: View {
     // MARK: Smart playlists
 
     private var smartPlaylistsSection: some View {
-        sectionShell(title: "Smart Playlists", subtitle: "Auto-generated from your cloud library's tempo") {
+        TVShelfSection(title: "Smart Playlists", subtitle: "Auto-generated from your cloud library's tempo") {
             if client.isLoadingSmartPlaylists {
                 ProgressView().padding(.horizontal, 60)
             } else if client.smartPlaylists.allSatisfy({ $0.tracks.isEmpty }) {
                 emptyRow("Upload music to your Personal Cloud Library to unlock tempo-based playlists.")
             } else {
-                horizontalGrid {
-                    ForEach(client.smartPlaylists) { bucket in
-                        NavigationLink {
-                            TVSmartPlaylistDetailView(client: client, token: token, bucket: bucket)
-                        } label: {
-                            smartPlaylistCard(bucket)
-                        }
-                        .buttonStyle(.card)
+                ForEach(client.smartPlaylists) { bucket in
+                    NavigationLink {
+                        TVSmartPlaylistDetailView(client: client, token: token, bucket: bucket)
+                    } label: {
+                        smartPlaylistCard(bucket)
                     }
+                    .buttonStyle(.card)
                 }
             }
         }
@@ -167,27 +157,10 @@ struct TVDiscoverView: View {
 
     // MARK: Shared layout helpers
 
-    @ViewBuilder
-    private func sectionShell<Content: View>(title: String, subtitle: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            TVSectionHeader(title: title, subtitle: subtitle)
-                .padding(.horizontal, 60)
-            content()
-        }
-    }
-
-    @ViewBuilder
-    private func horizontalGrid<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 32) { content() }
-                .padding(.horizontal, 60)
-        }
-    }
-
     private func emptyRow(_ text: String) -> some View {
         Text(text)
             .font(.title3).foregroundStyle(.secondary)
-            .padding(.horizontal, 60)
+            .padding(.horizontal, 70)
     }
 }
 
