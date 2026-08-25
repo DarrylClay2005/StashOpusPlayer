@@ -377,6 +377,17 @@ struct DocumentImportService {
         song.albumInferredFromFolder = albumInferredFromFolder
 
         appLog("Metadata: \"\(song.title)\" by \(song.artist.isEmpty ? "unknown" : song.artist) [\(fileExt), \(String(format: "%.0f", song.duration))s]\(albumInferredFromFolder ? " (album inferred from folder name)" : "")", category: "library")
+        // Explicit line for sourceTrackID specifically — it's the single
+        // field ArtworkService's deterministic hqdefault.jpg fallback
+        // depends on (see that file's "no sourceTrackID" log), so knowing
+        // right at import time whether a track got one (and from where) is
+        // what actually lets a later "no artwork" report be traced back to
+        // its root cause instead of guessing.
+        if let sourceTrackID {
+            appLog("Metadata: sourceTrackID=\(sourceTrackID) for \"\(song.title)\"", category: "library")
+        } else {
+            appLog("Metadata: no sourceTrackID found for \"\(song.title)\" (ext=\(fileExt)) — checked commonMetadata, all metadata items, and vorbis comments if applicable", category: "library")
+        }
 
         // Enrich sparse metadata via iTunes Search API. Only fires when artist or
         // genre is missing — common for YouTube downloads where yt-dlp fills in
@@ -499,6 +510,17 @@ struct DocumentImportService {
             || sourceTrackID != current.sourceTrackID
         else {
             return nil
+        }
+
+        // Specifically call out a sourceTrackID recovery/loss — this is the
+        // periodic re-scan (LibraryManager.startPeriodicMetadataRefresh)
+        // catching up on a field the initial `makeSong` import missed, which
+        // directly unlocks ArtworkService's deterministic hqdefault.jpg
+        // fallback for a track that couldn't use it before.
+        if current.sourceTrackID == nil, sourceTrackID != nil {
+            appLog("refreshTags: recovered sourceTrackID=\(sourceTrackID!) for \"\(current.title)\" on re-scan", category: "library")
+        } else if current.sourceTrackID != nil, sourceTrackID == nil {
+            appWarn("refreshTags: lost previously-known sourceTrackID for \"\(current.title)\" on re-scan", category: "library")
         }
 
         var refreshed = current

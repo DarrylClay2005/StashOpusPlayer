@@ -55,6 +55,7 @@ final class ArtworkService {
         guard let markedAt = noArtworkKeys[key] else { return false }
         guard Date().timeIntervalSince(markedAt) < Self.noArtworkCooldown else {
             noArtworkKeys.removeValue(forKey: key)
+            appLog("Artwork: no-artwork cooldown expired for key=\(key) — will retry", category: "artwork")
             return false
         }
         return true
@@ -207,6 +208,22 @@ final class ArtworkService {
     /// embedded asset metadata → video frame extraction → iTunes Search API.
     func loadArtwork(for song: Song) async -> UIImage? {
         let key = cacheKey(for: song)
+        let startedAt = Date()
+        // Logged once per full pipeline run (not on memory/disk cache hits,
+        // which fire constantly during ordinary scrolling and would drown
+        // out everything else) — the elapsed-time warning below is what
+        // actually matters diagnostically: which songs are slow, and why.
+        defer {
+            let elapsed = Date().timeIntervalSince(startedAt)
+            if elapsed > 2.0 {
+                appWarn(
+                    "Artwork: pipeline for \"\(song.displayName)\" took \(String(format: "%.1f", elapsed))s "
+                    + "(key=\(key), hasURL=\(song.url != nil), hasPersistentID=\(song.persistentID != nil), "
+                    + "hasCacheKey=\(song.artworkCacheKey != nil), sourceTrackID=\(song.sourceTrackID ?? "nil"))",
+                    category: "artwork"
+                )
+            }
+        }
 
         if let cached = memoryCache.object(forKey: key as NSString) {
             return cached
@@ -217,8 +234,15 @@ final class ArtworkService {
             return onDisk
         }
 
-        // Negative cache: skip all network/API sources for keys we already know have no artwork.
-        if isKnownNoArtwork(key) { return nil }
+        // Negative cache: skip all network/API sources for keys we already know
+        // have no artwork. Previously silent — a track short-circuiting here
+        // looked identical to one that was simply never asked for, which made
+        // "why didn't this even try to load" impossible to tell apart from
+        // "this hasn't been requested yet" purely from the log stream.
+        if isKnownNoArtwork(key) {
+            appLog("Artwork: skipping \"\(song.displayName)\" — still within no-artwork cooldown (key=\(key))", category: "artwork")
+            return nil
+        }
 
         // Streaming tracks store their thumbnail URL as the artworkCacheKey.
         if let cacheKeyStr = song.artworkCacheKey,
@@ -257,6 +281,7 @@ final class ArtworkService {
                 appLog("Artwork: embedded tag found for \"\(song.displayName)\"", category: "artwork")
                 return persistFullArtwork(image, forKey: key)
             }
+            appLog("Artwork: no embedded tag artwork for \"\(song.displayName)\" (ext=\(readableURL.pathExtension))", category: "artwork")
 
             // Tracks downloaded via the bridge are tagged with the original
             // YouTube/SoundCloud thumbnail URL (LUMISOUND_THUMBNAIL) since
@@ -293,6 +318,15 @@ final class ArtworkService {
                     appLog("Artwork: recovered via YouTube hqdefault fallback for \"\(song.displayName)\"", category: "artwork")
                     return persistFullArtwork(image, forKey: key)
                 }
+                appWarn("Artwork: hqdefault fallback fetch failed for \"\(song.displayName)\" (videoID=\(videoID))", category: "artwork")
+            } else {
+                // No embedded tag AND no sourceTrackID to fall back on — this
+                // is the single most useful line for diagnosing "metadata's
+                // there but artwork never loads": it tells us the file's own
+                // tags never carried a recoverable trackID at all (import-time
+                // tag read failed, or the file predates tagging), so the only
+                // paths left are the two fuzzy text-search fallbacks below.
+                appLog("Artwork: no sourceTrackID for \"\(song.displayName)\" — skipping deterministic hqdefault fallback", category: "artwork")
             }
 
             // For local video files, extract the first frame as artwork.
@@ -328,7 +362,13 @@ final class ArtworkService {
         }
 
         markNoArtwork(key)
-        appWarn("Artwork: no source found for \"\(song.displayName)\"", category: "artwork")
+        appWarn(
+            "Artwork: no source found for \"\(song.displayName)\" — exhausted all fallbacks "
+            + "(key=\(key), hasURL=\(song.url != nil), hasPersistentID=\(song.persistentID != nil), "
+            + "sourceTrackID=\(song.sourceTrackID ?? "nil"), ext=\(song.url.map { LumisoundExclusiveExtensionService.effectiveExtension(for: $0) } ?? "n/a"), "
+            + "blacklisting for \(Int(Self.noArtworkCooldown))s",
+            category: "artwork"
+        )
         return nil
     }
 
@@ -659,9 +699,26 @@ final class ArtworkService {
     func fetchRemoteImage(url: URL, headers: [String: String]? = nil) async -> UIImage? {
         var req = URLRequest(url: url)
         headers?.forEach { req.setValue($1, forHTTPHeaderField: $0) }
-        guard let (data, response) = try? await URLSession.shared.data(for: req),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return UIImage(data: data)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: req)
+        } catch {
+            appWarn("Artwork: fetchRemoteImage request failed for \(url.absoluteString): \(error.localizedDescription)", category: "artwork")
+            return nil
+        }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            appWarn(
+                "Artwork: fetchRemoteImage got HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1) for \(url.absoluteString)",
+                category: "artwork"
+            )
+            return nil
+        }
+        guard let image = UIImage(data: data) else {
+            appWarn("Artwork: fetchRemoteImage got 200 but undecodable data (\(data.count) bytes) for \(url.absoluteString)", category: "artwork")
+            return nil
+        }
+        return image
     }
 
     /// Reads embedded artwork from the file's metadata — checks both commonMetadata
@@ -758,8 +815,15 @@ final class ArtworkService {
             .joined(separator: " ")
         guard !query.isEmpty else { return nil }
 
-        guard let streaming = await MainActor.run(body: { StreamingService.shared }) else { return nil }
+        guard let streaming = await MainActor.run(body: { StreamingService.shared }) else {
+            appWarn("Artwork: YouTube search skipped — StreamingService unavailable (query=\"\(query)\")", category: "artwork")
+            return nil
+        }
         let results = await streaming.searchSilently(query: query)
+        guard !results.isEmpty else {
+            appLog("Artwork: YouTube search returned zero results (query=\"\(query)\")", category: "artwork")
+            return nil
+        }
         // The first hit for an unrestricted "title artist" YouTube search is
         // NOT necessarily the actual track — unlike the iTunes Search API
         // just below (which at least scopes to entity=song and tends to be
@@ -780,8 +844,18 @@ final class ArtworkService {
             guard !normalizedQueryTitle.isEmpty, !normalizedResultTitle.isEmpty else { return false }
             return normalizedResultTitle.contains(normalizedQueryTitle)
                 || normalizedQueryTitle.contains(normalizedResultTitle)
-        }) else { return nil }
-        guard !match.thumbnailURL.isEmpty, let thumbnailURL = URL(string: match.thumbnailURL) else { return nil }
+        }) else {
+            appLog(
+                "Artwork: YouTube search got \(results.count) result(s) but none passed the title-overlap "
+                + "guard (query=\"\(query)\", topResultTitle=\"\(results.first?.title ?? "")\")",
+                category: "artwork"
+            )
+            return nil
+        }
+        guard !match.thumbnailURL.isEmpty, let thumbnailURL = URL(string: match.thumbnailURL) else {
+            appWarn("Artwork: YouTube search matched \"\(match.title)\" but it has no usable thumbnail URL", category: "artwork")
+            return nil
+        }
         return await fetchRemoteImage(url: thumbnailURL)
     }
 
@@ -795,19 +869,39 @@ final class ArtworkService {
         guard !query.isEmpty,
               let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let apiURL = URL(string: "https://itunes.apple.com/search?term=\(encoded)&entity=song&limit=1&country=US")
-        else { return nil }
+        else {
+            appWarn("Artwork: iTunes lookup skipped — empty query or malformed URL (title=\"\(title)\", artist=\"\(artist)\")", category: "artwork")
+            return nil
+        }
 
-        guard let (data, response) = try? await URLSession.shared.data(from: apiURL),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let results = json["results"] as? [[String: Any]],
-              let first = results.first
-        else { return nil }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: apiURL)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                appWarn(
+                    "Artwork: iTunes lookup got HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1) (query=\"\(query)\")",
+                    category: "artwork"
+                )
+                return nil
+            }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let results = json["results"] as? [[String: Any]],
+                  let first = results.first
+            else {
+                appLog("Artwork: iTunes lookup returned zero results (query=\"\(query)\")", category: "artwork")
+                return nil
+            }
 
-        // Prefer 600×600 artwork; fall back to 100×100 upscaled.
-        let artStr = (first["artworkUrl600"] as? String)
-            ?? (first["artworkUrl100"] as? String ?? "").replacingOccurrences(of: "100x100bb", with: "600x600bb")
-        guard let artURL = URL(string: artStr) else { return nil }
-        return await fetchRemoteImage(url: artURL)
+            // Prefer 600×600 artwork; fall back to 100×100 upscaled.
+            let artStr = (first["artworkUrl600"] as? String)
+                ?? (first["artworkUrl100"] as? String ?? "").replacingOccurrences(of: "100x100bb", with: "600x600bb")
+            guard let artURL = URL(string: artStr) else {
+                appWarn("Artwork: iTunes matched a result for \"\(query)\" but it has no usable artwork URL", category: "artwork")
+                return nil
+            }
+            return await fetchRemoteImage(url: artURL)
+        } catch {
+            appWarn("Artwork: iTunes lookup request failed for \"\(query)\": \(error.localizedDescription)", category: "artwork")
+            return nil
+        }
     }
 }
