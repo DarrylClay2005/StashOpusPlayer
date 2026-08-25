@@ -156,8 +156,15 @@ final class TVPlayerModel: ObservableObject {
 
     private func asset(for item: TVPlayable) -> AVURLAsset {
         if let token = item.authToken {
+            // Two different bridge endpoints share this field: /user/music/stream
+            // checks "Authorization: Bearer <token>", /api/stream/proxy checks the
+            // raw "X-Account-Token" header. Send both — each endpoint ignores the
+            // header it doesn't recognize.
             return AVURLAsset(url: item.streamURL, options: [
-                "AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer \(token)"]
+                "AVURLAssetHTTPHeaderFieldsKey": [
+                    "Authorization": "Bearer \(token)",
+                    "X-Account-Token": token,
+                ]
             ])
         }
         return AVURLAsset(url: item.streamURL)

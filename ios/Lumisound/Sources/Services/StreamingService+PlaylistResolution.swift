@@ -12,6 +12,18 @@ extension StreamingService {
     /// with a non-empty `sourceTrackID` (the `LUMISOUND_ID`-tagged downloads)
     /// can be matched this way — local-only imports have no such ID and are
     /// simply omitted from the manifest.
+    ///
+    /// Capped to `maxManifestBytes` (~4KB) — with a large library this string
+    /// was going out uncapped as a single query param, and for libraries in
+    /// the thousands of tracks it grew past Cloudflare's/the origin's request
+    /// line limit, which sent back a 400 the app couldn't distinguish from
+    /// any other bad request and killed EVERY download for that user, not
+    /// just the dedupe check. This manifest is purely a "defense in depth"
+    /// hint anyway (`/api/download` and `/api/resolve` already do the
+    /// authoritative owned-track check server-side against the account's
+    /// stored inventory), so silently truncating it here is safe — worst
+    /// case a handful of already-owned tracks get redundantly
+    /// re-checked/re-downloaded instead of the whole request failing.
     func existingTrackManifest(songs: [Song]) -> String {
         var ids = Set(songs.compactMap { song -> String? in
             guard let id = song.sourceTrackID, !id.isEmpty else { return nil }
@@ -25,7 +37,15 @@ extension StreamingService {
         for id in DownloadLedgerStore.shared.presentSourceIDs(presentFilenames: presentFilenames) {
             ids.insert(id)
         }
-        return ids.joined(separator: ",")
+
+        let maxManifestBytes = 4000
+        var manifest = ""
+        for id in ids {
+            let candidate = manifest.isEmpty ? id : manifest + "," + id
+            guard candidate.utf8.count <= maxManifestBytes else { break }
+            manifest = candidate
+        }
+        return manifest
     }
 
     /// Resolves a YouTube (or SoundCloud) playlist URL to a list of tracks via

@@ -999,7 +999,12 @@ final class TVBridgeClient: ObservableObject {
             id: track.id, title: track.title, artist: track.artist,
             streamURL: url,
             artworkURL: URL(string: track.thumbnailURL),
-            authToken: nil
+            // Without this, /api/stream/proxy sees no X-Account-Token and falls
+            // back to the bridge's shared (often stale) cookies.txt, which
+            // YouTube rejects with "Sign in to confirm you're not a bot" —
+            // the tvOS "nothing streams" bug. iOS's StreamingService already
+            // attaches this on every stream request; tvOS didn't.
+            authToken: TVAccount.shared.token
         )
     }
 

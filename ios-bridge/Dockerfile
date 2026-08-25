@@ -32,7 +32,7 @@ ENV PATH="/usr/local/bin:${PATH}"
 # routinely takes 70-100+ seconds per video without one. No-ops harmlessly if
 # YTDLP_POT_PROVIDER_URL is unset (yt-dlp just extracts without a token, as
 # before this was added).
-RUN pip install --no-cache-dir yt-dlp==2026.7.4 yt-dlp-ejs bgutil-ytdlp-pot-provider
+RUN pip install --no-cache-dir yt-dlp==2026.8.19 yt-dlp-ejs bgutil-ytdlp-pot-provider
 
 WORKDIR /app
 
