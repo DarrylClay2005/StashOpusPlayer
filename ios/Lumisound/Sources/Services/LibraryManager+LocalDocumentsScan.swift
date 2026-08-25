@@ -13,6 +13,27 @@ extension LibraryManager {
     /// adds any not already tracked. Picks up files placed via Finder, Files app,
     /// iTunes file sharing, or any subdirectory the user created inside the app folder.
     func scanLocalDocuments() {
+        // A scan is already running — `performLocalDocumentsScan` would just
+        // have this new call join it anyway (see its own coalescing), but
+        // calling `beginScan()` here FIRST regardless meant every redundant
+        // trigger (the foreground-return observer firing more than once in
+        // a burst, several screens' `.onAppear`/`.task` each requesting
+        // their own scan around the same event — see that function's doc
+        // comment: "FIVE OR MORE of these firing back-to-back") still
+        // flipped the `@Published isScanning`/`scanProgress` state of its
+        // own accord. `@Published` fires `objectWillChange` on every
+        // assignment regardless of whether the value actually changed, so
+        // each of those redundant calls forced a full SwiftUI re-render
+        // across every view observing `LibraryManager` — a real, compounding
+        // main-actor cost stacked on top of, not instead of, the (already
+        // deduplicated) scan work itself. This is what actually produced the
+        // visible "freezes when the app comes back from background, and it
+        // happens 4-5 times" reports — not the scan's own disk I/O, which
+        // was already off-main and already coalesced.
+        guard Self.inFlightScanTask == nil else {
+            Task { await performLocalDocumentsScan() }
+            return
+        }
         beginScan()
         Task {
             defer { endScan() }
@@ -47,6 +68,15 @@ extension LibraryManager {
     /// file, including any sitting in subfolders the user created or moved
     /// files into, *before* deciding what still needs to be downloaded.
     func scanLocalDocumentsAsync() async {
+        // Same reasoning as scanLocalDocuments()'s guard above — several
+        // callers (Download All, TrackedPlaylistStore auto-downloads,
+        // pending-download reconciliation) can legitimately call this around
+        // the same moment scanLocalDocuments()'s own trigger fires; join the
+        // existing scan's isScanning state instead of also flipping it.
+        guard Self.inFlightScanTask == nil else {
+            await performLocalDocumentsScan()
+            return
+        }
         beginScan()
         defer { endScan() }
         await performLocalDocumentsScan()

@@ -90,6 +90,21 @@ jobs:
             "$XCASSETS"
           echo "Assets.car: $(du -sh "$APP_PATH/Assets.car" 2>/dev/null || echo MISSING)"
 
+          # actool compiling Assets.car alone isn't enough — tvOS finds the app
+          # icon via CFBundleIcons/CFBundlePrimaryIcon keys that --output-
+          # partial-info-plist writes to a SEPARATE file, not the app's own
+          # Info.plist. Without merging that in, the icon data sits in
+          # Assets.car but nothing in the bundle points at it, so the Home
+          # Screen falls back to the blank placeholder — exactly what shipped
+          # in tvos/v1.4.19 and tvos/v1.4.20 despite Assets.car compiling
+          # "successfully" both times. PlistBuddy's Merge command folds the
+          # partial plist's keys into the real Info.plist in place.
+          /usr/libexec/PlistBuddy -c "Merge /tmp/tvassets.plist" "$APP_PATH/Info.plist"
+          echo "--- /tmp/tvassets.plist (keys merged in) ---"
+          cat /tmp/tvassets.plist
+          echo "--- Info.plist icon keys after merge (diagnostic only) ---"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIcons" "$APP_PATH/Info.plist" || echo "(no CFBundleIcons key — check the partial plist dump above for the actual key name)"
+
       - name: Package IPA (unsigned)
         id: ipa
         working-directory: ios
