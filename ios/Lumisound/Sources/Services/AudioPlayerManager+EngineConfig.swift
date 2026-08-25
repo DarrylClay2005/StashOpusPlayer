@@ -17,8 +17,11 @@ extension AudioPlayerManager {
         if (try? session.setCategory(.playback, mode: .default, options: fullOptions)) == nil {
             try? session.setCategory(.playback, mode: .default, options: fallbackOptions)
         }
-        // Request 48 kHz — the native rate for Opus and most modern audio.
-        // iOS honours this when hardware supports it; silently ignores it otherwise.
+        // Request 48 kHz — the native rate for Opus and most modern audio,
+        // i.e. every YouTube-sourced track. `ensureSampleRate(matching:)`
+        // raises this per-track for a genuinely higher-rate file (a hi-res
+        // FLAC in the Personal Cloud Library/local library); this is just
+        // the floor every session starts at.
         try? session.setPreferredSampleRate(48000)
         // NOTE: deliberately do NOT activate the session here. Activating at
         // launch (before anything plays) made the app grab the audio system

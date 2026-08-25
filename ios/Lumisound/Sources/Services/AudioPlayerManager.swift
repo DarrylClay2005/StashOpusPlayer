@@ -307,6 +307,11 @@ final class AudioPlayerManager: ObservableObject {
     var fileStartFrame: AVAudioFramePosition = 0
     var timer: Timer?
     var isEngineConfigured = false
+    /// The sample rate last requested via `ensureSampleRate(matching:)` — starts
+    /// at the same 48kHz `configureAudioSession()` requests at launch, so a
+    /// session spent entirely on YouTube-sourced/48kHz-or-lower audio never
+    /// touches the engine again after the first track (the common case).
+    var lastRequestedSampleRate: Double = 48000
 
     /// The AVAudioFile pre-scheduled by `scheduleGaplessNext` for the next
     /// gapless hand-off, stashed so `handleTrackEnded` can adopt it as the new

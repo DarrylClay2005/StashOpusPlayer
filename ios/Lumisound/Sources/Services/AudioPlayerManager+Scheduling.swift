@@ -163,6 +163,11 @@ extension AudioPlayerManager {
             audioFile = file
             duration = file.duration
             let sampleRate = file.processingFormat.sampleRate
+            // A no-op for the overwhelming common case (every YouTube-sourced
+            // track tops out at 48kHz) — only actually reconfigures anything
+            // for a genuinely higher-rate local/Cloud Library file. Must
+            // happen before playCurrent()'s startEngineIfNeeded() below.
+            ensureSampleRate(matching: sampleRate)
             let startFrame = max(0, AVAudioFramePosition(startTime * sampleRate))
             // Skip Silent Intros (`SilenceTrimService`) nudges playback past any
             // detected leading dead air itself, via a `player.seek(to:)` right
@@ -553,6 +558,7 @@ extension AudioPlayerManager {
                     scheduleGeneration = gen
                     node.stop()
                     let sr = file2.processingFormat.sampleRate
+                    ensureSampleRate(matching: sr)
                     let sf = max(0, AVAudioFramePosition(startTime * sr))
                     let fl = max(0, AVAudioFrameCount(file2.length - sf))
                     fileStartFrame = sf; position = startTime; gaplessScheduled = false; pendingNextIndex = nil
@@ -578,6 +584,11 @@ extension AudioPlayerManager {
             audioFile = file
             duration = file.duration
             let sampleRate = file.processingFormat.sampleRate
+            // The path a hi-res Personal Cloud Library FLAC actually takes —
+            // Song.url for a cloud track is a remote /user/music/stream URL,
+            // so it downloads through here like any other "streamed" track
+            // rather than the local-file path in scheduleCurrent above.
+            ensureSampleRate(matching: sampleRate)
             let startFrame = max(0, AVAudioFramePosition(startTime * sampleRate))
             let framesLeft = max(0, AVAudioFrameCount(file.length - startFrame))
             fileStartFrame = startFrame

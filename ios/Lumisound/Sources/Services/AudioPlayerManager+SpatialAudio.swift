@@ -188,4 +188,58 @@ extension AudioPlayerManager {
             }
         }
     }
+
+    /// Raises the audio session's preferred sample rate to match a file that's
+    /// genuinely higher-resolution than the 48kHz `configureAudioSession()`
+    /// requests at launch (a hi-res FLAC/ALAC in the Personal Cloud Library or
+    /// local library) — every YouTube-sourced track (streamed or downloaded)
+    /// is natively ≤48kHz, so this is a no-op for the overwhelming common
+    /// case. Every node connection in `configureEngine()` uses `format: nil`,
+    /// so the graph itself already adapts to whatever rate the output
+    /// hardware negotiates — nothing here needs to touch node connections or
+    /// rebuild the graph, just get the SESSION's rate raised before the
+    /// engine (re)starts so the final hardware conversion happens at the
+    /// file's own rate instead of always being silently downsampled to
+    /// 48kHz first. Never LOWERS the rate mid-session once raised (dropping
+    /// back to 48kHz for the next YouTube track buys nothing and would just
+    /// mean another stop/restart blip) — `lastRequestedSampleRate` only ever
+    /// ratchets up to the highest rate seen this session.
+    func ensureSampleRate(matching fileSampleRate: Double) {
+        let desired = max(lastRequestedSampleRate, fileSampleRate.rounded())
+        guard desired > lastRequestedSampleRate else { return }
+        lastRequestedSampleRate = desired
+
+        let session = AVAudioSession.sharedInstance()
+        let wasRunning = engine.isRunning
+        // Stop (not pause) — changing the session's preferred sample rate
+        // needs the hardware I/O unit fully torn down first, the same way
+        // startEngineIfNeeded()'s own rebuild path always stops before it
+        // reconfigures anything.
+        if wasRunning { engine.stop() }
+        do {
+            try session.setPreferredSampleRate(desired)
+        } catch {
+            appWarn("ensureSampleRate: setPreferredSampleRate(\(desired)) failed: \(error.localizedDescription)", category: "audio")
+        }
+        guard wasRunning else { return }
+        try? session.setActive(true)
+        do {
+            try engine.start()
+        } catch {
+            // Same recovery path startEngineIfNeeded() falls back to — a
+            // sample-rate change is exactly the kind of hardware
+            // reconfiguration that can leave the engine needing a full
+            // rebuild, not just a restart.
+            appWarn("ensureSampleRate: engine restart failed after rate change — rebuilding: \(error.localizedDescription)", category: "audio")
+            engine.reset()
+            isEngineConfigured = false
+            isSpatialAudioRouted = false
+            isMonoAudioRouted = false
+            configureEngine()
+            configureEqualizer()
+            try? session.setActive(true)
+            try? engine.start()
+            applyAudioSettings()
+        }
+    }
 }
