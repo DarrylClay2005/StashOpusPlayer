@@ -42,6 +42,8 @@ struct TVSessionsView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .tvAmbientBackground()
         .navigationTitle("Active Sessions")
         .task {
             if client.sessions.isEmpty { await client.fetchSessions(token: token) }
@@ -107,6 +109,8 @@ struct TVNotificationsView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .tvAmbientBackground()
         .navigationTitle("Notifications")
         .task {
             if client.notifications.isEmpty { await client.fetchNotifications(token: token) }
@@ -170,6 +174,8 @@ struct TVFriendsListeningCard: View {
                     }
                 }
             }
+            .padding(20)
+            .tvGlassPanel()
         }
     }
 }

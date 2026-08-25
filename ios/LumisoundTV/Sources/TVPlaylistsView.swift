@@ -69,6 +69,7 @@ struct TVPlaylistsView: View {
                 .padding(60)
             }
         }
+        .tvAmbientBackground()
         .task {
             if client.playlists.isEmpty { await client.fetchPlaylists(token: token) }
         }
@@ -99,11 +100,11 @@ struct TVPlaylistsView: View {
         } label: {
             VStack(spacing: 10) {
                 ZStack {
-                    Color.gray.opacity(0.2)
-                    Image(systemName: "plus").font(.system(size: 50)).foregroundStyle(.secondary)
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [10, 8]))
+                    Image(systemName: "plus").font(.system(size: 50)).foregroundStyle(Color.accentColor)
                 }
                 .frame(width: 280, height: 280)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 Text("New Playlist").font(.headline)
             }
             .frame(width: 280)
@@ -113,12 +114,10 @@ struct TVPlaylistsView: View {
 
     private func playlistCard(_ playlist: TVPlaylist) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                Color.gray.opacity(0.3)
-                Image(systemName: "music.note.list").font(.system(size: 50)).foregroundStyle(.secondary)
-            }
-            .frame(width: 280, height: 280)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            TVArtPlaceholder(systemImage: "music.note.list", iconScale: 1.15)
+                .frame(width: 280, height: 280)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: .black.opacity(0.4), radius: 14, y: 8)
 
             Text(playlist.name).font(.headline).lineLimit(2, reservesSpace: true)
             Text("\(playlist.tracks.count) \(playlist.tracks.count == 1 ? "song" : "songs")")
@@ -177,6 +176,7 @@ struct TVPlaylistDetailView: View {
             }
             .padding(60)
         }
+        .tvAmbientBackground()
     }
 
     @ViewBuilder

@@ -68,6 +68,7 @@ struct TVSearchView: View {
                 .padding(60)
             }
         }
+        .tvAmbientBackground()
         .searchable(text: $query, prompt: "Search YouTube")
         .onSubmit(of: .search) { Task { await client.search(query) } }
         // tvOS search keyboards don't reliably fire `.onSubmit(of: .search)`, so
@@ -95,13 +96,11 @@ struct TVTrackCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             TVAuthImage(url: URL(string: track.thumbnailURL), token: nil) {
-                ZStack {
-                    Color.gray.opacity(0.3)
-                    Image(systemName: "music.note").font(.system(size: 40)).foregroundStyle(.secondary)
-                }
+                TVArtPlaceholder(systemImage: "music.note")
             }
             .frame(width: 280, height: 158)
-            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(color: .black.opacity(0.4), radius: 14, y: 8)
 
             Text(track.title).font(.headline).lineLimit(2, reservesSpace: true)
             Text(track.artist.isEmpty ? "Unknown Artist" : track.artist)
@@ -126,7 +125,10 @@ struct TVAccountView: View {
         ScrollView {
             VStack(spacing: 36) {
                 VStack(spacing: 12) {
-                    Image(systemName: "person.crop.circle.fill").font(.system(size: 90)).foregroundStyle(.tint)
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 90))
+                        .foregroundStyle(.tint)
+                        .shadow(color: Color.accentColor.opacity(0.6), radius: 24)
                     Text(account.user?.name ?? "Signed in").font(.title)
                 }
                 .padding(.top, 60)
@@ -152,6 +154,7 @@ struct TVAccountView: View {
                     .padding(.bottom, 60)
             }
         }
+        .tvAmbientBackground()
         .task {
             if client.notifications.isEmpty { await client.fetchNotifications(token: token) }
             await client.fetchFriendsListening(token: token)

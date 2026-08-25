@@ -26,6 +26,7 @@ struct TVStatsView: View {
                 .padding(60)
             }
         }
+        .tvAmbientBackground()
         .task {
             if client.stats == nil { await client.fetchStats(token: token) }
         }
@@ -35,7 +36,7 @@ struct TVStatsView: View {
 
     private var lifetimeSection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Listening Stats").font(.system(size: 34, weight: .bold))
+            TVSectionHeader(title: "Listening Stats")
 
             HStack(spacing: 40) {
                 statTile("Total Plays", value: "\(client.stats?.totalPlays ?? 0)")
@@ -68,12 +69,17 @@ struct TVStatsView: View {
 
     private func statTile(_ label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(value).font(.system(size: 30, weight: .bold).monospacedDigit())
+            Text(value)
+                .font(.system(size: 30, weight: .bold).monospacedDigit())
+                .foregroundStyle(
+                    LinearGradient(colors: [.white, Color.accentColor],
+                                   startPoint: .leading, endPoint: .trailing)
+                )
             Text(label).font(.callout).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .tvGlassPanel()
     }
 
     @ViewBuilder
@@ -102,7 +108,7 @@ struct TVStatsView: View {
 
     private var weeklySection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("This Week").font(.system(size: 28, weight: .bold))
+            TVSectionHeader(title: "This Week")
             if client.weeklyStats.isEmpty {
                 Text("No listening activity in the last 7 days yet.")
                     .font(.title3).foregroundStyle(.secondary)
@@ -142,7 +148,7 @@ struct TVStatsView: View {
 
     private var badgesSection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Achievements").font(.system(size: 28, weight: .bold))
+            TVSectionHeader(title: "Achievements")
             let unlocked = Set(client.achievements?.badges ?? [])
             let columns = [GridItem(.adaptive(minimum: 160), spacing: 24)]
             LazyVGrid(columns: columns, spacing: 24) {
@@ -160,6 +166,7 @@ struct TVStatsView: View {
                 .foregroundStyle(isUnlocked ? Color.accentColor : Color.secondary)
                 .frame(width: 90, height: 90)
                 .background(.white.opacity(isUnlocked ? 0.12 : 0.05), in: Circle())
+                .shadow(color: isUnlocked ? Color.accentColor.opacity(0.55) : .clear, radius: isUnlocked ? 16 : 0)
             Text(badge.title)
                 .font(.callout)
                 .multilineTextAlignment(.center)

@@ -110,13 +110,11 @@ struct TVAlbumsGridView: View {
     private func albumCard(_ album: TVAlbumGroup) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             TVAuthImage(url: client.userMusicArtworkURL(for: album.representativeTrack), token: token) {
-                ZStack {
-                    Color.gray.opacity(0.3)
-                    Image(systemName: "square.stack").font(.system(size: 40)).foregroundStyle(.secondary)
-                }
+                TVArtPlaceholder(systemImage: "square.stack")
             }
             .frame(width: 280, height: 280)
-            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: .black.opacity(0.4), radius: 14, y: 8)
 
             Text(album.name).font(.headline).lineLimit(2, reservesSpace: true)
             Text(album.artistName).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
@@ -141,13 +139,11 @@ struct TVAlbumDetailView: View {
             VStack(alignment: .leading, spacing: 30) {
                 HStack(spacing: 40) {
                     TVAuthImage(url: client.userMusicArtworkURL(for: album.representativeTrack), token: token) {
-                        ZStack {
-                            Color.gray.opacity(0.3)
-                            Image(systemName: "square.stack").font(.system(size: 60)).foregroundStyle(.secondary)
-                        }
+                        TVArtPlaceholder(systemImage: "square.stack", iconScale: 1.35)
                     }
                     .frame(width: 260, height: 260)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: .black.opacity(0.45), radius: 18, y: 10)
 
                     VStack(alignment: .leading, spacing: 10) {
                         Text(album.name).font(.system(size: 40, weight: .bold))
@@ -190,6 +186,7 @@ struct TVAlbumDetailView: View {
             }
             .padding(60)
         }
+        .tvAmbientBackground()
     }
 }
 
@@ -225,12 +222,10 @@ struct TVArtistsGridView: View {
 
     private func artistCard(_ artist: TVArtistGroup) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                Color.gray.opacity(0.3)
-                Image(systemName: "music.mic").font(.system(size: 60)).foregroundStyle(.secondary)
-            }
-            .frame(width: 280, height: 280)
-            .clipShape(Circle())
+            TVArtPlaceholder(systemImage: "music.mic", iconScale: 1.35)
+                .frame(width: 280, height: 280)
+                .clipShape(Circle())
+                .shadow(color: .black.opacity(0.4), radius: 14, y: 8)
 
             Text(artist.name).font(.headline).lineLimit(2, reservesSpace: true)
             Text("\(artist.albumCount) \(artist.albumCount == 1 ? "album" : "albums") · \(artist.tracks.count) \(artist.tracks.count == 1 ? "song" : "songs")")
@@ -265,13 +260,11 @@ struct TVArtistDetailView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 10) {
                                 TVAuthImage(url: client.userMusicArtworkURL(for: album.representativeTrack), token: token) {
-                                    ZStack {
-                                        Color.gray.opacity(0.3)
-                                        Image(systemName: "square.stack").font(.system(size: 40)).foregroundStyle(.secondary)
-                                    }
+                                    TVArtPlaceholder(systemImage: "square.stack")
                                 }
                                 .frame(width: 280, height: 280)
-                                .clipped()
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .shadow(color: .black.opacity(0.4), radius: 14, y: 8)
                                 Text(album.name).font(.headline).lineLimit(2, reservesSpace: true)
                                 Text("\(album.tracks.count) \(album.tracks.count == 1 ? "song" : "songs")")
                                     .font(.subheadline).foregroundStyle(.secondary)
@@ -284,6 +277,7 @@ struct TVArtistDetailView: View {
                 .padding(60)
             }
         }
+        .tvAmbientBackground()
     }
 }
 
@@ -319,12 +313,10 @@ struct TVGenresGridView: View {
 
     private func genreCard(_ genre: TVGenreGroup) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                Color.gray.opacity(0.3)
-                Image(systemName: "guitars").font(.system(size: 50)).foregroundStyle(.secondary)
-            }
-            .frame(width: 280, height: 280)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            TVArtPlaceholder(systemImage: "guitars", iconScale: 1.15)
+                .frame(width: 280, height: 280)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: .black.opacity(0.4), radius: 14, y: 8)
 
             Text(genre.name).font(.headline).lineLimit(2, reservesSpace: true)
             Text("\(genre.tracks.count) \(genre.tracks.count == 1 ? "song" : "songs")")
@@ -384,6 +376,7 @@ struct TVGenreDetailView: View {
             }
             .padding(60)
         }
+        .tvAmbientBackground()
     }
 }
 
@@ -422,13 +415,11 @@ struct TVFavoritesGridView: View {
                         NavigationLink(value: TVPlayContext(queue: queue, startID: track.id)) {
                             VStack(alignment: .leading, spacing: 10) {
                                 TVAuthImage(url: client.userMusicArtworkURL(for: track), token: token) {
-                                    ZStack {
-                                        Color.gray.opacity(0.3)
-                                        Image(systemName: "music.note").font(.system(size: 40)).foregroundStyle(.secondary)
-                                    }
+                                    TVArtPlaceholder(systemImage: "music.note")
                                 }
                                 .frame(width: 280, height: 280)
-                                .clipped()
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .shadow(color: .black.opacity(0.4), radius: 14, y: 8)
                                 Text(track.title.isEmpty ? track.filename : track.title)
                                     .font(.headline).lineLimit(2, reservesSpace: true)
                                 Text(track.artist.isEmpty ? "Unknown Artist" : track.artist)

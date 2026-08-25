@@ -75,6 +75,7 @@ struct TVLibraryView: View {
                 }
             }
         }
+        .tvAmbientBackground()
         .searchable(text: $searchText, prompt: "Search your library")
         .task {
             if client.library.isEmpty { await client.fetchLibrary(token: token) }
@@ -106,13 +107,11 @@ struct TVLibraryView: View {
         VStack(alignment: .leading, spacing: 10) {
             ZStack(alignment: .topTrailing) {
                 TVAuthImage(url: client.userMusicArtworkURL(for: track), token: token) {
-                    ZStack {
-                        Color.gray.opacity(0.3)
-                        Image(systemName: "music.note").font(.system(size: 40)).foregroundStyle(.secondary)
-                    }
+                    TVArtPlaceholder(systemImage: "music.note")
                 }
                 .frame(width: 280, height: 280)
-                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: .black.opacity(0.4), radius: 14, y: 8)
 
                 if client.isFavorite(track.id) {
                     Image(systemName: "star.fill")

@@ -28,6 +28,7 @@ struct TVDiscoverView: View {
             }
             .padding(.vertical, 50)
         }
+        .tvAmbientBackground()
         .task {
             if client.discoverMix.isEmpty { await client.fetchDiscoverMix(token: token) }
             if client.onThisDay.isEmpty { await client.fetchOnThisDay(token: token) }
@@ -142,12 +143,10 @@ struct TVDiscoverView: View {
 
     private func smartPlaylistCard(_ bucket: TVSmartPlaylistBucket) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                Color.gray.opacity(0.3)
-                Image(systemName: smartPlaylistIcon(bucket.key)).font(.system(size: 50)).foregroundStyle(.secondary)
-            }
-            .frame(width: 280, height: 280)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            TVArtPlaceholder(systemImage: smartPlaylistIcon(bucket.key), iconScale: 1.15)
+                .frame(width: 280, height: 280)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: .black.opacity(0.4), radius: 14, y: 8)
 
             Text(bucket.name).font(.headline)
             Text("\(bucket.tracks.count) \(bucket.tracks.count == 1 ? "song" : "songs")")
@@ -171,11 +170,8 @@ struct TVDiscoverView: View {
     @ViewBuilder
     private func sectionShell<Content: View>(title: String, subtitle: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.system(size: 34, weight: .bold))
-                Text(subtitle).font(.title3).foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 60)
+            TVSectionHeader(title: title, subtitle: subtitle)
+                .padding(.horizontal, 60)
             content()
         }
     }
@@ -259,6 +255,7 @@ struct TVSmartPlaylistDetailView: View {
             }
             .padding(60)
         }
+        .tvAmbientBackground()
         .task {
             if client.library.isEmpty { await client.fetchLibrary(token: token) }
         }
