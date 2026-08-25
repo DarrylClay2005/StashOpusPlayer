@@ -352,34 +352,38 @@ struct LaunchView: View {
                 withAnimation(.easeIn(duration: 0.3)) { contentOpacity = 1.0 }
             }
             Task {
-                // Previously a flat 1.5s timer — for small/cached libraries that's plenty,
-                // but for big ones (1000+ songs imported from Apple Music) the media-library
-                // scan is still running long after this fires: the user lands in a library
-                // that's still populating mid-interaction (rows reflowing, artwork popping
-                // in, the mini player jumping between tracks) — exactly the "freakout" feel
-                // reported after large imports/updates. Now we hold here until
-                // `library.isScanning` (set by scanMediaLibrary/requestAccessAndScan, the
-                // dominant scan path for big libraries — see LibraryView.onAppear) drops
-                // back to false, so the user never sees the library mid-rebuild.
+                // Holds the launch screen until real, observable work is
+                // actually done — `library.isScanning` (set by
+                // scanMediaLibrary/requestAccessAndScan, the dominant scan
+                // path for big libraries — see LibraryView.onAppear) and
+                // `account.isSyncing` (the pull-sync kicked off in
+                // LumisoundApp's launch `.task`) — instead of a blind flat
+                // delay. A previous version of this replaced a 1.2s minimum
+                // with an unconditional 6s one specifically to give the
+                // pull-sync/persisted-snapshot restore "a real chance to
+                // land" — but on every device, on every launch, regardless
+                // of how fast those actually finished. That turned a normal
+                // warm relaunch (everything already cached, nothing to
+                // sync) into a flat 6+ second stall before the user could
+                // touch anything — the opposite of what a launch screen
+                // should cost. Polling `isSyncing` directly gets the same
+                // safety without the tax: fast when there's genuinely
+                // nothing to wait for, patient when there is.
                 //
-                // Two safety rails: a minimum hold so the screen doesn't just flicker for
-                // small libraries (and so we're not sampling `isScanning` in the brief gap
-                // before LibraryView.onAppear has actually flipped it true), and a maximum
-                // cap so a stuck/never-starting scan can never trap the user here.
-                //
-                // Minimum raised 1.2s -> 6s: launch also kicks off several other
-                // async loads that don't feed `isScanning` at all (the account
-                // pull-sync, the persisted-snapshot restore, avatar/banner
-                // fetches) — a short hold could let the screen dismiss into a
-                // still-populating profile/library even once scanning itself
-                // reports done. 6s gives those a real chance to land first.
-                let minimumHold: UInt64 = 6_000_000_000   //  6.0 s
-                let maximumHold: UInt64 = 15_000_000_000  // 15.0 s
+                // Two safety rails remain: a short minimum hold, both so the
+                // screen doesn't just flicker for small/cached libraries and
+                // so this loop isn't sampling `isScanning`/`isSyncing` in the
+                // brief gap before LibraryView.onAppear / pullSync have
+                // actually flipped them true yet; and a maximum cap so a
+                // stuck/never-starting scan or sync can never trap the user
+                // here indefinitely.
+                let minimumHold: UInt64 = 1_200_000_000   //  1.2 s
+                let maximumHold: UInt64 = 10_000_000_000  // 10.0 s
                 let pollInterval: UInt64 = 250_000_000    //  0.25 s
 
                 try? await Task.sleep(nanoseconds: minimumHold)
                 var waited = minimumHold
-                while await MainActor.run(body: { library.isScanning }), waited < maximumHold {
+                while await MainActor.run(body: { library.isScanning || account.isSyncing }), waited < maximumHold {
                     try? await Task.sleep(nanoseconds: pollInterval)
                     waited += pollInterval
                 }

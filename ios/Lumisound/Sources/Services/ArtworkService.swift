@@ -19,29 +19,51 @@ final class ArtworkService {
     /// Thread-safe cache for MPMediaLibrary lookups keyed by persistentID.
     private let mediaQueryCache = NSCache<NSNumber, UIImage>()
 
-    /// In-memory set of cache keys for which all artwork sources failed. Prevents
-    /// repeated lookups (including remote API calls) for tracks that have no artwork.
-    /// Resets on app relaunch — that's fine; one miss per launch is acceptable.
+    /// In-memory map of cache keys for which all artwork sources failed, to the
+    /// moment that happened. Prevents repeated lookups (including remote API
+    /// calls) for tracks that have no artwork — but only for a bounded cooldown
+    /// (see `noArtworkCooldown`), not permanently.
+    ///
+    /// This used to be a plain `Set` with no expiry at all — a genuinely
+    /// no-artwork track and one that just hit a transient network blip on its
+    /// one and only YouTube-search/iTunes-search attempt (rate limit, a dropped
+    /// request, momentarily poor connectivity) were treated identically:
+    /// blacklisted for the rest of the session, full stop, with no way for the
+    /// user to force a recheck short of relaunching the app. For anyone who
+    /// keeps Lumisound open/backgrounded for hours (the common case), one bad
+    /// moment on first scroll-past permanently locked a track's artwork blank
+    /// for the entire session even with a perfectly good network the rest of
+    /// the time — the "metadata's there but artwork just refuses to load"
+    /// reports. A time-boxed cooldown keeps the original intent (don't hammer
+    /// remote APIs on every single re-scroll of a track with no art) while
+    /// letting a transient miss heal itself automatically within a few
+    /// minutes instead of needing a full relaunch.
     ///
     /// `loadArtwork` is a plain (non-actor-isolated) async function invoked
     /// concurrently from many `ArtworkThumbnail.task` instances while scrolling
     /// plus the background `prefetch` loop, so it can run on different threads of
-    /// the cooperative pool at the same time. A bare `Set<String>` mutated from
+    /// the cooperative pool at the same time. A bare dictionary mutated from
     /// concurrent reads/inserts is a data race (unlike `memoryCache`/`mediaQueryCache`,
     /// which are `NSCache` and already thread-safe) — guard it with a lock.
-    private var noArtworkKeys: Set<String> = []
+    private var noArtworkKeys: [String: Date] = [:]
     private let noArtworkLock = NSLock()
+    private static let noArtworkCooldown: TimeInterval = 5 * 60  // 5 minutes
 
     private func isKnownNoArtwork(_ key: String) -> Bool {
         noArtworkLock.lock()
         defer { noArtworkLock.unlock() }
-        return noArtworkKeys.contains(key)
+        guard let markedAt = noArtworkKeys[key] else { return false }
+        guard Date().timeIntervalSince(markedAt) < Self.noArtworkCooldown else {
+            noArtworkKeys.removeValue(forKey: key)
+            return false
+        }
+        return true
     }
 
     private func markNoArtwork(_ key: String) {
         noArtworkLock.lock()
         defer { noArtworkLock.unlock() }
-        noArtworkKeys.insert(key)
+        noArtworkKeys[key] = Date()
     }
 
     private func clearNoArtworkKeys() {
