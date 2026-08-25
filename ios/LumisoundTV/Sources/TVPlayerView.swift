@@ -519,6 +519,10 @@ struct TVPlayerView: View {
     @State private var showSleepTimerSheet = false
     @State private var showArtworkStyleSheet = false
     @AppStorage("tv.nowPlaying.artworkStyle") private var artworkStyleRaw = TVArtworkStyle.classic.rawValue
+    /// Drives the ambient glow's "breathing" pulse behind the artwork —
+    /// toggled once on appear rather than animating a constant, since a
+    /// `repeatForever` animation needs an actual value change to attach to.
+    @State private var breathe = false
 
     private var artworkStyle: TVArtworkStyle { TVArtworkStyle(rawValue: artworkStyleRaw) ?? .classic }
 
@@ -537,6 +541,8 @@ struct TVPlayerView: View {
                             Text(displayed?.title ?? "")
                                 .font(.system(size: 46, weight: .bold))
                                 .lineLimit(2)
+                                .id(displayed?.id)
+                                .transition(.opacity.combined(with: .move(edge: .leading)))
                             if let songID = displayed?.favoriteSongID {
                                 favoriteButton(songID: songID)
                             }
@@ -545,7 +551,10 @@ struct TVPlayerView: View {
                             .font(.system(size: 30))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                            .id(displayed?.id)
+                            .transition(.opacity)
                     }
+                    .animation(.easeOut(duration: 0.4), value: displayed?.id)
                     progressBar
                     HStack(spacing: 44) {
                         controlButton("backward.fill") { model.previous() }
@@ -572,7 +581,10 @@ struct TVPlayerView: View {
                 .transition(.opacity)
             }
         }
-        .onAppear { model.start(context: context) }
+        .onAppear {
+            model.start(context: context)
+            breathe = true
+        }
         .onDisappear { model.stop() }
     }
 
@@ -611,9 +623,9 @@ struct TVPlayerView: View {
 
     private func toggleIconButton(_ symbol: String, isOn: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .foregroundStyle(isOn ? Color.accentColor : Color.primary)
+            TVUtilityButtonLabel(symbol: symbol, isOn: isOn)
         }
+        .buttonStyle(.plain)
     }
 
     private func favoriteButton(songID: String) -> some View {
@@ -623,18 +635,20 @@ struct TVPlayerView: View {
                 await client.toggleFavorite(track: track, token: token)
             }
         } label: {
-            Image(systemName: client.isFavorite(songID) ? "star.fill" : "star")
-                .foregroundStyle(client.isFavorite(songID) ? Color.yellow : Color.secondary)
+            TVUtilityButtonLabel(symbol: client.isFavorite(songID) ? "star.fill" : "star",
+                                  isOn: client.isFavorite(songID), tint: .yellow)
         }
+        .buttonStyle(.plain)
     }
 
     private var sleepTimerMenu: some View {
         Button {
             showSleepTimerSheet = true
         } label: {
-            Image(systemName: model.sleepTimerEndDate != nil ? "moon.fill" : "moon")
-                .foregroundStyle(model.sleepTimerEndDate != nil ? Color.accentColor : Color.primary)
+            TVUtilityButtonLabel(symbol: model.sleepTimerEndDate != nil ? "moon.fill" : "moon",
+                                  isOn: model.sleepTimerEndDate != nil)
         }
+        .buttonStyle(.plain)
         .sheet(isPresented: $showSleepTimerSheet) {
             TVSleepTimerSheet(hasActiveTimer: model.sleepTimerEndDate != nil) { minutes in
                 if let minutes {
@@ -650,9 +664,9 @@ struct TVPlayerView: View {
         Button {
             showArtworkStyleSheet = true
         } label: {
-            Image(systemName: "paintpalette")
-                .foregroundStyle(artworkStyle == .classic ? Color.primary : Color.accentColor)
+            TVUtilityButtonLabel(symbol: "paintpalette", isOn: artworkStyle != .classic)
         }
+        .buttonStyle(.plain)
         .sheet(isPresented: $showArtworkStyleSheet) {
             TVArtworkStyleSheet(current: artworkStyle) { style in
                 artworkStyleRaw = style.rawValue
@@ -747,8 +761,30 @@ struct TVPlayerView: View {
         .ignoresSafeArea()
     }
 
+    /// Soft, slowly "breathing" halo behind the artwork, using the same
+    /// image as the full-screen backdrop rather than a flat accent color —
+    /// it reads as light cast off the artwork itself instead of a generic
+    /// decorative glow, and it's most alive right when a track is actually
+    /// playing (dims and stops pulsing on pause, a quiet way of reinforcing
+    /// play state beyond just the button icon).
+    @ViewBuilder private var artworkGlow: some View {
+        TVAuthImage(url: displayed?.artworkURL, token: displayed?.authToken) { Color.clear }
+            .blur(radius: 70)
+            .saturation(1.4)
+            .opacity(model.isPlaying ? 0.85 : 0.35)
+            .scaleEffect(breathe ? 1.08 : 0.92)
+            .animation(
+                .easeInOut(duration: 3.2).repeatForever(autoreverses: true),
+                value: breathe
+            )
+            .animation(.easeInOut(duration: 0.6), value: model.isPlaying)
+    }
+
     @ViewBuilder private var artwork: some View {
         ZStack {
+            artworkGlow
+                .frame(width: 440, height: 440)
+
             switch artworkStyle {
             case .classic:
                 classicArtwork
@@ -790,7 +826,22 @@ struct TVPlayerView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.22))
-                    Capsule().fill(.white).frame(width: geo.size.width * fraction)
+                    Capsule()
+                        .fill(
+                            LinearGradient(colors: [Color.accentColor, .white],
+                                           startPoint: .leading, endPoint: .trailing)
+                        )
+                        .frame(width: geo.size.width * fraction)
+                    // Playhead — a small glowing dot at the current position,
+                    // pulsing gently while playing so the bar doesn't read as
+                    // a static, dead-looking track marker.
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 16, height: 16)
+                        .shadow(color: Color.accentColor.opacity(model.isPlaying ? 0.9 : 0), radius: 8)
+                        .scaleEffect(breathe && model.isPlaying ? 1.15 : 1.0)
+                        .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: breathe)
+                        .offset(x: geo.size.width * fraction - 8)
                 }
             }
             .frame(height: 8)
@@ -817,10 +868,61 @@ struct TVPlayerView: View {
 
     private func controlButton(_ symbol: String, big: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: big ? 46 : 32, weight: .semibold))
-                .frame(width: big ? 120 : 96, height: big ? 120 : 96)
+            TVTransportButtonLabel(symbol: symbol, big: big)
         }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Focus-reactive label for the main transport buttons (play/pause, skip).
+/// A plain `Button` on tvOS gets the system's default focus treatment, which
+/// reads as fairly flat for a full-screen Now Playing surface — this scales
+/// up, lifts with a soft accent-colored glow, and fills in behind the glyph
+/// when the Siri Remote's focus lands on it, so the transport row feels like
+/// a deliberately designed control cluster rather than plain SF Symbols.
+private struct TVTransportButtonLabel: View {
+    let symbol: String
+    let big: Bool
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        let size: CGFloat = big ? 122 : 92
+        ZStack {
+            Circle()
+                .fill(isFocused ? Color.white.opacity(0.18) : Color.white.opacity(0.05))
+            Image(systemName: symbol)
+                .font(.system(size: big ? 44 : 30, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: size, height: size)
+        .scaleEffect(isFocused ? 1.16 : 1.0)
+        .shadow(color: isFocused ? Color.accentColor.opacity(0.6) : .clear, radius: isFocused ? 20 : 0)
+        .animation(.spring(response: 0.32, dampingFraction: 0.72), value: isFocused)
+    }
+}
+
+/// Same focus treatment as `TVTransportButtonLabel`, sized down for the
+/// utility row (shuffle/repeat/crossfade/sleep timer/lyrics/artwork style)
+/// and the inline favorite star — a smaller glow/scale so a row of six of
+/// these doesn't compete with the transport buttons for visual weight.
+private struct TVUtilityButtonLabel: View {
+    let symbol: String
+    var isOn: Bool = false
+    var tint: Color = .accentColor
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(isFocused ? Color.white.opacity(0.16) : Color.clear)
+            Image(systemName: symbol)
+                .font(.system(size: 24, weight: .medium))
+                .foregroundStyle(isOn ? tint : (isFocused ? Color.white : Color.secondary))
+        }
+        .frame(width: 64, height: 64)
+        .scaleEffect(isFocused ? 1.14 : 1.0)
+        .shadow(color: isFocused ? tint.opacity(0.5) : .clear, radius: isFocused ? 12 : 0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isFocused)
     }
 }
 

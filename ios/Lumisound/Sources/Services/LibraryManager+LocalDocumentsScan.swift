@@ -106,6 +106,23 @@ extension LibraryManager {
             await existing.value
             return
         }
+        // A forced scan (the Library "Refresh" button) still shouldn't run
+        // CONCURRENTLY with an already-in-flight regular one — both walk the
+        // whole Documents tree and run `resolveSongs` over potentially
+        // thousands of files, and a forced pass re-resolves EVERY candidate
+        // rather than just new ones, so it's the heavier of the two. Caught
+        // on screen: tapping Refresh right as an auto-download batch's own
+        // scan was still wrapping up froze the UI for several seconds — two
+        // full-library passes contending for the same CPU/IO budget at
+        // once, not something either one's own off-main work alone
+        // accounts for. Waiting here doesn't weaken the "always fresh"
+        // guarantee `force` provides — this scan hasn't started reading
+        // anything yet, so anything the other pass picks up is still
+        // reflected once this one actually runs.
+        if force, let existing = Self.inFlightScanTask {
+            appLog("performLocalDocumentsScan(force): waiting for in-flight regular scan to finish first, rather than racing it", category: "library")
+            await existing.value
+        }
         let task = Task { await self.runLocalDocumentsScan(force: force) }
         if !force { Self.inFlightScanTask = task }
         await task.value
