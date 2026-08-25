@@ -52,7 +52,8 @@ extension StreamingService {
             // than needing its own opt-in.
             for song in localSongs {
                 guard !Task.isCancelled, let url = song.url, let name = url.lastPathComponent as String?,
-                      let record = existingByOriginalName[name], !record.hasArtwork
+                      let record = existingByOriginalName[name], !record.hasArtwork,
+                      FileManager.default.fileExists(atPath: url.path)
                 else { continue }
                 guard await LumisoundExclusiveExtensionService.hasEmbeddedThumbnailTag(fileURL: url) else { continue }
                 _ = try? await self.patchArtworkFlag(filename: record.filename, hasArtwork: true, token: token)
@@ -63,6 +64,23 @@ extension StreamingService {
 
             for song in pending {
                 guard !Task.isCancelled, let url = song.url else { return }
+                // `pending` is a one-time snapshot, but this loop can run for
+                // a genuinely long time (1.5s/song × a several-thousand-song
+                // backlog is over an hour) — long enough for the periodic
+                // lock-conversion pass or a corrupt-file cleanup elsewhere in
+                // the app to rename/remove a file this snapshot still points
+                // at by the time we get to it. Without this check, that
+                // showed up as a confusing "unlock failed"/"could not read"
+                // warning pair for every such song (the file genuinely wasn't
+                // there — "no such file", not a decode/corruption failure) —
+                // skip quietly instead of burning a read attempt on a path
+                // that's already gone; the next scan's fresh snapshot will
+                // pick up wherever the file actually ended up now (e.g. under
+                // its post-lock `.lms` name) on its own.
+                guard FileManager.default.fileExists(atPath: url.path) else {
+                    appLog("backUpLibraryIfNeeded: skipping \"\(song.displayName)\" — file no longer at its scanned path (likely renamed/removed since)", category: "network")
+                    continue
+                }
                 let metadata = TrackMetadata(
                     title: song.title.isEmpty ? nil : song.title,
                     artist: song.artist.isEmpty ? nil : song.artist,
