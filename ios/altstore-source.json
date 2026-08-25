@@ -14,6 +14,14 @@
       "screenshotURLs": [],
       "versions": [
         {
+          "version": "1.7.0.0",
+          "date": "2026-08-25T05:29:38Z",
+          "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.7.0.0/Lumisound-1.7.0.0-unsigned.ipa",
+          "localizedDescription": "See release notes on GitHub.",
+          "size": 9030959,
+          "minOSVersion": "16.0"
+        },
+        {
           "version": "1.6.1.0",
           "date": "2026-08-25T04:50:55Z",
           "downloadURL": "https://github.com/HeavenlyXenusVR/Lumisound/releases/download/ios%2Fv1.6.1.0/Lumisound-1.6.1.0-unsigned.ipa",
