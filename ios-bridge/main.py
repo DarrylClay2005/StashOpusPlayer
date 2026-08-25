@@ -8996,6 +8996,15 @@ async def upload_user_music(
     duration: Optional[float] = Query(None, description="Duration in seconds"),
     bitrate: Optional[int] = Query(None, description="Bitrate in kbps"),
     sample_rate: Optional[int] = Query(None, description="Sample rate in Hz"),
+    has_artwork: bool = Query(
+        False,
+        description="Whether the client already knows this file has embedded "
+                     "artwork. Only trusted signal for a locked (.lms) upload — "
+                     "the server can't ffprobe those (see _locked_inner_ext's "
+                     "doc comment), so without this every locked track's "
+                     "artwork silently reported as missing regardless of what "
+                     "the original file actually had embedded.",
+    ),
     user: dict = Depends(get_current_user),
 ):
     """
@@ -9050,6 +9059,15 @@ async def upload_user_music(
     except ClientDisconnect:
         raise HTTPException(status_code=499, detail="Client disconnected before upload completed")
     if not body:
+        # Seen in a burst right after a container restart (a client mid-upload
+        # when the origin connection drops can get replayed by an intermediate
+        # proxy onto a fresh connection with a body stream it can no longer
+        # re-read, landing here empty) — logging the declared Content-Length
+        # distinguishes that from a genuinely empty client payload.
+        logger.warning(
+            "upload_user_music: empty body for %s (user %s, declared Content-Length=%s)",
+            safe_name, user_id, request.headers.get("content-length"),
+        )
         raise HTTPException(status_code=400, detail="Empty file body")
     if len(body) > 100 * 1024 * 1024:  # 100 MB
         raise HTTPException(status_code=413, detail="File too large (max 100 MB)")
@@ -9171,6 +9189,7 @@ async def upload_user_music(
                         bitrate = CASE WHEN EXCLUDED.bitrate IS NULL THEN ios_user_music_metadata.bitrate ELSE EXCLUDED.bitrate END,
                         sample_rate = CASE WHEN EXCLUDED.sample_rate IS NULL THEN ios_user_music_metadata.sample_rate ELSE EXCLUDED.sample_rate END,
                         mime_type = EXCLUDED.mime_type,
+                        has_artwork = EXCLUDED.has_artwork OR ios_user_music_metadata.has_artwork,
                         loudness_lufs = CASE WHEN EXCLUDED.loudness_lufs IS NULL THEN ios_user_music_metadata.loudness_lufs ELSE EXCLUDED.loudness_lufs END,
                         bpm = CASE WHEN EXCLUDED.bpm IS NULL THEN ios_user_music_metadata.bpm ELSE EXCLUDED.bpm END,
                         musical_key = CASE WHEN EXCLUDED.musical_key IS NULL THEN ios_user_music_metadata.musical_key ELSE EXCLUDED.musical_key END,
@@ -9191,7 +9210,7 @@ async def upload_user_music(
                         bitrate,
                         sample_rate,
                         mime_type,
-                        False,
+                        has_artwork,
                         loudness_lufs,
                         bpm,
                         musical_key,
@@ -9217,6 +9236,28 @@ async def upload_user_music(
         "metadata_id": content_hash,
         "size": len(body),
     }
+
+
+@app.patch("/user/music/artwork-flag", status_code=204)
+async def patch_user_music_artwork_flag(
+    filename: str = Query(..., description="The on-disk filename returned by /user/music/metadata"),
+    has_artwork: bool = Query(...),
+    user: dict = Depends(get_current_user),
+):
+    """Cheap, file-transfer-free fix for a track whose has_artwork is wrong —
+    specifically, a Lumisound-locked upload's was hardcoded false at upload
+    time for a while (this server can't ffprobe locked bytes itself; see
+    `_locked_inner_ext`'s doc comment) even though the client already knows
+    the original file has embedded art. No file re-transfer, just the one
+    metadata column."""
+    user_id = user["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_user_music_metadata SET has_artwork = %s WHERE user_id = %s AND filename = %s",
+                (has_artwork, user_id, filename),
+            )
 
 
 @app.get("/user/music/waveform")

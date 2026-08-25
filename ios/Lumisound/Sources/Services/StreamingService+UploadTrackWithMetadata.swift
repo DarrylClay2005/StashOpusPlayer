@@ -30,6 +30,7 @@ extension StreamingService {
         if let v = metadata.durationSeconds               { queryItems.append(URLQueryItem(name: "duration",    value: String(v))) }
         if let v = metadata.bitrate                       { queryItems.append(URLQueryItem(name: "bitrate",     value: String(v))) }
         if let v = metadata.sampleRate                    { queryItems.append(URLQueryItem(name: "sample_rate", value: String(v))) }
+        if metadata.hasArtwork == true { queryItems.append(URLQueryItem(name: "has_artwork", value: "true")) }
 
         var components = URLComponents()
         components.path = "/user/music/upload"
@@ -83,5 +84,33 @@ extension StreamingService {
             loudnessLufs: nil,
             gainDb: nil
         )
+    }
+
+    /// Cheap, file-transfer-free fix for a track whose server-side
+    /// `has_artwork` is wrong — specifically, a Lumisound-locked upload's was
+    /// hardcoded `false` at upload time for a while (the server can't
+    /// ffprobe locked bytes itself; see `_locked_inner_ext`'s doc comment on
+    /// the bridge). Matches by the server's own on-disk `filename` (as
+    /// returned by `/user/music/metadata`), not `fileURL`, since this is
+    /// called for a track that's already uploaded — there's no local file
+    /// transfer here, just one metadata column.
+    @discardableResult
+    func patchArtworkFlag(filename: String, hasArtwork: Bool, token: String) async throws -> Bool {
+        var components = URLComponents()
+        components.path = "/user/music/artwork-flag"
+        components.queryItems = [
+            URLQueryItem(name: "filename", value: filename),
+            URLQueryItem(name: "has_artwork", value: hasArtwork ? "true" : "false"),
+        ]
+        guard var request = makeRequest(components.string ?? "/user/music/artwork-flag") else {
+            throw StreamingError.invalidURL
+        }
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            return false
+        }
+        return true
     }
 }

@@ -115,9 +115,10 @@ extension StreamSearchView {
                 )
                 if autoCloudBackup, account.isLoggedIn, let token = account.token {
                     Task {
+                        let hasArtwork = await LumisoundExclusiveExtensionService.hasEmbeddedThumbnailTag(fileURL: localURL)
                         try? await streaming.uploadTrack(
                             fileURL: localURL, token: token,
-                            metadata: TrackMetadata(title: track.title, artist: track.artist, durationSeconds: track.duration)
+                            metadata: TrackMetadata(title: track.title, artist: track.artist, durationSeconds: track.duration, hasArtwork: hasArtwork)
                         )
                     }
                 }
@@ -259,9 +260,10 @@ extension StreamSearchView {
                         failedTrackIDs.remove(result.track.id)
                         if autoCloudBackup, account.isLoggedIn, let token = account.token {
                             Task {
+                                let hasArtwork = await LumisoundExclusiveExtensionService.hasEmbeddedThumbnailTag(fileURL: localURL)
                                 try? await streaming.uploadTrack(
                                     fileURL: localURL, token: token,
-                                    metadata: TrackMetadata(title: result.track.title, artist: result.track.artist, durationSeconds: result.track.duration)
+                                    metadata: TrackMetadata(title: result.track.title, artist: result.track.artist, durationSeconds: result.track.duration, hasArtwork: hasArtwork)
                                 )
                             }
                         }

@@ -573,7 +573,8 @@ struct UploadMusicView: View {
             defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
 
             // Build metadata from file attributes where possible
-            let meta = TrackMetadata()
+            var meta = TrackMetadata()
+            meta.hasArtwork = await LumisoundExclusiveExtensionService.hasEmbeddedThumbnailTag(fileURL: url)
             // Duration and bitrate are not easily available without AVFoundation;
             // pass what we can and let the server handle the rest.
 

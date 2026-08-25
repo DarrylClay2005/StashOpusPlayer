@@ -193,6 +193,13 @@ struct TrackMetadata {
     var durationSeconds: Double?
     var bitrate: Int?
     var sampleRate: Int?
+    /// Whether the file being uploaded has embedded artwork — the server
+    /// can't determine this itself for a Lumisound-locked (`.lms`) upload
+    /// (its bytes are XOR-masked; see LumisoundLockFormat), so this is the
+    /// only source of truth for those. `nil`/`false` are equivalent to the
+    /// server (both mean "don't claim artwork"), kept Optional here just so
+    /// call sites that haven't checked can omit it rather than assert `false`.
+    var hasArtwork: Bool?
 }
 
 // MARK: - UserMusicMetadataTrack  (rich metadata from /user/music/metadata)

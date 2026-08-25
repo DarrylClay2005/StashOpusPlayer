@@ -399,10 +399,11 @@ struct TrackedPlaylistDetailView: View {
 
     private func maybeCloudBackup(track: StreamTrack, localURL: URL) async {
         guard autoCloudBackup, account.isLoggedIn, let token = account.token else { return }
+        let hasArtwork = await LumisoundExclusiveExtensionService.hasEmbeddedThumbnailTag(fileURL: localURL)
         try? await streaming.uploadTrack(
             fileURL: localURL,
             token: token,
-            metadata: TrackMetadata(title: track.title, artist: track.artist, durationSeconds: track.duration)
+            metadata: TrackMetadata(title: track.title, artist: track.artist, durationSeconds: track.duration, hasArtwork: hasArtwork)
         )
     }
 }

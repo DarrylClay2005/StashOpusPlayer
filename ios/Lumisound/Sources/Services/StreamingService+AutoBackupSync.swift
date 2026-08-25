@@ -28,12 +28,36 @@ extension StreamingService {
             // Compare against what the server already has so re-runs (e.g. after
             // every scan) only ever upload genuinely new files.
             guard let existing = try? await self.fetchUserMusicMetadata(token: token) else { return }
-            let alreadyBackedUp = Set(existing.compactMap { $0.originalFilename })
+            let existingByOriginalName = Dictionary(
+                existing.compactMap { track -> (String, UserMusicMetadataTrack)? in
+                    guard let name = track.originalFilename else { return nil }
+                    return (name, track)
+                },
+                uniquingKeysWith: { first, _ in first }
+            )
 
             let pending = localSongs.filter { song in
                 guard let name = song.url?.lastPathComponent else { return false }
-                return !alreadyBackedUp.contains(name)
+                return existingByOriginalName[name] == nil
             }
+
+            // Retroactive fix, independent of `pending`: a Lumisound-locked
+            // upload's has_artwork was hardcoded false server-side for a
+            // while (the server can't ffprobe locked bytes to check itself —
+            // see _locked_inner_ext's doc comment) — patch already-backed-up
+            // tracks whose local copy actually has embedded art but whose
+            // server record still says it doesn't, without re-uploading the
+            // whole file. Best-effort and cheap (a metadata-only PATCH), so
+            // this just runs alongside the real upload pass below rather
+            // than needing its own opt-in.
+            for song in localSongs {
+                guard !Task.isCancelled, let url = song.url, let name = url.lastPathComponent as String?,
+                      let record = existingByOriginalName[name], !record.hasArtwork
+                else { continue }
+                guard await LumisoundExclusiveExtensionService.hasEmbeddedThumbnailTag(fileURL: url) else { continue }
+                _ = try? await self.patchArtworkFlag(filename: record.filename, hasArtwork: true, token: token)
+            }
+
             guard !pending.isEmpty else { return }
             appLog("backUpLibraryIfNeeded: backing up \(pending.count) local song(s)", category: "network")
 
@@ -47,7 +71,8 @@ extension StreamingService {
                     year: song.year.isEmpty ? nil : song.year,
                     durationSeconds: song.duration > 0 ? song.duration : nil,
                     bitrate: song.bitrate > 0 ? song.bitrate : nil,
-                    sampleRate: song.sampleRate > 0 ? song.sampleRate : nil
+                    sampleRate: song.sampleRate > 0 ? song.sampleRate : nil,
+                    hasArtwork: await LumisoundExclusiveExtensionService.hasEmbeddedThumbnailTag(fileURL: url)
                 )
                 _ = try? await self.uploadTrack(fileURL: url, token: token, metadata: metadata)
                 // Throttle — keeps this from saturating the network/CPU during a
