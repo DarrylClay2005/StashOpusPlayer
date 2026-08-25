@@ -42,7 +42,6 @@ struct TVSessionsView: View {
                 }
             }
         }
-        .scrollContentBackground(.hidden)
         .tvAmbientBackground()
         .navigationTitle("Active Sessions")
         .task {
@@ -109,7 +108,6 @@ struct TVNotificationsView: View {
                 }
             }
         }
-        .scrollContentBackground(.hidden)
         .tvAmbientBackground()
         .navigationTitle("Notifications")
         .task {
