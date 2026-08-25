@@ -103,7 +103,11 @@ struct AlbumDetailView: View {
                                     )
                                 }
                                 .buttonStyle(.plain)
-                                .listRowBackground(AppTheme.surface.opacity(0.5))
+                                .listRowBackground(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(AppTheme.elevatedSurface.opacity(0.6))
+                                )
+                                .listRowSeparator(.hidden)
                             }
                         }
                     }
@@ -252,43 +256,50 @@ private struct AlbumHeaderView: View {
     let songs: [Song]
 
     var body: some View {
-        VStack(spacing: 16) {
-            // Large artwork
-            Group {
-                if let song = songs.first {
-                    ArtworkThumbnail(song: song, size: 256)
-                } else {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(AppTheme.surface)
-                        .frame(width: 256, height: 256)
-                        .overlay {
-                            Image(systemName: "square.stack.fill")
-                                .font(.system(size: 64))
-                                .foregroundStyle(AppTheme.dynamicAccent)
-                        }
+        ZStack(alignment: .bottom) {
+            // Big blurred-artwork backdrop — same hero component the Songs/
+            // Queue/Folder Detail redesign uses, replacing the old plain
+            // centered-art-on-flat-background header.
+            HeroArtworkBackdrop(song: songs.first, height: 300)
+
+            VStack(spacing: 14) {
+                Group {
+                    if let song = songs.first {
+                        ArtworkThumbnail(song: song, size: 156)
+                    } else {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(AppTheme.surface)
+                            .frame(width: 156, height: 156)
+                            .overlay {
+                                Image(systemName: "square.stack.fill")
+                                    .font(.system(size: 44))
+                                    .foregroundStyle(AppTheme.dynamicAccent)
+                            }
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: .black.opacity(0.5), radius: 14, y: 8)
+
+                VStack(spacing: 6) {
+                    Text(album)
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .multilineTextAlignment(.center)
+
+                    Text(artistName)
+                        .font(.subheadline)
+                        .foregroundStyle(AppTheme.dynamicAccent)
+
+                    HStack(spacing: 8) {
+                        ScreenStatChip(icon: "music.note", text: "\(songCount) \(songCount == 1 ? "song" : "songs")")
+                        ScreenStatChip(icon: "clock", text: totalDurationText)
+                    }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
-
-            // Metadata
-            VStack(spacing: 6) {
-                Text(album)
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(AppTheme.textPrimary)
-                    .multilineTextAlignment(.center)
-
-                Text(artistName)
-                    .font(.subheadline)
-                    .foregroundStyle(AppTheme.dynamicAccent)
-
-                Text("\(songCount) \(songCount == 1 ? "song" : "songs") · \(totalDurationText)")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 18)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 20)
     }
 }
 

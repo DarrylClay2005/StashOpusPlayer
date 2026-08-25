@@ -18,21 +18,30 @@ struct AlbumsTab: View {
                 EmptyStateView(icon: "square.stack", title: "No albums", message: "Add music to see albums here.")
                     .padding(.top, 60)
             } else {
-                LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(library.albums, id: \.self) { album in
-                        NavigationLink {
-                            AlbumDetailView(album: album)
-                        } label: {
-                            AlbumGridCell(album: album)
-                        }
-                        .buttonStyle(.plain)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        ScreenStatChip(icon: "square.stack", text: "\(library.albums.count) album\(library.albums.count == 1 ? "" : "s")")
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+
+                    LazyVGrid(columns: columns, spacing: 20) {
+                        ForEach(library.albums, id: \.self) { album in
+                            NavigationLink {
+                                AlbumDetailView(album: album)
+                            } label: {
+                                AlbumGridCell(album: album)
+                                    .shadow(color: .black.opacity(0.35), radius: 9, y: 5)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    // Extra clearance below the last row — see SongsTab's
+                    // identical fix.
+                    .padding(.bottom, 190)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                // Extra clearance below the last row — see SongsTab's
-                // identical fix.
-                .padding(.bottom, 190)
             }
         }
         .background(Color.clear.ignoresSafeArea())
@@ -79,7 +88,7 @@ private struct AlbumGridCell: View {
                 if let song = representativeSong {
                     ArtworkThumbnail(song: song, size: geo.size.width)
                 } else {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(AppTheme.surface)
                         .overlay {
                             Image(systemName: "square.stack.fill")
@@ -90,7 +99,7 @@ private struct AlbumGridCell: View {
             }
             .frame(maxWidth: .infinity)
             .aspectRatio(1, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(album)

@@ -152,7 +152,6 @@ struct LibraryHubView: View {
             customGreeting: customGreeting,
             accent: resolvedAccent
         )
-        .padding(.horizontal, 16)
 
         HubQuickActionsRow(
             hasLibrary: !library.allSongs.isEmpty,
@@ -621,19 +620,22 @@ private struct HubSpeedDialTile: View {
             destination
         } label: {
             VStack(alignment: .leading, spacing: 6) {
-                if let customFolderCover {
-                    Image(uiImage: customFolderCover)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: tileWidth, height: tileWidth)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                } else {
-                    HubArtworkCollage(
-                        songs: collage,
-                        size: tileWidth,
-                        placeholderIcon: shortcut.icon
-                    )
+                Group {
+                    if let customFolderCover {
+                        Image(uiImage: customFolderCover)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: tileWidth, height: tileWidth)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    } else {
+                        HubArtworkCollage(
+                            songs: collage,
+                            size: tileWidth,
+                            placeholderIcon: shortcut.icon
+                        )
+                    }
                 }
+                .shadow(color: .black.opacity(0.3), radius: 8, y: 5)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(shortcut.title)
                         .font(.caption.weight(.semibold))
@@ -748,13 +750,16 @@ private struct HubSectionHeader: View {
 
     var body: some View {
         HStack {
-            HStack(spacing: 6) {
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(accent)
+                    .frame(width: 4, height: 22)
                 Image(systemName: icon)
                     .foregroundStyle(accent)
                 Text(title)
                     .foregroundStyle(AppTheme.textPrimary)
             }
-            .font(.headline)
+            .font(.title3.weight(.bold))
             Spacer()
             if let seeAllTab, let selectedTab {
                 Button {
@@ -790,7 +795,9 @@ private struct HubSongCarousel: View {
 
     @EnvironmentObject private var player: AudioPlayerManager
 
-    private let cardWidth: CGFloat = 132
+    // Bigger than the old 132pt cards — more dramatic, art-forward tiles
+    // matching the "card wall" treatment the Songs tab redesign uses.
+    private let cardWidth: CGFloat = 152
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -798,7 +805,7 @@ private struct HubSongCarousel: View {
                 .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 14) {
+                LazyHStack(spacing: 16) {
                     ForEach(songs) { song in
                         HubParallaxCard {
                             Button {
@@ -806,6 +813,8 @@ private struct HubSongCarousel: View {
                             } label: {
                                 VStack(alignment: .leading, spacing: 6) {
                                     ArtworkThumbnail(song: song, size: cardWidth)
+                                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                        .shadow(color: .black.opacity(0.35), radius: 8, y: 5)
                                         .overlay(alignment: .bottomTrailing) { nowPlayingBadge(for: song) }
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(song.displayName)
@@ -822,7 +831,7 @@ private struct HubSongCarousel: View {
                             }
                             .buttonStyle(PressableButtonStyle())
                         }
-                        .frame(width: cardWidth, height: cardWidth + 46)
+                        .frame(width: cardWidth, height: cardWidth + 50)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -910,6 +919,13 @@ private struct HubGreetingHeader: View {
     var customGreeting: String = ""
     var accent: Color = AppTheme.dynamicAccent
 
+    /// Whatever's currently playing (if anything) backs the hero's blurred
+    /// artwork backdrop — the same `HeroArtworkBackdrop` component the
+    /// Songs/Queue/Folder Detail redesign uses, so the very top of Home ties
+    /// into the same "your library right now," not a generic banner. Falls
+    /// back to its own ambient gradient when nothing's playing.
+    @EnvironmentObject private var player: AudioPlayerManager
+
     private var greeting: String {
         switch Calendar.current.component(.hour, from: Date()) {
         case 5..<12:  return "Good morning"
@@ -929,21 +945,27 @@ private struct HubGreetingHeader: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if !trimmedCustomGreeting.isEmpty {
-                Text(trimmedCustomGreeting)
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(accent)
-            } else {
-                Text(displayName.map { "\(greeting), \($0)" } ?? greeting)
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(accent)
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(AppTheme.textSecondary)
+        ZStack(alignment: .bottomLeading) {
+            HeroArtworkBackdrop(song: player.currentSong, height: 150)
+
+            VStack(alignment: .leading, spacing: 3) {
+                if !trimmedCustomGreeting.isEmpty {
+                    Text(trimmedCustomGreeting)
+                        .font(.title.weight(.heavy))
+                        .foregroundStyle(AppTheme.textPrimary)
+                } else {
+                    Text(displayName.map { "\(greeting), \($0)" } ?? greeting)
+                        .font(.title.weight(.heavy))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
     }
 }
 

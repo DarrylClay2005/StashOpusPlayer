@@ -47,6 +47,29 @@ struct FavoritesView: View {
 
     // MARK: Body
 
+    /// Hero-forward header — a blurred backdrop drawn from the top favorite,
+    /// mirroring the Songs tab's own hero. Replaces the old plain "Favorites"
+    /// large-title + flat stat caption.
+    private var heroHeader: some View {
+        ZStack(alignment: .bottom) {
+            HeroArtworkBackdrop(song: favorites.first, height: 170)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "heart.fill")
+                        .foregroundStyle(AppTheme.dynamicAccent)
+                    Text("Favorites")
+                        .font(.title.weight(.heavy))
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                ScreenStatChip(icon: "music.note", text: "\(favorites.count) \(favorites.count == 1 ? "song" : "songs")")
+                playAllShuffleRow
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 14)
+        }
+    }
+
     var body: some View {
         Group {
             if favoritesColumns == 1 {
@@ -54,17 +77,11 @@ struct FavoritesView: View {
                     if favorites.isEmpty {
                         emptyState.listRowBackground(Color.clear)
                     } else {
-                        // Play All / Shuffle buttons
                         Section {
-                            playAllShuffleRow
-                                .listRowBackground(Color.clear)
-
-                            // Song count header
-                            Text("\(favorites.count) \(favorites.count == 1 ? "song" : "songs")")
-                                .font(.caption)
-                                .foregroundStyle(AppTheme.textSecondary)
-                                .listRowBackground(Color.clear)
+                            heroHeader
                         }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
                         .listSectionSeparator(.hidden)
 
                         // Favorites list
@@ -74,7 +91,11 @@ struct FavoritesView: View {
                                 .onTapGesture {
                                     player.play(song: song, in: favorites)
                                 }
-                                .listRowBackground(AppTheme.surface.opacity(0.5))
+                                .listRowBackground(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(AppTheme.elevatedSurface.opacity(0.6))
+                                )
+                                .listRowSeparator(.hidden)
                                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                     Button(role: .destructive) {
                                         library.toggleFavorite(songID: song.id)
@@ -100,21 +121,15 @@ struct FavoritesView: View {
                     if favorites.isEmpty {
                         emptyState.padding(.top, 60)
                     } else {
-                        VStack(spacing: 12) {
-                            playAllShuffleRow
-                            Text("\(favorites.count) \(favorites.count == 1 ? "song" : "songs")")
-                                .font(.caption)
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
+                        heroHeader
 
-                        LazyVGrid(columns: gridColumns, spacing: 12) {
+                        LazyVGrid(columns: gridColumns, spacing: 20) {
                             ForEach(favorites) { song in
                                 Button {
                                     player.play(song: song, in: favorites)
                                 } label: {
                                     SongGridCell(song: song, isCurrent: player.currentSong?.id == song.id)
+                                        .shadow(color: .black.opacity(0.35), radius: 9, y: 5)
                                 }
                                 .buttonStyle(.plain)
                                 .contextMenu {
@@ -126,8 +141,8 @@ struct FavoritesView: View {
                                 }
                             }
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.top, 12)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
                         .padding(.bottom, 190)
                     }
                 }
@@ -138,7 +153,10 @@ struct FavoritesView: View {
         // root's), so it matches the rest of the app instead of system black.
         .background(GalleryBackgroundView().ignoresSafeArea())
         .navigationTitle("Favorites")
-        .navigationBarTitleDisplayMode(.large)
+        // Inline, not `.large` — the new hero header carries its own "Favorites"
+        // title treatment, so a large nav-bar title on top of it would just
+        // duplicate it.
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
