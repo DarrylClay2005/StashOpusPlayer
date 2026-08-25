@@ -102,6 +102,7 @@ struct SongsTab: View {
     private func recomputeSortedSongs() {
         sortedSongsCache = computeSortedSongs()
         recomputeIndexCache()
+        alphaSectionsCache = computeAlphaSections()
     }
 
     /// Debounced entry point for `songs` changing — used ONLY for that
@@ -246,14 +247,28 @@ struct SongsTab: View {
     /// orders — Recently Added/Most Played/Duration have no letter to index
     /// by) — shared by the sectioned list and its index rail so both are
     /// always built from the identical grouping.
-    private var alphaSections: [(letter: String, songs: [Song])] {
+    ///
+    /// Backed by `alphaSectionsCache` (recomputed only in `recomputeSortedSongs`,
+    /// same as `sortedSongsCache`) rather than derived live — this was a plain
+    /// computed property doing its own O(n) grouping pass over the whole
+    /// library, read from 4 separate call sites in `body` (`showsIndexRail`
+    /// alone reads it once, plus the list content and the rail each read it
+    /// again) — 4 redundant full-library regroups on EVERY body evaluation,
+    /// which for `@EnvironmentObject player`-driven re-renders means on every
+    /// playback position tick, not just when the song list actually changes.
+    /// Confirmed via user report as the dominant Songs-tab-specific lag on an
+    /// iPhone 13 with a 3,000+ song library.
+    private var alphaSections: [(letter: String, songs: [Song])] { alphaSectionsCache }
+    @State private var alphaSectionsCache: [(letter: String, songs: [Song])] = []
+
+    private func computeAlphaSections() -> [(letter: String, songs: [Song])] {
         switch sortOrder {
         case .title:  return alphabeticalSections(of: sortedSongs) { $0.displayName }
         case .artist: return alphabeticalSections(of: sortedSongs) { $0.artistName }
         default:      return []
         }
     }
-    private var showsIndexRail: Bool { !alphaSections.isEmpty && songColumns == 1 && sortedSongs.count > 20 }
+    private var showsIndexRail: Bool { !alphaSectionsCache.isEmpty && songColumns == 1 && sortedSongs.count > 20 }
 
     /// Flat song id → position in `sortedSongs`, recomputed alongside
     /// `sortedSongsCache`. The sectioned list still needs prefetch/stagger
