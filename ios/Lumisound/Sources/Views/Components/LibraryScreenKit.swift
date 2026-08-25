@@ -66,11 +66,22 @@ struct HeroArtworkBackdrop: View {
 
 // MARK: - AlphabetIndexRail
 
-/// A right-edge A-Z jump rail — press-and-drag (or tap) any letter to scroll
-/// straight to that section, the same interaction as Contacts/Mail's index.
-/// Purely a UI affordance: callers own the actual scroll-to-section behavior
-/// via `onSelect`, since that depends on each screen's own `ScrollViewReader`/
-/// section-anchor setup.
+/// A right-edge A-Z jump rail — tap any letter to scroll straight to that
+/// section, the same idea as Contacts/Mail's index (drag-to-scrub isn't
+/// supported here — see the note below on why).
+///
+/// Deliberately NOT built on `GeometryReader`-divided row heights + a raw
+/// `DragGesture`, which an earlier version of this used: dividing the
+/// overlay's available height by the letter count is fragile (a transient
+/// zero/garbage size during the first layout pass collapses every letter's
+/// frame to the same spot, reading as "bunched"/overlapping text), and a
+/// `DragGesture(minimumDistance: 0)` attached over a mis-sized frame can
+/// swallow touches meant for whatever sits above it — confirmed live: with
+/// the drag-based rail, the Home/Songs/Artists pill row above the list
+/// stopped responding to taps entirely. Plain `Button`s size themselves
+/// naturally (no division, so no collapse case) and their hit-testing is
+/// scoped exactly to each button's own small frame — there's no invisible
+/// oversized gesture layer that can capture anything outside this view.
 struct AlphabetIndexRail: View {
     let letters: [String]
     let onSelect: (String) -> Void
@@ -78,34 +89,22 @@ struct AlphabetIndexRail: View {
     @State private var activeLetter: String?
 
     var body: some View {
-        GeometryReader { geo in
-            let rowHeight = geo.size.height / CGFloat(max(letters.count, 1))
-            VStack(spacing: 0) {
-                ForEach(letters, id: \.self) { letter in
+        VStack(spacing: 1) {
+            ForEach(letters, id: \.self) { letter in
+                Button {
+                    activeLetter = letter
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    onSelect(letter)
+                } label: {
                     Text(letter)
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(activeLetter == letter ? AppTheme.dynamicAccent : AppTheme.textSecondary)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: rowHeight)
+                        .frame(width: 18, height: 12)
                 }
+                .buttonStyle(.plain)
             }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        guard !letters.isEmpty else { return }
-                        let index = min(letters.count - 1, max(0, Int(value.location.y / max(rowHeight, 1))))
-                        let letter = letters[index]
-                        if letter != activeLetter {
-                            activeLetter = letter
-                            UISelectionFeedbackGenerator().selectionChanged()
-                            onSelect(letter)
-                        }
-                    }
-                    .onEnded { _ in activeLetter = nil }
-            )
         }
-        .frame(width: 18)
+        .padding(.vertical, 4)
     }
 }
 
