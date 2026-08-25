@@ -141,6 +141,31 @@ SUPPORTED_AUDIO_EXTS: frozenset[str] = frozenset({
     ".mp3", ".m4a", ".aac", ".wav", ".aif", ".aiff",
     ".flac", ".opus", ".ogg", ".caf", ".mp4", ".m4v",
 })
+
+# The iOS client's "Lumisound Exclusive" lock (see
+# ios/Lumisound/Sources/Services/LumisoundLockFormat.swift +
+# LumisoundExclusiveExtensionService.swift): once a downloaded track is
+# converted, its on-disk bytes are XOR-masked and it's renamed to
+# `<original-name>.<original-ext>.lms` — e.g. "Song.opus" -> "Song.opus.lms".
+# The server NEVER has (and shouldn't have) the key to unlock these; it only
+# needs to recognize the filename shape well enough to accept/list/serve them
+# for Personal Cloud Library backup and cross-device sync (an official
+# Lumisound client — iOS or tvOS — unlocks them locally before playback,
+# exactly as the iOS app already does for its own local copies).
+LUMISOUND_LOCK_EXT = "lms"
+
+
+def _locked_inner_ext(filename: str) -> Optional[str]:
+    """Returns the real (inner) audio extension for a Lumisound-locked
+    `<realext>.lms` filename (e.g. "Song.opus.lms" -> "opus"), or None if
+    *filename* isn't a recognized locked-audio filename (wrong outer
+    extension, or an inner extension that isn't itself a supported audio
+    format)."""
+    path = pathlib.Path(filename)
+    if path.suffix.lower().lstrip(".") != LUMISOUND_LOCK_EXT:
+        return None
+    inner_suffix = path.stem.rsplit(".", 1)[-1].lower() if "." in path.stem else ""
+    return inner_suffix if f".{inner_suffix}" in SUPPORTED_AUDIO_EXTS else None
 # Optional: a YouTube Data API v3 key (https://console.cloud.google.com, enable
 # "YouTube Data API v3"). When set, /api/resolve uses playlistItems.list to
 # enumerate YouTube playlists, which paginates via nextPageToken with no
@@ -8789,29 +8814,76 @@ async def get_user_music(
 
     music_dir.mkdir(parents=True, exist_ok=True)
 
+    # Locked (`.lms`) files are listed alongside plain supported-extension
+    # ones — see `_locked_inner_ext`'s doc comment for what these are.
     audio_files: list[pathlib.Path] = []
+    locked_paths: set[pathlib.Path] = set()
     try:
         for entry in music_dir.rglob("*"):
-            if entry.is_file() and entry.suffix.lower() in SUPPORTED_AUDIO_EXTS:
+            if not entry.is_file():
+                continue
+            if entry.suffix.lower() in SUPPORTED_AUDIO_EXTS:
                 audio_files.append(entry)
+            elif _locked_inner_ext(entry.name) is not None:
+                audio_files.append(entry)
+                locked_paths.add(entry)
     except Exception as exc:
         logger.error("Error scanning user music dir for %s: %s", user_id, exc)
         raise HTTPException(status_code=500, detail="Failed to scan music directory")
 
-    abs_paths = [str(f.resolve()) for f in audio_files]
-    tag_results = await asyncio.gather(*(_ffprobe_tags(p) for p in abs_paths))
+    # A locked file's bytes are XOR-masked, so ffprobe can't read them (and
+    # shouldn't be asked to — a locked-but-unreadable result would silently
+    # replace real metadata with "Unknown Artist"/0:00 for every locked
+    # track). Use whatever was captured at upload time instead
+    # (ios_user_music_metadata, populated from the client's own tag read —
+    # see StreamingService+UploadTrackWithMetadata.swift), batch-fetched once
+    # rather than per file.
+    stored_meta: dict[str, dict] = {}
+    if locked_paths:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT relative_path, title, artist, album, genre, duration_seconds, has_artwork "
+                    "FROM ios_user_music_metadata WHERE user_id = %s AND relative_path IS NOT NULL",
+                    (user_id,),
+                )
+                rows = await cur.fetchall()
+        for rp, m_title, m_artist, m_album, m_genre, m_duration, m_has_artwork in rows:
+            stored_meta[rp] = {
+                "title": m_title, "artist": m_artist, "album": m_album,
+                "genre": m_genre, "duration": m_duration, "has_artwork": m_has_artwork,
+            }
+
+    unlocked_files = [f for f in audio_files if f not in locked_paths]
+    unlocked_abs_paths = [str(f.resolve()) for f in unlocked_files]
+    tag_results_list = await asyncio.gather(*(_ffprobe_tags(p) for p in unlocked_abs_paths))
+    tag_results = dict(zip(unlocked_abs_paths, tag_results_list))
     await _FFPROBE_CACHE.flush()
 
     music_dir_resolved = music_dir.resolve()
     tracks: list[dict] = []
-    for fpath, abs_path, meta in zip(audio_files, abs_paths, tag_results):
+    for fpath in audio_files:
+        abs_path = str(fpath.resolve())
         try:
             rel_path = str(fpath.relative_to(music_dir))
         except ValueError:
             rel_path = fpath.name
 
-        ext = fpath.suffix.lstrip(".").lower()
-        title = meta.get("title") or fpath.stem
+        is_locked = fpath in locked_paths
+        if is_locked:
+            meta = stored_meta.get(rel_path, {})
+            ext = _locked_inner_ext(fpath.name) or ""
+            # Strip only the outer ".lms" for the filename-derived fallback
+            # title, same as the client's own effectiveExtension unwrapping.
+            title = meta.get("title") or fpath.stem
+            track_number = ""
+        else:
+            meta = tag_results.get(abs_path, {})
+            ext = fpath.suffix.lstrip(".").lower()
+            title = meta.get("title") or fpath.stem
+            track_number = meta.get("track_number") or ""
+
         artist = meta.get("artist") or "Unknown Artist"
         album_name = meta.get("album") or ""
         if not album_name:
@@ -8831,11 +8903,12 @@ async def get_user_music(
             "album": album_name,
             "duration": meta.get("duration") or 0.0,
             "genre": meta.get("genre") or "",
-            "track_number": meta.get("track_number") or "",
-            "has_artwork": meta.get("has_artwork") or False,
+            "track_number": track_number,
+            "has_artwork": bool(meta.get("has_artwork")),
             "server_path": rel_path,
             "filename": fpath.name,
             "ext": ext,
+            "is_locked": is_locked,
         })
 
     tracks.sort(key=lambda t: (t["album"].lower(), t["title"].lower()))
@@ -8935,11 +9008,19 @@ async def upload_user_music(
     if music_dir is None:
         raise HTTPException(status_code=503, detail="User music storage not configured on server")
 
-    # Sanitise the destination filename
+    # Sanitise the destination filename — accepts a plain supported
+    # extension OR a Lumisound-locked `<realext>.lms` one (see
+    # `_locked_inner_ext`'s doc comment) so Cloud Backup can back up locked
+    # tracks exactly as they sit on disk, without the server ever needing to
+    # unlock them.
     safe_name = pathlib.Path(filename).name.replace("..", "").strip()
-    if not safe_name or pathlib.Path(safe_name).suffix.lower().lstrip(".") not in {
-        e.lstrip(".") for e in SUPPORTED_AUDIO_EXTS
-    }:
+    is_locked_upload = _locked_inner_ext(safe_name) is not None
+    if not safe_name or (
+        not is_locked_upload
+        and pathlib.Path(safe_name).suffix.lower().lstrip(".") not in {
+            e.lstrip(".") for e in SUPPORTED_AUDIO_EXTS
+        }
+    ):
         raise HTTPException(status_code=400, detail="Unsupported or invalid filename")
 
     folder_clean = folder.strip("/")
@@ -9048,14 +9129,20 @@ async def upload_user_music(
     # filter, and tempo (BPM) estimate for crossfade/gapless tuning. Bounded by
     # _UPLOAD_ANALYSIS_SEMAPHORE so a burst of uploads (e.g. "Download All" with
     # auto-cloud-backup) can't spawn unlimited concurrent ffmpeg processes.
-    async with _UPLOAD_ANALYSIS_SEMAPHORE:
-        # ffmpeg/ffprobe need the decoded audio — decompress first if the file
-        # was stored gzip-compressed (no-op/zero-copy when uncompressed).
-        with _readable_user_music_file(dest_path) as analysis_path:
-            loudness_lufs = await _measure_loudness(analysis_path)
-            bpm = await _estimate_bpm(analysis_path)
-            musical_key = await _estimate_key(analysis_path)
-            waveform = await _compute_waveform(analysis_path)
+    # Skipped entirely for a locked upload — its bytes are XOR-masked, so
+    # ffmpeg can't decode them (would just burn a semaphore slot to fail).
+    if is_locked_upload:
+        loudness_lufs = bpm = musical_key = None
+        waveform = None
+    else:
+        async with _UPLOAD_ANALYSIS_SEMAPHORE:
+            # ffmpeg/ffprobe need the decoded audio — decompress first if the
+            # file was stored gzip-compressed (no-op/zero-copy when uncompressed).
+            with _readable_user_music_file(dest_path) as analysis_path:
+                loudness_lufs = await _measure_loudness(analysis_path)
+                bpm = await _estimate_bpm(analysis_path)
+                musical_key = await _estimate_key(analysis_path)
+                waveform = await _compute_waveform(analysis_path)
 
     waveform_json = json.dumps(waveform) if waveform else None
 

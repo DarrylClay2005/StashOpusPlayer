@@ -638,7 +638,16 @@ struct UploadMusicView: View {
         restoringFilename = track.filename
         defer { restoringFilename = nil }
 
-        // Build a minimal UserMusicTrack so we can use the existing stream endpoint
+        // Build a minimal UserMusicTrack so we can use the existing stream endpoint.
+        // `track.filename` may itself be a Lumisound-locked "<realext>.lms" backup
+        // (see LumisoundLockFormat) — restoring one is actually a no-op download:
+        // it lands back in the local import dir under its exact ".lms" filename
+        // below, which the local library scan already recognizes and unlocks at
+        // play time, same as any freshly-converted local file.
+        let isLockedBackup = (track.filename as NSString).pathExtension.lowercased() == LumisoundExclusiveExtensionService.marker
+        let realExt = isLockedBackup
+            ? (track.filename as NSString).deletingPathExtension.split(separator: ".").last.map(String.init) ?? ""
+            : String(track.filename.split(separator: ".").last ?? "")
         let userTrack = UserMusicTrack(
             id: track.id,
             title: track.title ?? track.filename,
@@ -650,7 +659,8 @@ struct UploadMusicView: View {
             hasArtwork: track.hasArtwork,
             serverPath: track.filename,
             filename: track.filename,
-            ext: String(track.filename.split(separator: ".").last ?? "")
+            ext: realExt,
+            isLocked: isLockedBackup
         )
 
         guard let streamURL = streaming.userMusicStreamURL(for: userTrack, token: tok) else {

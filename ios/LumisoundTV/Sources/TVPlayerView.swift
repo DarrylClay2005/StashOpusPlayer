@@ -170,6 +170,26 @@ final class TVPlayerModel: ObservableObject {
         return AVURLAsset(url: item.streamURL)
     }
 
+    /// Locked-aware version of `asset(for:)` — a non-locked item resolves
+    /// instantly via the same URL/header construction as before. A
+    /// Lumisound-locked Personal Cloud Library item (`item.isLocked`) is
+    /// downloaded in full and unlocked to a local temp file first, via
+    /// `TVLockedTrackCache` — its bytes aren't a decodable audio container
+    /// to AVFoundation until that transform is reversed (see
+    /// `TVLockFormat`'s header comment). Falls back to the raw (undecoded)
+    /// stream on a download/unlock failure, matching this app's "never leave
+    /// playback silently stuck" pattern elsewhere — the player's existing
+    /// failure observer surfaces that the same way it would any other
+    /// unplayable item, rather than hanging forever on a resolution that
+    /// already failed.
+    private func resolvedAsset(for item: TVPlayable) async -> AVURLAsset {
+        guard item.isLocked else { return asset(for: item) }
+        if let localURL = await TVLockedTrackCache.shared.playableURL(for: item) {
+            return AVURLAsset(url: localURL)
+        }
+        return asset(for: item)
+    }
+
     private func loadCurrent() {
         guard let item = current else { return }
         cancelCrossfade()
@@ -177,8 +197,6 @@ final class TVPlayerModel: ObservableObject {
         duration = 0
         isBuffering = true
         player.volume = 1
-        player.replaceCurrentItem(with: AVPlayerItem(asset: asset(for: item)))
-        player.play()
         loadLyrics(for: item)
         // Single chokepoint for every track transition (initial start, skip,
         // repeat-all wrap, Up Next jump) — logging once here instead of at
@@ -186,6 +204,15 @@ final class TVPlayerModel: ObservableObject {
         tvBreadcrumb("Playing: \(item.title)")
         TVRemoteLogger.log(category: "playback", event: "track_started",
                             detail: ["title": item.title, "artist": item.artist])
+        Task { [weak self] in
+            guard let self else { return }
+            let resolved = await self.resolvedAsset(for: item)
+            // The user may have skipped again while a locked track was
+            // downloading — don't stomp over whatever's playing now.
+            guard self.current?.id == item.id else { return }
+            self.player.replaceCurrentItem(with: AVPlayerItem(asset: resolved))
+            self.player.play()
+        }
     }
 
     // MARK: Crossfade
@@ -223,13 +250,16 @@ final class TVPlayerModel: ObservableObject {
 
         incoming.pause()
         incoming.volume = 0
-        incoming.replaceCurrentItem(with: AVPlayerItem(asset: asset(for: nextItem)))
-        incoming.play()
         tvLog("Crossfade started into: \(nextItem.title)", category: "playback")
 
         let steps = 30
         let stepNanoseconds = UInt64(crossfadeDuration / Double(steps) * 1_000_000_000)
         crossfadeTask = Task { [weak self] in
+            guard let self else { return }
+            let resolved = await self.resolvedAsset(for: nextItem)
+            guard !Task.isCancelled else { return }
+            incoming.replaceCurrentItem(with: AVPlayerItem(asset: resolved))
+            incoming.play()
             for i in 0...steps {
                 guard !Task.isCancelled else { return }
                 let t = Double(i) / Double(steps)
@@ -240,7 +270,7 @@ final class TVPlayerModel: ObservableObject {
                 incoming.volume = Float(sin(t * .pi / 2))
                 try? await Task.sleep(nanoseconds: stepNanoseconds)
             }
-            guard !Task.isCancelled, let self else { return }
+            guard !Task.isCancelled else { return }
             self.completeCrossfade(to: nextIndex)
         }
     }

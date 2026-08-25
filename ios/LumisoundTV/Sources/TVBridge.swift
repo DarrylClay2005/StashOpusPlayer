@@ -32,7 +32,17 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
     let hasArtwork: Bool
     let serverPath: String
     let filename: String
-    let ext: String
+    let ext: String          // the REAL container extension — already unwrapped
+                              // server-side for a locked track (e.g. "opus" for
+                              // "Song.opus.lms"), never "lms" itself.
+    /// True for a Lumisound-locked (`.lms`) cloud backup of a track converted
+    /// by the native iOS app's `LumisoundExclusiveExtensionService` — its
+    /// bytes on the server are XOR-masked, not directly decodable audio,
+    /// until unlocked with `TVLockFormat` (a port of the iOS app's own
+    /// `LumisoundLockFormat` — see that type's header comment). tvOS
+    /// downloads+unlocks these before playback instead of streaming the raw
+    /// URL — see `TVPlayerModel.resolvedAsset(for:)`.
+    let isLocked: Bool
 
     var durationText: String {
         let s = Int(duration)
@@ -44,6 +54,7 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
         case trackNumber = "track_number"
         case hasArtwork  = "has_artwork"
         case serverPath  = "server_path"
+        case isLocked    = "is_locked"
     }
 }
 
@@ -342,6 +353,14 @@ struct TVPlayable: Identifiable, Hashable {
     /// Set only when this item came from the Personal Cloud Library, where
     /// `id` is already the stable favoritable song id — see `TVFavorite`.
     var favoriteSongID: String?
+    /// True for a Lumisound-locked (`.lms`) Personal Cloud Library track —
+    /// see `UserMusicTrack.isLocked`'s doc comment. Always `false` for
+    /// search results and playlist entries, which are never locked.
+    var isLocked: Bool = false
+    /// The real container extension, only meaningful (non-empty) when
+    /// `isLocked` — needed to name the unlocked temp file correctly. See
+    /// `TVPlayerModel.resolvedAsset(for:)`.
+    var ext: String = ""
 }
 
 // MARK: - TVSyncTrackBody (POST /user/playlists/{id}/tracks request body —
@@ -1017,7 +1036,9 @@ final class TVBridgeClient: ObservableObject {
             streamURL: url,
             artworkURL: userMusicArtworkURL(for: track),
             authToken: token,
-            favoriteSongID: track.id
+            favoriteSongID: track.id,
+            isLocked: track.isLocked,
+            ext: track.ext
         )
     }
 

@@ -7,8 +7,15 @@ extension StreamSearchView {
 
     func handleUserLibraryPlay(track: UserMusicTrack) {
         guard let token = account.token else { return }
-        let song = streaming.toSong(userMusicTrack: track, token: token)
-        player.play(song: song, in: streaming.userMusicTracks.map { streaming.toSong(userMusicTrack: $0, token: token) })
+        // The queue (everything else in the library, for skip/next) stays on
+        // the cheap synchronous path — see toSong's doc comment for the known
+        // gap that leaves. The tapped track itself is guaranteed playable:
+        // toPlayableSong downloads+unlocks it first if it's a locked backup.
+        let queue = streaming.userMusicTracks.map { streaming.toSong(userMusicTrack: $0, token: token) }
+        Task {
+            let song = await streaming.toPlayableSong(userMusicTrack: track, token: token)
+            player.play(song: song, in: queue)
+        }
     }
 
     func handleUserLibraryDelete(track: UserMusicTrack) {

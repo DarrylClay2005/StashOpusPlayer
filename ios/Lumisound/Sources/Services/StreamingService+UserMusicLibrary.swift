@@ -21,6 +21,21 @@ extension StreamingService {
     }
 
     /// Wraps a `UserMusicTrack` in a `Song` for playback.
+    ///
+    /// NOTE: for a Lumisound-locked track (`userMusicTrack.isLocked`) this
+    /// hands back the raw (still-masked, not decodable) stream URL as-is —
+    /// use `toPlayableSong(userMusicTrack:token:)` instead for anything
+    /// that's actually about to play immediately. This synchronous version
+    /// stays cheap/instant specifically so it's still safe to `.map` over an
+    /// entire cloud library (e.g. building an up-next queue) without an
+    /// eager download-and-unlock pass per locked track. KNOWN GAP: skipping
+    /// forward/backward through a queue built this way will fail to decode
+    /// when it lands on a locked track — only the track actually handed to
+    /// `toPlayableSong` at play-time is guaranteed playable. Fixing that
+    /// fully means teaching `AudioPlayerManager`'s queue-advance path itself
+    /// to resolve locked cloud tracks JIT (the same pattern
+    /// `LumisoundExclusiveExtensionService.prewarmPlayableURL` already uses
+    /// for local files) — deferred; out of scope for the single-track fix.
     func toSong(userMusicTrack: UserMusicTrack, token: String) -> Song {
         let streamURL = userMusicStreamURL(for: userMusicTrack, token: token)
         let artworkKey = userMusicArtworkURL(for: userMusicTrack)?.absoluteString
@@ -40,6 +55,95 @@ extension StreamingService {
             sampleRate: 0,
             httpHeaders: ["Authorization": "Bearer \(token)"]
         )
+    }
+
+    /// Same as `toSong(userMusicTrack:token:)`, except a locked track is
+    /// downloaded and unlocked to a local temp file FIRST (see
+    /// `LumisoundLockFormat`'s header comment for why: its on-server bytes
+    /// are XOR-masked and not a decodable audio container to AVFoundation
+    /// until reversed — exactly like a local `.lms` file, which this app
+    /// only ever plays via `LumisoundExclusiveExtensionService.playableURL`,
+    /// never the raw locked bytes directly). Use this for the track that's
+    /// actually about to start playing; use the cheap synchronous version
+    /// for building a queue/list.
+    func toPlayableSong(userMusicTrack: UserMusicTrack, token: String) async -> Song {
+        guard userMusicTrack.isLocked,
+              let localURL = await resolveLockedUserMusicURL(for: userMusicTrack, token: token)
+        else {
+            return toSong(userMusicTrack: userMusicTrack, token: token)
+        }
+        let artworkKey = userMusicArtworkURL(for: userMusicTrack)?.absoluteString
+        return Song(
+            id: userMusicTrack.id,
+            title: userMusicTrack.title,
+            artist: userMusicTrack.artist,
+            album: userMusicTrack.album,
+            duration: userMusicTrack.duration,
+            url: localURL,
+            persistentID: nil,
+            artworkCacheKey: artworkKey,
+            trackNumber: Int(userMusicTrack.trackNumber) ?? 0,
+            year: "",
+            genre: userMusicTrack.genre,
+            bitrate: 0,
+            sampleRate: 0,
+            httpHeaders: [:]   // local file — no auth header needed
+        )
+    }
+
+    /// Downloads a Lumisound-locked cloud track's full bytes and unlocks them
+    /// to a local temp file, returning its URL — or `nil` on any failure
+    /// (network error, non-2xx response, or an unlock failure). Cached at a
+    /// stable path keyed by the track's id, so repeat plays of the same
+    /// track don't re-download+re-unlock every time — mirrors
+    /// `LumisoundExclusiveExtensionService.playableURL`'s own caching
+    /// strategy for local files. Full-file, not incremental streaming —
+    /// same as how that function's own `LumisoundLockFormat.unlock` already
+    /// works for local files (XOR needs the whole payload up front), so this
+    /// isn't a new architectural tradeoff, just the same one over the network.
+    func resolveLockedUserMusicURL(for track: UserMusicTrack, token: String) async -> URL? {
+        guard track.isLocked, let remoteURL = userMusicStreamURL(for: track, token: token) else { return nil }
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("lumisound_cloud_lms_playable", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let cacheName = track.id.isEmpty ? track.serverPath : track.id
+        let realExt = track.ext.isEmpty ? "m4a" : track.ext
+        let outURL = dir.appendingPathComponent(cacheName).appendingPathExtension(realExt)
+        if fm.fileExists(atPath: outURL.path) {
+            return outURL
+        }
+
+        var request = URLRequest(url: remoteURL)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 120
+
+        let data: Data
+        do {
+            let (responseData, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                appWarn("resolveLockedUserMusicURL: bad response for \(track.filename)", category: "network")
+                return nil
+            }
+            data = responseData
+        } catch {
+            appWarn("resolveLockedUserMusicURL: download failed for \(track.filename): \(error.localizedDescription)", category: "network")
+            return nil
+        }
+
+        let lockedTempURL = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(LumisoundExclusiveExtensionService.marker)
+        defer { try? fm.removeItem(at: lockedTempURL) }
+        do {
+            try data.write(to: lockedTempURL, options: .atomic)
+        } catch {
+            appWarn("resolveLockedUserMusicURL: write failed for \(track.filename): \(error.localizedDescription)", category: "network")
+            return nil
+        }
+        guard LumisoundLockFormat.unlock(lockedURL: lockedTempURL, to: outURL) else {
+            appWarn("resolveLockedUserMusicURL: unlock failed for \(track.filename)", category: "network")
+            return nil
+        }
+        return outURL
     }
 
     /// Returns the stream URL for a weekly-mix track (requires JWT token) —

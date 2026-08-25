@@ -51,7 +51,16 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
     let hasArtwork: Bool
     let serverPath: String   // relative to the user's personal music dir
     let filename: String
-    let ext: String
+    let ext: String          // the REAL container extension — already unwrapped
+                              // server-side for a locked track (e.g. "opus" for
+                              // "Song.opus.lms"), never "lms" itself.
+    /// True for a Lumisound-locked (`.lms`) cloud backup of a track converted
+    /// by the native app's `LumisoundExclusiveExtensionService` — its bytes
+    /// on the server are XOR-masked, not directly decodable audio, until
+    /// unlocked with `LumisoundLockFormat` (see that type's header comment).
+    /// `toSong(userMusicTrack:token:)` downloads+unlocks these before
+    /// playback instead of streaming the raw URL.
+    let isLocked: Bool
 
     var durationText: String {
         let s = Int(duration)
@@ -64,6 +73,7 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
         case hasArtwork  = "has_artwork"
         case serverPath  = "server_path"
         case filename, ext
+        case isLocked    = "is_locked"
     }
 }
 
