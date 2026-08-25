@@ -106,6 +106,21 @@ struct LibraryHubView: View {
         }
         .background(Color.clear.ignoresSafeArea())
         .task(id: library.allSongs.count) {
+            // Debounced: `.task(id:)` already cancels the in-flight instance
+            // of this exact task whenever `allSongs.count` changes again, so
+            // sleeping briefly before doing any real work means a BURST of
+            // individually-landing changes (several downloads finishing
+            // within a couple seconds of each other, or a multi-step
+            // rescan) collapses into exactly one `reload()` once things
+            // settle, instead of restarting reload()'s whole ~8-scan derive
+            // pipeline from scratch on every single increment. Confirmed via
+            // a screen recording's frame-diff timeline: six separate
+            // multi-second freeze windows inside 20 seconds, landing right
+            // around a "2 downloads finished in the background" toast — the
+            // pipeline was being cancelled and restarted faster than it
+            // could ever finish, keeping the main actor busy the whole time.
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
             await reload()
         }
         .task {

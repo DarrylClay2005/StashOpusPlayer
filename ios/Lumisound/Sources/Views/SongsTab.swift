@@ -97,10 +97,33 @@ struct SongsTab: View {
     private var sortedSongs: [Song] { sortedSongsCache ?? computeSortedSongs() }
 
     @State private var sortedSongsCache: [Song]? = nil
+    @State private var recomputeDebounceTask: Task<Void, Never>?
 
     private func recomputeSortedSongs() {
         sortedSongsCache = computeSortedSongs()
         recomputeIndexCache()
+    }
+
+    /// Debounced entry point for `songs` changing — used ONLY for that
+    /// trigger (see the `.onChange(of: songs)` below), not the others, which
+    /// are single deliberate user actions (change sort order, toggle pin-
+    /// favorites) that should recompute immediately for responsiveness.
+    /// `songs` itself changes once per song as the library grows/shrinks
+    /// (e.g. several downloads landing within a couple seconds of each
+    /// other), and this is an O(n log n) sort PLUS a full index-cache
+    /// rebuild over the whole library on every single increment — undebounced,
+    /// a burst repeatedly restarted that full recompute before the previous
+    /// one even finished rendering, which is what "the Songs tab freaks out"
+    /// during/after a batch of downloads landing turned out to be (confirmed
+    /// via a screen recording's frame-diff timeline showing the same pattern
+    /// as the Home hub's identical `allSongs.count`-driven storm).
+    private func scheduleRecompute() {
+        recomputeDebounceTask?.cancel()
+        recomputeDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            recomputeSortedSongs()
+        }
     }
 
     private func computeSortedSongs() -> [Song] {
@@ -433,7 +456,7 @@ struct SongsTab: View {
         // fires same-event `.onAppear`/`.onChange` modifiers on one view in
         // the order they're attached.
         .onAppear { recomputeSortedSongs() }
-        .onChange(of: songs) { _ in recomputeSortedSongs() }
+        .onChange(of: songs) { _ in scheduleRecompute() }
         .onChange(of: sortOrderRaw) { _ in recomputeSortedSongs() }
         .onChange(of: pinFavoritesFirst) { _ in recomputeSortedSongs() }
         .onChange(of: library.favoriteSongIDs) { _ in recomputeSortedSongs() }
