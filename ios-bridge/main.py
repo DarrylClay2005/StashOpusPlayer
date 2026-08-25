@@ -3,6 +3,7 @@ import asyncio
 import base64
 import hashlib
 import html
+import http.client
 import io
 import ipaddress
 import json
@@ -14,6 +15,7 @@ import pathlib
 import re
 import secrets
 import shutil
+import socket
 import string
 import tempfile
 import time
@@ -434,6 +436,43 @@ if YTDLP_POT_PROVIDER_URL:
     _YTDLP_NETWORK_ARGS += [
         "--extractor-args", f"youtubepot-bgutilhttp:base_url={YTDLP_POT_PROVIDER_URL}",
     ]
+
+
+# googlevideo (and other CDN) stream URLs yt-dlp resolves above are signed
+# with the client IP that requested them (an `ip=` param YouTube checks
+# server-side) — always IPv4, since _YTDLP_NETWORK_ARGS forces `-4` on every
+# yt-dlp invocation. This host is dual-stack, so a plain urllib.request.urlopen()
+# fetching that same URL can pick IPv6 for its own DNS resolution and get a
+# 403 (IP mismatch) even though the URL itself is perfectly valid — this was
+# silently causing stream_proxy/download_relay to fail intermittently
+# (whichever address family the OS resolver happened to race first) with no
+# relation to cookies or yt-dlp version. Forces IPv4 the same way -4 does,
+# just for stdlib urllib instead of a subprocess flag.
+class _IPv4HTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        last_exc: Optional[OSError] = None
+        for family, socktype, proto, _, sockaddr in socket.getaddrinfo(
+            self.host, self.port, socket.AF_INET, socket.SOCK_STREAM
+        ):
+            sock = socket.socket(family, socktype, proto)
+            try:
+                sock.settimeout(self.timeout)
+                sock.connect(sockaddr)
+            except OSError as exc:
+                last_exc = exc
+                sock.close()
+                continue
+            self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+            return
+        raise last_exc or OSError(f"No IPv4 address found for {self.host}")
+
+
+class _IPv4HTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_IPv4HTTPSConnection, req, context=self._context)
+
+
+_ipv4_urlopen = urllib.request.build_opener(_IPv4HTTPSHandler()).open
 
 # ---------------------------------------------------------------------------
 # /api/download job tracking
@@ -2954,7 +2993,7 @@ async def stream_proxy(
         req_headers["Range"] = range_header
 
     def _open_upstream():
-        return urllib.request.urlopen(
+        return _ipv4_urlopen(
             urllib.request.Request(raw_url, headers=req_headers), timeout=30
         )
 
@@ -3091,7 +3130,7 @@ async def download_relay(
     }
 
     def _open_upstream():
-        return urllib.request.urlopen(
+        return _ipv4_urlopen(
             urllib.request.Request(raw_url, headers=req_headers), timeout=30
         )
 
