@@ -5,25 +5,43 @@ import SwiftUI
 struct TVContentView: View {
     @StateObject private var account = TVAccount.shared
     @StateObject private var client = TVBridgeClient.shared
+    @State private var selection: TVDestination = .home
 
     var body: some View {
         if account.isLoggedIn, let token = account.token {
             NavigationStack {
-                TabView {
-                    TVLibraryView(client: client, token: token)
-                        .tabItem { Label("My Library", systemImage: "music.note.house") }
-                    TVPlaylistsView(client: client, token: token)
-                        .tabItem { Label("Playlists", systemImage: "music.note.list") }
-                    TVDiscoverView(client: client, token: token)
-                        .tabItem { Label("Discover", systemImage: "sparkles") }
-                    TVSearchView(client: client, token: token)
-                        .tabItem { Label("Search", systemImage: "magnifyingglass") }
-                    TVAccountView(client: client, account: account, token: token)
-                        .tabItem { Label(account.user?.name ?? "Account", systemImage: "person.crop.circle") }
+                VStack(spacing: 0) {
+                    TVTopNavBar(
+                        selection: $selection,
+                        accountName: account.user?.name ?? "Account",
+                        accountBadge: client.notifications.filter(\.isUnread).count
+                    )
+                    ZStack {
+                        switch selection {
+                        case .home:
+                            TVHomeView(client: client, token: token)
+                        case .library:
+                            TVLibraryView(client: client, token: token)
+                        case .playlists:
+                            TVPlaylistsView(client: client, token: token)
+                        case .discover:
+                            TVDiscoverView(client: client, token: token)
+                        case .search:
+                            TVSearchView(client: client, token: token)
+                        case .account:
+                            TVAccountView(client: client, account: account, token: token)
+                        }
+                    }
                 }
                 .navigationDestination(for: TVPlayContext.self) { ctx in
                     TVPlayerView(context: ctx, client: client, token: token)
                 }
+            }
+            // Fetched here (not just inside TVAccountView.task, as before) so
+            // the nav bar's unread badge is accurate even before Account is
+            // ever visited this session.
+            .task {
+                if client.notifications.isEmpty { await client.fetchNotifications(token: token) }
             }
         } else {
             TVLoginView(account: account)

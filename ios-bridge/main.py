@@ -8839,21 +8839,28 @@ async def get_user_music(
     # see StreamingService+UploadTrackWithMetadata.swift), batch-fetched once
     # rather than per file.
     stored_meta: dict[str, dict] = {}
-    if locked_paths:
+    # Keyed separately (not folded into stored_meta, which only unlocked-vs-
+    # locked branches consult) since every uploaded track gets an
+    # uploaded_at — used by clients to build a "Recently Added" shelf, which
+    # a plain filesystem listing has no ordering for.
+    uploaded_at_by_path: dict[str, str] = {}
+    if audio_files:
         pool = await get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT relative_path, title, artist, album, genre, duration_seconds, has_artwork "
+                    "SELECT relative_path, title, artist, album, genre, duration_seconds, has_artwork, uploaded_at "
                     "FROM ios_user_music_metadata WHERE user_id = %s AND relative_path IS NOT NULL",
                     (user_id,),
                 )
                 rows = await cur.fetchall()
-        for rp, m_title, m_artist, m_album, m_genre, m_duration, m_has_artwork in rows:
+        for rp, m_title, m_artist, m_album, m_genre, m_duration, m_has_artwork, m_uploaded_at in rows:
             stored_meta[rp] = {
                 "title": m_title, "artist": m_artist, "album": m_album,
                 "genre": m_genre, "duration": m_duration, "has_artwork": m_has_artwork,
             }
+            if m_uploaded_at is not None:
+                uploaded_at_by_path[rp] = m_uploaded_at.isoformat()
 
     unlocked_files = [f for f in audio_files if f not in locked_paths]
     unlocked_abs_paths = [str(f.resolve()) for f in unlocked_files]
@@ -8896,6 +8903,15 @@ async def get_user_music(
             if q not in title.lower() and q not in artist.lower() and q not in album_name.lower():
                 continue
 
+        uploaded_at = uploaded_at_by_path.get(rel_path)
+        if uploaded_at is None:
+            try:
+                uploaded_at = datetime.fromtimestamp(
+                    fpath.stat().st_mtime, tz=timezone.utc
+                ).isoformat()
+            except OSError:
+                uploaded_at = None
+
         tracks.append({
             "id": _stable_id(abs_path),
             "title": title,
@@ -8909,6 +8925,7 @@ async def get_user_music(
             "filename": fpath.name,
             "ext": ext,
             "is_locked": is_locked,
+            "uploaded_at": uploaded_at,
         })
 
     tracks.sort(key=lambda t: (t["album"].lower(), t["title"].lower()))

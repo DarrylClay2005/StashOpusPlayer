@@ -43,10 +43,20 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
     /// downloads+unlocks these before playback instead of streaming the raw
     /// URL — see `TVPlayerModel.resolvedAsset(for:)`.
     let isLocked: Bool
+    /// ISO 8601 upload timestamp (falls back server-side to the file's mtime
+    /// when no metadata row exists) — the only ordering signal available for
+    /// a "Recently Added" shelf, since `/user/music` otherwise returns tracks
+    /// sorted alphabetically by album/title.
+    let uploadedAt: String?
 
     var durationText: String {
         let s = Int(duration)
         return "\(s / 60):\(String(format: "%02d", s % 60))"
+    }
+
+    var uploadedDate: Date? {
+        guard let uploadedAt else { return nil }
+        return tvParseISO8601(uploadedAt)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -55,7 +65,20 @@ struct UserMusicTrack: Identifiable, Codable, Hashable {
         case hasArtwork  = "has_artwork"
         case serverPath  = "server_path"
         case isLocked    = "is_locked"
+        case uploadedAt  = "uploaded_at"
     }
+}
+
+/// Parses the bridge's ISO-8601 timestamps, which show up both with and
+/// without fractional seconds depending on the source column/fallback that
+/// produced them — see `tvFormattedTimestamp` in TVAccountExtras.swift for
+/// the same two-formatter dance applied to a display string instead of a `Date`.
+func tvParseISO8601(_ iso: String) -> Date? {
+    let withFraction = ISO8601DateFormatter()
+    withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let withoutFraction = ISO8601DateFormatter()
+    withoutFraction.formatOptions = [.withInternetDateTime]
+    return withFraction.date(from: iso) ?? withoutFraction.date(from: iso)
 }
 
 // MARK: - TVFavorite (GET /user/favorites row)

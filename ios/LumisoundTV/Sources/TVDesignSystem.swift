@@ -132,3 +132,236 @@ extension View {
         modifier(TVGlassPanel(cornerRadius: cornerRadius))
     }
 }
+
+// MARK: - Top-level destinations
+//
+// The root shell used to be a stock `TabView` — tvOS renders that as its own
+// fixed top tab bar chrome, which can't be restyled and reads as a completely
+// generic "any tvOS app" shell. `TVTopNavBar` below replaces it with a custom
+// row we fully control, driven by this selection enum instead of `.tabItem`.
+
+enum TVDestination: String, CaseIterable, Identifiable {
+    case home, library, playlists, discover, search, account
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .home:      return "house.fill"
+        case .library:   return "music.note.house.fill"
+        case .playlists: return "music.note.list"
+        case .discover:  return "sparkles"
+        case .search:    return "magnifyingglass"
+        case .account:   return "person.crop.circle.fill"
+        }
+    }
+
+    func title(accountName: String) -> String {
+        switch self {
+        case .home:      return "Home"
+        case .library:   return "Library"
+        case .playlists: return "Playlists"
+        case .discover:  return "Discover"
+        case .search:    return "Search"
+        case .account:   return accountName
+        }
+    }
+}
+
+/// One pill in `TVTopNavBar` — reads focus off its own environment (tvOS
+/// populates `@Environment(\.isFocused)` on a `Button` label's subtree while
+/// that button is the focused element) rather than the button carrying any
+/// focus styling itself, same pattern as `TVPlayerView`'s transport buttons.
+private struct TVNavPillLabel: View {
+    let title: String
+    let systemImage: String
+    let isSelected: Bool
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.system(size: 26, weight: isSelected || isFocused ? .bold : .semibold))
+            .foregroundStyle(
+                isFocused ? Color.black
+                : isSelected ? Color.white
+                : Color.white.opacity(0.55)
+            )
+            .padding(.horizontal, 30)
+            .padding(.vertical, 16)
+            .background(
+                Capsule().fill(
+                    isFocused ? Color.white
+                    : isSelected ? Color.white.opacity(0.16)
+                    : Color.clear
+                )
+            )
+            .scaleEffect(isFocused ? 1.08 : 1.0)
+            .shadow(color: isFocused ? .black.opacity(0.35) : .clear, radius: isFocused ? 16 : 0, y: 8)
+            .animation(.spring(response: 0.32, dampingFraction: 0.75), value: isFocused)
+    }
+}
+
+/// Custom persistent top navigation replacing the stock `TabView` tab bar —
+/// a translucent pill row that floats over `TVAmbientBackground` instead of
+/// tvOS's own opaque system chrome.
+struct TVTopNavBar: View {
+    @Binding var selection: TVDestination
+    var accountName: String
+    var accountBadge: Int = 0
+
+    var body: some View {
+        HStack(spacing: 22) {
+            ForEach(TVDestination.allCases) { dest in
+                Button {
+                    selection = dest
+                } label: {
+                    TVNavPillLabel(
+                        title: dest.title(accountName: accountName),
+                        systemImage: dest.systemImage,
+                        isSelected: selection == dest
+                    )
+                }
+                .buttonStyle(.plain)
+                .overlay(alignment: .topTrailing) {
+                    if dest == .account, accountBadge > 0 {
+                        Text("\(accountBadge)")
+                            .font(.caption2.weight(.bold))
+                            .padding(6)
+                            .background(Color.red, in: Circle())
+                            .offset(x: 8, y: -8)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 70)
+        .padding(.top, 54)
+        .padding(.bottom, 26)
+    }
+}
+
+// MARK: - Hero banner
+
+/// The big featured treatment at the top of the Home hub — a blown-up piece
+/// of artwork with a gradient scrim, title/subtitle, and a Play button.
+/// Content-agnostic: callers decide what's "featured" (most-recently-added,
+/// a Discover Mix pick, etc.) and just hand this the pieces to render.
+struct TVHeroBanner<Art: View, PlayButton: View>: View {
+    let eyebrow: String
+    let title: String
+    let subtitle: String
+    let art: () -> Art
+    /// The actual focusable/navigable control — a caller-supplied
+    /// `NavigationLink` (or `Button`), NOT a plain action closure. The hero
+    /// itself carries no button of its own: nesting a `Button` inside this
+    /// view while ALSO wrapping the whole banner in a `NavigationLink` (as an
+    /// earlier draft did) creates two overlapping focusable elements, which
+    /// tvOS's focus engine can't cleanly resolve. This is the one and only
+    /// focusable/interactive element in the banner.
+    let playButton: () -> PlayButton
+
+    init(
+        eyebrow: String,
+        title: String,
+        subtitle: String,
+        @ViewBuilder art: @escaping () -> Art,
+        @ViewBuilder playButton: @escaping () -> PlayButton
+    ) {
+        self.eyebrow = eyebrow
+        self.title = title
+        self.subtitle = subtitle
+        self.art = art
+        self.playButton = playButton
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            art()
+                .frame(height: 620)
+                .frame(maxWidth: .infinity)
+                .clipped()
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.55), .black.opacity(0.92)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .frame(height: 620)
+
+            VStack(alignment: .leading, spacing: 14) {
+                Text(eyebrow.uppercased())
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(Color.accentColor)
+                    .tracking(2)
+                Text(title)
+                    .font(.system(size: 56, weight: .heavy))
+                    .lineLimit(2)
+                Text(subtitle)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                playButton()
+                    .padding(.top, 8)
+            }
+            .padding(.horizontal, 70)
+            .padding(.bottom, 56)
+        }
+        .frame(height: 620)
+    }
+}
+
+// MARK: - Shelf section (Home hub + Discover share this shape)
+
+/// A titled, horizontally-scrolling row of cards with an optional "See All"
+/// destination — the recurring shape every Home/Discover shelf reduces to.
+/// The destination is type-erased (`AnyView`) rather than a second generic
+/// parameter so the no-"See All" initializer doesn't need a stand-in type.
+struct TVShelfSection<Content: View>: View {
+    let title: String
+    var subtitle: String? = nil
+    let content: () -> Content
+    var seeAll: (() -> AnyView)? = nil
+
+    init(title: String, subtitle: String? = nil, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content
+        self.seeAll = nil
+    }
+
+    init<Destination: View>(
+        title: String,
+        subtitle: String? = nil,
+        @ViewBuilder content: @escaping () -> Content,
+        @ViewBuilder seeAll: @escaping () -> Destination
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content
+        self.seeAll = { AnyView(seeAll()) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .lastTextBaseline) {
+                TVSectionHeader(title: title, subtitle: subtitle)
+                if let seeAll {
+                    Spacer()
+                    NavigationLink {
+                        seeAll()
+                    } label: {
+                        Label("See All", systemImage: "chevron.right")
+                            .labelStyle(.titleAndIcon)
+                            .font(.headline)
+                    }
+                    .buttonStyle(.card)
+                }
+            }
+            .padding(.horizontal, 70)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 32) { content() }
+                    .padding(.horizontal, 70)
+            }
+        }
+    }
+}
