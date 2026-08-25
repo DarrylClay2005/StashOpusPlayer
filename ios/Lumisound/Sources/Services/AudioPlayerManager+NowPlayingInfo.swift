@@ -48,7 +48,10 @@ extension AudioPlayerManager {
             info[MPMediaItemPropertyArtwork] = artwork
             MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         }
-        WidgetDataService.shared.update(song: song, isPlaying: isPlaying, artwork: image, position: position, duration: duration)
+        WidgetDataService.shared.update(
+            song: song, isPlaying: isPlaying, artwork: image, position: position, duration: duration,
+            isFavorite: LibraryManager.shared?.isFavorite(songID: song.id) ?? false
+        )
         PhoneWatchSync.shared.update(song: song, isPlaying: isPlaying, artwork: image)
     }
 

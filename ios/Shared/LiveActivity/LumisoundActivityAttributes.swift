@@ -21,6 +21,10 @@ struct LumisoundActivityAttributes: ActivityAttributes {
         /// The moment `position`/`isPlaying` were captured — lets the Live
         /// Activity's `Text(timerInterval:)` keep ticking between updates.
         var anchorDate: Date
+        /// Mirrors `LibraryManager.isFavorite(songID:)` for the current
+        /// track — drives the heart button's filled/outline state. Reuses
+        /// the Home Screen widget's existing `ToggleFavoriteIntent`.
+        var isFavorite: Bool = false
 
         var trackRange: ClosedRange<Date> {
             let start = anchorDate.addingTimeInterval(-position)

@@ -12,6 +12,14 @@ enum LiveActivityManager {
     private static var activity: Activity<LumisoundActivityAttributes>?
     private static var lastTitle = ""
     private static var lastArtist = ""
+    /// Mirrors `WidgetDataService`'s `widget_is_favorite` for the Home Screen
+    /// widget — kept here too so `updateFavoriteState` can push a heart-icon
+    /// change to the Live Activity without needing isPlaying/position/
+    /// duration re-supplied (see that function).
+    private static var lastIsFavorite = false
+    private static var lastIsPlaying = false
+    private static var lastPosition: TimeInterval = 0
+    private static var lastDuration: TimeInterval = 0
 
     /// `Activity.request()` requires the app to be in the FOREGROUND to
     /// start a new activity — a call while backgrounded (the normal state
@@ -34,13 +42,14 @@ enum LiveActivityManager {
 
     /// Full update: called when the current song changes (or clears). Starts a
     /// new Activity if none is running yet, otherwise just refreshes its state.
-    static func update(song: Song?, isPlaying: Bool, position: TimeInterval, duration: TimeInterval) {
+    static func update(song: Song?, isPlaying: Bool, position: TimeInterval, duration: TimeInterval, isFavorite: Bool) {
         guard let song else {
             end()
             return
         }
         lastTitle = song.displayName
         lastArtist = song.artistName
+        lastIsFavorite = isFavorite
         pushState(isPlaying: isPlaying, position: position, duration: duration)
     }
 
@@ -51,11 +60,22 @@ enum LiveActivityManager {
         pushState(isPlaying: isPlaying, position: position, duration: duration)
     }
 
+    /// Lightweight update: the current track's favorite flag changed (toggled
+    /// from in-app UI, the Home Screen widget, or this Live Activity's own
+    /// heart button — see `ToggleFavoriteIntent`). No-op if no Activity is
+    /// running. Reuses the last-known play state/position/duration since
+    /// only the favorite flag actually changed.
+    static func updateFavoriteState(isFavorite: Bool) {
+        lastIsFavorite = isFavorite
+        guard activity != nil else { return }
+        pushState(isPlaying: lastIsPlaying, position: lastPosition, duration: lastDuration)
+    }
+
     static func end() {
         guard let activity else { return }
         let finalState = LumisoundActivityAttributes.ContentState(
             title: lastTitle, artist: lastArtist, isPlaying: false,
-            position: 0, duration: 0, anchorDate: Date()
+            position: 0, duration: 0, anchorDate: Date(), isFavorite: lastIsFavorite
         )
         Task {
             await activity.end(using: finalState, dismissalPolicy: .immediate)
@@ -64,13 +84,35 @@ enum LiveActivityManager {
     }
 
     private static func pushState(isPlaying: Bool, position: TimeInterval, duration: TimeInterval) {
+        lastIsPlaying = isPlaying
+        lastPosition = position
+        lastDuration = duration
         let state = LumisoundActivityAttributes.ContentState(
             title: lastTitle, artist: lastArtist, isPlaying: isPlaying,
-            position: position, duration: duration, anchorDate: Date()
+            position: position, duration: duration, anchorDate: Date(), isFavorite: lastIsFavorite
         )
 
         if let activity {
             Task { await activity.update(using: state) }
+            return
+        }
+
+        // A Live Activity outlives this process (up to iOS's own ~8h budget) —
+        // `self.activity` only resets to nil because it's an in-memory static,
+        // not because the activity itself ended. Every app relaunch after a
+        // background kill (routine for a backgrounded audio app — this is NOT
+        // a crash) landed here with a real activity still alive on iOS's side
+        // but no in-process reference to it, so the next track change called
+        // `.request()` again — a SECOND concurrent activity of the same type,
+        // which is exactly the shape of thing that stacks duplicate "Allow
+        // Live Activities?" prompts (each independent `.request()` call is a
+        // fresh ask as far as the system's concerned, regardless of a prior
+        // one already being granted). Re-attach to it instead — `Activity
+        // .activities` is OS-tracked and survives process relaunch, unlike
+        // this enum's own static state.
+        if let existing = Activity<LumisoundActivityAttributes>.activities.first {
+            activity = existing
+            Task { await existing.update(using: state) }
             return
         }
 

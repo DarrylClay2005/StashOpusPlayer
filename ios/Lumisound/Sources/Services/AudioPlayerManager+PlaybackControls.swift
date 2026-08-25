@@ -73,6 +73,22 @@ extension AudioPlayerManager {
             if !queue.isEmpty { playCurrent(from: position) }
             return
         }
+        // A new track is mid-download/transcode (downloadAndSchedule/
+        // transcodeAndSchedule) — `activeNode` still has the OUTGOING
+        // track's segment scheduled on it (the switch's own `node.stop()` +
+        // reschedule only happens once that async work finishes), so
+        // `activeNode.isPlaying` reads `false` the moment something pauses
+        // it mid-transition (a system audio interruption ending with
+        // `.shouldResume`, or any other `resume()` caller racing the same
+        // window) — resuming here would audibly bring back the OLD track,
+        // then the new one silently never plays once its own download
+        // finally lands (this was the exact "start streaming a cloud track
+        // while a local one is playing — the local track keeps/resumes
+        // playing and the stream never starts" bug). Once the async
+        // scheduling finishes it calls `node.play()`/sets `isPlaying` itself
+        // if playback should be active, so there's nothing for this to do
+        // here anyway.
+        guard !isSchedulingAsync else { return }
         if !activeNode.isPlaying {
             startEngineIfNeeded()
             activeNode.play()

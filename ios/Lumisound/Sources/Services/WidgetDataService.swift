@@ -45,7 +45,7 @@ final class WidgetDataService {
     /// artwork (if available). Called when the current song changes and artwork
     /// has been loaded, and on play/pause so the widget's live progress display
     /// (`Text(timerInterval:)`) has an accurate anchor.
-    func update(song: Song?, isPlaying: Bool, artwork: UIImage?, position: TimeInterval = 0, duration: TimeInterval = 0) {
+    func update(song: Song?, isPlaying: Bool, artwork: UIImage?, position: TimeInterval = 0, duration: TimeInterval = 0, isFavorite: Bool = false) {
         guard let ud = defaults else {
             logMissingAppGroupOnce()
             return
@@ -91,7 +91,7 @@ final class WidgetDataService {
         reloadTimelinesThrottled()
 
         if #available(iOS 16.1, *) {
-            LiveActivityManager.update(song: song, isPlaying: isPlaying, position: position, duration: duration)
+            LiveActivityManager.update(song: song, isPlaying: isPlaying, position: position, duration: duration, isFavorite: isFavorite)
         }
     }
 
@@ -134,6 +134,10 @@ final class WidgetDataService {
         }
         ud.set(isFavorite, forKey: "widget_is_favorite")
         reloadTimelinesThrottled()
+
+        if #available(iOS 16.1, *) {
+            LiveActivityManager.updateFavoriteState(isFavorite: isFavorite)
+        }
     }
 
     // MARK: - Private Helpers

@@ -69,6 +69,11 @@ private struct LiveActivityTransportControls: View {
     let state: LumisoundActivityAttributes.ContentState
     var iconSize: CGFloat = 20
     var spacing: CGFloat = 26
+    /// The Lock Screen banner has room for a 4th button; the Dynamic
+    /// Island's compact expanded-region slots don't — keep the heart button
+    /// exclusive to the roomier presentation rather than cramming every
+    /// region.
+    var showsFavorite: Bool = false
 
     var body: some View {
         if #available(iOS 17.0, *) {
@@ -90,6 +95,15 @@ private struct LiveActivityTransportControls: View {
                         .font(.system(size: iconSize * 0.85, weight: .medium))
                 }
                 .buttonStyle(.plain)
+
+                if showsFavorite {
+                    Button(intent: ToggleFavoriteIntent()) {
+                        Image(systemName: state.isFavorite ? "heart.fill" : "heart")
+                            .font(.system(size: iconSize * 0.8, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(state.isFavorite ? Color.pink : Color.white)
+                }
             }
             .foregroundStyle(.white)
         } else {
@@ -149,7 +163,7 @@ struct LumisoundLiveActivity: Widget {
 
                 Spacer(minLength: 0)
 
-                LiveActivityTransportControls(state: state)
+                LiveActivityTransportControls(state: state, showsFavorite: true)
             }
             .padding(14)
             .activityBackgroundTint(Color.black)
