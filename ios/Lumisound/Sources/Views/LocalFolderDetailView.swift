@@ -238,7 +238,14 @@ struct LocalFolderDetailView: View {
                                     .animation(.easeInOut(duration: 0.15), value: isSelecting)
                                 }
                                 .buttonStyle(.plain)
-                                .listRowBackground(AppTheme.surface.opacity(0.5))
+                                // Matches the rounded-card row treatment the
+                                // Queue redesign uses, for visual consistency
+                                // across this whole redesign pass.
+                                .listRowBackground(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(AppTheme.elevatedSurface.opacity(0.6))
+                                )
+                                .listRowSeparator(.hidden)
                             }
                         }
                     }
@@ -495,83 +502,95 @@ private struct FolderDetailHeaderView: View {
     @State private var pickerItem: PhotosPickerItem?
 
     var body: some View {
-        VStack(spacing: 16) {
-            ZStack(alignment: .bottomTrailing) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(AppTheme.surface)
-                        .frame(width: 256, height: 256)
+        ZStack(alignment: .bottom) {
+            // Big blurred-artwork backdrop, same component the Queue and
+            // Songs redesigns use — gives the folder its own atmosphere
+            // instead of opening straight onto a plain centered art tile on
+            // a flat background.
+            HeroArtworkBackdrop(song: representativeSong, height: 300)
 
-                    if let customCover {
-                        Image(uiImage: customCover)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 256, height: 256)
-                            .clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    } else if let song = representativeSong {
-                        ArtworkThumbnail(song: song, size: 256)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    } else {
-                        Image(systemName: "folder.fill")
-                            .font(.system(size: 64))
-                            .foregroundStyle(AppTheme.dynamicAccent)
+            VStack(spacing: 14) {
+                BreadcrumbTrail(parent: "Imported Music", current: folderName)
+
+                ZStack(alignment: .bottomTrailing) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(AppTheme.surface)
+                            .frame(width: 156, height: 156)
+
+                        if let customCover {
+                            Image(uiImage: customCover)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 156, height: 156)
+                                .clipped()
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        } else if let song = representativeSong {
+                            ArtworkThumbnail(song: song, size: 156)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        } else {
+                            Image(systemName: "folder.fill")
+                                .font(.system(size: 44))
+                                .foregroundStyle(AppTheme.dynamicAccent)
+                        }
+                    }
+                    .frame(width: 156, height: 156)
+                    .shadow(color: .black.opacity(0.5), radius: 14, y: 8)
+
+                    // Custom folder cover art — device-local, see
+                    // FolderCoverArtService. Overlaid on the artwork itself
+                    // (rather than a toolbar action) so it's discoverable the
+                    // same way changing a playlist's/profile's photo is
+                    // elsewhere in the app.
+                    PhotosPicker(selection: $pickerItem, matching: .images) {
+                        Image(systemName: "pencil.circle.fill")
+                            .font(.system(size: 24))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, AppTheme.dynamicAccent)
+                            .background(Circle().fill(.black.opacity(0.35)))
+                    }
+                    .padding(6)
+                }
+                .onChange(of: pickerItem) { item in
+                    guard let item else { return }
+                    Task {
+                        // Downsample straight from the encoded bytes (ImageIO,
+                        // never decodes the full-resolution photo-library asset)
+                        // rather than `UIImage(data:)` + a later resize — same
+                        // rationale as every other raster import path in the app
+                        // (see ImageDownsampler's header comment).
+                        guard let data = try? await item.loadTransferable(type: Data.self),
+                              let image = ImageDownsampler.downsampled(from: data, maxPixelSize: 512)
+                        else { return }
+                        // Explicit MainActor hop for everything past the `await`
+                        // above (loadTransferable can resume off the main actor) —
+                        // same defensive pattern CustomStyleEditorView's identical
+                        // PhotosPicker → onChange → Task flow uses, and required
+                        // here anyway since FolderCoverArtService is @MainActor.
+                        await MainActor.run {
+                            FolderCoverArtService.shared.setCover(image, for: folderURL)
+                            customCover = FolderCoverArtService.shared.cover(for: folderURL)
+                            pickerItem = nil
+                        }
                     }
                 }
-                .frame(width: 256, height: 256)
-                .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
 
-                // Custom folder cover art — device-local, see
-                // FolderCoverArtService. Overlaid on the artwork itself
-                // (rather than a toolbar action) so it's discoverable the
-                // same way changing a playlist's/profile's photo is
-                // elsewhere in the app.
-                PhotosPicker(selection: $pickerItem, matching: .images) {
-                    Image(systemName: "pencil.circle.fill")
-                        .font(.system(size: 30))
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, AppTheme.dynamicAccent)
-                        .background(Circle().fill(.black.opacity(0.35)))
-                }
-                .padding(10)
-            }
-            .onChange(of: pickerItem) { item in
-                guard let item else { return }
-                Task {
-                    // Downsample straight from the encoded bytes (ImageIO,
-                    // never decodes the full-resolution photo-library asset)
-                    // rather than `UIImage(data:)` + a later resize — same
-                    // rationale as every other raster import path in the app
-                    // (see ImageDownsampler's header comment).
-                    guard let data = try? await item.loadTransferable(type: Data.self),
-                          let image = ImageDownsampler.downsampled(from: data, maxPixelSize: 512)
-                    else { return }
-                    // Explicit MainActor hop for everything past the `await`
-                    // above (loadTransferable can resume off the main actor) —
-                    // same defensive pattern CustomStyleEditorView's identical
-                    // PhotosPicker → onChange → Task flow uses, and required
-                    // here anyway since FolderCoverArtService is @MainActor.
-                    await MainActor.run {
-                        FolderCoverArtService.shared.setCover(image, for: folderURL)
-                        customCover = FolderCoverArtService.shared.cover(for: folderURL)
-                        pickerItem = nil
+                VStack(spacing: 6) {
+                    Text(folderName)
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .multilineTextAlignment(.center)
+
+                    HStack(spacing: 8) {
+                        ScreenStatChip(icon: "music.note", text: "\(songCount) \(songCount == 1 ? "song" : "songs")")
+                        ScreenStatChip(icon: "clock", text: totalDurationText)
+                        ScreenStatChip(icon: "internaldrive", text: totalSizeText)
                     }
                 }
             }
-
-            VStack(spacing: 6) {
-                Text(folderName)
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(AppTheme.textPrimary)
-                    .multilineTextAlignment(.center)
-
-                Text("\(songCount) \(songCount == 1 ? "song" : "songs") · \(totalDurationText) · \(totalSizeText)")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
+            .padding(.bottom, 18)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 20)
     }
 }
 

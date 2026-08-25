@@ -168,6 +168,7 @@ struct QueueView: View {
             if player.queue.isEmpty {
                 emptyState
             } else {
+                heroSection
                 contextHeaderSection
                 listenTogetherSection
                 earlierSection
@@ -191,6 +192,44 @@ struct QueueView: View {
         // keyed to the queue's identity order, instead of needing every
         // single call site to remember to wrap itself in `withAnimation`.
         .animation(.spring(response: 0.35, dampingFraction: 0.82), value: player.queue.map(\.id))
+    }
+
+    /// Hero-forward top-of-screen treatment: a big blurred backdrop drawn
+    /// from whatever's currently playing, giving the Queue screen its own
+    /// visual identity that shifts with playback instead of opening
+    /// straight onto a flat list the way it used to.
+    @ViewBuilder
+    private var heroSection: some View {
+        if let current = player.currentSong {
+            ZStack(alignment: .bottomLeading) {
+                HeroArtworkBackdrop(song: current, height: 190)
+                HStack(spacing: 14) {
+                    ArtworkThumbnail(song: current, size: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .shadow(color: .black.opacity(0.4), radius: 10, y: 4)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Now Playing")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppTheme.dynamicAccent)
+                            .textCase(.uppercase)
+                        Text(current.displayName)
+                            .font(.headline)
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .lineLimit(1)
+                        Text(current.artistName)
+                            .font(.subheadline)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+            }
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
     }
 
     private var emptyState: some View {
@@ -329,9 +368,14 @@ struct QueueView: View {
                 SongRow(song: current, isCurrent: true)
                     .padding(.vertical, 2)
                     .listRowBackground(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .fill(AppTheme.dynamicAccent.opacity(nowPlayingPulse ? 0.20 : 0.09))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .strokeBorder(AppTheme.dynamicAccent.opacity(0.4), lineWidth: 1)
+                            )
                     )
+                    .listRowSeparator(.hidden)
                     .onAppear {
                         withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
                             nowPlayingPulse = true
@@ -422,6 +466,16 @@ struct QueueView: View {
             }
         }
         .buttonStyle(.plain)
+        // Each row its own rounded, subtly-elevated card rather than a flat
+        // list row blending into the background — the "card stack" reading
+        // of the queue this redesign is going for, applied at the row level
+        // (not a shared per-section container) so drag-reorder/swipe-remove
+        // on individual rows keeps working exactly as before.
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(AppTheme.elevatedSurface.opacity(0.6))
+        )
+        .listRowSeparator(.hidden)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 withAnimation(.easeInOut(duration: 0.22)) {

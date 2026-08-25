@@ -100,6 +100,7 @@ struct SongsTab: View {
 
     private func recomputeSortedSongs() {
         sortedSongsCache = computeSortedSongs()
+        recomputeIndexCache()
     }
 
     private func computeSortedSongs() -> [Song] {
@@ -131,17 +132,6 @@ struct SongsTab: View {
         Array(repeating: GridItem(.flexible(), spacing: 12), count: songColumns)
     }
 
-    /// "247 songs · 18h 32m" — a real library-stats line under the action
-    /// buttons, common in Apple Music/Spotify library headers but previously
-    /// absent here entirely.
-    private var libraryStatsText: String {
-        let totalSeconds = songs.reduce(0.0) { $0 + $1.duration }
-        let hours = Int(totalSeconds) / 3600
-        let minutes = (Int(totalSeconds) % 3600) / 60
-        let durationText = hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
-        return "\(songs.count) song\(songs.count == 1 ? "" : "s") · \(durationText)"
-    }
-
     /// Physical pixel size to prefetch artwork thumbnails at for whichever
     /// layout (`List` rows vs. grid cells) is currently showing — must match
     /// what `ArtworkThumbnail` actually requests, or the prefetched bucket
@@ -150,180 +140,252 @@ struct SongsTab: View {
         songColumns == 1 ? 192 : 768
     }
 
-    /// Spotify/Apple-Music-style action bar above the song list.
-    private var songsActionHeader: some View {
-        HStack(spacing: 12) {
-            Button {
-                player.setQueue(sortedSongs, startIndex: 0, autoplay: true)
-            } label: {
-                Label("Play", systemImage: "play.fill")
-                    .font(.subheadline.weight(.bold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
-                    .background(AppTheme.dynamicAccent, in: Capsule())
-                    .foregroundStyle(.white)
-            }
-            Button {
-                player.setQueue(sortedSongs.shuffled(), startIndex: 0, autoplay: true)
-            } label: {
-                Label("Shuffle", systemImage: "shuffle")
-                    .font(.subheadline.weight(.bold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
-                    .background(AppTheme.surface, in: Capsule())
-                    .foregroundStyle(AppTheme.textPrimary)
-                    .overlay(Capsule().stroke(.white.opacity(0.08), lineWidth: 1))
-            }
-        }
-        .buttonStyle(PressableButtonStyle())
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
-    }
+    /// Hero-forward header: a big blurred-artwork backdrop (drawn from
+    /// whatever's currently sitting at the top of the sorted list — the
+    /// screen's own visual identity shifts with sort order/library changes
+    /// instead of being a fixed banner) behind the title stats, Play/Shuffle,
+    /// and the sort-chip row — replaces the old plain-caption stats line +
+    /// flat action bar with one unified panel.
+    private var songsHeroHeader: some View {
+        ZStack(alignment: .bottom) {
+            HeroArtworkBackdrop(song: sortedSongs.first, height: 200)
 
-    /// Real library stats + a horizontally-scrollable sort-chip row.
-    private var statsAndSortHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(libraryStatsText)
-                .font(.caption)
-                .foregroundStyle(AppTheme.textSecondary)
-                .padding(.horizontal, 16)
-
-            ScrollView(.horizontal, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 8) {
-                    ForEach(SongSortOrder.allCases, id: \.self) { order in
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) { sortOrderRaw = order.rawValue }
-                        } label: {
-                            Label(order.label, systemImage: order.icon)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(sortOrder == order ? .white : AppTheme.textPrimary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(
-                                    sortOrder == order ? AppTheme.dynamicAccent : AppTheme.surface,
-                                    in: Capsule()
-                                )
-                                .overlay(
-                                    Capsule().stroke(.white.opacity(sortOrder == order ? 0 : 0.08), lineWidth: 1)
-                                )
-                        }
-                        .buttonStyle(.plain)
+                    ScreenStatChip(icon: "music.note", text: "\(songs.count) song\(songs.count == 1 ? "" : "s")")
+                    ScreenStatChip(icon: "clock", text: libraryDurationText)
+                }
+
+                HStack(spacing: 12) {
+                    Button {
+                        player.setQueue(sortedSongs, startIndex: 0, autoplay: true)
+                    } label: {
+                        Label("Play", systemImage: "play.fill")
+                            .font(.subheadline.weight(.bold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(AppTheme.dynamicAccent, in: Capsule())
+                            .foregroundStyle(.white)
+                    }
+                    Button {
+                        player.setQueue(sortedSongs.shuffled(), startIndex: 0, autoplay: true)
+                    } label: {
+                        Label("Shuffle", systemImage: "shuffle")
+                            .font(.subheadline.weight(.bold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
                     }
                 }
-                .padding(.horizontal, 16)
+                .buttonStyle(PressableButtonStyle())
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(SongSortOrder.allCases, id: \.self) { order in
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) { sortOrderRaw = order.rawValue }
+                            } label: {
+                                Label(order.label, systemImage: order.icon)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(sortOrder == order ? .white : AppTheme.textPrimary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        sortOrder == order ? AppTheme.dynamicAccent : Color.white.opacity(0.1),
+                                        in: Capsule()
+                                    )
+                                    .overlay(
+                                        Capsule().stroke(.white.opacity(sortOrder == order ? 0 : 0.1), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
         }
-        .padding(.bottom, 10)
+    }
+
+    /// "18h 32m" alone — split out of the old combined stats string now that
+    /// the song count has its own chip.
+    private var libraryDurationText: String {
+        let totalSeconds = songs.reduce(0.0) { $0 + $1.duration }
+        let hours = Int(totalSeconds) / 3600
+        let minutes = (Int(totalSeconds) % 3600) / 60
+        return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
+    }
+
+    /// Alphabetical sections (only meaningful for the Title/Artist sort
+    /// orders — Recently Added/Most Played/Duration have no letter to index
+    /// by) — shared by the sectioned list and its index rail so both are
+    /// always built from the identical grouping.
+    private var alphaSections: [(letter: String, songs: [Song])] {
+        switch sortOrder {
+        case .title:  return alphabeticalSections(of: sortedSongs) { $0.displayName }
+        case .artist: return alphabeticalSections(of: sortedSongs) { $0.artistName }
+        default:      return []
+        }
+    }
+    private var showsIndexRail: Bool { !alphaSections.isEmpty && songColumns == 1 && sortedSongs.count > 20 }
+
+    /// Flat song id → position in `sortedSongs`, recomputed alongside
+    /// `sortedSongsCache`. The sectioned list still needs prefetch/stagger
+    /// timing keyed on a song's position in the OVERALL order (not its
+    /// position within just its own letter section), and re-deriving that
+    /// with `sortedSongs.firstIndex(of:)` per row would be an O(n) scan for
+    /// every one of n rows on every appearance — this is the O(1) lookup
+    /// that avoids turning a 1,000-song library into an O(n²) render.
+    @State private var songIndexCache: [String: Int] = [:]
+
+    private func recomputeIndexCache() {
+        var map: [String: Int] = [:]
+        for (i, song) in sortedSongs.enumerated() { map[song.id] = i }
+        songIndexCache = map
+    }
+
+    @ViewBuilder
+    private func songRowContent(_ song: Song, flatIndex: Int) -> some View {
+        Button {
+            if isSelecting {
+                toggleSelection(song)
+            } else {
+                player.play(song: song, in: sortedSongs)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                if isSelecting {
+                    Image(systemName: selectedSongIDs.contains(song.id) ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 20))
+                        .foregroundStyle(
+                            selectedSongIDs.contains(song.id)
+                                ? AppTheme.dynamicAccent
+                                : AppTheme.textSecondary
+                        )
+                        .transition(.scale.combined(with: .opacity))
+                        .animation(.spring(response: 0.25, dampingFraction: 0.6), value: selectedSongIDs)
+                }
+                SongRow(song: song, isCurrent: player.currentSong?.id == song.id)
+            }
+            .animation(.easeInOut(duration: 0.15), value: isSelecting)
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(AppTheme.surface.opacity(0.5))
+        // Fast one-handed actions alongside the existing long-press
+        // context menu (SongContextMenuContent, via SongRow) — 2026's
+        // expected pattern per current gesture-UX research is swipe
+        // actions with distinct semantics/tint per edge, not everything
+        // buried behind a single long-press menu.
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button {
+                library.toggleFavorite(songID: song.id)
+            } label: {
+                let isFav = library.isFavorite(songID: song.id)
+                Label(isFav ? "Unfavorite" : "Favorite", systemImage: isFav ? "heart.slash.fill" : "heart.fill")
+            }
+            .tint(AppTheme.dynamicAccent)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button {
+                player.insertNext(song: song)
+            } label: {
+                Label("Play Next", systemImage: "text.insert")
+            }
+            .tint(AppTheme.success)
+        }
+        // Staggered entrance: first 20 rows slide in from the left
+        .modifier(StaggeredSlideInModifier(
+            index: flatIndex,
+            maxIndex: 19,
+            didAnimate: didAnimateEntrance
+        ))
+        // Windowed artwork prefetch: the initial onAppear below
+        // only warms the first 30 — fine at the top of a 1,100-song
+        // library, useless once the user scrolls past row 200.
+        // `List` only calls onAppear for rows that actually become
+        // visible, so this stays cheap (and `prefetch` itself skips
+        // anything already cached) while keeping artwork ready a
+        // little ahead of and behind wherever the user is scrolling.
+        .onAppear {
+            // Widened ahead/behind window when the active Lua
+            // theme preset's `flags.aggressive_prefetch` is on
+            // (see LuaFeatureFlags) — trades some extra network/
+            // decode work for artwork being ready further in
+            // advance of fast scrolling.
+            let behind = LuaFeatureFlags.aggressivePrefetch ? 16 : 8
+            let ahead = LuaFeatureFlags.aggressivePrefetch ? 48 : 24
+            let lower = max(0, flatIndex - behind)
+            let upper = min(sortedSongs.count, flatIndex + ahead)
+            guard lower < upper else { return }
+            ArtworkService.shared.prefetch(songs: Array(sortedSongs[lower..<upper]), pixelSize: 192)
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             if !songs.isEmpty {
-                songsActionHeader
-                statsAndSortHeader
+                songsHeroHeader
             }
             // Content — list or grid
             Group {
                 if songColumns == 1 {
-                    List {
-                        if songs.isEmpty {
-                            EmptyLibraryView(
-                                isScanning: library.isScanning,
-                                onAddMusic: { showAddMusic = true },
-                                onScan: { library.requestAccessAndScan() }
-                            )
-                            .listRowBackground(Color.clear)
-                        } else {
-                            ForEach(Array(sortedSongs.enumerated()), id: \.element.id) { index, song in
-                                Button {
-                                    if isSelecting {
-                                        toggleSelection(song)
-                                    } else {
-                                        player.play(song: song, in: sortedSongs)
-                                    }
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        if isSelecting {
-                                            Image(systemName: selectedSongIDs.contains(song.id) ? "checkmark.circle.fill" : "circle")
-                                                .font(.system(size: 20))
-                                                .foregroundStyle(
-                                                    selectedSongIDs.contains(song.id)
-                                                        ? AppTheme.dynamicAccent
-                                                        : AppTheme.textSecondary
-                                                )
-                                                .transition(.scale.combined(with: .opacity))
-                                                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: selectedSongIDs)
+                    ScrollViewReader { proxy in
+                        List {
+                                if songs.isEmpty {
+                                    EmptyLibraryView(
+                                        isScanning: library.isScanning,
+                                        onAddMusic: { showAddMusic = true },
+                                        onScan: { library.requestAccessAndScan() }
+                                    )
+                                    .listRowBackground(Color.clear)
+                                } else if showsIndexRail {
+                                    // Sectioned-by-letter path — only taken for
+                                    // Title/Artist sort with enough songs to make
+                                    // an index worth having (see `showsIndexRail`).
+                                    ForEach(alphaSections, id: \.letter) { section in
+                                        Section {
+                                            ForEach(section.songs) { song in
+                                                songRowContent(song, flatIndex: songIndexCache[song.id] ?? 0)
+                                            }
+                                        } header: {
+                                            Text(section.letter)
+                                                .font(.footnote.weight(.heavy))
+                                                .foregroundStyle(AppTheme.dynamicAccent)
+                                                .id(section.letter)
                                         }
-                                        SongRow(song: song, isCurrent: player.currentSong?.id == song.id)
                                     }
-                                    .animation(.easeInOut(duration: 0.15), value: isSelecting)
-                                }
-                                .buttonStyle(.plain)
-                                .listRowBackground(AppTheme.surface.opacity(0.5))
-                                // Fast one-handed actions alongside the existing long-press
-                                // context menu (SongContextMenuContent, via SongRow) — 2026's
-                                // expected pattern per current gesture-UX research is swipe
-                                // actions with distinct semantics/tint per edge, not everything
-                                // buried behind a single long-press menu.
-                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                    Button {
-                                        library.toggleFavorite(songID: song.id)
-                                    } label: {
-                                        let isFav = library.isFavorite(songID: song.id)
-                                        Label(isFav ? "Unfavorite" : "Favorite", systemImage: isFav ? "heart.slash.fill" : "heart.fill")
+                                } else {
+                                    ForEach(Array(sortedSongs.enumerated()), id: \.element.id) { index, song in
+                                        songRowContent(song, flatIndex: index)
                                     }
-                                    .tint(AppTheme.dynamicAccent)
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button {
-                                        player.insertNext(song: song)
-                                    } label: {
-                                        Label("Play Next", systemImage: "text.insert")
-                                    }
-                                    .tint(AppTheme.success)
-                                }
-                                // Staggered entrance: first 20 rows slide in from the left
-                                .modifier(StaggeredSlideInModifier(
-                                    index: index,
-                                    maxIndex: 19,
-                                    didAnimate: didAnimateEntrance
-                                ))
-                                // Windowed artwork prefetch: the initial onAppear below
-                                // only warms the first 30 — fine at the top of a 1,100-song
-                                // library, useless once the user scrolls past row 200.
-                                // `List` only calls onAppear for rows that actually become
-                                // visible, so this stays cheap (and `prefetch` itself skips
-                                // anything already cached) while keeping artwork ready a
-                                // little ahead of and behind wherever the user is scrolling.
-                                .onAppear {
-                                    // Widened ahead/behind window when the active Lua
-                                    // theme preset's `flags.aggressive_prefetch` is on
-                                    // (see LuaFeatureFlags) — trades some extra network/
-                                    // decode work for artwork being ready further in
-                                    // advance of fast scrolling.
-                                    let behind = LuaFeatureFlags.aggressivePrefetch ? 16 : 8
-                                    let ahead = LuaFeatureFlags.aggressivePrefetch ? 48 : 24
-                                    let lower = max(0, index - behind)
-                                    let upper = min(sortedSongs.count, index + ahead)
-                                    guard lower < upper else { return }
-                                    ArtworkService.shared.prefetch(songs: Array(sortedSongs[lower..<upper]), pixelSize: 192)
                                 }
                             }
-                        }
-                    }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .onAppear {
-                        guard !didAnimateEntrance else { return }
-                        didAnimateEntrance = true
-                    }
-                    .onChange(of: sortedSongs.first?.id) { _ in
-                        // Re-trigger entrance animation when the song list changes substantially
-                        didAnimateEntrance = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            didAnimateEntrance = true
-                        }
+                            .listStyle(.plain)
+                            .scrollContentBackground(.hidden)
+                            .onAppear {
+                                guard !didAnimateEntrance else { return }
+                                didAnimateEntrance = true
+                            }
+                            .onChange(of: sortedSongs.first?.id) { _ in
+                                // Re-trigger entrance animation when the song list changes substantially
+                                didAnimateEntrance = false
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                    didAnimateEntrance = true
+                                }
+                            }
+                            .overlay(alignment: .trailing) {
+                                if showsIndexRail {
+                                    AlphabetIndexRail(letters: alphaSections.map(\.letter)) { letter in
+                                        withAnimation(.easeInOut(duration: 0.15)) {
+                                            proxy.scrollTo(letter, anchor: .top)
+                                        }
+                                    }
+                                    .padding(.trailing, 2)
+                                }
+                            }
                     }
                 } else {
                     ScrollView {
@@ -335,18 +397,24 @@ struct SongsTab: View {
                             )
                             .padding(.top, 60)
                         } else {
-                            LazyVGrid(columns: gridColumns, spacing: 12) {
+                            // More breathing room and a heavier per-tile shadow
+                            // than the old grid (column count is still the
+                            // user's own 1/2/3 toggle, unchanged) so this reads
+                            // as a deliberate "card wall" instead of a denser
+                            // version of the list.
+                            LazyVGrid(columns: gridColumns, spacing: 20) {
                                 ForEach(sortedSongs) { song in
                                     Button {
                                         player.play(song: song, in: sortedSongs)
                                     } label: {
                                         SongGridCell(song: song, isCurrent: player.currentSong?.id == song.id)
+                                            .shadow(color: .black.opacity(0.35), radius: 10, y: 6)
                                     }
                                     .buttonStyle(.plain)
                                 }
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.top, 12)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 16)
                             // Extra clearance below the last row — a plain
                             // ScrollView's grid content was settling close
                             // enough to the MiniPlayerBar + tab bar that the

@@ -17,6 +17,14 @@ struct FoldersTab: View {
     @AppStorage("library_folders_columns") private var columns: Int = 2
 
     @State private var folders: [FolderEntry] = []
+    /// Which folders' inline "peek" is expanded — owned here, not by each
+    /// `FolderGridCell`, since the toggle button has to live OUTSIDE the
+    /// `NavigationLink`'s label as a sibling overlay (see the ForEach below):
+    /// a `Button` nested inside a `NavigationLink`'s label is an unreliable
+    /// pattern on iOS — the outer link's tap recognizer can swallow the
+    /// inner button's taps — so the actual toggle control can't live inside
+    /// `FolderGridCell` itself the way a first draft of this had it.
+    @State private var expandedFolderIDs: Set<String> = []
 
     private var gridColumns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: 12), count: columns)
@@ -34,12 +42,37 @@ struct FoldersTab: View {
             } else {
                 LazyVGrid(columns: gridColumns, spacing: 16) {
                     ForEach(folders) { folder in
-                        NavigationLink {
-                            LocalFolderDetailView(folderName: folder.id, folderURL: folder.dirURL)
-                        } label: {
-                            FolderGridCell(folder: folder)
+                        ZStack(alignment: .topTrailing) {
+                            NavigationLink {
+                                LocalFolderDetailView(folderName: folder.id, folderURL: folder.dirURL)
+                            } label: {
+                                FolderGridCell(folder: folder, isExpanded: expandedFolderIDs.contains(folder.id))
+                            }
+                            .buttonStyle(.plain)
+
+                            // Drawn on top as a sibling (not inside the
+                            // NavigationLink's label) so it reliably gets its
+                            // own taps instead of the link swallowing them —
+                            // see `expandedFolderIDs`'s doc comment.
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    if expandedFolderIDs.contains(folder.id) {
+                                        expandedFolderIDs.remove(folder.id)
+                                    } else {
+                                        expandedFolderIDs.insert(folder.id)
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "chevron.down")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                    .rotationEffect(.degrees(expandedFolderIDs.contains(folder.id) ? 180 : 0))
+                                    .padding(6)
+                                    .adaptiveGlass(in: Circle(), fallback: Color.black.opacity(0.4))
+                            }
+                            .buttonStyle(.plain)
+                            .padding(8)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -101,9 +134,17 @@ struct FoldersTab: View {
 
 private struct FolderGridCell: View {
     let folder: FolderEntry
+    /// Owned by `FoldersTab` (see `expandedFolderIDs`'s doc comment there) —
+    /// this view only reads it to decide whether to show the inline peek;
+    /// the actual toggle button lives outside this view entirely.
+    let isExpanded: Bool
 
-    private var representativeSong: Song? { folder.songs.first }
     private var trackCount: Int { folder.songs.count }
+    /// Up to four representative tracks for the collage — a real folder full
+    /// of mismatched album art reads as a proper "shelf" of what's inside,
+    /// not just one arbitrarily-first track's cover standing in for the
+    /// whole folder the way the old single-image tile did.
+    private var collageSongs: [Song] { Array(folder.songs.prefix(4)) }
 
     // Custom, device-local folder cover art (see FolderCoverArtService) —
     // read once on appear/whenever this folder's identity changes rather
@@ -124,7 +165,7 @@ private struct FolderGridCell: View {
             // (1-column) the cell depending on how many columns are selected.
             GeometryReader { geo in
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(AppTheme.surface)
 
                     if let customCover {
@@ -132,17 +173,23 @@ private struct FolderGridCell: View {
                             .resizable()
                             .scaledToFill()
                             .frame(width: geo.size.width, height: geo.size.width)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    } else if let song = representativeSong {
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    } else if collageSongs.count > 1 {
+                        collage(songs: collageSongs, side: geo.size.width)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    } else if let song = collageSongs.first {
                         ArtworkThumbnail(song: song, size: geo.size.width)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     } else {
                         Image(systemName: "folder.fill")
                             .font(.system(size: geo.size.width * 0.25))
                             .foregroundStyle(AppTheme.dynamicAccent)
                     }
 
-                    // Folder badge overlay
+                    // Folder badge overlay — the real expand/collapse toggle
+                    // is a separate button drawn by `FoldersTab` on top of
+                    // this whole cell (top-trailing corner), not here; see
+                    // `isExpanded`'s doc comment for why.
                     VStack {
                         Spacer()
                         HStack {
@@ -153,11 +200,12 @@ private struct FolderGridCell: View {
                         .padding(6)
                         .adaptiveGlass(in: Rectangle())
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
             .frame(maxWidth: .infinity)
             .aspectRatio(1, contentMode: .fit)
+            .shadow(color: .black.opacity(0.3), radius: 8, y: 5)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(folder.id)
@@ -170,9 +218,55 @@ private struct FolderGridCell: View {
                     .foregroundStyle(AppTheme.textSecondary)
             }
             .padding(.horizontal, 2)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(folder.songs.prefix(4)) { song in
+                        Text(song.displayName)
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .lineLimit(1)
+                    }
+                    if trackCount > 4 {
+                        Text("+ \(trackCount - 4) more")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AppTheme.dynamicAccent)
+                    }
+                }
+                .padding(.horizontal, 2)
+                .padding(.top, 2)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .onAppear {
             customCover = FolderCoverArtService.shared.cover(for: folder.dirURL)
+        }
+    }
+
+    /// A 2×2 grid of up to 4 tracks' artwork, quarter-sized — the "shelf of
+    /// what's actually inside" collage used when a folder has more than one
+    /// track and no custom cover set.
+    private func collage(songs: [Song], side: CGFloat) -> some View {
+        let half = side / 2
+        return VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                collageCell(songs, 0, half)
+                collageCell(songs, 1, half)
+            }
+            HStack(spacing: 0) {
+                collageCell(songs, 2, half)
+                collageCell(songs, 3, half)
+            }
+        }
+        .frame(width: side, height: side)
+    }
+
+    @ViewBuilder
+    private func collageCell(_ songs: [Song], _ index: Int, _ side: CGFloat) -> some View {
+        if index < songs.count {
+            ArtworkThumbnail(song: songs[index], size: side)
+        } else {
+            Rectangle().fill(AppTheme.surface).frame(width: side, height: side)
         }
     }
 }
