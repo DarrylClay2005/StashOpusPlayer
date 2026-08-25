@@ -54,7 +54,11 @@ struct TVAuthImage<Placeholder: View>: View {
             return
         }
 
-        guard let ui = await fetch(url) ?? (await fetch(url, afterDelayNanoseconds: 900_000_000)) else {
+        var ui = await fetch(url)
+        if ui == nil {
+            ui = await fetch(url, afterDelayNanoseconds: 900_000_000)
+        }
+        guard let ui else {
             // Both attempts failed — leave whatever was already on screen
             // (e.g. the previous track's art, or the placeholder) rather
             // than clearing it; a blank frame is a worse failure mode than a
