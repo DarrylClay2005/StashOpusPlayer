@@ -34,7 +34,16 @@ final class TVAccount: ObservableObject {
     private let userKey = "tv.auth.user"
 
     private init() {
-        token = UserDefaults.standard.string(forKey: tokenKey)
+        if let keychainToken = TVKeychainTokenStore.get(account: tokenKey) {
+            token = keychainToken
+        } else if let legacyToken = UserDefaults.standard.string(forKey: tokenKey) {
+            // One-time migration from the old UserDefaults-backed token —
+            // move it into the Keychain and scrub the plaintext copy so a
+            // pre-existing login isn't lost by this change.
+            token = legacyToken
+            TVKeychainTokenStore.set(legacyToken, account: tokenKey)
+            UserDefaults.standard.removeObject(forKey: tokenKey)
+        }
         if let data = UserDefaults.standard.data(forKey: userKey) {
             user = try? JSONDecoder().decode(TVUser.self, from: data)
         }
@@ -77,7 +86,7 @@ final class TVAccount: ObservableObject {
             let decoded = try JSONDecoder().decode(TVAuthResponse.self, from: data)
             token = decoded.token
             user = decoded.user
-            UserDefaults.standard.set(decoded.token, forKey: tokenKey)
+            TVKeychainTokenStore.set(decoded.token, account: tokenKey)
             if let user = decoded.user, let enc = try? JSONEncoder().encode(user) {
                 UserDefaults.standard.set(enc, forKey: userKey)
             }
@@ -102,7 +111,7 @@ final class TVAccount: ObservableObject {
         TVRemoteLogger.log(category: "auth", event: "logout", authToken: priorToken)
         token = nil
         user = nil
-        UserDefaults.standard.removeObject(forKey: tokenKey)
+        TVKeychainTokenStore.delete(account: tokenKey)
         UserDefaults.standard.removeObject(forKey: userKey)
     }
 }

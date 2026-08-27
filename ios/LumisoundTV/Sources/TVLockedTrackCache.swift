@@ -45,11 +45,23 @@ actor TVLockedTrackCache {
 
     private static func downloadAndUnlock(item: TVPlayable) async -> URL? {
         let fm = FileManager.default
-        let dir = fm.temporaryDirectory.appendingPathComponent("lumisound_tv_cloud_lms_playable", isDirectory: true)
+        // Caches directory, not temporaryDirectory: this is used as a
+        // persistent-across-calls cache (the fileExists check below treats a
+        // prior download as reusable), but tmp can be purged by the system
+        // at ANY time, including mid-session — not just between launches the
+        // way Caches is. A purge landing between this existence check and
+        // AVFoundation actually reading the file would silently fall through
+        // to the raw, undecodable stream in TVPlayerModel.resolvedAsset.
+        // Caches is still purgeable under disk pressure, but only while the
+        // app isn't running, which is the guarantee this cache actually needs.
+        guard let cachesBase = fm.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        let dir = cachesBase.appendingPathComponent("lumisound_tv_cloud_lms_playable", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         let realExt = item.ext.isEmpty ? "m4a" : item.ext
         let outURL = dir.appendingPathComponent(item.id).appendingPathExtension(realExt)
-        if fm.fileExists(atPath: outURL.path) {
+        // Guard against a zero-byte leftover from an interrupted previous
+        // write (e.g. the app was killed mid-unlock) being trusted as valid.
+        if let size = try? fm.attributesOfItem(atPath: outURL.path)[.size] as? Int, size > 0 {
             return outURL
         }
 

@@ -75,6 +75,7 @@ final class TVPlayerModel: ObservableObject {
     private var statusObservations: [NSKeyValueObservation] = []
     private var sleepTimerTask: Task<Void, Never>?
     private var lyricsTask: Task<Void, Never>?
+    var audioSessionObservers: [NSObjectProtocol] = []
 
     var current: TVPlayable? { queue.indices.contains(currentIndex) ? queue[currentIndex] : nil }
 
@@ -86,6 +87,8 @@ final class TVPlayerModel: ObservableObject {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         try? AVAudioSession.sharedInstance().setActive(true)
         setupObservers()
+        setupAudioSessionObservers()
+        configureRemoteCommands()
         loadCurrent()
     }
 
@@ -138,6 +141,7 @@ final class TVPlayerModel: ObservableObject {
                         self.duration = d
                     }
                     self.checkCrossfadeTrigger()
+                    self.updateNowPlayingInfo()
                 }
             }
             timeObservers.append((p, timeObs))
@@ -148,6 +152,7 @@ final class TVPlayerModel: ObservableObject {
                     guard let self, let p, self.player === p else { return }
                     self.isPlaying = observed.timeControlStatus == .playing
                     self.isBuffering = observed.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                    self.updateNowPlayingInfo()
                 }
             }
             statusObservations.append(statusObs)
@@ -204,6 +209,8 @@ final class TVPlayerModel: ObservableObject {
         tvBreadcrumb("Playing: \(item.title)")
         TVRemoteLogger.log(category: "playback", event: "track_started",
                             detail: ["title": item.title, "artist": item.artist])
+        updateNowPlayingInfo()
+        updateNowPlayingArtwork()
         Task { [weak self] in
             guard let self else { return }
             let resolved = await self.resolvedAsset(for: item)
@@ -293,6 +300,8 @@ final class TVPlayerModel: ObservableObject {
         tvBreadcrumb("Crossfaded to: \(newItem.title)")
         TVRemoteLogger.log(category: "playback", event: "track_started",
                             detail: ["title": newItem.title, "artist": newItem.artist, "via": "crossfade"])
+        updateNowPlayingInfo()
+        updateNowPlayingArtwork()
     }
 
     /// Stops and silences an in-flight crossfade (the not-yet-promoted
@@ -503,6 +512,8 @@ final class TVPlayerModel: ObservableObject {
         cancelSleepTimer()
         lyricsTask?.cancel()
         lyricsTask = nil
+        teardownAudioSessionObservers()
+        teardownRemoteCommands()
     }
 }
 
