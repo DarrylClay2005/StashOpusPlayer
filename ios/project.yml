@@ -3,7 +3,14 @@ name: Lumisound
 options:
   bundleIdPrefix: com.lumisound
   deploymentTarget:
-    iOS: "16.0"
+    # Sideloaded (AltStore/atvloadly unsigned IPAs, not App Store), so the
+    # usual "keep this low for broader device reach" reasoning doesn't
+    # apply — the only real constraint is the devices actually running
+    # this app. Raised from 16.0 (an old default with no deliberate reason
+    # behind it) to 26.0 so newer API surface (e.g. AppIntents'
+    # Measurement<UnitDuration> parameters) is usable without availability
+    # gating or older-OS fallback paths.
+    iOS: "26.0"
 
 configs:
   Debug: debug
@@ -172,7 +179,8 @@ targets:
   LumisoundTV:
     type: application
     platform: tvOS
-    deploymentTarget: "16.0"
+    # See the root `deploymentTarget.iOS` comment above — same reasoning.
+    deploymentTarget: "26.0"
     sources:
       - path: LumisoundTV/Sources
     resources:
