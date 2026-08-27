@@ -10,8 +10,21 @@ struct SongContextMenuContent: View {
 
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var player: AudioPlayerManager
+    @ObservedObject private var ariaLog = AriaActivityLog.shared
 
     var body: some View {
+        // MARK: Revert Aria's Change — only shown when she's actually done
+        // something to this specific track (currently: auto-removed a
+        // duplicate and kept this copy) that hasn't already been reverted.
+        if let action = ariaLog.activeAction(forSurvivingSongID: song.id) {
+            Button {
+                ariaLog.revertDuplicateRemoved(action, library: library)
+            } label: {
+                Label("Revert Aria's Change", systemImage: "arrow.uturn.backward")
+            }
+            Divider()
+        }
+
         // MARK: Favorite / Unfavorite
         Button {
             library.toggleFavorite(songID: song.id)

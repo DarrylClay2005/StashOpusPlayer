@@ -938,6 +938,10 @@ struct DuplicateResolveCandidate: Codable {
 struct DuplicateResolution {
     let keepIndex: Int
     let memoryID: Int?
+    /// "high" / "medium" / "low", as returned by the bridge — DuplicateFinderService
+    /// only auto-applies (actually removes the losing copies) on "high"; anything
+    /// else is treated as a plain suggestion the user reviews manually, same as before.
+    let confidence: String
 }
 
 struct SyncTrack: Codable {

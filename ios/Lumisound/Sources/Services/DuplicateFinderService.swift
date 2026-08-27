@@ -172,22 +172,43 @@ final class DuplicateFinderService: ObservableObject {
         guard let account = AccountService.shared, account.isLoggedIn else { return }
         let groups = duplicateGroups
         guard !groups.isEmpty else { return }
+        guard let library = LibraryManager.shared else { return }
+
+        struct GroupResult {
+            let groupID: UUID
+            let removable: [Song]
+            let resolution: DuplicateResolution
+        }
 
         let maxConcurrent = 3
-        await withTaskGroup(of: (UUID, String?).self) { taskGroup in
+        await withTaskGroup(of: GroupResult?.self) { taskGroup in
             var iterator = groups.makeIterator()
             func launchNext() {
                 guard let group = iterator.next() else { return }
                 taskGroup.addTask { [weak self] in
-                    guard let self else { return (group.id, nil) }
-                    let keeperID = await self.resolveKeeperSongID(for: group, account: account)
-                    return (group.id, keeperID)
+                    guard let self else { return nil }
+                    guard let (removable, resolution) = await self.resolveKeeper(for: group, account: account) else { return nil }
+                    return GroupResult(groupID: group.id, removable: removable, resolution: resolution)
                 }
             }
             for _ in 0..<maxConcurrent { launchNext() }
-            for await (groupID, keeperID) in taskGroup {
-                if let keeperID {
-                    ariaKeeperOverrides[groupID] = keeperID
+            for await result in taskGroup {
+                if let result {
+                    let keeper = result.removable[result.resolution.keepIndex]
+                    if result.resolution.confidence == "high" {
+                        // High confidence: act now rather than just suggesting —
+                        // see AriaActivityLog for the revert path this enables.
+                        // Anything less than "high" still only sets the override
+                        // below, same as before this existed — the user reviews
+                        // and confirms it themselves via "Delete All Duplicates".
+                        autoRemoveLosers(
+                            group: groups.first { $0.id == result.groupID },
+                            removable: result.removable, keeper: keeper,
+                            resolution: result.resolution, library: library
+                        )
+                    } else {
+                        ariaKeeperOverrides[result.groupID] = keeper.id
+                    }
                 }
                 launchNext()
             }
@@ -195,11 +216,12 @@ final class DuplicateFinderService: ObservableObject {
     }
 
     /// One group's Aria call — builds the candidate payload from real
-    /// on-disk/metadata signal (not just duration) and returns the song ID
-    /// she picked to keep, or `nil` if she's unavailable/unconfident/the
+    /// on-disk/metadata signal (not just duration) and returns which
+    /// removable copy she picked to keep plus her full resolution
+    /// (including confidence), or `nil` if she's unavailable/unconfident/the
     /// group isn't eligible (fewer than 2 removable copies, e.g. one copy
     /// is an Apple Music item that can't be deleted from here anyway).
-    private func resolveKeeperSongID(for group: DuplicateGroup, account: AccountService) async -> String? {
+    private func resolveKeeper(for group: DuplicateGroup, account: AccountService) async -> (removable: [Song], resolution: DuplicateResolution)? {
         let removable = group.songs.filter { $0.persistentID == nil && $0.url != nil }
         guard removable.count > 1 else { return nil }
 
@@ -230,7 +252,45 @@ final class DuplicateFinderService: ObservableObject {
             candidates: candidates
         )
         guard let resolution, resolution.keepIndex < removable.count else { return nil }
-        return removable[resolution.keepIndex].id
+        return (removable, resolution)
+    }
+
+    /// Actually removes every removable copy except `keeper` — called only
+    /// for a "high" confidence resolution (see `refineGroupsWithAria`).
+    /// Uses `ariaRemoveDuplicate`, never `removeImportedSong`: an
+    /// autonomous action she takes has to stay revertible, so a copy that
+    /// fails to trash is left alone rather than hard-deleted. Logs one
+    /// combined action (not one per removed copy) via `AriaActivityLog`,
+    /// which shows the attributed toast and enables "Revert Aria's Change"
+    /// from the keeper's context menu.
+    private func autoRemoveLosers(
+        group: DuplicateGroup?, removable: [Song], keeper: Song,
+        resolution: DuplicateResolution, library: LibraryManager
+    ) {
+        let losers = removable.filter { $0.id != keeper.id }
+        guard !losers.isEmpty else { return }
+
+        var removedAny = false
+        var loggedOnce = false
+        for loser in losers {
+            guard library.ariaRemoveDuplicate(id: loser.id) else { continue }
+            removedAny = true
+            removeSongFromGroups(songID: loser.id)
+            // Only the FIRST successfully-removed loser's trash entry is
+            // wired to the revert action — duplicate groups are overwhelmingly
+            // pairs in practice, and the log entry already names the track,
+            // not a specific copy, so this is the common case handled well
+            // rather than every N-way group handled perfectly.
+            guard !loggedOnce else { continue }
+            loggedOnce = true
+            AriaActivityLog.shared.recordDuplicateRemoved(
+                survivingSongID: keeper.id, title: keeper.displayName, artist: keeper.artistName,
+                removedEntryID: loser.id, confidence: resolution.confidence, memoryID: resolution.memoryID
+            )
+        }
+        if let group, removedAny {
+            ariaKeeperOverrides[group.id] = keeper.id
+        }
     }
 
     /// Songs that "Delete All Duplicates" would remove: for each group, the

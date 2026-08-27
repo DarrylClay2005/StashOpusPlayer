@@ -84,7 +84,7 @@ extension AccountService {
             guard let index = result.keep_index, index >= 0, index < candidates.count else {
                 return nil
             }
-            return DuplicateResolution(keepIndex: index, memoryID: result.memory_id)
+            return DuplicateResolution(keepIndex: index, memoryID: result.memory_id, confidence: result.confidence)
         } catch {
             return nil
         }
@@ -171,6 +171,56 @@ extension AccountService {
         } catch {
             appWarn("fetchAriaDailyPick: \(error.localizedDescription)", category: "network")
         }
+    }
+
+    /// Logs a real action Aria Lumi just took on an existing track (see
+    /// `AriaActivityLog`) to the bridge's deep action log (`ios_aria_actions`),
+    /// after the local action (trashing a duplicate, rewriting tags) has
+    /// already happened — this call is a log write, not a request for
+    /// permission. Returns the server-assigned action id (used later to
+    /// report a revert), or `nil` on any failure — the local
+    /// `AriaActivityLog` entry and the revert UI it powers work entirely
+    /// off-device regardless, so a failure here only means this particular
+    /// action won't show up in the server-side audit trail.
+    func reportAriaAction(
+        type: String, title: String, artist: String?, detail: String?,
+        before: [String: String]? = nil, after: [String: String]? = nil,
+        confidence: String?, memoryID: Int?
+    ) async -> Int? {
+        guard isLoggedIn else { return nil }
+        struct Body: Encodable {
+            let action_type: String
+            let title: String
+            let artist: String?
+            let detail: String?
+            let before: [String: String]?
+            let after: [String: String]?
+            let confidence: String?
+            let memory_id: Int?
+        }
+        struct Response: Decodable { let id: Int }
+        do {
+            let data = try await makeRequest(
+                "/user/intelligence/actions",
+                method: "POST",
+                body: Body(
+                    action_type: type, title: title, artist: artist, detail: detail,
+                    before: before, after: after, confidence: confidence, memory_id: memoryID
+                )
+            )
+            return try JSONDecoder().decode(Response.self, from: data).id
+        } catch {
+            return nil
+        }
+    }
+
+    /// Reports that an Aria action (by its server-assigned id from
+    /// `reportAriaAction`) was reverted locally — fire-and-forget, same
+    /// silent-failure contract as `reportMetadataCorrection`: the local
+    /// revert already happened regardless of whether this write succeeds.
+    func reportAriaActionReverted(actionID: Int) async {
+        guard isLoggedIn else { return }
+        _ = try? await makeRequest("/user/intelligence/actions/\(actionID)/revert", method: "POST")
     }
 
     /// Fetches (or triggers, on a first-ever request for this album) a

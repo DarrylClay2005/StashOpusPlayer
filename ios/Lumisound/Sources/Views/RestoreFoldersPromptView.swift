@@ -99,7 +99,13 @@ struct RestoreFoldersPromptView: View {
                 }
 
                 do {
-                    _ = try await streaming.downloadToLibrary(track: streamTrack, destinationDir: folderURL)
+                    // existingSongs enables downloadToLibrary's pre-download dedupe
+                    // (matches by sourceTrackID against a valid on-disk file) — without
+                    // it, every track here re-downloads via yt-dlp unconditionally even
+                    // if it already exists elsewhere in the library (a different folder,
+                    // a prior partial restore), wasting a full yt-dlp fetch that's
+                    // discarded the moment the file lands somewhere already covered.
+                    _ = try await streaming.downloadToLibrary(track: streamTrack, destinationDir: folderURL, existingSongs: library.allSongs)
                     restoredCount += 1
                 } catch {
                     appWarn("restoreFolders: redownload failed for \"\(streamTrack.title)\": \(error.localizedDescription)", category: "library")

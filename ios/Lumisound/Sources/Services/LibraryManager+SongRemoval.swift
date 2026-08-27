@@ -46,6 +46,29 @@ extension LibraryManager {
         ToastCenter.shared.show("Deleted \"\(song.displayName)\" — recoverable in Recently Deleted for 30 days", category: .info, icon: "trash")
     }
 
+    /// Aria Lumi's auto duplicate-removal path — unlike `removeImportedSong`,
+    /// this NEVER falls back to a hard delete when trashing fails (an
+    /// autonomous action she takes on her own has to stay revertible; a
+    /// user tapping "Delete" themselves already knows what they're doing
+    /// and gets the hard-delete safety net instead). Returns `false` without
+    /// touching anything if the trash move fails, leaving the song exactly
+    /// as it was — the caller should treat that as "she couldn't act here,"
+    /// not attempt any other removal path.
+    @discardableResult
+    func ariaRemoveDuplicate(id songID: String) -> Bool {
+        guard let song = importedSongs.first(where: { $0.id == songID }), song.url != nil else { return false }
+        guard RecentlyDeletedService.shared?.trash(song: song) ?? false else { return false }
+        importedSongs.removeAll { $0.id == songID }
+        favoriteSongIDs.remove(songID)
+        persistence.saveFavorites(favoriteSongIDs)
+        for index in playlists.indices {
+            playlists[index].songIDs.removeAll { $0 == songID }
+        }
+        persistence.savePlaylists(playlists)
+        rebuildAllSongs()
+        return true
+    }
+
     /// Bulk version of `removeImportedSong` for Library's multi-select "Delete"
     /// action — one rebuild/toast instead of one per song. IDs that aren't in
     /// `importedSongs` (e.g. Apple Music library tracks, which this can't
