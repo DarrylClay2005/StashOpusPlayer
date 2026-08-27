@@ -198,11 +198,11 @@ struct LumisoundLiveActivity: Widget {
             } compactLeading: {
                 LiveActivityArtworkView(image: artwork, size: 20, cornerRadius: 4)
             } compactTrailing: {
-                Image(systemName: state.isPlaying ? "waveform" : "pause.fill")
+                Image(systemName: state.isPlaying ? "pause.fill" : "play.fill")
                     .foregroundStyle(.cyan)
                     .font(.system(size: 13, weight: .semibold))
             } minimal: {
-                Image(systemName: state.isPlaying ? "waveform" : "pause.fill")
+                Image(systemName: state.isPlaying ? "pause.fill" : "play.fill")
                     .foregroundStyle(.cyan)
             }
             .widgetURL(nil)
