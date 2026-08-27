@@ -61,11 +61,11 @@ services:
       # when distributing a true App Store build.
       - APNS_USE_SANDBOX=${APNS_USE_SANDBOX:-1}
       - IOS_BRIDGE_API_KEY=${IOS_BRIDGE_API_KEY:-}
-      # Optional: Anthropic API key (console.anthropic.com). When set, powers
+      # Optional: Gemini API key (aistudio.google.com). When set, powers
       # the opt-in "AI-assisted suggestions" feature (see intelligence.py) —
       # metadata disambiguation today, EQ/duplicate/mix suggestions planned.
-      # Off (no calls made) when unset.
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Off (no calls made, falls back to heuristics) when unset.
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - PORT=8002
       # PostgreSQL credentials for the Lumisound iOS app (migrated from
       # MariaDB — see db.py). Point DB_HOST at wherever Postgres actually

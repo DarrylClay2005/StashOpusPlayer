@@ -989,10 +989,10 @@ async def check_admin_or_operator(
     deploy."""
     if credentials:
         payload = decode_token(credentials.credentials)
-        if payload and payload.get("sub") == OPERATOR_USER_ID:
+        if payload and payload.get("sub") == OPERATOR_USER_ID and not payload.get("purpose"):
             token_id = payload.get("jti")
             if not token_id:
-                return
+                raise HTTPException(status_code=401, detail="Malformed session token")
             pool = await get_pool()
             async with pool.acquire() as conn:
                 async with conn.cursor() as cur:
