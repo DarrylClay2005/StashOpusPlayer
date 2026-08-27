@@ -59,6 +59,25 @@ extension StreamingService {
         // Re-fetch metadata so the caller gets a fully populated object
         let tracks = try await fetchUserMusicMetadata(token: token)
         if let match = tracks.first(where: { $0.filename == filename }) {
+            // A locked (`.lms`) upload's `has_artwork` flag only records
+            // THAT it has embedded art, not the art itself — the server
+            // can't extract it (XOR-masked bytes, same limitation as
+            // ffprobe/loudness analysis elsewhere in this pipeline), so
+            // without this a locked cloud track never shows artwork
+            // anywhere it's browsed from (this was the actual bug behind
+            // "tvOS shows no artwork for uploaded tracks" — it's not
+            // tvOS-specific, the bytes just never existed server-side for
+            // ANY client to fetch). Best-effort, off the critical path —
+            // the upload itself already succeeded regardless of this.
+            if LumisoundExclusiveExtensionService.isConverted(fileURL), metadata.hasArtwork == true, !match.id.isEmpty {
+                if let jpeg = await LumisoundExclusiveExtensionService.embeddedThumbnailJPEGData(fileURL: fileURL) {
+                    do {
+                        try await uploadArtworkThumbnail(jpeg, forMetadataID: match.id, token: token)
+                    } catch {
+                        appWarn("uploadTrack: thumbnail upload failed for \(filename): \(error.localizedDescription)", category: "network")
+                    }
+                }
+            }
             return match
         }
         // Fallback: synthesise a minimal response from the query params
@@ -84,6 +103,27 @@ extension StreamingService {
             loudnessLufs: nil,
             gainDb: nil
         )
+    }
+
+    /// Uploads a pre-extracted JPEG thumbnail for a locked track's cloud
+    /// backup — see `LumisoundExclusiveExtensionService.embeddedThumbnailJPEGData`
+    /// and `/user/music/artwork-upload` in main.py for why this exists as
+    /// its own call instead of riding along on the audio upload itself.
+    func uploadArtworkThumbnail(_ jpegData: Data, forMetadataID metadataID: String, token: String) async throws {
+        var components = URLComponents()
+        components.path = "/user/music/artwork-upload"
+        components.queryItems = [URLQueryItem(name: "id", value: metadataID)]
+        guard var request = makeRequest(components.string ?? "/user/music/artwork-upload") else {
+            throw StreamingError.invalidURL
+        }
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.httpBody = jpegData
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw StreamingError.httpError((response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
     }
 
     /// Cheap, file-transfer-free fix for a track whose server-side

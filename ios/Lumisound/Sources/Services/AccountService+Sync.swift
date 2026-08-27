@@ -323,23 +323,34 @@ extension AccountService {
             let remoteIDs = Set(sync.favorites.map { $0.songId })
             let localFavorites = library.favoriteSongIDs
             let toAdd = remoteIDs.subtracting(localFavorites)
-            for id in toAdd { library.toggleFavorite(songID: id) }
+            // `addFavorites` (one persistence write, one toast) instead of
+            // looping `toggleFavorite` once per id: this pull runs on every
+            // launch/foreground while logged in — the "auto reload" users
+            // reported as freezing the whole app — and `toggleFavorite`
+            // does a synchronous disk write PLUS pops a toast on every
+            // single call. With hundreds of favorites that's hundreds of
+            // synchronous writes and toast animations firing back-to-back
+            // on the main actor with no `await` in between to yield at, a
+            // real multi-second block on all interaction, not just a
+            // rendering-cost issue.
+            if !toAdd.isEmpty { library.addFavorites(ids: toAdd) }
 
-            // Apply playlists: merge server playlists (add missing by name, skip existing)
+            // Apply playlists: merge server playlists (add missing by name, skip existing).
+            // Same fix as favorites above: build each new playlist's full
+            // song id list first and create it in one `createPlaylist(name:songIDs:)`
+            // call (one write, no toast — same helper M3U import already
+            // uses for this exact "several tracks into a fresh playlist"
+            // shape) instead of `createPlaylist(name:)` + one `addSong`
+            // call per track, which was the dominant cost here for anyone
+            // with sizable playlists — a 500-track playlist meant 500
+            // synchronous writes/toasts for that ONE playlist alone.
             let existingNames = Set(library.playlists.map { $0.name })
             for sp in sync.playlists {
                 guard !existingNames.contains(sp.name) else { continue }
-                library.createPlaylist(name: sp.name)
-                // Add any local song IDs that match tracks
-                if let newPL = library.playlists.last(where: { $0.name == sp.name }) {
-                    for track in sp.tracks {
-                        if let sid = track.localSongId {
-                            library.addSong(id: sid, toPlaylistID: newPL.id)
-                        }
-                    }
-                    if sp.folder != nil { library.setFolder(sp.folder, forPlaylistID: newPL.id) }
-                    if !sp.tags.isEmpty { library.setTags(sp.tags, forPlaylistID: newPL.id) }
-                }
+                let songIDs = sp.tracks.compactMap { $0.localSongId }
+                let newPL = library.createPlaylist(name: sp.name, songIDs: songIDs)
+                if sp.folder != nil { library.setFolder(sp.folder, forPlaylistID: newPL.id) }
+                if !sp.tags.isEmpty { library.setTags(sp.tags, forPlaylistID: newPL.id) }
             }
 
             // Restore audio settings from DB — but only as a first-run/new-device

@@ -9553,12 +9553,73 @@ def _safe_unlink(path: Optional[pathlib.Path]) -> None:
         pass
 
 
+def _locked_artwork_path(music_dir: pathlib.Path, metadata_id: str) -> pathlib.Path:
+    """Where a pre-extracted thumbnail for a Lumisound-locked (`.lms`) cloud
+    track lives — see `user_music_artwork_upload`'s doc comment for why this
+    exists at all. Keyed by the track's `ios_user_music_metadata.id` (a
+    content hash), not its path, so it survives a rename/re-folder same as
+    the metadata row itself does."""
+    safe_id = "".join(c for c in metadata_id if c.isalnum())
+    return music_dir / ".artwork" / f"{safe_id}.jpg"
+
+
+@app.post("/user/music/artwork-upload", status_code=204)
+async def user_music_artwork_upload(
+    request: Request,
+    id: str = Query(..., description="The track's ios_user_music_metadata.id"),
+    user: dict = Depends(get_current_user),
+):
+    """Stores a pre-extracted JPEG thumbnail for a track, uploaded separately
+    from the audio bytes themselves — the ONLY way a Lumisound-locked
+    (`.lms`) cloud track can ever have real artwork served back, since its
+    audio bytes are XOR-masked on the server and `user_music_artwork`'s
+    ffmpeg extraction below can't decode a locked file any more than
+    ffprobe/loudnorm/BPM analysis can elsewhere in this file (see
+    `upload_user_music`'s `is_locked_upload` branch). The iOS client already
+    has the original, unlocked artwork on-device (from before it locked the
+    file) — this just gives it somewhere to put it. Called right after
+    `upload_user_music` succeeds for a locked file whose `has_artwork` query
+    param was true; a no-op for unlocked files, which keep working via the
+    existing ffmpeg extraction path with no upload needed."""
+    user_id = user["sub"]
+    music_dir = _user_music_dir(user_id)
+    if music_dir is None:
+        raise HTTPException(status_code=503, detail="User music storage not configured")
+
+    # Confirms this id actually belongs to this user before writing anything
+    # under their directory — `id` is otherwise an arbitrary client-supplied
+    # string used directly to build a filename (sanitised in
+    # `_locked_artwork_path`, but still worth confirming ownership).
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT 1 FROM ios_user_music_metadata WHERE id = %s AND user_id = %s", (id, user_id)
+            )
+            if await cur.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Unknown track id")
+
+    try:
+        body = await request.body()
+    except ClientDisconnect:
+        raise HTTPException(status_code=499, detail="Client disconnected before upload completed")
+    if not body or len(body) > 2 * 1024 * 1024:  # thumbnails only — 2 MB is generous
+        raise HTTPException(status_code=400, detail="Invalid or oversized thumbnail (max 2 MB)")
+
+    dest = _locked_artwork_path(music_dir, id)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(dest.write_bytes, body)
+
+
 @app.get("/user/music/artwork")
 async def user_music_artwork(
     path: str = Query(..., description="Relative path within user's music dir"),
     user: dict = Depends(get_current_user),
 ):
-    """Extracts embedded album art from a user music file and returns it as JPEG."""
+    """Returns a track's album art as JPEG — a pre-uploaded thumbnail if one
+    exists (see `user_music_artwork_upload`; the only source of real
+    artwork for a locked `.lms` track), otherwise extracted from the file's
+    own embedded art via ffmpeg (unlocked files only)."""
     user_id = user["sub"]
     music_dir = _user_music_dir(user_id)
     if music_dir is None:
@@ -9569,6 +9630,24 @@ async def user_music_artwork(
         raise HTTPException(status_code=403, detail="Access denied")
     if not full_path.exists() or not full_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        rel_path = str(full_path.relative_to(music_dir))
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT id FROM ios_user_music_metadata WHERE user_id = %s AND relative_path = %s",
+                    (user_id, rel_path),
+                )
+                row = await cur.fetchone()
+        if row:
+            pre_uploaded = _locked_artwork_path(music_dir, row[0])
+            if pre_uploaded.exists():
+                from fastapi.responses import Response
+                return Response(content=pre_uploaded.read_bytes(), media_type="image/jpeg")
+    except Exception as exc:
+        logger.warning("user_music_artwork: pre-uploaded thumbnail lookup failed for %s: %s", path, exc)
 
     # Decompress first if stored gzip-compressed (no-op when uncompressed).
     try:
@@ -9637,13 +9716,26 @@ async def delete_user_music(
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "DELETE FROM ios_user_music_metadata WHERE user_id = %s AND filename = %s",
+                "DELETE FROM ios_user_music_metadata WHERE user_id = %s AND filename = %s RETURNING id",
                 (user_id, filepath),
             )
-            row_deleted = cur.rowcount > 0
+            deleted_row = await cur.fetchone()
+            row_deleted = deleted_row is not None
 
     if not file_existed and not row_deleted:
         raise HTTPException(status_code=404, detail="File not found")
+
+    # Best-effort: drop a pre-uploaded locked-track thumbnail (see
+    # `user_music_artwork_upload`) alongside the metadata row and audio file
+    # it belonged to, so deleting a locked track doesn't leave an orphaned
+    # image behind forever.
+    if deleted_row is not None:
+        artwork_path = _locked_artwork_path(music_dir, deleted_row[0])
+        if artwork_path.exists():
+            try:
+                artwork_path.unlink()
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------

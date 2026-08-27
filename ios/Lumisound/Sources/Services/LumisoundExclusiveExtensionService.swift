@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import UIKit
 
 // MARK: - LumisoundExclusiveExtensionService
 //
@@ -417,5 +418,44 @@ enum LumisoundExclusiveExtensionService {
             let keyRaw = (item.key as? String)?.lowercased() ?? ""
             return idRaw.contains("lumisound_thumbnail") || keyRaw.contains("lumisound_thumbnail")
         }
+    }
+
+    /// Reads the actual embedded artwork bytes (as JPEG) from a locked
+    /// track's unlocked-on-device view — the only source of real cloud
+    /// artwork for a `.lms` upload, since the server's own extraction
+    /// (`ffmpeg` in `/user/music/artwork`) can't decode XOR-masked bytes any
+    /// more than ffprobe/loudness analysis can elsewhere in the pipeline.
+    /// Called right after a successful locked upload whose
+    /// `hasEmbeddedThumbnailTag` was true — see
+    /// `StreamingService.uploadTrack`/`backUpLibraryIfNeeded`. Checks both
+    /// `commonMetadata` and the full metadata item list (same two-pass
+    /// approach `ArtworkService.fetchAssetArtwork` uses locally) since
+    /// artwork surfaces under different keys depending on container/tagger.
+    static func embeddedThumbnailJPEGData(fileURL: URL) async -> Data? {
+        let asset = AVURLAsset(url: playableURL(for: fileURL))
+
+        if let commonMetadata = try? await asset.load(.commonMetadata) {
+            for item in commonMetadata where item.commonKey == .commonKeyArtwork {
+                if let data = try? await item.load(.dataValue), let jpeg = Self.jpegData(from: data) { return jpeg }
+            }
+        }
+        if let allMeta = try? await asset.load(.metadata) {
+            for item in allMeta {
+                let idRaw = item.identifier?.rawValue.lowercased() ?? ""
+                let keyRaw = (item.key as? String)?.lowercased() ?? ""
+                guard idRaw.contains("lumisound_thumbnail") || keyRaw.contains("lumisound_thumbnail")
+                    || idRaw.contains("artwork") || idRaw.contains("covr") || idRaw.contains("apic") else { continue }
+                if let data = try? await item.load(.dataValue), let jpeg = Self.jpegData(from: data) { return jpeg }
+            }
+        }
+        return nil
+    }
+
+    /// Re-encodes whatever image bytes were actually embedded (often PNG)
+    /// to JPEG, matching what `/user/music/artwork-upload` and the server's
+    /// own ffmpeg-extraction fallback both always serve.
+    private static func jpegData(from raw: Data) -> Data? {
+        guard raw.count > 500, let image = UIImage(data: raw) else { return nil }
+        return image.jpegData(compressionQuality: 0.85)
     }
 }
