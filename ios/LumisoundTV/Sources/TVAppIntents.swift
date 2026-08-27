@@ -126,32 +126,29 @@ struct TVCycleRepeatModeIntent: AppIntent {
     }
 }
 
-/// "Siri, skip forward 30 seconds in Lumisound" / "Siri, skip forward 2
-/// minutes in Lumisound" — `Measurement<UnitDuration>` lets Siri parse
-/// either unit naturally out of the spoken phrase instead of needing a
-/// separate intent per unit. Only usable now that the deployment target is
-/// 26.0 — see the matching comment on iOS's `SeekForwardIntent` and the
-/// `deploymentTarget` comment in project.yml for why.
+/// "Siri, skip forward 30 seconds in Lumisound" — a plain `Int` (seconds).
+/// See the matching comment on iOS's `SeekForwardIntent`:
+/// `Measurement<UnitDuration>` failed the archive even with the
+/// deployment target and default-value issues both fixed — this Xcode
+/// 26.6 toolchain's `appintentsmetadataprocessor` rejects `Measurement`
+/// as an `@Parameter` type outright, identically on both platforms.
 struct TVSkipForwardIntent: AppIntent {
     static var title: LocalizedStringResource = "Skip Forward"
     static var description = IntentDescription("Skips forward in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
-    // No `default:` — see the matching comment on iOS's SeekForwardIntent:
-    // the metadata processor's static analyzer needs a literal it can
-    // parse from source, and `Measurement(value:unit:)` isn't one.
-    @Parameter(title: "Duration")
-    var duration: Measurement<UnitDuration>
+    @Parameter(title: "Seconds", default: 15)
+    var seconds: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Skip forward \(\.$duration) in Lumisound")
+        Summary("Skip forward \(\.$seconds) seconds in Lumisound")
     }
 
     @MainActor
     func perform() async throws -> some IntentResult {
         let player = TVPlayerModel.shared
         guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
-        player.seek(to: player.position + duration.converted(to: .seconds).value)
+        player.seek(to: player.position + Double(seconds))
         return .result()
     }
 }
@@ -161,21 +158,18 @@ struct TVSkipBackwardIntent: AppIntent {
     static var description = IntentDescription("Skips backward (rewinds) in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
-    // No `default:` — see the matching comment on iOS's SeekForwardIntent:
-    // the metadata processor's static analyzer needs a literal it can
-    // parse from source, and `Measurement(value:unit:)` isn't one.
-    @Parameter(title: "Duration")
-    var duration: Measurement<UnitDuration>
+    @Parameter(title: "Seconds", default: 15)
+    var seconds: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Skip backward \(\.$duration) in Lumisound")
+        Summary("Skip backward \(\.$seconds) seconds in Lumisound")
     }
 
     @MainActor
     func perform() async throws -> some IntentResult {
         let player = TVPlayerModel.shared
         guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
-        player.seek(to: player.position - duration.converted(to: .seconds).value)
+        player.seek(to: player.position - Double(seconds))
         return .result()
     }
 }
@@ -230,8 +224,8 @@ struct LumisoundTVShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: TVSkipForwardIntent(),
             phrases: [
-                "Skip forward \(\.$duration) in \(.applicationName)",
-                "Fast forward \(\.$duration) in \(.applicationName)",
+                "Skip forward \(\.$seconds) seconds in \(.applicationName)",
+                "Fast forward \(\.$seconds) seconds in \(.applicationName)",
             ],
             shortTitle: "Skip Forward",
             systemImageName: "goforward"
@@ -239,8 +233,8 @@ struct LumisoundTVShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: TVSkipBackwardIntent(),
             phrases: [
-                "Skip backward \(\.$duration) in \(.applicationName)",
-                "Rewind \(\.$duration) in \(.applicationName)",
+                "Skip backward \(\.$seconds) seconds in \(.applicationName)",
+                "Rewind \(\.$seconds) seconds in \(.applicationName)",
             ],
             shortTitle: "Skip Backward",
             systemImageName: "gobackward"

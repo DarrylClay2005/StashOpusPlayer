@@ -119,32 +119,29 @@ struct ToggleShuffleIntent: AppIntent {
     }
 }
 
-/// "Siri, skip forward 30 seconds in Lumisound" / "Siri, skip forward 2
-/// minutes in Lumisound" — `Measurement<UnitDuration>` lets Siri parse
-/// either unit naturally out of the spoken phrase instead of needing a
-/// separate intent per unit. Only usable now that the deployment target is
-/// 26.0 — the `@Parameter` initializer overload this resolves to didn't
-/// exist before that OS version, which is exactly what broke the archive
-/// build the first time this was tried against a 16.0 target (see the
-/// deploymentTarget comment in project.yml for why that got raised).
+/// "Siri, skip forward 30 seconds in Lumisound" — a plain `Int` (seconds).
+/// `Measurement<UnitDuration>` was tried twice (once blocked by an old
+/// deployment target, once by an unparseable literal default) and even
+/// once BOTH of those were fixed, still failed the archive on its own —
+/// isolated by confirming this Xcode 26.6 toolchain's
+/// `appintentsmetadataprocessor` rejects `Measurement` as an `@Parameter`
+/// type outright ("Invalid parameter type. AppEntity and AppEnum are the
+/// only allowed types"), on a required parameter with no default,
+/// identically on both iOS and tvOS. Whatever the cause (toolchain bug or
+/// genuinely unsupported), `Int` is unambiguously a supported primitive
+/// parameter type and Siri still resolves a spoken duration into it fine
+/// — it just always lands in seconds rather than letting the user name a
+/// unit.
 struct SeekForwardIntent: AppIntent {
     static var title: LocalizedStringResource = "Skip Forward"
     static var description = IntentDescription("Skips forward in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
-    // No `default:` — the metadata processor's static analyzer needs the
-    // default value (when present) to be a literal it can parse from
-    // source text alone; `Measurement(value:unit:)` is a constructor call,
-    // not a literal, and using it as a default failed the archive with
-    // "Expected either a literal or array of literals, but got unexpected
-    // value instead". Leaving the parameter required sidesteps that
-    // entirely — Siri always has a value in hand by the time this runs,
-    // since the value is spoken as part of matching the phrase itself.
-    @Parameter(title: "Duration")
-    var duration: Measurement<UnitDuration>
+    @Parameter(title: "Seconds", default: 15)
+    var seconds: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Skip forward \(\.$duration) in Lumisound")
+        Summary("Skip forward \(\.$seconds) seconds in Lumisound")
     }
 
     @MainActor
@@ -152,7 +149,7 @@ struct SeekForwardIntent: AppIntent {
         guard let player = AudioPlayerManager.shared else {
             throw LumisoundIntentError.appNotReady
         }
-        player.seek(to: player.position + duration.converted(to: .seconds).value)
+        player.seek(to: player.position + TimeInterval(seconds))
         return .result()
     }
 }
@@ -162,19 +159,11 @@ struct SeekBackwardIntent: AppIntent {
     static var description = IntentDescription("Skips backward (rewinds) in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
-    // No `default:` — the metadata processor's static analyzer needs the
-    // default value (when present) to be a literal it can parse from
-    // source text alone; `Measurement(value:unit:)` is a constructor call,
-    // not a literal, and using it as a default failed the archive with
-    // "Expected either a literal or array of literals, but got unexpected
-    // value instead". Leaving the parameter required sidesteps that
-    // entirely — Siri always has a value in hand by the time this runs,
-    // since the value is spoken as part of matching the phrase itself.
-    @Parameter(title: "Duration")
-    var duration: Measurement<UnitDuration>
+    @Parameter(title: "Seconds", default: 15)
+    var seconds: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Skip backward \(\.$duration) in Lumisound")
+        Summary("Skip backward \(\.$seconds) seconds in Lumisound")
     }
 
     @MainActor
@@ -182,7 +171,7 @@ struct SeekBackwardIntent: AppIntent {
         guard let player = AudioPlayerManager.shared else {
             throw LumisoundIntentError.appNotReady
         }
-        player.seek(to: player.position - duration.converted(to: .seconds).value)
+        player.seek(to: player.position - TimeInterval(seconds))
         return .result()
     }
 }
@@ -391,8 +380,8 @@ struct LumisoundShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: SeekForwardIntent(),
             phrases: [
-                "Skip forward \(\.$duration) in \(.applicationName)",
-                "Fast forward \(\.$duration) in \(.applicationName)",
+                "Skip forward \(\.$seconds) seconds in \(.applicationName)",
+                "Fast forward \(\.$seconds) seconds in \(.applicationName)",
             ],
             shortTitle: "Skip Forward",
             systemImageName: "goforward"
@@ -400,8 +389,8 @@ struct LumisoundShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: SeekBackwardIntent(),
             phrases: [
-                "Skip backward \(\.$duration) in \(.applicationName)",
-                "Rewind \(\.$duration) in \(.applicationName)",
+                "Skip backward \(\.$seconds) seconds in \(.applicationName)",
+                "Rewind \(\.$seconds) seconds in \(.applicationName)",
             ],
             shortTitle: "Skip Backward",
             systemImageName: "gobackward"
