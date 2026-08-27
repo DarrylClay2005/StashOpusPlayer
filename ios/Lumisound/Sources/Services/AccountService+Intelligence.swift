@@ -223,6 +223,26 @@ extension AccountService {
         _ = try? await makeRequest("/user/intelligence/actions/\(actionID)/revert", method: "POST")
     }
 
+    /// Aria Lumi's cloud-library counterpart to the on-device corrupt-file
+    /// auto-delete: asks the bridge to remove any `ios_user_music_metadata`
+    /// row that doesn't point at a real, playable file (a failed/partial
+    /// upload — zero/unknown size, non-positive duration) — see
+    /// `/user/intelligence/cloud-cleanup` in main.py for the exact bar and
+    /// why this one skips the local trash-first contract (there's no real
+    /// audio behind these rows to protect). Returns the titles removed, for
+    /// the caller to log/toast; empty on any failure or when logged out.
+    func ariaCloudCleanup() async -> [(filename: String, title: String)] {
+        guard isLoggedIn else { return [] }
+        struct RemovedEntry: Decodable { let filename: String; let title: String }
+        struct Response: Decodable { let removed: [RemovedEntry] }
+        do {
+            let data = try await makeRequest("/user/intelligence/cloud-cleanup", method: "POST")
+            return try JSONDecoder().decode(Response.self, from: data).removed.map { ($0.filename, $0.title) }
+        } catch {
+            return []
+        }
+    }
+
     /// Fetches (or triggers, on a first-ever request for this album) a
     /// short Aria Lumi liner-notes blurb for `artist`/`album` — cached
     /// server-side per album, not per user, so most calls are free (see

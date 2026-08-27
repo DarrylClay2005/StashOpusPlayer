@@ -66,6 +66,7 @@ enum DeadLinkHealingService {
                 healed += 1
                 appLog("DeadLinkHealingService: relinked \"\(song.title)\" to \(replacement.sourceTrackID)", category: "library")
                 RemoteLogger.log(category: "library", event: "dead_link_healed", detail: ["title": song.title])
+                AriaActivityLog.shared.logDeadLinkHealed(title: song.title, artist: song.artist)
             }
         }
 

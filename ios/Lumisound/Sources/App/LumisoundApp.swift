@@ -210,6 +210,10 @@ struct LumisoundApp: App {
                     // for the rest of the session (non-blocking, all users).
                     CorruptFileFinderService.shared.startPeriodicScanning()
 
+                    // Aria's cloud-library housekeeping counterpart to the
+                    // local corrupt-file scan above — once a day, at most.
+                    Task { await AriaCloudCleanupService.runIfNeeded() }
+
                     // Sweep anything past its 30-day recovery window — cheap
                     // no-op most launches, matters for anyone who deleted
                     // tracks a month ago and never opened Recently Deleted.

@@ -5789,6 +5789,71 @@ async def revert_aria_action(action_id: int, payload: dict = Depends(get_current
     return {"ok": True}
 
 
+@app.post("/user/intelligence/cloud-cleanup")
+async def aria_cloud_cleanup(user: dict = Depends(get_current_user)):
+    """Aria Lumi's cloud-library counterpart to the iOS app's local
+    corrupt-file auto-delete (see CorruptFileFinderService.
+    ariaAutoDeleteCorruptFiles): removes `ios_user_music_metadata` rows
+    that don't point at a real, playable track — zero/unknown file size or
+    a non-positive duration, which is never a legitimate upload, only a
+    failed/partial one or a row left behind by an interrupted operation.
+
+    Deliberately conservative and, unlike the local version, a genuine hard
+    delete with no trash/revert step: there's no "before" state worth
+    protecting here (a 0-byte file has no audio to lose), so the same
+    revert-first bar the local auto-delete holds itself to doesn't apply.
+    A merely LOW bitrate or SMALL-but-playable file is left alone — that's
+    a quality issue, not a broken upload, and removing it isn't this
+    endpoint's call to make. Logged to `ios_aria_actions` same as any other
+    autonomous action of hers.
+    """
+    user_id = user["sub"]
+    music_dir = _user_music_dir(user_id)
+    if music_dir is None:
+        raise HTTPException(status_code=503, detail="User music storage not configured")
+
+    removed: list[dict] = []
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT filename, relative_path, title FROM ios_user_music_metadata "
+                "WHERE user_id = %s AND (file_size_bytes IS NULL OR file_size_bytes < 1024 "
+                "OR duration_seconds IS NULL OR duration_seconds <= 0) LIMIT 200",
+                (user_id,),
+            )
+            rows = await cur.fetchall()
+
+            for filename, relative_path, title in rows:
+                filepath = relative_path or filename
+                full_path = (music_dir / filepath).resolve()
+                if not full_path.is_relative_to(music_dir):
+                    continue  # never follow a stored path outside the user's own dir
+                try:
+                    if full_path.exists():
+                        full_path.unlink()
+                except Exception:
+                    logger.exception("aria_cloud_cleanup: failed to remove %s for user %s", filepath, user_id)
+                    continue
+
+                await cur.execute(
+                    "DELETE FROM ios_user_music_metadata WHERE user_id = %s AND filename = %s",
+                    (user_id, filename),
+                )
+                display_title = title or filename
+                await cur.execute(
+                    "INSERT INTO ios_aria_actions "
+                    "(user_id, action_type, title, artist, detail, confidence) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (user_id, "cloud_broken_upload_removed", display_title, None,
+                     "Removed a cloud library entry with no real audio behind it (failed/partial upload).",
+                     "high"),
+                )
+                removed.append({"filename": filename, "title": display_title})
+
+    return {"removed": removed}
+
+
 # ---------------------------------------------------------------------------
 # AI DJ Mode (Feature: ai-dj-mode)
 # ---------------------------------------------------------------------------

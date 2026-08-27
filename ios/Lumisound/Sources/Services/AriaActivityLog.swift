@@ -14,6 +14,8 @@ struct AriaAction: Codable, Identifiable, Equatable {
     enum Kind: String, Codable {
         case duplicateRemoved
         case corruptFileDeleted
+        case cloudTrackRemoved
+        case deadLinkHealed
     }
 
     let id: UUID
@@ -148,6 +150,44 @@ final class AriaActivityLog: ObservableObject {
             }
         }
         trimAndPersist()
+    }
+
+    /// Records Aria Lumi's cloud-library cleanup (see
+    /// `AccountService.ariaCloudCleanup`) and toasts it. The server has
+    /// already made the removal by the time this is called — this is a
+    /// local record only (no server report round-trip needed, unlike the
+    /// on-device actions above, since the server wrote its own
+    /// `ios_aria_actions` row directly). No revert: these rows never
+    /// pointed at real audio to begin with.
+    func logCloudTracksRemoved(_ entries: [(filename: String, title: String)]) {
+        guard !entries.isEmpty else { return }
+        for entry in entries {
+            actions.append(AriaAction(
+                id: UUID(), survivingSongID: "", kind: .cloudTrackRemoved,
+                title: entry.title, artist: "", removedEntryID: entry.filename,
+                serverActionID: nil, confidence: "high", timestamp: Date()
+            ))
+        }
+        trimAndPersist()
+        let word = entries.count == 1 ? "entry" : "entries"
+        ToastCenter.shared.show("Aria cleaned up \(entries.count) broken cloud \(word)", category: .info, icon: "sparkles")
+    }
+
+    /// Records Aria Lumi silently relinking a track whose upstream source
+    /// went dead (see `DeadLinkHealingService`) and toasts it. This
+    /// automation already existed and already ran on its own — it just
+    /// never told the user it happened, logging only to the debug console.
+    /// No revert: relinking only changes which source a FUTURE re-download
+    /// would use, never the current (already playable) local file, so
+    /// there's nothing here that needs undoing.
+    func logDeadLinkHealed(title: String, artist: String) {
+        actions.append(AriaAction(
+            id: UUID(), survivingSongID: "", kind: .deadLinkHealed,
+            title: title, artist: artist, removedEntryID: "",
+            serverActionID: nil, confidence: "high", timestamp: Date()
+        ))
+        trimAndPersist()
+        ToastCenter.shared.show("Aria relinked \"\(title)\" to a working source", category: .info, icon: "sparkles")
     }
 
     private func trimAndPersist() {
