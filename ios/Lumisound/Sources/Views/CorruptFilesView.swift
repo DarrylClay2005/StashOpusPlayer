@@ -70,8 +70,26 @@ struct CorruptFilesView: View {
                 }
                 .disabled(service.isScanning)
 
+                // Lets Aria trash whatever a scan flags automatically,
+                // without waiting for a manual "Delete All" tap — on by
+                // default (see `CorruptFileFinderService.autoDeleteEnabled`).
+                // Trashing (not a hard delete) means turning this off just
+                // stops the automation; it isn't the only safety net.
+                Toggle(isOn: Binding(
+                    get: { service.autoDeleteEnabled },
+                    set: { service.autoDeleteEnabled = $0 }
+                )) {
+                    Label("Let Aria Auto-Delete", systemImage: "sparkles")
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .tint(AppTheme.dynamicAccent)
+
             } header: {
                 sectionHeader("Status")
+            } footer: {
+                Text("When on, Aria automatically removes corrupt files she finds — moved to Recently Deleted, recoverable for 30 days, never a permanent delete.")
+                    .font(AppTheme.bodyFont(size: 12))
+                    .foregroundStyle(AppTheme.textSecondary)
             }
             .listRowBackground(AppTheme.surface)
 

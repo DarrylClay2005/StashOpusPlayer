@@ -13,6 +13,7 @@ import Foundation
 struct AriaAction: Codable, Identifiable, Equatable {
     enum Kind: String, Codable {
         case duplicateRemoved
+        case corruptFileDeleted
     }
 
     let id: UUID
@@ -120,6 +121,33 @@ final class AriaActivityLog: ObservableObject {
         if let serverID = action.serverActionID {
             Task { await AccountService.shared?.reportAriaActionReverted(actionID: serverID) }
         }
+    }
+
+    /// Records Aria Lumi's autonomous corrupt-file cleanup (see
+    /// `CorruptFileFinderService.ariaAutoDeleteCorruptFiles`), toasts it, and
+    /// reports each removal to the server audit log. Unlike
+    /// `recordDuplicateRemoved`, there's no surviving row left to hang a
+    /// "Revert Aria's Change" context-menu item off of — the file is simply
+    /// gone from the library — but it's not gone from disk: the removal
+    /// itself went through `RecentlyDeletedService`/the Files app Trash
+    /// (see `LibraryManager.ariaRemoveCorruptFile`), so it's still fully
+    /// recoverable there, same revertibility guarantee, different UI.
+    func logCorruptFilesDeleted(_ entries: [CorruptFileEntry]) {
+        guard !entries.isEmpty else { return }
+        for entry in entries {
+            actions.append(AriaAction(
+                id: UUID(), survivingSongID: "", kind: .corruptFileDeleted,
+                title: entry.fileName, artist: "", removedEntryID: entry.id.uuidString,
+                serverActionID: nil, confidence: "high", timestamp: Date()
+            ))
+            Task {
+                _ = await AccountService.shared?.reportAriaAction(
+                    type: "corrupt_file_deleted", title: entry.fileName, artist: nil,
+                    detail: entry.reasonText, after: nil, confidence: "high", memoryID: nil
+                )
+            }
+        }
+        trimAndPersist()
     }
 
     private func trimAndPersist() {

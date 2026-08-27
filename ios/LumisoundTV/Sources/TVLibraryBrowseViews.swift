@@ -86,14 +86,25 @@ struct TVAlbumsGridView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: 48)]
 
+    // `tvAlbumGroups` is a `Dictionary(grouping:)` + sort over the WHOLE
+    // library — with a several-thousand-track cloud library, recomputing it
+    // as a plain `let` inline in `body` (as this used to do) meant paying
+    // that full O(n log n) cost on every body re-evaluation, including ones
+    // triggered by unrelated state elsewhere in the view tree (e.g. typing
+    // in the Songs tab's search field re-renders `TVLibraryView`, which
+    // reconstructs this view even while `mode == .albums` isn't showing;
+    // any other `@Published` change on the shared `client` does the same).
+    // Cached in `.task(id:)` instead, same fix as iOS's `SongsTab` got for
+    // its identical A-Z grouping cost — see `sortedSongsCache` there.
+    @State private var cachedAlbums: [TVAlbumGroup] = []
+
     var body: some View {
-        let albums = tvAlbumGroups(from: library)
         ScrollView {
-            if albums.isEmpty {
+            if cachedAlbums.isEmpty {
                 Text("No albums yet.").font(.title3).foregroundStyle(.secondary).padding(.top, 100)
             } else {
                 LazyVGrid(columns: columns, spacing: 48) {
-                    ForEach(albums) { album in
+                    ForEach(cachedAlbums) { album in
                         NavigationLink {
                             TVAlbumDetailView(client: client, token: token, album: album)
                         } label: {
@@ -104,6 +115,10 @@ struct TVAlbumsGridView: View {
                 }
                 .padding(60)
             }
+        }
+        .task(id: library.count) {
+            let library = library
+            cachedAlbums = await Task.detached(priority: .userInitiated) { tvAlbumGroups(from: library) }.value
         }
     }
 
@@ -199,14 +214,16 @@ struct TVArtistsGridView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: 48)]
 
+    /// See `TVAlbumsGridView.cachedAlbums` — same fix, same reason.
+    @State private var cachedArtists: [TVArtistGroup] = []
+
     var body: some View {
-        let artists = tvArtistGroups(from: library)
         ScrollView {
-            if artists.isEmpty {
+            if cachedArtists.isEmpty {
                 Text("No artists yet.").font(.title3).foregroundStyle(.secondary).padding(.top, 100)
             } else {
                 LazyVGrid(columns: columns, spacing: 48) {
-                    ForEach(artists) { artist in
+                    ForEach(cachedArtists) { artist in
                         NavigationLink {
                             TVArtistDetailView(client: client, token: token, artist: artist)
                         } label: {
@@ -217,6 +234,10 @@ struct TVArtistsGridView: View {
                 }
                 .padding(60)
             }
+        }
+        .task(id: library.count) {
+            let library = library
+            cachedArtists = await Task.detached(priority: .userInitiated) { tvArtistGroups(from: library) }.value
         }
     }
 
@@ -290,14 +311,16 @@ struct TVGenresGridView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: 48)]
 
+    /// See `TVAlbumsGridView.cachedAlbums` — same fix, same reason.
+    @State private var cachedGenres: [TVGenreGroup] = []
+
     var body: some View {
-        let genres = tvGenreGroups(from: library)
         ScrollView {
-            if genres.isEmpty {
+            if cachedGenres.isEmpty {
                 Text("No genre-tagged songs yet.").font(.title3).foregroundStyle(.secondary).padding(.top, 100)
             } else {
                 LazyVGrid(columns: columns, spacing: 48) {
-                    ForEach(genres) { genre in
+                    ForEach(cachedGenres) { genre in
                         NavigationLink {
                             TVGenreDetailView(client: client, token: token, genre: genre)
                         } label: {
@@ -308,6 +331,10 @@ struct TVGenresGridView: View {
                 }
                 .padding(60)
             }
+        }
+        .task(id: library.count) {
+            let library = library
+            cachedGenres = await Task.detached(priority: .userInitiated) { tvGenreGroups(from: library) }.value
         }
     }
 

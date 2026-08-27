@@ -69,6 +69,37 @@ extension LibraryManager {
         return true
     }
 
+    /// Aria Lumi's autonomous corrupt-file cleanup path — mirrors
+    /// `ariaRemoveDuplicate`'s revert-first contract (never a hard delete on
+    /// her own initiative) but works from a raw file URL rather than a known
+    /// song id, since a corrupt file (an interrupted download, a truncated
+    /// conversion) may never have made it into `importedSongs` at all.
+    @discardableResult
+    func ariaRemoveCorruptFile(at url: URL) -> Bool {
+        if let song = importedSongs.first(where: { $0.url == url }) {
+            guard RecentlyDeletedService.shared?.trash(song: song) ?? false else { return false }
+            importedSongs.removeAll { $0.id == song.id }
+            favoriteSongIDs.remove(song.id)
+            persistence.saveFavorites(favoriteSongIDs)
+            for index in playlists.indices {
+                playlists[index].songIDs.removeAll { $0 == song.id }
+            }
+            persistence.savePlaylists(playlists)
+            rebuildAllSongs()
+            return true
+        }
+        // Not a tracked library song — e.g. a download that got interrupted
+        // before it was ever adopted into `importedSongs`. Route through the
+        // OS's own Trash (recoverable via the Files app) rather than
+        // `removeItem`, so it stays revertible the same as a tracked song.
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// Bulk version of `removeImportedSong` for Library's multi-select "Delete"
     /// action — one rebuild/toast instead of one per song. IDs that aren't in
     /// `importedSongs` (e.g. Apple Music library tracks, which this can't

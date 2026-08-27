@@ -38,7 +38,7 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 
-from aria_apis import get_library_genre_snapshot, get_playlist_context
+from aria_apis import get_library_genre_snapshot, get_playlist_context, get_recent_housekeeping
 from db import get_pool, log_event
 
 logger = logging.getLogger("ios-bridge.intelligence")
@@ -369,6 +369,7 @@ async def get_user_taste_profile(user_id: str) -> dict:
     # try/except needed here.
     profile["library_genres"] = await get_library_genre_snapshot(user_id)
     profile["playlists"] = await get_playlist_context(user_id)
+    profile["recent_housekeeping"] = await get_recent_housekeeping(user_id)
 
     _taste_profile_cache[user_id] = (time.monotonic() + _TASTE_PROFILE_TTL, profile)
     return profile

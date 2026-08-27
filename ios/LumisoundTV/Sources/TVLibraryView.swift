@@ -35,17 +35,37 @@ struct TVLibraryView: View {
     /// Only the Songs tab is filtered by it; Albums/Artists/Genres still
     /// group the whole library so browsing by those dimensions isn't
     /// truncated by an unrelated in-progress search.
-    private var filteredSongs: [UserMusicTrack] {
+    ///
+    /// Cached rather than a plain computed property: with a several-
+    /// thousand-track library this `.filter`/`.compactMap` pair (`queue`
+    /// chains directly off it) re-ran on EVERY `body` evaluation — not just
+    /// per keystroke, but on every unrelated re-render too (mode switches,
+    /// favorite toggles, `client` publishing anything) — since a computed
+    /// property has no memory of whether its inputs actually changed. Same
+    /// class of fix as `TVAlbumsGridView.cachedAlbums`.
+    @State private var filteredSongs: [UserMusicTrack] = []
+    @State private var queue: [TVPlayable] = []
+    @State private var filterDebounceTask: Task<Void, Never>?
+
+    private func recomputeFilteredSongs() {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return client.library }
-        return client.library.filter {
+        let library = client.library
+        let filtered = q.isEmpty ? library : library.filter {
             $0.title.lowercased().contains(q) || $0.artist.lowercased().contains(q) || $0.album.lowercased().contains(q)
         }
+        filteredSongs = filtered
+        queue = filtered.compactMap { client.playable(from: $0, token: token) }
     }
 
-    /// The whole library mapped to playables — used as the queue when a track is picked.
-    private var queue: [TVPlayable] {
-        filteredSongs.compactMap { client.playable(from: $0, token: token) }
+    /// Debounced for `searchText` (fires once per pause in typing, not once
+    /// per keystroke); immediate for the library actually loading/changing.
+    private func scheduleFilterRecompute() {
+        filterDebounceTask?.cancel()
+        filterDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            recomputeFilteredSongs()
+        }
     }
 
     var body: some View {
@@ -86,7 +106,10 @@ struct TVLibraryView: View {
         .task {
             if client.library.isEmpty { await client.fetchLibrary(token: token) }
             if client.favoriteSongIDs.isEmpty { await client.fetchFavorites(token: token) }
+            recomputeFilteredSongs()
         }
+        .onChange(of: searchText) { _ in scheduleFilterRecompute() }
+        .onChange(of: client.library.count) { _ in recomputeFilteredSongs() }
     }
 
     /// Custom chip row replacing the stock segmented `Picker` — matches the

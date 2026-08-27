@@ -78,3 +78,39 @@ async def get_playlist_context(user_id: str, limit: int = 10) -> list[dict]:
     except Exception:
         logger.exception("get_playlist_context failed for user %s", user_id)
         return []
+
+
+async def get_recent_housekeeping(user_id: str, days: int = 14, limit: int = 20) -> list[dict]:
+    """Aria's own memory of the autonomous cleanup she's actually done for
+    this user recently (duplicate copies trashed, corrupt files trashed —
+    see `ios_aria_actions`, written by `POST /user/intelligence/actions`
+    right after each on-device action). Distinct from `ios_aria_memory`
+    (her suggestion history): this is what she DID, not what she merely
+    proposed. Feeds her taste-profile context so she can reference her own
+    housekeeping conversationally ("cleaned up 3 corrupt files this week")
+    instead of only ever talking about the user's music."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT action_type, title, artist, created_at, reverted_at "
+                    "FROM ios_aria_actions "
+                    "WHERE user_id = %s AND created_at > NOW() - (%s || ' days')::interval "
+                    "ORDER BY created_at DESC LIMIT %s",
+                    (user_id, days, limit),
+                )
+                rows = await cur.fetchall()
+                return [
+                    {
+                        "action_type": row[0],
+                        "title": row[1],
+                        "artist": row[2],
+                        "created_at": row[3].isoformat() if row[3] else None,
+                        "reverted": row[4] is not None,
+                    }
+                    for row in rows
+                ]
+    except Exception:
+        logger.exception("get_recent_housekeeping failed for user %s", user_id)
+        return []

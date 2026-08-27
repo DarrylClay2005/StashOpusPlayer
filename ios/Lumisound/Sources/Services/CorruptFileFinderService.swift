@@ -25,9 +25,27 @@ final class CorruptFileFinderService: ObservableObject {
 
     // MARK: - Scan
 
+    /// Whether a successful scan should auto-trash whatever it finds instead
+    /// of just listing it for manual review — see `autoDeleteEnabled`.
+    @Published var autoDeleteEnabled: Bool = UserDefaults.standard.object(forKey: "corruptFinder_autoDelete") == nil
+        ? true // default on, per product decision: Aria should keep the library clean without being asked
+        : UserDefaults.standard.bool(forKey: "corruptFinder_autoDelete") {
+        didSet { UserDefaults.standard.set(autoDeleteEnabled, forKey: "corruptFinder_autoDelete") }
+    }
+
     /// Scans all audio files inside `directory` for corruption.
     /// Tries to open each file with AVAudioFile; also checks minimum file size
     /// (1 KB) and that the file extension is a recognised audio type.
+    ///
+    /// A file that passed validation on a previous scan and hasn't changed
+    /// since (same `ValidatedFileCache.FileStamp`) is skipped rather than
+    /// re-opened/re-decoded — without this, the periodic scan
+    /// (`startPeriodicScanning`, every 5 min for the life of the app) redid
+    /// a full `AVAudioFile` open + tail-read of EVERY audio file in
+    /// Documents on every tick, forever, regardless of whether anything had
+    /// actually changed. At a few thousand songs that's real, recurring
+    /// CPU/disk work competing with playback and downloads — same class of
+    /// fix as `ScanCacheService` uses for the main library scan.
     func runScan(in directory: URL) async {
         guard !isScanning else { return }
         isScanning = true
@@ -47,15 +65,48 @@ final class CorruptFileFinderService: ObservableObject {
             }
         }
 
-        let found = await Task.detached(priority: .utility) { [directory, expectedDurations] in
-            CorruptFileFinderService.scanDirectory(directory, expectedDurations: expectedDurations)
+        let knownGood = ValidatedFileCache.shared.stamps
+        let (found, nowGood) = await Task.detached(priority: .utility) { [directory, expectedDurations, knownGood] in
+            CorruptFileFinderService.scanDirectory(directory, expectedDurations: expectedDurations, knownGood: knownGood)
         }.value
 
+        ValidatedFileCache.shared.replaceAll(nowGood)
         corruptFiles = found
         let now = Date()
         lastScanDate = now
         UserDefaults.standard.set(now.timeIntervalSince1970, forKey: "corruptFinder_lastScanTimestamp")
         isScanning = false
+
+        if autoDeleteEnabled, !found.isEmpty {
+            await ariaAutoDeleteCorruptFiles()
+        }
+    }
+
+    // MARK: - Aria auto-delete
+
+    /// Aria Lumi's autonomous cleanup pass: trashes (never hard-deletes —
+    /// same revertibility contract as `LibraryManager.ariaRemoveDuplicate`)
+    /// every file currently flagged corrupt, logs each removal to
+    /// `AriaActivityLog` (toast + server audit trail — see its doc comment
+    /// for why this one has no "Revert Aria's Change" menu item the way a
+    /// duplicate-removal does). Runs automatically
+    /// after every scan that finds something (both the periodic background
+    /// scan and a manual "Scan Now") as long as `autoDeleteEnabled` is on;
+    /// also callable directly for a user-initiated "let Aria clean this up"
+    /// action on the current `corruptFiles` list.
+    func ariaAutoDeleteCorruptFiles() async {
+        let toDelete = corruptFiles
+        guard !toDelete.isEmpty else { return }
+        var removed: [CorruptFileEntry] = []
+        for entry in toDelete {
+            guard LibraryManager.shared?.ariaRemoveCorruptFile(at: entry.url) ?? false else { continue }
+            removed.append(entry)
+        }
+        guard !removed.isEmpty else { return }
+        corruptFiles.removeAll { entry in removed.contains { $0.id == entry.id } }
+        AriaActivityLog.shared.logCorruptFilesDeleted(removed)
+        let fileWord = removed.count == 1 ? "file" : "files"
+        ToastCenter.shared.show("Aria cleaned up \(removed.count) corrupt \(fileWord)", category: .info, icon: "sparkles")
     }
 
     // MARK: - Delete
@@ -215,15 +266,27 @@ final class CorruptFileFinderService: ObservableObject {
         LumisoundExclusiveExtensionService.marker  // "lms" — converted tracks, see that type
     ]
 
-    nonisolated static func scanDirectory(_ directory: URL, expectedDurations: [URL: TimeInterval] = [:]) -> [CorruptFileEntry] {
+    /// - Parameter knownGood: paths (see `ScanCacheService.documentsRelativePath`)
+    ///   that validated as `.valid` on a previous scan, keyed to the
+    ///   `ScanCacheService.FileStamp` they had then. A file whose current
+    ///   stamp still matches is trusted without re-opening/re-decoding it —
+    ///   see `runScan`'s doc comment for why this matters at library scale.
+    /// - Returns: the flagged files, plus the full set of paths that
+    ///   validated `.valid` THIS scan (becomes next scan's `knownGood`).
+    nonisolated static func scanDirectory(
+        _ directory: URL,
+        expectedDurations: [URL: TimeInterval] = [:],
+        knownGood: [String: ScanCacheService.FileStamp] = [:]
+    ) -> (flagged: [CorruptFileEntry], validated: [String: ScanCacheService.FileStamp]) {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: directory,
             includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return [] }
+        ) else { return ([], [:]) }
 
         var results: [CorruptFileEntry] = []
+        var validated: [String: ScanCacheService.FileStamp] = [:]
 
         for case let fileURL as URL in enumerator {
             let ext = fileURL.pathExtension.lowercased()
@@ -234,10 +297,24 @@ final class CorruptFileFinderService: ObservableObject {
                   attrs.isRegularFile == true else { continue }
 
             let fileSize = attrs.fileSize ?? 0
+            let key = ScanCacheService.documentsRelativePath(for: fileURL) ?? fileURL.standardizedFileURL.path
+            let stamp = ScanCacheService.fileStamp(for: fileURL)
+
+            // A file with no expected-duration entry that matched its
+            // known-good stamp last scan is unchanged since it last passed —
+            // trust it and skip the AVAudioFile open/tail-read entirely.
+            // Files WITH an expected duration are always re-checked even if
+            // unchanged, since `expectedDurations` itself can change scan to
+            // scan (e.g. metadata re-enrichment learning a real duration
+            // after the fact) in a way the file's own stamp wouldn't reflect.
+            if expectedDurations[fileURL] == nil, let stamp, knownGood[key] == stamp {
+                validated[key] = stamp
+                continue
+            }
 
             switch validateAudioFile(at: fileURL, expectedDuration: expectedDurations[fileURL]) {
             case .valid:
-                continue
+                if let stamp { validated[key] = stamp }
             case .tooSmall:
                 results.append(CorruptFileEntry(url: fileURL, fileSizeBytes: Int64(fileSize), reason: .tooSmall))
             case .unreadable(let detail):
@@ -247,7 +324,52 @@ final class CorruptFileFinderService: ObservableObject {
             }
         }
 
-        return results
+        return (results, validated)
+    }
+}
+
+// MARK: - ValidatedFileCache
+
+/// Persisted `path → FileStamp` set of files that passed
+/// `CorruptFileFinderService`'s integrity check on their most recent scan —
+/// lets `runScan` skip re-validating anything that hasn't changed since.
+/// Deliberately separate from `ScanCacheService` (which caches extracted
+/// `Song` metadata, a different concern) even though it reuses its
+/// `FileStamp`/path-keying helpers.
+@MainActor
+final class ValidatedFileCache {
+    static let shared = ValidatedFileCache()
+
+    private(set) var stamps: [String: ScanCacheService.FileStamp] = [:]
+    private let cacheURL: URL
+
+    private init() {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        cacheURL = caches.appendingPathComponent("corrupt_finder_validated_v1.json")
+        load()
+    }
+
+    /// Wholesale-replaces the known-good set with the result of a just-
+    /// completed scan and persists it off-actor.
+    func replaceAll(_ newStamps: [String: ScanCacheService.FileStamp]) {
+        stamps = newStamps
+        let snapshot = newStamps
+        let destination = cacheURL
+        Task.detached(priority: .utility) {
+            struct Entry: Codable { let mtime: TimeInterval; let size: Int64 }
+            let encodable = snapshot.mapValues { Entry(mtime: $0.mtime, size: $0.size) }
+            guard let data = try? JSONEncoder().encode(encodable) else { return }
+            try? data.write(to: destination, options: .atomic)
+        }
+    }
+
+    private func load() {
+        struct Entry: Codable { let mtime: TimeInterval; let size: Int64 }
+        guard let data = try? Data(contentsOf: cacheURL),
+              let decoded = try? JSONDecoder().decode([String: Entry].self, from: data)
+        else { return }
+        stamps = decoded.mapValues { ScanCacheService.FileStamp(mtime: $0.mtime, size: $0.size) }
     }
 }
 
