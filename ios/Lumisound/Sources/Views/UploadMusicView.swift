@@ -673,7 +673,16 @@ struct UploadMusicView: View {
         let importDir = streaming.downloadDirectory
         do {
             try FileManager.default.createDirectory(at: importDir, withIntermediateDirectories: true)
-        } catch {}
+        } catch {
+            // withIntermediateDirectories: true doesn't throw for "already
+            // exists" — a failure here is a real filesystem problem
+            // (permissions, disk full), which the download below would also
+            // hit but with a far less specific error. Surface it now instead
+            // of masking the root cause behind a generic download failure.
+            appWarn("restore: createDirectory failed for \(importDir.path): \(error.localizedDescription)", category: "storage")
+            errorMessage = "Restore failed: could not create download folder (\(error.localizedDescription))"
+            return
+        }
 
         let destURL = importDir.appendingPathComponent(track.filename)
         if FileManager.default.fileExists(atPath: destURL.path) {

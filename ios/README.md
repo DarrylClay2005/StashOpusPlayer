@@ -60,10 +60,10 @@ Lumisound connects to a FastAPI bridge server that powers YouTube/SoundCloud sea
 The app ships pointed at the shared server running at:
 
 ```
-https://germinate-props-motive.ngrok-free.dev
+https://lumisound-bridge.xenusanimations.studio
 ```
 
-This is a static ngrok domain running on the developer's machine. It is always on and accessible from anywhere without home Wi-Fi. You do not need to run your own server to use Lumisound — just create a free account (see below).
+This is a static Cloudflare Tunnel domain running on the developer's machine. It is always on and accessible from anywhere without home Wi-Fi. You do not need to run your own server to use Lumisound — just create a free account (see below).
 
 ### Creating your account
 

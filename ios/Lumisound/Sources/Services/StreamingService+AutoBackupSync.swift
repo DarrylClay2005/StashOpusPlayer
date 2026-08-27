@@ -56,7 +56,11 @@ extension StreamingService {
                       FileManager.default.fileExists(atPath: url.path)
                 else { continue }
                 guard await LumisoundExclusiveExtensionService.hasEmbeddedThumbnailTag(fileURL: url) else { continue }
-                _ = try? await self.patchArtworkFlag(filename: record.filename, hasArtwork: true, token: token)
+                do {
+                    _ = try await self.patchArtworkFlag(filename: record.filename, hasArtwork: true, token: token)
+                } catch {
+                    appWarn("backUpLibraryIfNeeded: has_artwork patch failed for \"\(record.filename)\": \(error.localizedDescription)", category: "network")
+                }
             }
 
             guard !pending.isEmpty else { return }
@@ -92,7 +96,11 @@ extension StreamingService {
                     sampleRate: song.sampleRate > 0 ? song.sampleRate : nil,
                     hasArtwork: await LumisoundExclusiveExtensionService.hasEmbeddedThumbnailTag(fileURL: url)
                 )
-                _ = try? await self.uploadTrack(fileURL: url, token: token, metadata: metadata)
+                do {
+                    _ = try await self.uploadTrack(fileURL: url, token: token, metadata: metadata)
+                } catch {
+                    appWarn("backUpLibraryIfNeeded: upload failed for \"\(song.displayName)\": \(error.localizedDescription)", category: "network")
+                }
                 // Throttle — keeps this from saturating the network/CPU during a
                 // big catch-up so foreground playback and streaming stay smooth.
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
