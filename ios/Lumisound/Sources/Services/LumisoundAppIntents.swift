@@ -132,7 +132,15 @@ struct SeekForwardIntent: AppIntent {
     static var description = IntentDescription("Skips forward in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "Duration", default: Measurement(value: 15, unit: UnitDuration.seconds))
+    // No `default:` — the metadata processor's static analyzer needs the
+    // default value (when present) to be a literal it can parse from
+    // source text alone; `Measurement(value:unit:)` is a constructor call,
+    // not a literal, and using it as a default failed the archive with
+    // "Expected either a literal or array of literals, but got unexpected
+    // value instead". Leaving the parameter required sidesteps that
+    // entirely — Siri always has a value in hand by the time this runs,
+    // since the value is spoken as part of matching the phrase itself.
+    @Parameter(title: "Duration")
     var duration: Measurement<UnitDuration>
 
     static var parameterSummary: some ParameterSummary {
@@ -154,7 +162,15 @@ struct SeekBackwardIntent: AppIntent {
     static var description = IntentDescription("Skips backward (rewinds) in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "Duration", default: Measurement(value: 15, unit: UnitDuration.seconds))
+    // No `default:` — the metadata processor's static analyzer needs the
+    // default value (when present) to be a literal it can parse from
+    // source text alone; `Measurement(value:unit:)` is a constructor call,
+    // not a literal, and using it as a default failed the archive with
+    // "Expected either a literal or array of literals, but got unexpected
+    // value instead". Leaving the parameter required sidesteps that
+    // entirely — Siri always has a value in hand by the time this runs,
+    // since the value is spoken as part of matching the phrase itself.
+    @Parameter(title: "Duration")
     var duration: Measurement<UnitDuration>
 
     static var parameterSummary: some ParameterSummary {
@@ -328,6 +344,16 @@ struct SearchAndPlayIntent: AppIntent {
 }
 
 struct LumisoundShortcuts: AppShortcutsProvider {
+    // Apple caps AppShortcutsProvider at 10 entries per app — exceeding it
+    // fails the archive outright ("Found 11 App Shortcuts, but each app may
+    // have at most 10"), and the metadata processor's OTHER diagnostics
+    // from the same failed export (bogus-looking "Invalid parameter type"
+    // errors on otherwise perfectly valid parameters) are a confusing,
+    // misleading side effect of that overflow, not real problems with those
+    // parameters. ToggleShuffleIntent/CycleRepeatModeIntent are still fully
+    // functional intents (usable from the Shortcuts app), just no longer
+    // pre-registered with a default Siri phrase — traded for the two new
+    // seek intents below, which are more likely to actually get spoken.
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: PlayFavoritesIntent(),
@@ -361,18 +387,6 @@ struct LumisoundShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Previous Track",
             systemImageName: "backward.fill"
-        )
-        AppShortcut(
-            intent: ToggleShuffleIntent(),
-            phrases: ["Toggle shuffle in \(.applicationName)"],
-            shortTitle: "Toggle Shuffle",
-            systemImageName: "shuffle"
-        )
-        AppShortcut(
-            intent: CycleRepeatModeIntent(),
-            phrases: ["Cycle repeat mode in \(.applicationName)"],
-            shortTitle: "Repeat Mode",
-            systemImageName: "repeat"
         )
         AppShortcut(
             intent: SeekForwardIntent(),

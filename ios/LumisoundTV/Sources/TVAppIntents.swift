@@ -137,7 +137,10 @@ struct TVSkipForwardIntent: AppIntent {
     static var description = IntentDescription("Skips forward in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "Duration", default: Measurement(value: 15, unit: UnitDuration.seconds))
+    // No `default:` — see the matching comment on iOS's SeekForwardIntent:
+    // the metadata processor's static analyzer needs a literal it can
+    // parse from source, and `Measurement(value:unit:)` isn't one.
+    @Parameter(title: "Duration")
     var duration: Measurement<UnitDuration>
 
     static var parameterSummary: some ParameterSummary {
@@ -158,7 +161,10 @@ struct TVSkipBackwardIntent: AppIntent {
     static var description = IntentDescription("Skips backward (rewinds) in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "Duration", default: Measurement(value: 15, unit: UnitDuration.seconds))
+    // No `default:` — see the matching comment on iOS's SeekForwardIntent:
+    // the metadata processor's static analyzer needs a literal it can
+    // parse from source, and `Measurement(value:unit:)` isn't one.
+    @Parameter(title: "Duration")
     var duration: Measurement<UnitDuration>
 
     static var parameterSummary: some ParameterSummary {
