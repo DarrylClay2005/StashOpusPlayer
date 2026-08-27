@@ -3229,12 +3229,41 @@ def _ytdlp_generic_failure_summary(stderr: bytes) -> str:
     return summary[:300] if summary else "Could not download track"
 
 
+_COOKIES_STALE_SENTINEL = pathlib.Path(YTDLP_CACHE_DIR) / ".cookies_stale"
+
+
+def _flag_cookies_stale_if_needed(stderr: bytes) -> None:
+    """Writes a sentinel file (inside the already-host-mounted yt-dlp cache
+    dir — see YTDLP_CACHE_DIR/docker-compose.yml's `./cache/yt-dlp` mount)
+    whenever yt-dlp reports the specific "cookies have been rotated" failure
+    — as opposed to every other reason `_ytdlp_auth_failure_reason` below
+    handles, THIS one is fixable by nothing short of re-exporting a fresh
+    cookies.txt from a real logged-in browser, which only a host-level
+    process (this container can't reach the host's browser profile, and
+    shouldn't be able to — see refresh_youtube_cookies.sh's own header
+    comment on why that's kept out of the container entirely) can do. A
+    host-side timer picks this sentinel up and reacts immediately rather
+    than waiting for its normal periodic schedule. Best-effort: a failure
+    to write it just means the next scheduled refresh (not an immediate
+    one) eventually fixes it instead.
+    """
+    text = stderr.decode(errors="replace").lower()
+    if "no longer valid" not in text or "cookie" not in text:
+        return
+    try:
+        _COOKIES_STALE_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
+        _COOKIES_STALE_SENTINEL.write_text(datetime.now(timezone.utc).isoformat())
+    except OSError:
+        logger.warning("_flag_cookies_stale_if_needed: failed to write sentinel", exc_info=True)
+
+
 def _ytdlp_auth_failure_reason(stderr: bytes) -> Optional[str]:
     """Maps common yt-dlp stderr failure signatures to a user-facing reason —
     lets /api/stream and /api/download surface "upload your cookies" instead
     of a generic "not found" when that's actually why extraction failed.
     YouTube increasingly requires an authenticated session even for the
     "Play" preview button, which is why this exists."""
+    _flag_cookies_stale_if_needed(stderr)
     text = stderr.decode(errors="replace").lower()
     if "sign in to confirm" in text or "not a bot" in text:
         return "YouTube is requiring sign-in to verify this isn't a bot. Upload your YouTube cookies in Settings to fix this."
