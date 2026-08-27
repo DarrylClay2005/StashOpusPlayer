@@ -129,7 +129,7 @@ final class MusicHapticsService {
                 value: sharpness
             )
         ]
-        let event = CHHapticEvent(type: .hapticTransient, parameters: parameters, relativeTime: 0)
+        let event = CHHapticEvent(eventType: .hapticTransient, parameters: parameters, relativeTime: 0)
         guard let pattern = try? CHHapticPattern(events: [event], parameters: []),
               let hapticEngine = engine,
               let player = try? hapticEngine.makePlayer(with: pattern) else { return }
