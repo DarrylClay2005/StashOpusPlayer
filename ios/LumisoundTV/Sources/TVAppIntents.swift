@@ -127,26 +127,32 @@ struct TVCycleRepeatModeIntent: AppIntent {
 }
 
 /// "Siri, skip forward 30 seconds in Lumisound" / "Siri, skip forward 2
-/// minutes in Lumisound" — `Measurement<UnitDuration>` lets Siri parse
-/// either unit naturally out of the spoken phrase instead of needing a
-/// separate intent per unit.
+/// minutes in Lumisound" — a plain `Int` (seconds) rather than
+/// `Measurement<UnitDuration>`: that overload of `@Parameter`'s
+/// initializer only exists in iOS/tvOS 26+ SDKs, and this app's
+/// deployment target is 16.0 — using it failed the archive build outright
+/// (`'init(...)' is only available in tvOS 26.0 or newer`) for every user
+/// still below 26. Siri still resolves a spoken duration into a plain
+/// integer parameter just fine; it just always lands in seconds rather
+/// than letting the user pick the unit, which is a reasonable trade for
+/// actually working below tvOS 26.
 struct TVSkipForwardIntent: AppIntent {
     static var title: LocalizedStringResource = "Skip Forward"
     static var description = IntentDescription("Skips forward in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "Duration", default: Measurement(value: 15, unit: UnitDuration.seconds))
-    var duration: Measurement<UnitDuration>
+    @Parameter(title: "Seconds", default: 15)
+    var seconds: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Skip forward \(\.$duration) in Lumisound")
+        Summary("Skip forward \(\.$seconds) seconds in Lumisound")
     }
 
     @MainActor
     func perform() async throws -> some IntentResult {
         let player = TVPlayerModel.shared
         guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
-        player.seek(to: player.position + duration.converted(to: .seconds).value)
+        player.seek(to: player.position + Double(seconds))
         return .result()
     }
 }
@@ -156,18 +162,18 @@ struct TVSkipBackwardIntent: AppIntent {
     static var description = IntentDescription("Skips backward (rewinds) in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "Duration", default: Measurement(value: 15, unit: UnitDuration.seconds))
-    var duration: Measurement<UnitDuration>
+    @Parameter(title: "Seconds", default: 15)
+    var seconds: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Skip backward \(\.$duration) in Lumisound")
+        Summary("Skip backward \(\.$seconds) seconds in Lumisound")
     }
 
     @MainActor
     func perform() async throws -> some IntentResult {
         let player = TVPlayerModel.shared
         guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
-        player.seek(to: player.position - duration.converted(to: .seconds).value)
+        player.seek(to: player.position - Double(seconds))
         return .result()
     }
 }
@@ -222,8 +228,8 @@ struct LumisoundTVShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: TVSkipForwardIntent(),
             phrases: [
-                "Skip forward \(\.$duration) in \(.applicationName)",
-                "Fast forward \(\.$duration) in \(.applicationName)",
+                "Skip forward \(\.$seconds) seconds in \(.applicationName)",
+                "Fast forward \(\.$seconds) seconds in \(.applicationName)",
             ],
             shortTitle: "Skip Forward",
             systemImageName: "goforward"
@@ -231,8 +237,8 @@ struct LumisoundTVShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: TVSkipBackwardIntent(),
             phrases: [
-                "Skip backward \(\.$duration) in \(.applicationName)",
-                "Rewind \(\.$duration) in \(.applicationName)",
+                "Skip backward \(\.$seconds) seconds in \(.applicationName)",
+                "Rewind \(\.$seconds) seconds in \(.applicationName)",
             ],
             shortTitle: "Skip Backward",
             systemImageName: "gobackward"

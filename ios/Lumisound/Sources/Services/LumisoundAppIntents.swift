@@ -119,20 +119,26 @@ struct ToggleShuffleIntent: AppIntent {
     }
 }
 
-/// "Siri, skip forward 30 seconds in Lumisound" / "Siri, skip forward 2
-/// minutes in Lumisound" — `Measurement<UnitDuration>` lets Siri parse
-/// either unit naturally out of the spoken phrase instead of needing a
-/// separate intent per unit.
+/// "Siri, skip forward 30 seconds in Lumisound" / "Siri, rewind 90 seconds
+/// in Lumisound" — a plain `Int` (seconds) rather than
+/// `Measurement<UnitDuration>`: that overload of `@Parameter`'s
+/// initializer only exists in iOS/tvOS 26+ SDKs, and this app's
+/// deployment target is 16.0 — using it failed the archive build outright
+/// (`'init(...)' is only available in iOS 26.0 or newer`) for every user
+/// still below 26. Siri still resolves a spoken duration ("thirty
+/// seconds", "two minutes") into a plain integer parameter just fine; it
+/// just always lands in seconds rather than letting the user pick the
+/// unit, which is a reasonable trade for actually working below iOS 26.
 struct SeekForwardIntent: AppIntent {
     static var title: LocalizedStringResource = "Skip Forward"
     static var description = IntentDescription("Skips forward in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "Duration", default: Measurement(value: 15, unit: UnitDuration.seconds))
-    var duration: Measurement<UnitDuration>
+    @Parameter(title: "Seconds", default: 15)
+    var seconds: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Skip forward \(\.$duration) in Lumisound")
+        Summary("Skip forward \(\.$seconds) seconds in Lumisound")
     }
 
     @MainActor
@@ -140,7 +146,7 @@ struct SeekForwardIntent: AppIntent {
         guard let player = AudioPlayerManager.shared else {
             throw LumisoundIntentError.appNotReady
         }
-        player.seek(to: player.position + duration.converted(to: .seconds).value)
+        player.seek(to: player.position + TimeInterval(seconds))
         return .result()
     }
 }
@@ -150,11 +156,11 @@ struct SeekBackwardIntent: AppIntent {
     static var description = IntentDescription("Skips backward (rewinds) in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "Duration", default: Measurement(value: 15, unit: UnitDuration.seconds))
-    var duration: Measurement<UnitDuration>
+    @Parameter(title: "Seconds", default: 15)
+    var seconds: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Skip backward \(\.$duration) in Lumisound")
+        Summary("Skip backward \(\.$seconds) seconds in Lumisound")
     }
 
     @MainActor
@@ -162,7 +168,7 @@ struct SeekBackwardIntent: AppIntent {
         guard let player = AudioPlayerManager.shared else {
             throw LumisoundIntentError.appNotReady
         }
-        player.seek(to: player.position - duration.converted(to: .seconds).value)
+        player.seek(to: player.position - TimeInterval(seconds))
         return .result()
     }
 }
@@ -373,8 +379,8 @@ struct LumisoundShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: SeekForwardIntent(),
             phrases: [
-                "Skip forward \(\.$duration) in \(.applicationName)",
-                "Fast forward \(\.$duration) in \(.applicationName)",
+                "Skip forward \(\.$seconds) seconds in \(.applicationName)",
+                "Fast forward \(\.$seconds) seconds in \(.applicationName)",
             ],
             shortTitle: "Skip Forward",
             systemImageName: "goforward"
@@ -382,8 +388,8 @@ struct LumisoundShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: SeekBackwardIntent(),
             phrases: [
-                "Skip backward \(\.$duration) in \(.applicationName)",
-                "Rewind \(\.$duration) in \(.applicationName)",
+                "Skip backward \(\.$seconds) seconds in \(.applicationName)",
+                "Rewind \(\.$seconds) seconds in \(.applicationName)",
             ],
             shortTitle: "Skip Backward",
             systemImageName: "gobackward"
