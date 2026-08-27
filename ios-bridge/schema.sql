@@ -528,6 +528,23 @@ ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS acoustid_api_key VARCHAR(
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS ytdlp_cookies TEXT NULL;
 ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS ytdlp_cookies_updated_at TIMESTAMP NULL;
 
+-- Governs whether/when a user's yt-dlp calls may fall back to the
+-- server-wide shared cookie file (YTDLP_COOKIES_FILE — the operator's own
+-- YouTube session) instead of failing when the user has no cookies of
+-- their own configured, or their own have gone stale. See
+-- _may_use_global_cookies in main.py: accounts under 15 days old are
+-- never eligible regardless of this value (a new/throwaway account
+-- riding on the operator's personal session is exactly the abuse case
+-- this age gate exists to prevent) — this column only takes effect once
+-- an account clears that bar.
+--   'auto'       (default) — prefer the user's own cookies; fall back to
+--                 the global ones only when the user has none configured
+--                 or their own fail with a cookie-rotation error.
+--   'own_only'   — never fall back to global, even once eligible by age.
+--   'global_only'— always prefer the global session over the user's own
+--                 (e.g. a user whose own account keeps getting flagged).
+ALTER TABLE ios_user_settings ADD COLUMN IF NOT EXISTS cookie_fallback_preference VARCHAR(20) DEFAULT 'auto';
+
 -- Feature: Discord "now playing" webhook integration. True per-user Discord
 -- Rich Presence ("Listening to ...") requires the Discord desktop client and
 -- a local IPC connection, which an iOS app cannot establish on a user's

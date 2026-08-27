@@ -1175,24 +1175,114 @@ async def _user_cookies_file(user_id: Optional[str]) -> Optional[str]:
     return str(path)
 
 
-async def _ytdlp_cookie_args(user_id: Optional[str] = None) -> list[str]:
+_MIN_ACCOUNT_AGE_DAYS_FOR_GLOBAL_COOKIES = 15
+
+# Same short-TTL cache shape as _user_cookies_text_cache above — account age
+# only changes with the passage of time and the preference only changes via
+# an explicit settings call, so there's no correctness reason to hit the DB
+# on every single yt-dlp invocation (up to 3x per download, once per search/
+# resolve) for either of these.
+_account_age_cache: dict[str, tuple[float, Optional[int]]] = {}
+_cookie_fallback_pref_cache: dict[str, tuple[float, str]] = {}
+
+
+async def _account_age_days(user_id: str) -> Optional[int]:
+    """Days since *user_id* registered, or None if the account can't be
+    found (treated as "not eligible" by every caller — an unresolvable
+    account is never trusted with the operator's own session cookies)."""
+    cached = _account_age_cache.get(user_id)
+    if cached is not None and time.monotonic() < cached[0]:
+        return cached[1]
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT created_at FROM ios_users WHERE id = %s", (user_id,))
+            row = await cur.fetchone()
+    age_days = (datetime.now(timezone.utc) - row[0].replace(tzinfo=timezone.utc)).days if row and row[0] else None
+    _account_age_cache[user_id] = (time.monotonic() + _YTDLP_USER_COOKIES_CACHE_TTL, age_days)
+    return age_days
+
+
+async def _cookie_fallback_preference(user_id: str) -> str:
+    """One of 'auto' (default), 'own_only', 'global_only' — see the column's
+    doc comment in schema.sql. Always normalized to a known value so a bad/
+    legacy row can never silently grant more access than 'auto' would."""
+    cached = _cookie_fallback_pref_cache.get(user_id)
+    if cached is not None and time.monotonic() < cached[0]:
+        return cached[1]
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT cookie_fallback_preference FROM ios_user_settings WHERE user_id = %s", (user_id,)
+            )
+            row = await cur.fetchone()
+    pref = row[0] if row and row[0] in ("auto", "own_only", "global_only") else "auto"
+    _cookie_fallback_pref_cache[user_id] = (time.monotonic() + _YTDLP_USER_COOKIES_CACHE_TTL, pref)
+    return pref
+
+
+async def _may_use_global_cookies(user_id: Optional[str]) -> bool:
+    """Guardrail on the operator's own YouTube session (YTDLP_COOKIES_FILE):
+    a brand-new or throwaway account riding on it — especially one an
+    abuser spins up specifically to avoid ever configuring/burning their
+    own cookies — is exactly the failure mode an age gate exists to catch.
+    *user_id* being None (no account context at all, e.g. an unauthenticated
+    call) is never eligible either, same reasoning. Once an account clears
+    the age bar, its own stored preference decides ('auto'/'global_only'
+    both allow it; 'own_only' opts back out even though it's eligible)."""
+    if not user_id:
+        return False
+    age_days = await _account_age_days(user_id)
+    if age_days is None or age_days < _MIN_ACCOUNT_AGE_DAYS_FOR_GLOBAL_COOKIES:
+        return False
+    return await _cookie_fallback_preference(user_id) != "own_only"
+
+
+async def _ytdlp_cookie_args(user_id: Optional[str] = None, force_global: bool = False) -> list[str]:
     """YouTube only paginates flat-playlist results past the first ~100 entries
     for authenticated requests, and increasingly throttles/blocks anonymous
     extraction outright ("Sign in to confirm you're not a bot"). Prefers
     *user_id*'s personally-uploaded cookies (see /user/ytdlp-cookies); falls
-    back to the server-wide cookie file at YTDLP_COOKIES_FILE when the user
-    has none configured (or *user_id* is None) — that file can be bind-mounted
-    /swapped out at any time (no rebuild/restart needed) to refresh the
-    shared session.
+    back to the server-wide cookie file at YTDLP_COOKIES_FILE — the
+    operator's own YouTube session — only once the account is eligible (see
+    _may_use_global_cookies: 15+ days old, and hasn't opted out via
+    'own_only'). An account that isn't eligible and has no cookies of its
+    own configured gets NO cookies at all (anonymous extraction) rather than
+    silently riding on the operator's session — a real behavior change from
+    before this guardrail existed, and the intended one.
+
+    *force_global*, when True, skips straight to the global file (still
+    subject to the same eligibility check) regardless of whether the user
+    has their own configured — used by callers retrying after the user's
+    OWN cookies just failed with a rotation/staleness signature (see
+    _do_download_job's retry loop), which is the "only fall back once their
+    own actually go stale" half of the guardrail.
 
     Also skip yt-dlp's initial webpage fetch for the playlist tab and go
     straight to the API JSON — for large playlists that contain unavailable
     (deleted/private) videos this roughly doubles the number of entries
     yt-dlp is able to paginate through (e.g. 105/307 -> 205/307)."""
     args = ["--extractor-args", "youtubetab:skip=webpage"]
-    cookie_path = await _user_cookies_file(user_id)
-    if not cookie_path and os.path.isfile(YTDLP_COOKIES_FILE) and os.path.getsize(YTDLP_COOKIES_FILE) > 0:
+
+    global_available = os.path.isfile(YTDLP_COOKIES_FILE) and os.path.getsize(YTDLP_COOKIES_FILE) > 0
+    eligible_for_global = global_available and await _may_use_global_cookies(user_id)
+
+    cookie_path: Optional[str] = None
+    if force_global and eligible_for_global:
         cookie_path = YTDLP_COOKIES_FILE
+    else:
+        own_path = await _user_cookies_file(user_id)
+        preference = await _cookie_fallback_preference(user_id) if (user_id and eligible_for_global) else "auto"
+        if eligible_for_global and preference == "global_only":
+            cookie_path = YTDLP_COOKIES_FILE
+        elif own_path:
+            cookie_path = own_path
+        elif eligible_for_global:
+            cookie_path = YTDLP_COOKIES_FILE
+
     if cookie_path:
         args += ["--cookies", cookie_path]
     return args
@@ -3615,6 +3705,14 @@ async def _do_download_job(
     # download-history write at the end of this function.
     cookie_args = await _ytdlp_cookie_args(user_id)
     last_stderr = b""
+    # Set once a failed attempt's stderr looks like the user's OWN cookies
+    # just went stale and this account is eligible to fall back — see
+    # _ytdlp_cookie_args' force_global doc comment. Guards against forcing
+    # global more than once per job (no point retrying identically) and
+    # against ever touching it for an account that isn't actually eligible
+    # (the force_global branch re-checks eligibility itself regardless, so
+    # this flag is purely "don't bother trying again", not the real gate).
+    already_forced_global = False
 
     for attempt in range(1, max_attempts + 1):
         # Use UUID-based temp dir to prevent collisions (Fix 6)
@@ -3736,6 +3834,20 @@ async def _do_download_job(
                 attempt, max_attempts, downloader_name, proc_elapsed, proc.returncode, err_text,
             )
             shutil.rmtree(tmp_dir, ignore_errors=True)
+            # The user's OWN cookies (if that's what this job was using)
+            # just went stale, not the global session — see
+            # _ytdlp_cookie_args' force_global doc comment for the full
+            # guardrail this implements. _flag_cookies_stale_if_needed also
+            # runs here (via _ytdlp_auth_failure_reason below on the final
+            # attempt) but that one's about the GLOBAL file specifically;
+            # this check is independent since it's about swapping TO global
+            # for THIS user, regardless of whether global itself is fine.
+            if not already_forced_global and attempt < max_attempts and "no longer valid" in err_text.lower():
+                already_forced_global = True
+                forced_args = await _ytdlp_cookie_args(user_id, force_global=True)
+                if forced_args != cookie_args:
+                    logger.info("Retrying download job with global cookie fallback (user %s own cookies stale)", user_id)
+                    cookie_args = forced_args
             if attempt == max_attempts:
                 detail = _ytdlp_auth_failure_reason(last_stderr) or _ytdlp_generic_failure_summary(last_stderr)
                 raise HTTPException(status_code=404, detail=detail)
@@ -15624,6 +15736,52 @@ async def delete_ytdlp_cookies(payload: dict = Depends(get_current_user)):
             )
     (YTDLP_USER_COOKIES_DIR / f"{user_id}.txt").unlink(missing_ok=True)
     _user_cookies_text_cache.pop(user_id, None)
+
+
+class CookieFallbackPreferenceRequest(BaseModel):
+    preference: str  # 'auto' | 'own_only' | 'global_only'
+
+
+@app.get("/user/ytdlp-cookies/preference")
+async def get_cookie_fallback_preference(payload: dict = Depends(get_current_user)):
+    """Whether/how this account may fall back to the operator's own shared
+    YouTube session — see the cookie_fallback_preference column's doc
+    comment in schema.sql and _may_use_global_cookies in this file.
+    `eligible` tells the client whether to even show the picker: accounts
+    under 15 days old can't use global cookies regardless of what they'd
+    prefer, so there's nothing meaningful to choose yet."""
+    user_id = payload["sub"]
+    age_days = await _account_age_days(user_id)
+    eligible = age_days is not None and age_days >= _MIN_ACCOUNT_AGE_DAYS_FOR_GLOBAL_COOKIES
+    return {
+        "preference": await _cookie_fallback_preference(user_id),
+        "eligible": eligible,
+        "account_age_days": age_days,
+        "days_until_eligible": max(0, _MIN_ACCOUNT_AGE_DAYS_FOR_GLOBAL_COOKIES - age_days) if age_days is not None else None,
+    }
+
+
+@app.put("/user/ytdlp-cookies/preference")
+async def set_cookie_fallback_preference(
+    body: CookieFallbackPreferenceRequest, payload: dict = Depends(get_current_user)
+):
+    if body.preference not in ("auto", "own_only", "global_only"):
+        raise HTTPException(status_code=400, detail="preference must be one of: auto, own_only, global_only")
+    user_id = payload["sub"]
+    # Storing the choice even for an ineligible (< 15 day) account is
+    # harmless and deliberate — it just takes effect the moment they DO
+    # clear the age bar, instead of requiring them to remember to come
+    # back and set it then.
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_user_settings (user_id, cookie_fallback_preference) VALUES (%s, %s) "
+                "ON CONFLICT (user_id) DO UPDATE SET cookie_fallback_preference = EXCLUDED.cookie_fallback_preference",
+                (user_id, body.preference),
+            )
+    _cookie_fallback_pref_cache.pop(user_id, None)
+    return {"status": "ok", "preference": body.preference}
 
 
 @app.post("/user/ytdlp-cookies/validate")
