@@ -111,6 +111,12 @@ struct AudioSettings: Codable, Equatable {
     /// Wet/dry mix, 0–100. Maps directly to `AVAudioUnitReverb.wetDryMix`.
     var reverbWetDryMix: Float = 18.0
     var reverbPreset: ReverbRoomPreset = .mediumRoom
+    /// Generates an audio-reactive haptic accompaniment for engine playback
+    /// using Core Haptics. This is an approximation of Apple Music's Music
+    /// Haptics feature; the private Apple Music pattern catalog is not exposed
+    /// to third-party apps. Optional so settings saved before this feature was
+    /// added continue to decode safely.
+    var musicHapticsEnabled: Bool? = false
     /// Routes the final mix through `AVAudioEnvironmentNode` (HRTF binaural
     /// rendering), externalizing the stereo image as a single anchored source
     /// in front of the listener. Head-tracked (via `CMHeadphoneMotionManager`)

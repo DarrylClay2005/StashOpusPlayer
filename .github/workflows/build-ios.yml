@@ -15,6 +15,9 @@ on:
         type: choice
         options: [ Release, Debug ]
 
+permissions:
+  contents: write
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -138,3 +141,20 @@ jobs:
           name: Lumisound-xcarchive
           path: ios/build/Lumisound.xcarchive
           retention-days: 7
+
+      # A successful release build is the single source of truth for tags.
+      # Creating the tag only after archive/package steps complete prevents a
+      # broken main build from triggering the release workflow.
+      - name: Tag successful release build
+        if: success() && steps.config.outputs.configuration == 'Release' && github.ref == 'refs/heads/main'
+        run: |
+          VERSION=$(grep 'MARKETING_VERSION' ios/project.yml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          TAG="ios/v${VERSION}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; leaving it unchanged."
+            exit 0
+          fi
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag -a "$TAG" -m "Release Lumisound iOS v${VERSION}" "$GITHUB_SHA"
+          git push origin "$TAG"

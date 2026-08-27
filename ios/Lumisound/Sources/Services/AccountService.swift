@@ -1,3 +1,4 @@
+import AuthenticationServices
 import Foundation
 import SwiftUI
 import UIKit
@@ -98,6 +99,11 @@ final class AccountService: ObservableObject {
     // MARK: Auto-push timer
 
     var autoPushTimer: Timer?
+    // ASWebAuthenticationSession must be retained until its completion
+    // handler runs. Keeping it here also gives cancellation/deallocation a
+    // deterministic owner instead of relying on the local variable in the
+    // async Discord-login helper.
+    var discordAuthSession: ASWebAuthenticationSession?
 
     func startAutoPushTimer(library: LibraryManager) {
         stopAutoPushTimer()
@@ -179,6 +185,7 @@ final class AccountService: ObservableObject {
     deinit {
         syncDebounceTask?.cancel()
         autoPushTimer?.invalidate()
+        discordAuthSession?.cancel()
     }
 
     /// Ambient reference to the app's single AccountService instance, so

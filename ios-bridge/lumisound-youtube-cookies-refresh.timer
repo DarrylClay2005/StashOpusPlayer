@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically refresh Lumisound's host-side YouTube cookies
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+Persistent=true
+Unit=lumisound-youtube-cookies-refresh.service
+
+[Install]
+WantedBy=timers.target

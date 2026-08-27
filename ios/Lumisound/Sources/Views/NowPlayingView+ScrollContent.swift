@@ -55,6 +55,13 @@ extension NowPlayingView {
                 playingFromRow
                 actionPillsRow
 
+                // Contextual station ideas use the current song's metadata,
+                // plus the account's listening history and favorites.
+                StationSuggestionsSection(
+                    seed: player.currentSong.map { StationSeed(song: $0) },
+                    accent: screenStyle.accentColor
+                )
+
                 // ── Secondary controls, organized into switchable, swipeable panels ──
                 panelPicker
                 panelPageDots

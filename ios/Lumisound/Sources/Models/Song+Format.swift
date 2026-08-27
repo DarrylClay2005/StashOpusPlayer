@@ -20,6 +20,13 @@ extension Song {
         sampleRate > 44_100
     }
 
+    /// Cheap library-row equivalent of `AudioFormatDetails.isHiResLossless`.
+    /// Bit depth is not retained on `Song`, so the scanner can only classify
+    /// hi-res by sample rate until the format detail sheet opens the file.
+    var isHiResLossless: Bool {
+        isKnownLosslessContainer && isHiResSampleRate
+    }
+
     /// Short uppercase format tag for display (e.g. "FLAC", "MP3", "M4A"),
     /// or `nil` if the song has no resolvable file extension (e.g. an
     /// Apple Music library item with no local URL). Prefixed "LMS " for a

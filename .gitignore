@@ -30,6 +30,8 @@ secrets.txt
 local.properties
 cookies.txt
 ios-bridge/cookies.txt
+# Host-side browser-cookie refresh staging files
+.cookies-refresh.*
 .env
 ios-bridge/.env
 # yt-dlp runtime cache, incl. per-user session cookies — never source, never committed

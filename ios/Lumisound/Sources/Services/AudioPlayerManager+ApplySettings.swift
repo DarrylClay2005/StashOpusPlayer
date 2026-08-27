@@ -32,6 +32,7 @@ extension AudioPlayerManager {
             ("spatialAudioEnabled", old.spatialAudioEnabled ?? false, new.spatialAudioEnabled ?? false),
             ("monoAudioEnabled", old.monoAudioEnabled ?? false, new.monoAudioEnabled ?? false),
             ("nightModeEnabled", old.nightModeEnabled ?? false, new.nightModeEnabled ?? false),
+            ("musicHapticsEnabled", old.musicHapticsEnabled ?? false, new.musicHapticsEnabled ?? false),
         ]
         for (name, wasOn, isOn) in toggles where wasOn != isOn {
             appLog("Setting changed: \(name) -> \(isOn)", category: "settings")
@@ -47,6 +48,12 @@ extension AudioPlayerManager {
     // MARK: - Apply Audio Settings
 
     func applyAudioSettings() {
+        MusicHapticsService.shared.updatePlayback(
+            enabled: audioSettings.musicHapticsEnabled ?? false,
+            isPlaying: isPlaying,
+            engineAvailable: !isUsingOpusPlayer
+        )
+
         // AVPlayer fallback path (opus/webm/ogg streams) — only Speed can be
         // mapped onto AVPlayer's API (EQ/pitch/crossfade/gapless/ReplayGain need
         // the AVAudioEngine graph below, which this path bypasses entirely).

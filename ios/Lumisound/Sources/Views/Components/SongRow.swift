@@ -257,7 +257,7 @@ struct SongRow: View {
     @ViewBuilder
     private var formatBadge: some View {
         if song.isKnownLosslessContainer || song.isHiResSampleRate {
-            Text(song.isKnownLosslessContainer ? (song.formatTag ?? "LOSSLESS") : "HI-RES")
+            Text(song.isHiResLossless ? "HI-RES LOSSLESS" : song.isKnownLosslessContainer ? (song.formatTag ?? "LOSSLESS") : "HI-RES")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(AppTheme.dynamicAccent)
                 .padding(.horizontal, 4)

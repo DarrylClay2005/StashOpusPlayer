@@ -70,7 +70,7 @@ final class AudioEncoderService {
         // entirely for this one container type. See `oggOpusTranscode`.
         if await oggOpusTranscode(url, to: outURL, settings: Self.alacSettings) { return outURL }
 
-        // Tier 3 — lossless: decode to PCM → ALAC (identical to Opus decoder output)
+        // Tier 3 — lossless container: decode to PCM → CD-quality ALAC
         if await losslessTranscode(url, to: outURL) { return outURL }
 
         // Tier 4 — fallback: AAC re-encode (works for WebM and other exotic containers)
@@ -122,6 +122,25 @@ final class AudioEncoderService {
         }
         try? FileManager.default.removeItem(at: destinationURL)
         guard await decodeAndReencode(url, to: destinationURL, settings: Self.aacSettings) else { return false }
+        return CorruptFileFinderService.isValidAudioFile(at: destinationURL)
+    }
+
+    /// Converts a source into a standard 16-bit/44.1 kHz ALAC M4A. This is
+    /// useful when a caller needs a broadly playable lossless container;
+    /// native lossless sources should still be copied/played directly to
+    /// avoid an unnecessary decode/re-encode.
+    func convertLosslessly(_ url: URL, to destinationURL: URL) async -> Bool {
+        let playableURL = LumisoundExclusiveExtensionService.playableURL(for: url)
+        try? FileManager.default.removeItem(at: destinationURL)
+
+        if await oggOpusTranscode(playableURL, to: destinationURL, settings: Self.alacSettings),
+           CorruptFileFinderService.isValidAudioFile(at: destinationURL) {
+            return true
+        }
+        try? FileManager.default.removeItem(at: destinationURL)
+        guard await decodeAndReencode(playableURL, to: destinationURL, settings: Self.alacSettings) else {
+            return false
+        }
         return CorruptFileFinderService.isValidAudioFile(at: destinationURL)
     }
 
@@ -198,8 +217,21 @@ final class AudioEncoderService {
             return false
         }
 
+        let outputBuffer = convertedBuffer(
+            pcmBuffer,
+            sampleRate: (settings[AVSampleRateKey] as? Double) ?? pcmBuffer.format.sampleRate,
+            channelCount: AVAudioChannelCount(
+                (settings[AVNumberOfChannelsKey] as? Int) ?? Int(pcmBuffer.format.channelCount)
+            )
+        )
+        guard let outputBuffer else {
+            appError("oggOpusTranscode: couldn't convert decoded PCM to output format for \(url.lastPathComponent)", category: "audio-encoder")
+            try? FileManager.default.removeItem(at: outURL)
+            return false
+        }
+
         do {
-            try outFile.write(from: pcmBuffer)
+            try outFile.write(from: outputBuffer)
         } catch {
             appError("oggOpusTranscode: write failed for \(url.lastPathComponent) -- \(error)", category: "audio-encoder")
             try? FileManager.default.removeItem(at: outURL)
@@ -210,11 +242,57 @@ final class AudioEncoderService {
         return true
     }
 
+    /// Resamples/channel-converts decoder output to the exact format requested
+    /// by the writer. In particular, the Opus decoder is always 48 kHz while
+    /// the CD-quality ALAC profile is 44.1 kHz.
+    private func convertedBuffer(
+        _ input: AVAudioPCMBuffer,
+        sampleRate: Double,
+        channelCount: AVAudioChannelCount
+    ) -> AVAudioPCMBuffer? {
+        guard sampleRate > 0, channelCount > 0 else { return nil }
+        guard abs(input.format.sampleRate - sampleRate) > 0.5 ||
+              input.format.channelCount != channelCount else {
+            return input
+        }
+        guard let outputFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: channelCount,
+            interleaved: false
+        ),
+        let output = AVAudioPCMBuffer(
+            pcmFormat: outputFormat,
+            frameCapacity: AVAudioFrameCount(
+                ceil(Double(input.frameLength) * sampleRate / input.format.sampleRate) + 1
+            )
+        ),
+        let converter = AVAudioConverter(from: input.format, to: outputFormat) else {
+            return nil
+        }
+
+        var suppliedInput = false
+        var conversionError: Error?
+        converter.convert(to: output, error: &conversionError) { _, status in
+            if suppliedInput {
+                status.pointee = .endOfStream
+                return nil
+            }
+            suppliedInput = true
+            status.pointee = .haveData
+            return input
+        }
+        return conversionError == nil ? output : nil
+    }
+
     // MARK: - Lossless decode via AVAssetReader + AVAssetWriter
 
     private static let alacSettings: [String: Any] = [
         AVFormatIDKey:            kAudioFormatAppleLossless,
-        AVSampleRateKey:          48000.0,
+        // CD-quality ALAC is the compatibility baseline. Native files are
+        // never resampled; this profile is only used for compatibility-cache
+        // transcodes where a deterministic lossless output is required.
+        AVSampleRateKey:          44100.0,
         AVNumberOfChannelsKey:    2,
         AVEncoderBitDepthHintKey: 16
     ]
@@ -256,15 +334,19 @@ final class AudioEncoderService {
 
         guard let reader = try? AVAssetReader(asset: asset) else { return false }
 
-        // Decode to 16-bit integer stereo PCM at 48 kHz (Opus native rate)
+        // Decode to PCM at the writer's requested rate. The ALAC cache uses
+        // the 44.1 kHz CD-quality baseline, while the AAC fallback keeps its
+        // existing 48 kHz profile.
+        let outputSampleRate = (settings[AVSampleRateKey] as? Double) ?? 44100.0
+        let outputChannelCount = (settings[AVNumberOfChannelsKey] as? Int) ?? 2
         let pcmSettings: [String: Any] = [
             AVFormatIDKey:               kAudioFormatLinearPCM,
             AVLinearPCMBitDepthKey:      16,
             AVLinearPCMIsFloatKey:       false,
             AVLinearPCMIsBigEndianKey:   false,
             AVLinearPCMIsNonInterleaved: false,
-            AVSampleRateKey:             48000.0,
-            AVNumberOfChannelsKey:       2
+            AVSampleRateKey:             outputSampleRate,
+            AVNumberOfChannelsKey:       outputChannelCount
         ]
         let readerOut = AVAssetReaderTrackOutput(track: track, outputSettings: pcmSettings)
         guard reader.canAdd(readerOut) else { return false }

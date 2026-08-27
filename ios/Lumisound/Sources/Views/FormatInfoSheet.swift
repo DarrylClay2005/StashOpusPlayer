@@ -98,7 +98,7 @@ struct FormatInfoSheet: View {
                 Image(systemName: details.isLossless ? "checkmark.seal.fill" : "waveform")
                     .font(.system(size: 32))
                     .foregroundStyle(details.isLossless ? AppTheme.dynamicAccent : AppTheme.textSecondary)
-                Text(details.isLossless ? "Lossless" : "Lossy")
+                Text(details.qualityLabel)
                     .font(.headline)
                     .foregroundStyle(AppTheme.textPrimary)
             }

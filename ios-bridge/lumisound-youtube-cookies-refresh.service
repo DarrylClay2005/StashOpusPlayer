@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh Lumisound's host-side YouTube cookies
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/lumisound-youtube-cookies.env
+# Copy this repository's refresh_youtube_cookies.sh to the path below, or
+# change ExecStart to the checkout path before enabling the unit.
+ExecStart=%h/.local/bin/lumisound-refresh-youtube-cookies

@@ -132,6 +132,11 @@ extension AudioPlayerManager {
     /// 8D, crossfade, gapless, and reverb need the AVAudioEngine graph and do not apply.
     func scheduleWithOpusPlayer(url: URL, startTime: TimeInterval) {
         tearDownOpusPlayer()
+        MusicHapticsService.shared.updatePlayback(
+            enabled: false,
+            isPlaying: false,
+            engineAvailable: false
+        )
 
         // Stop any engine nodes that were started optimistically in playCurrent().
         primaryNode.stop()

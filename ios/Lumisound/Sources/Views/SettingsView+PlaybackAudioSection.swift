@@ -328,6 +328,28 @@ extension SettingsView {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
+            Toggle(isOn: Binding(
+                get: { player.audioSettings.musicHapticsEnabled ?? false },
+                set: { player.audioSettings.musicHapticsEnabled = $0 }
+            )) {
+                Label("Music Haptics", systemImage: "waveform.and.mic")
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(.teal)
+            .disabled(!MusicHapticsService.shared.isAvailable)
+
+            if player.audioSettings.musicHapticsEnabled ?? false {
+                Text(
+                    MusicHapticsService.shared.isAvailable
+                        ? "Adds gentle, audio-reactive vibrations on compatible iPhone hardware. Works with the audio engine path; compatibility-mode streams cannot be synchronized."
+                        : "Music Haptics needs a device with Core Haptics support."
+                )
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+                .padding(.leading, 16)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Skip Silent Intros — skips near-silent lead-in audio at the start
             // of a local track. Off by default. Was previously two separate,
             // independently-toggled implementations that both partially did
@@ -426,6 +448,7 @@ extension SettingsView {
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.spatialAudioEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.smartCrossfadeEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.nightModeEnabled)
+        .animation(.easeInOut(duration: 0.22), value: player.audioSettings.musicHapticsEnabled)
         .animation(.easeInOut(duration: 0.22), value: silenceTrim.isEnabled)
         .animation(.easeInOut(duration: 0.22), value: player.audioSettings.monoAudioEnabled)
     }

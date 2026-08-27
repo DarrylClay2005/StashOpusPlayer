@@ -50,6 +50,7 @@ extension AccountService {
                 url: authorizeURL,
                 callbackURLScheme: callbackScheme
             ) { callbackURL, _ in
+                self.discordAuthSession = nil
                 continuation.resume(returning: callbackURL)
             }
             session.presentationContextProvider = presentationContext
@@ -58,7 +59,9 @@ extension AccountService {
             // to be cached in the shared cookie jar from a previous session
             // on this device.
             session.prefersEphemeralWebBrowserSession = true
+            self.discordAuthSession = session
             if !session.start() {
+                self.discordAuthSession = nil
                 continuation.resume(returning: nil)
             }
         }

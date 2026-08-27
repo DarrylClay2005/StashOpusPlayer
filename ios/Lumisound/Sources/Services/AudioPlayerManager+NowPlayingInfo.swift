@@ -11,6 +11,7 @@ extension AudioPlayerManager {
     func updateNowPlaying() {
         guard let song = currentSong else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            nowPlayingArtworkSongID = nil
             return
         }
 
@@ -24,8 +25,10 @@ extension AudioPlayerManager {
             MPNowPlayingInfoPropertyDefaultPlaybackRate: Double(audioSettings.speed)
         ]
 
-        // Preserve existing artwork if already set (avoid flickering during position updates).
-        if let existing = MPNowPlayingInfoCenter.default().nowPlayingInfo,
+        // Preserve artwork during position updates, but never carry artwork
+        // over from a different track while the new track's artwork loads.
+        if nowPlayingArtworkSongID == song.id,
+           let existing = MPNowPlayingInfoCenter.default().nowPlayingInfo,
            let existingArtwork = existing[MPMediaItemPropertyArtwork] {
             info[MPMediaItemPropertyArtwork] = existingArtwork
         }
@@ -37,15 +40,27 @@ extension AudioPlayerManager {
     /// and the WidgetKit shared container.
     func updateNowPlayingArtwork(for song: Song?) async {
         guard let song else {
+            nowPlayingArtworkSongID = nil
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             WidgetDataService.shared.update(song: nil, isPlaying: false, artwork: nil)
             PhoneWatchSync.shared.update(song: nil, isPlaying: false, artwork: nil)
             return
         }
         let image = await ArtworkService.shared.loadArtwork(for: song)
+        // Artwork loads can finish out of order when tracks change quickly.
+        // Do not let an older request overwrite the current system controls
+        // or shared widget state.
+        guard currentSong?.id == song.id else { return }
         if let image {
             let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
             var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
             info[MPMediaItemPropertyArtwork] = artwork
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            nowPlayingArtworkSongID = song.id
+        } else {
+            nowPlayingArtworkSongID = nil
+            var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+            info.removeValue(forKey: MPMediaItemPropertyArtwork)
             MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         }
         WidgetDataService.shared.update(

@@ -34,6 +34,8 @@ final class AudioPlayerManager: ObservableObject {
     @Published var currentSong: Song? {
         didSet {
             if currentSong?.id != oldValue?.id {
+                nowPlayingArtworkSongID = nil
+                updateNowPlaying()
                 Task { await updateNowPlayingArtwork(for: currentSong) }
                 applyTrackAudioSettings(previousID: oldValue?.id)
                 pushPlaybackStateToBridge()
@@ -52,6 +54,10 @@ final class AudioPlayerManager: ObservableObject {
             }
         }
     }
+    /// Identifies the artwork currently installed in the system Now Playing
+    /// card, preventing an older asynchronous artwork load from being reused
+    /// for a newer track.
+    var nowPlayingArtworkSongID: String?
     @Published var queue: [Song] = [] {
         didSet {
             pushQueueToBridge()
@@ -82,6 +88,11 @@ final class AudioPlayerManager: ObservableObject {
     @Published var isPlaying = false {
         didSet {
             guard isPlaying != oldValue else { return }
+            MusicHapticsService.shared.updatePlayback(
+                enabled: audioSettings.musicHapticsEnabled ?? false,
+                isPlaying: isPlaying,
+                engineAvailable: !isUsingOpusPlayer
+            )
             WidgetDataService.shared.updatePlayState(isPlaying: isPlaying, position: position, duration: duration)
             pushPlaybackStateToBridge()
             SharePlayCoordinator.shared?.broadcastPlayState(isPlaying: isPlaying, position: position)

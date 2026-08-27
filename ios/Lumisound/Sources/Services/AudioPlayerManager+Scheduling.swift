@@ -385,6 +385,11 @@ extension AudioPlayerManager {
             if isPlaying {
                 startEngineIfNeeded()
                 node.play()
+                MusicHapticsService.shared.updatePlayback(
+                    enabled: audioSettings.musicHapticsEnabled ?? false,
+                    isPlaying: true,
+                    engineAvailable: true
+                )
                 startTimer()
                 reapplyActiveEffect()
                 startSmartCrossfadeAnalysisIfNeeded()
@@ -566,7 +571,18 @@ extension AudioPlayerManager {
                     node.scheduleSegment(file2, startingFrame: sf, frameCount: fl, at: nil) { [weak self] in
                         Task { @MainActor in guard let self, self.scheduleGeneration == gen else { return }; self.handleTrackEnded() }
                     }
-                    if isPlaying { startEngineIfNeeded(); node.play(); startTimer(); reapplyActiveEffect(); startSmartCrossfadeAnalysisIfNeeded() }
+                    if isPlaying {
+                        startEngineIfNeeded()
+                        node.play()
+                        MusicHapticsService.shared.updatePlayback(
+                            enabled: audioSettings.musicHapticsEnabled ?? false,
+                            isPlaying: true,
+                            engineAvailable: true
+                        )
+                        startTimer()
+                        reapplyActiveEffect()
+                        startSmartCrossfadeAnalysisIfNeeded()
+                    }
                     updateNowPlaying()
                     return
                 }
@@ -608,6 +624,11 @@ extension AudioPlayerManager {
             if isPlaying {
                 startEngineIfNeeded()
                 node.play()
+                MusicHapticsService.shared.updatePlayback(
+                    enabled: audioSettings.musicHapticsEnabled ?? false,
+                    isPlaying: true,
+                    engineAvailable: true
+                )
                 startTimer()
                 reapplyActiveEffect()
                 startSmartCrossfadeAnalysisIfNeeded()

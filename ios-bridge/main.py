@@ -1354,6 +1354,7 @@ async def _run_ytdlp(*args: str, timeout: float = 30.0) -> list[dict]:
             raise
 
     if stderr_bytes:
+        _flag_cookies_stale_if_needed(stderr_bytes)
         logger.debug("yt-dlp stderr: %s", stderr_bytes.decode(errors="replace")[:500])
 
     results: list[dict] = []
@@ -3855,6 +3856,7 @@ async def _do_download_job(
         proc_elapsed = time.monotonic() - proc_start
         if proc.returncode != 0:
             last_stderr = stderr_bytes
+            _flag_cookies_stale_if_needed(stderr_bytes)
             err_text = stderr_bytes.decode(errors="replace")[-500:]
             logger.error(
                 "yt-dlp download failed (attempt %d/%d, downloader=%s, elapsed=%.1fs, exit=%d): %s",
@@ -13003,7 +13005,7 @@ async def get_discover_mix(
 
             await cur.execute(
                 "SELECT song_id FROM ios_user_favorites WHERE user_id = %s "
-                "UNION SELECT song_id FROM ios_user_library WHERE user_id = %s",
+                "UNION SELECT source_id FROM ios_user_library_inventory WHERE user_id = %s",
                 (user_id, user_id),
             )
             known_ids = {r[0] for r in await cur.fetchall()}
@@ -13038,6 +13040,233 @@ async def get_discover_mix(
             break
 
     return tracks
+
+
+# ---------------------------------------------------------------------------
+# Automatic stations and contextual suggestions (Feature: stations)
+# ---------------------------------------------------------------------------
+
+
+class StationSeedRequest(BaseModel):
+    """Small, client-provided snapshot of the listening context.
+
+    The server combines this with first-party signals (weighted listening
+    history, favorites, library genres, and time of day).  The seed is never
+    treated as an instruction to fetch an arbitrary URL; it only contributes
+    text to a bounded yt-dlp search query.
+    """
+
+    title: Optional[str] = None
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    genre: Optional[str] = None
+    bpm: Optional[float] = None
+    source_track_id: Optional[str] = None
+    local_hour: Optional[int] = None
+
+
+def _station_signal(value: Optional[str], limit: int = 100) -> str:
+    """Normalize a user-facing metadata signal before it enters a search."""
+    if not value:
+        return ""
+    return " ".join(value.split())[:limit]
+
+
+async def _station_known_ids(user_id: str) -> set[str]:
+    """IDs already in the user's library/favorites, for discovery hygiene."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT song_id FROM ios_user_favorites WHERE user_id = %s "
+                    "UNION SELECT source_id FROM ios_user_library_inventory WHERE user_id = %s",
+                    (user_id, user_id),
+                )
+                return {str(row[0]) for row in await cur.fetchall()}
+    except Exception:
+        logger.exception("station known-track lookup failed for user %s", user_id)
+        return set()
+
+
+async def _fetch_station_tracks(
+    user_id: str, queries: list[str], limit: int, known_ids: set[str]
+) -> list[dict]:
+    """Resolve a few bounded searches into unique, playable StreamTracks."""
+    tracks: list[dict] = []
+    seen_ids: set[str] = set()
+    per_query = max(2, min(8, limit))
+    for query in queries:
+        query = _station_signal(query, 180)
+        if not query:
+            continue
+        try:
+            entries = await _run_ytdlp(
+                f"ytsearch{per_query}:{query}",
+                "--dump-json", "--flat-playlist", "--no-playlist",
+                "--cache-dir", YTDLP_CACHE_DIR,
+                *(await _ytdlp_cookie_args(user_id)),
+                timeout=20.0,
+            )
+        except Exception as exc:
+            logger.warning("station search failed for %r: %s", query, exc)
+            continue
+        for entry in entries:
+            track = _parse_track(entry, "youtube")
+            source_track_id = f"{track['source']}:{track['id']}"
+            if (
+                track["id"] in known_ids
+                or source_track_id in known_ids
+                or track["id"] in seen_ids
+            ):
+                continue
+            seen_ids.add(track["id"])
+            tracks.append(track)
+            if len(tracks) >= limit:
+                return tracks
+    return tracks
+
+
+def _station_plans(profile: dict, seed: StationSeedRequest) -> list[dict]:
+    """Build station ideas from independent signals, strongest first."""
+    artist = _station_signal(seed.artist)
+    title = _station_signal(seed.title)
+    album = _station_signal(seed.album)
+    genre = _station_signal(seed.genre)
+    top_artists = [
+        _station_signal(value) for value in profile.get("top_played_artists", [])
+        if _station_signal(value)
+    ]
+    favorite_artists = [
+        _station_signal(value) for value in profile.get("favorited_artists", [])
+        if _station_signal(value)
+    ]
+    library_genres = [
+        _station_signal(value) for value in profile.get("library_genres", [])
+        if _station_signal(value)
+    ]
+    plans: list[dict] = []
+
+    if artist or title or album:
+        context = " · ".join(part for part in (artist, title, album) if part)
+        tempo = ""
+        if seed.bpm is not None and 40 <= seed.bpm <= 220:
+            tempo = " energetic" if seed.bpm >= 120 else " mellow"
+        context_queries = [f"{artist} {title} {album} similar songs{tempo}".strip()]
+        if artist:
+            context_queries.append(f"{artist} radio{tempo}".strip())
+        plans.append({
+            "id": "context",
+            "title": f"Station from {artist or title or album}",
+            "subtitle": f"Because you're listening to {context}",
+            "icon": "dot.radiowaves.left.and.right",
+            "queries": context_queries,
+        })
+
+    favorite = (favorite_artists or top_artists)
+    if favorite:
+        plans.append({
+            "id": "favorites",
+            "title": f"More from {favorite[0]}",
+            "subtitle": "Built from your favorites and recent plays",
+            "icon": "heart.fill",
+            "queries": [f"{favorite[0]} mix", f"{favorite[0]} deep cuts"],
+        })
+
+    selected_genre = genre or (library_genres[0] if library_genres else "")
+    if selected_genre:
+        anchor = top_artists[0] if top_artists else ""
+        plans.append({
+            "id": "genre",
+            "title": f"{selected_genre} station",
+            "subtitle": "A genre match for your library",
+            "icon": "guitars.fill",
+            "queries": [
+                f"{anchor} {selected_genre} mix".strip(),
+                f"best {selected_genre} songs",
+            ],
+        })
+
+    hour = seed.local_hour
+    if hour is None or not 0 <= hour <= 23:
+        hour = datetime.now().astimezone().hour
+    mood = "late night" if hour >= 21 or hour < 6 else ("focus" if 9 <= hour < 17 else "easy listening")
+    anchor = top_artists[0] if top_artists else (favorite[0] if favorite else "")
+    if anchor:
+        plans.append({
+            "id": "moment",
+            "title": f"{mood.title()} station",
+            "subtitle": f"Tuned to your listening time and {anchor}",
+            "icon": "moon.stars.fill" if mood == "late night" else "sparkles",
+            "queries": [f"{anchor} {mood} mix", f"{mood} music mix"],
+        })
+
+    # A new account may have only one usable signal. Keep the endpoint useful
+    # without inventing a user profile or returning placeholder tracks.
+    if not plans and library_genres:
+        plans.append({
+            "id": "library",
+            "title": f"{library_genres[0]} station",
+            "subtitle": "Built from your library",
+            "icon": "music.note.list",
+            "queries": [f"{library_genres[0]} mix"],
+        })
+    return plans
+
+
+async def _build_station(
+    user_id: str, plan: dict, limit: int, known_ids: set[str]
+) -> dict:
+    tracks = await _fetch_station_tracks(user_id, plan["queries"], limit, known_ids)
+    return {
+        "id": plan["id"],
+        "title": plan["title"],
+        "subtitle": plan["subtitle"],
+        "icon": plan["icon"],
+        "tracks": tracks,
+    }
+
+
+@app.post("/user/stations/suggestions")
+async def get_station_suggestions(
+    body: StationSeedRequest,
+    limit: int = Query(4, ge=1, le=6),
+    track_limit: int = Query(6, ge=3, le=12),
+    payload: dict = Depends(get_current_user),
+):
+    """Returns playable station suggestions based on the user's real signals."""
+    user_id = payload["sub"]
+    profile = await get_user_taste_profile(user_id)
+    plans = _station_plans(profile, body)
+    known_ids = await _station_known_ids(user_id)
+    if body.source_track_id:
+        known_ids.add(_station_signal(body.source_track_id, 180))
+    stations = await asyncio.gather(*(
+        _build_station(user_id, plan, track_limit, known_ids)
+        for plan in plans[:limit]
+    ))
+    stations = [station for station in stations if station["tracks"]]
+    return stations
+
+
+@app.post("/user/stations/auto")
+async def create_automatic_station(
+    body: StationSeedRequest,
+    track_limit: int = Query(8, ge=3, le=15),
+    payload: dict = Depends(get_current_user),
+):
+    """Creates one contextual station for Auto-Radio playback continuation."""
+    user_id = payload["sub"]
+    profile = await get_user_taste_profile(user_id)
+    plans = _station_plans(profile, body)
+    if not plans:
+        return {"id": "auto", "title": "Auto-Radio", "subtitle": None, "icon": "sparkles", "tracks": []}
+    known_ids = await _station_known_ids(user_id)
+    if body.source_track_id:
+        known_ids.add(_station_signal(body.source_track_id, 180))
+    station = await _build_station(user_id, plans[0], track_limit, known_ids)
+    station["id"] = "auto"
+    return station
 
 
 # ---------------------------------------------------------------------------
@@ -13354,7 +13583,7 @@ async def get_twin_mix(
 
             await cur.execute(
                 "SELECT song_id FROM ios_user_favorites WHERE user_id = %s "
-                "UNION SELECT song_id FROM ios_user_library WHERE user_id = %s",
+                "UNION SELECT source_id FROM ios_user_library_inventory WHERE user_id = %s",
                 (user_id, user_id),
             )
             known_ids = {r[0] for r in await cur.fetchall()}

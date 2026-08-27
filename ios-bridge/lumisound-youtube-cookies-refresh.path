@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Lumisound YouTube cookies when the bridge marks them stale
+
+[Path]
+# Change this to the host path mounted as YTDLP_CACHE_DIR in docker-compose.
+PathExists=%h/Documents/Projects/Lumisound/ios-bridge/cache/yt-dlp/.cookies_stale
+PathChanged=%h/Documents/Projects/Lumisound/ios-bridge/cache/yt-dlp/.cookies_stale
+Unit=lumisound-youtube-cookies-refresh.service
+
+[Install]
+WantedBy=default.target

@@ -33,6 +33,7 @@ final class AudioVisualizerService: ObservableObject {
         case liveSpectrumUI
         case autoEQ
         case smartCrossfade
+        case musicHaptics
     }
     private var activeReasons: Set<AnalysisReason> = []
 

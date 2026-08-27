@@ -342,44 +342,49 @@ struct LumisoundApp: App {
                 .onReceive(sleepTimer.$didExpire) { expired in
                     if expired { player.pause() }
                 }
-                // Auto-Radio: when the queue ends and autoRadioEnabled is on, search YouTube
-                // for tracks similar to the last-played song and append them to the queue.
+                // Auto-Radio: when the queue ends and autoRadioEnabled is on,
+                // create a contextual station from the last-played song and
+                // the account's real listening signals.
                 .onReceive(player.$autoRadioSeed.compactMap { $0 }) { seed in
                     player.clearAutoRadioSeed()
                     guard player.autoRadioEnabled else { return }
                     Task {
                         appLog("Auto-radio: seeding from \"\(seed.displayName)\" by \(seed.artistName)", category: "audio")
-                        // BPM-aware query: bias the related-tracks search toward
-                        // results that match the seed's tempo feel, so a fast/energetic
-                        // seed doesn't get followed by a string of ballads (or vice versa).
                         let seedBPM = await libraryManager.bpm(for: seed)
-                        let tempoHint = autoRadioTempoHint(for: seedBPM)
-                        let query = [seed.artistName, seed.displayName, tempoHint]
-                            .compactMap { $0 }
-                            .filter { !$0.isEmpty }
-                            .joined(separator: " ")
-                        // Uses `relatedTracks`, not `search` — the latter publishes
-                        // into `searchResults`/`isSearching`/`errorMessage`, which
-                        // would silently overwrite whatever the user has up in the
-                        // Stream Search tab right as their queue runs out.
-                        let tracks = await streaming.relatedTracks(
-                            query: query,
-                            source: "youtube",
-                            limit: 5
+                        let station = await account.fetchAutomaticStation(
+                            seed: StationSeed(song: seed, bpm: seedBPM)
                         )
+                        // Preserve the signed-out/offline behavior of the
+                        // original Auto-Radio path; the richer station API is
+                        // an enhancement, not a prerequisite for playback.
+                        let tracks: [StreamTrack]
+                        let stationTitle: String
+                        if let station {
+                            tracks = station.tracks
+                            stationTitle = station.title
+                        } else {
+                            tracks = await streaming.relatedTracks(
+                                query: "\(seed.artistName) \(seed.displayName)",
+                                source: "youtube",
+                                limit: 5
+                            )
+                            stationTitle = "fallback radio"
+                        }
                         guard !tracks.isEmpty else {
                             appLog("Auto-radio: no results", category: "audio")
                             return
                         }
+                        var appendedCount = 0
                         for track in tracks {
                             guard let url = try? await streaming.streamURL(for: track) else { continue }
                             // Tagged `.autoContinuation` (not the default `.manual`) so these
                             // land in the Queue UI's "Up Next" section, not "Manually Queued" —
                             // see QueueSource / AudioPlayerManager+Queue.appendToQueue.
                             player.appendToQueue(song: streaming.toSong(track: track, streamURL: url), source: .autoContinuation)
+                            appendedCount += 1
                         }
-                        if !player.isPlaying { player.skipToNext() }
-                        appLog("Auto-radio: appended \(tracks.count) track(s)", category: "audio")
+                        if appendedCount > 0, !player.isPlaying { player.skipToNext() }
+                        appLog("Auto-radio: appended \(appendedCount) track(s) from \(stationTitle)", category: "audio")
                     }
                 }
                 // When the user logs in after launch, start the auto-push timer and load avatar.
@@ -393,19 +398,5 @@ struct LumisoundApp: App {
                     Task { await discordVerification.refresh() }
                 }
         }
-    }
-}
-
-/// Maps a tempo to a short search-query keyword so Auto-Radio's related-tracks
-/// search is biased toward results with a similar energy level as the seed
-/// track. Returns `nil` for unknown or "normal"-tempo (90-120 BPM) seeds, where
-/// no extra hint is needed — the artist/title alone is descriptive enough.
-private func autoRadioTempoHint(for bpm: Double?) -> String? {
-    guard let bpm, bpm > 0 else { return nil }
-    switch bpm {
-    case ..<60:    return "ambient"
-    case 60..<90:  return "chill"
-    case 90..<120: return nil
-    default:       return "energetic"
     }
 }

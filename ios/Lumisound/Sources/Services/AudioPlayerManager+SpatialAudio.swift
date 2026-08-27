@@ -189,24 +189,16 @@ extension AudioPlayerManager {
         }
     }
 
-    /// Raises the audio session's preferred sample rate to match a file that's
-    /// genuinely higher-resolution than the 48kHz `configureAudioSession()`
-    /// requests at launch (a hi-res FLAC/ALAC in the Personal Cloud Library or
-    /// local library) — every YouTube-sourced track (streamed or downloaded)
-    /// is natively ≤48kHz, so this is a no-op for the overwhelming common
-    /// case. Every node connection in `configureEngine()` uses `format: nil`,
-    /// so the graph itself already adapts to whatever rate the output
-    /// hardware negotiates — nothing here needs to touch node connections or
-    /// rebuild the graph, just get the SESSION's rate raised before the
-    /// engine (re)starts so the final hardware conversion happens at the
-    /// file's own rate instead of always being silently downsampled to
-    /// 48kHz first. Never LOWERS the rate mid-session once raised (dropping
-    /// back to 48kHz for the next YouTube track buys nothing and would just
-    /// mean another stop/restart blip) — `lastRequestedSampleRate` only ever
-    /// ratchets up to the highest rate seen this session.
+    /// Matches the audio session's preferred sample rate to the source file
+    /// before the engine starts. This keeps CD-quality 44.1 kHz ALAC and
+    /// genuinely hi-res FLAC/ALAC from being needlessly converted through a
+    /// fixed 48 kHz intermediate. The graph uses `format: nil`, so the
+    /// hardware still negotiates its supported rate (and may resample when
+    /// the route cannot provide the source rate).
     func ensureSampleRate(matching fileSampleRate: Double) {
-        let desired = max(lastRequestedSampleRate, fileSampleRate.rounded())
-        guard desired > lastRequestedSampleRate else { return }
+        let desired = fileSampleRate.rounded()
+        guard desired > 0,
+              abs(desired - lastRequestedSampleRate) > 0.5 else { return }
         lastRequestedSampleRate = desired
 
         let session = AVAudioSession.sharedInstance()

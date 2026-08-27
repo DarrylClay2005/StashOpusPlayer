@@ -166,4 +166,33 @@ final class EQSystemTests: XCTestCase {
         let settings = AudioSettings()
         XCTAssertFalse(settings.smartCrossfadeEnabled, "Smart Auto Crossfade must be opt-in (default off)")
     }
+
+    // MARK: Test 16 — Music Haptics is opt-in and backward-compatible
+
+    func testMusicHapticsDefaultsOff() {
+        let settings = AudioSettings()
+        XCTAssertFalse(settings.musicHapticsEnabled ?? true)
+    }
+
+    // MARK: Test 17 — Lossless quality classification
+
+    func testLosslessQualityLabels() {
+        var details = AudioFormatDetails(
+            container: "ALAC",
+            isLossless: true,
+            sampleRateHz: 44_100,
+            bitDepth: 16,
+            channelCount: 2,
+            bitrateKbps: nil,
+            fileSizeBytes: nil,
+            isPlayingViaCompatibilityFallback: false
+        )
+        XCTAssertFalse(details.isHiResLossless)
+        XCTAssertEqual(details.qualityLabel, "Lossless")
+
+        details.sampleRateHz = 96_000
+        details.bitDepth = 24
+        XCTAssertTrue(details.isHiResLossless)
+        XCTAssertEqual(details.qualityLabel, "Hi-Res Lossless")
+    }
 }

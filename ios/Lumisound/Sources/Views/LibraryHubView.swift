@@ -91,8 +91,14 @@ struct LibraryHubView: View {
                     HubSkeleton()
                         .transition(.opacity)
                 } else if library.allSongs.isEmpty {
-                    HubEmptyState()
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    VStack(spacing: 24) {
+                        HubEmptyState()
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                        // Listening history can outlive the local library,
+                        // so still offer server-backed stations to a signed-in
+                        // user who has not imported music on this device yet.
+                        StationSuggestionsSection(accent: resolvedAccent)
+                    }
                 } else {
                     hubContent
                         .transition(.opacity)
@@ -174,6 +180,10 @@ struct LibraryHubView: View {
             onHumToSearch: { showHumToSearch = true },
             onNameThatTune: { showNameThatTune = true }
         )
+
+        // Contextual stations use the same server-side signal fusion as
+        // Auto-Radio, but without a current-track seed on Home.
+        StationSuggestionsSection(accent: resolvedAccent)
 
         // Everything below is data-driven: the persisted order (see
         // `HomeHubLayoutStore`) filtered to sections that are both not
