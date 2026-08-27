@@ -219,4 +219,62 @@ extension NowPlayingView {
             lyricsImportError = "Couldn't save that file: \(error.localizedDescription)"
         }
     }
+
+    /// Has Aria Lumi listen to the current track and generate (or, if
+    /// `lyricsLines` already has something from a remote fetch/import,
+    /// correct and re-time) synced lyrics for it — see
+    /// `StreamingService.transcribeLyrics`. The result is written to the
+    /// exact same file the manual Sync Editor saves to
+    /// (`syncedLyricsURL(for:)`), so once generated it behaves identically
+    /// to a user's own hand-synced lyrics: it wins over any future remote
+    /// fetch, and remains editable in the Sync Editor if a line or two
+    /// needs a manual nudge afterward.
+    func generateLyricsWithAria() {
+        guard let song = player.currentSong else {
+            lyricsImportError = "No track is currently playing."
+            return
+        }
+        guard let streaming = StreamingService.shared, let token = account.token else {
+            lyricsImportError = "Sign in to use Aria's lyrics transcription."
+            return
+        }
+        guard !isGeneratingLyrics else { return }
+        isGeneratingLyrics = true
+
+        // Whatever untimed text is already on screen becomes Aria's
+        // starting point — the actual "cross-check the words against what's
+        // playing" step, not a fresh blind transcription every time.
+        let hint = lyricsLines.isEmpty ? nil : lyricsLines.map(\.text).joined(separator: "\n")
+        let songID = song.id
+
+        Task { @MainActor in
+            defer { isGeneratingLyrics = false }
+            do {
+                let result = try await streaming.transcribeLyrics(for: song, token: token, hintLyrics: hint)
+                // The user may have skipped tracks while this was in flight —
+                // don't clobber whatever's now showing with a stale result.
+                guard player.currentSong?.id == songID else { return }
+
+                if result.instrumental || result.lrc.isEmpty {
+                    ToastCenter.shared.show(
+                        result.instrumental ? "Aria didn't find any lyrics — looks instrumental" : "Aria couldn't make out clear lyrics for this track",
+                        category: .info, icon: "waveform"
+                    )
+                    return
+                }
+
+                let lyricsDir = syncedLyricsURL(for: song).deletingLastPathComponent()
+                if !FileManager.default.fileExists(atPath: lyricsDir.path) {
+                    try FileManager.default.createDirectory(at: lyricsDir, withIntermediateDirectories: true)
+                }
+                try result.lrc.write(to: syncedLyricsURL(for: song), atomically: true, encoding: .utf8)
+                try? FileManager.default.removeItem(at: importedPlainLyricsURL(for: song))
+                loadLyrics()
+                ToastCenter.shared.show("Aria generated synced lyrics for this track", category: .success, icon: "sparkles")
+            } catch {
+                guard player.currentSong?.id == songID else { return }
+                lyricsImportError = "Aria couldn't transcribe this track: \(error.localizedDescription)"
+            }
+        }
+    }
 }

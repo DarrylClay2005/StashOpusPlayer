@@ -48,6 +48,19 @@ final class TVPlayerModel: ObservableObject {
         didSet { UserDefaults.standard.set(crossfadeEnabled, forKey: "tv.player.crossfadeEnabled") }
     }
 
+    // Reachable from a Siri/App Intent (TVAppIntents.swift), which runs
+    // outside the normal SwiftUI environment the same way a BGTask does on
+    // iOS — see LumisoundAppIntents.swift's identical reasoning there. Weak
+    // since `TVPlayerView`'s `@StateObject` (the only place this is
+    // constructed) still owns the real lifetime; this is only ever a
+    // pointer to whichever instance is currently on screen, `nil` whenever
+    // Now Playing isn't.
+    static weak var shared: TVPlayerModel?
+
+    init() {
+        Self.shared = self
+    }
+
     // MARK: Dual-player crossfade
     //
     // Two fixed AVPlayer instances rather than one — crossfading means the

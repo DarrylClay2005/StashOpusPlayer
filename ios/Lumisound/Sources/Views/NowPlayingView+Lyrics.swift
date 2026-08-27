@@ -44,6 +44,28 @@ extension NowPlayingView {
                                 .font(.caption)
                                 .foregroundStyle(AppTheme.dynamicAccent)
                         }
+                        // The only lyrics source that works for a track no
+                        // database has ever heard of (a personal/unreleased
+                        // recording) and the only one that verifies wording
+                        // against the actual audio — see
+                        // `generateLyricsWithAria()`. Always available (not
+                        // just when `lyricsLines` is empty), since it's also
+                        // how an existing fetched/imported guess gets
+                        // cross-checked and re-timed against the real track.
+                        Button {
+                            generateLyricsWithAria()
+                        } label: {
+                            if isGeneratingLyrics {
+                                Label("Generating…", systemImage: "waveform")
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            } else {
+                                Label("Generate with Aria", systemImage: "sparkles")
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.dynamicAccent)
+                            }
+                        }
+                        .disabled(isGeneratingLyrics)
                     }
                     .padding(.top, 4)
                 }

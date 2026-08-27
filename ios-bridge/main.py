@@ -69,6 +69,7 @@ from intelligence import (
     record_correction,
     record_suggestion,
 )
+from lyrics_ai import transcribe_lyrics
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -5852,6 +5853,53 @@ async def aria_cloud_cleanup(user: dict = Depends(get_current_user)):
                 removed.append({"filename": filename, "title": display_title})
 
     return {"removed": removed}
+
+
+@app.post("/user/intelligence/lyrics-transcribe")
+async def aria_transcribe_lyrics(
+    request: Request,
+    title: str = Query(...),
+    artist: str = Query(""),
+    hint_lyrics: Optional[str] = Query(None, max_length=6000, description="Untimed candidate lyrics text already fetched/imported for this track, if any — Aria re-times and corrects it against the audio rather than transcribing blind."),
+    user: dict = Depends(get_current_user),
+):
+    """Aria Lumi listens to the attached audio and produces (or corrects)
+    time-aligned lyrics for it — see lyrics_ai.transcribe_lyrics. Used for a
+    user's own tracks that have no match in any lyrics database (an
+    unreleased/personal recording), and to cross-check/re-time lyrics
+    already fetched from LRCLIB/lyrics.ovh or imported by the user against
+    what the audio actually contains. Returns LRC-formatted text the client
+    writes straight into its existing synced-lyrics file for the track (see
+    NowPlayingView+Helpers.swift's syncedLyricsURL) — no new client-side
+    lyrics format needed."""
+    try:
+        body = await request.body()
+    except ClientDisconnect:
+        raise HTTPException(status_code=499, detail="Client disconnected before upload completed")
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty audio body")
+    if len(body) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Audio too large for transcription (max 20 MB)")
+
+    mime_type = request.headers.get("content-type") or "audio/mpeg"
+    result = await transcribe_lyrics(body, mime_type, title, artist, hint_lyrics)
+    if result is None:
+        raise HTTPException(status_code=503, detail="Lyrics transcription isn't available right now")
+
+    lines = result.get("lines") or []
+    if result.get("instrumental") or not lines:
+        return {"lrc": "", "instrumental": bool(result.get("instrumental")), "confidence": result.get("confidence", "low")}
+
+    lrc_out: list[str] = []
+    for line in sorted(lines, key=lambda entry: entry.get("time_seconds", 0)):
+        text = str(line.get("text", "")).strip()
+        if not text:
+            continue
+        t = max(0.0, float(line.get("time_seconds", 0) or 0))
+        minutes, seconds = divmod(t, 60.0)
+        lrc_out.append(f"[{int(minutes):02d}:{seconds:05.2f}]{text}")
+
+    return {"lrc": "\n".join(lrc_out), "instrumental": False, "confidence": result.get("confidence", "medium")}
 
 
 # ---------------------------------------------------------------------------

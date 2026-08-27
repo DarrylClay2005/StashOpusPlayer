@@ -115,6 +115,10 @@ struct NowPlayingView: View {
     /// `importLyricsFile(from:)` in NowPlayingView+Helpers.swift.
     @State var showLyricsFileImporter = false
     @State var lyricsImportError: String?
+    /// True while `generateLyricsWithAria()` (NowPlayingView+Helpers.swift)
+    /// has an in-flight request — drives the "Generate with Aria" button's
+    /// spinner/disabled state in NowPlayingView+Lyrics.swift.
+    @State var isGeneratingLyrics = false
     // Bumped after add/remove so the view re-reads BookmarkStore (which
     // isn't an ObservableObject — it's a plain persisted store, same shape
     // as DownloadLedgerStore/PlayHistoryStore).
