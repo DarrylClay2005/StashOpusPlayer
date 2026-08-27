@@ -2,35 +2,57 @@ import AppIntents
 
 // MARK: - Lumisound tvOS App Intents / Siri
 //
-// Controls whatever's already playing via the Siri Remote's mic button or
-// "Hey Siri" (HomePod-paired Apple TVs) — reaches the live `TVPlayerModel`
-// through its `.shared` weak singleton (see that type's doc comment in
-// TVPlayerView.swift for why a weak pointer, not a real app-wide singleton
-// the way iOS's `AudioPlayerManager.shared` is).
-//
-// That's also this file's real scope limit: `TVPlayerModel` only exists
-// while the Now Playing screen is actually on screen (it's a plain
-// `@StateObject`, torn down once that view isn't), so unlike iOS these
-// intents can only ever CONTROL an already-started session, not START one
-// from cold — `TVAppIntentError.nothingPlaying` covers that case with an
-// honest error instead of silently no-op'ing or crashing. Starting
-// playback from Siri on tvOS would need `TVPlayerModel` promoted to a real
-// app-wide singleton first (constructed once at launch, not per-screen),
-// which is a genuine architecture change outside this file's scope.
+// Reaches the app-wide `TVPlayerModel.shared` (see that type's doc comment
+// in TVPlayerView.swift for why it's a real singleton now, not scoped to
+// whatever screen is on screen) the same way `TVBridgeClient.shared`/
+// `TVAccount.shared` already are. Because `TVPlayerModel` now lives for the
+// whole app session rather than only while Now Playing is open, these
+// intents can both CONTROL already-playing audio (skip, seek, pause) AND
+// START it from cold (`TVPlayFavoritesIntent`) — the latter wasn't
+// possible before this file's player-singleton follow-up.
 //
 // `openAppWhenRun = true`, same reasoning as LumisoundAppIntents.swift on
 // iOS: an intent runs outside the normal SwiftUI environment, so the app
-// has to actually be brought forward for `.shared` to have any chance of
-// being populated.
+// has to actually be brought forward for its state to be safely readable/
+// mutable from here (`TVBridgeClient`/`TVAccount` are populated during the
+// app's normal launch/login sequence, not before).
 
 enum TVAppIntentError: Error, CustomLocalizedStringResourceConvertible {
     case nothingPlaying
+    case notSignedIn
+    case noFavorites
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .nothingPlaying:
-            return "Nothing is currently playing in Lumisound — open Now Playing first."
+            return "Nothing is currently playing in Lumisound."
+        case .notSignedIn:
+            return "Sign in to Lumisound first."
+        case .noFavorites:
+            return "You don't have any favorite songs yet."
         }
+    }
+}
+
+struct TVPlayFavoritesIntent: AppIntent {
+    static var title: LocalizedStringResource = "Play Favorites"
+    static var description = IntentDescription("Plays your favorite songs in Lumisound.")
+    static var openAppWhenRun: Bool = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        let client = TVBridgeClient.shared
+        guard let token = TVAccount.shared.token else { throw TVAppIntentError.notSignedIn }
+        if client.library.isEmpty { await client.fetchLibrary(token: token) }
+        if client.favoriteSongIDs.isEmpty { await client.fetchFavorites(token: token) }
+
+        let queue = client.library
+            .filter { client.favoriteSongIDs.contains($0.id) }
+            .compactMap { client.playable(from: $0, token: token) }
+        guard let first = queue.first else { throw TVAppIntentError.noFavorites }
+
+        TVPlayerModel.shared.start(context: TVPlayContext(queue: queue, startID: first.id))
+        return .result()
     }
 }
 
@@ -41,7 +63,8 @@ struct TVTogglePlayPauseIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        guard let player = TVPlayerModel.shared else { throw TVAppIntentError.nothingPlaying }
+        let player = TVPlayerModel.shared
+        guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
         player.togglePlayPause()
         return .result()
     }
@@ -54,7 +77,8 @@ struct TVSkipToNextTrackIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        guard let player = TVPlayerModel.shared else { throw TVAppIntentError.nothingPlaying }
+        let player = TVPlayerModel.shared
+        guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
         player.next()
         return .result()
     }
@@ -67,7 +91,8 @@ struct TVSkipToPreviousTrackIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        guard let player = TVPlayerModel.shared else { throw TVAppIntentError.nothingPlaying }
+        let player = TVPlayerModel.shared
+        guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
         player.previous()
         return .result()
     }
@@ -80,7 +105,8 @@ struct TVToggleShuffleIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        guard let player = TVPlayerModel.shared else { throw TVAppIntentError.nothingPlaying }
+        let player = TVPlayerModel.shared
+        guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
         player.toggleShuffle()
         return .result()
     }
@@ -93,14 +119,70 @@ struct TVCycleRepeatModeIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        guard let player = TVPlayerModel.shared else { throw TVAppIntentError.nothingPlaying }
+        let player = TVPlayerModel.shared
+        guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
         player.cycleRepeatMode()
+        return .result()
+    }
+}
+
+/// "Siri, skip forward 30 seconds in Lumisound" / "Siri, skip forward 2
+/// minutes in Lumisound" — `Measurement<UnitDuration>` lets Siri parse
+/// either unit naturally out of the spoken phrase instead of needing a
+/// separate intent per unit.
+struct TVSkipForwardIntent: AppIntent {
+    static var title: LocalizedStringResource = "Skip Forward"
+    static var description = IntentDescription("Skips forward in the current track in Lumisound.")
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Duration", default: Measurement(value: 15, unit: UnitDuration.seconds))
+    var duration: Measurement<UnitDuration>
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Skip forward \(\.$duration) in Lumisound")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        let player = TVPlayerModel.shared
+        guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
+        player.seek(to: player.position + duration.converted(to: .seconds).value)
+        return .result()
+    }
+}
+
+struct TVSkipBackwardIntent: AppIntent {
+    static var title: LocalizedStringResource = "Skip Backward"
+    static var description = IntentDescription("Skips backward (rewinds) in the current track in Lumisound.")
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Duration", default: Measurement(value: 15, unit: UnitDuration.seconds))
+    var duration: Measurement<UnitDuration>
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Skip backward \(\.$duration) in Lumisound")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        let player = TVPlayerModel.shared
+        guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
+        player.seek(to: player.position - duration.converted(to: .seconds).value)
         return .result()
     }
 }
 
 struct LumisoundTVShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: TVPlayFavoritesIntent(),
+            phrases: [
+                "Play my favorites in \(.applicationName)",
+                "Play favorites in \(.applicationName)",
+            ],
+            shortTitle: "Play Favorites",
+            systemImageName: "heart.fill"
+        )
         AppShortcut(
             intent: TVTogglePlayPauseIntent(),
             phrases: ["Toggle playback in \(.applicationName)"],
@@ -136,6 +218,24 @@ struct LumisoundTVShortcuts: AppShortcutsProvider {
             phrases: ["Cycle repeat mode in \(.applicationName)"],
             shortTitle: "Repeat Mode",
             systemImageName: "repeat"
+        )
+        AppShortcut(
+            intent: TVSkipForwardIntent(),
+            phrases: [
+                "Skip forward \(\.$duration) in \(.applicationName)",
+                "Fast forward \(\.$duration) in \(.applicationName)",
+            ],
+            shortTitle: "Skip Forward",
+            systemImageName: "goforward"
+        )
+        AppShortcut(
+            intent: TVSkipBackwardIntent(),
+            phrases: [
+                "Skip backward \(\.$duration) in \(.applicationName)",
+                "Rewind \(\.$duration) in \(.applicationName)",
+            ],
+            shortTitle: "Skip Backward",
+            systemImageName: "gobackward"
         )
     }
 }

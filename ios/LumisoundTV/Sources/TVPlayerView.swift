@@ -48,18 +48,21 @@ final class TVPlayerModel: ObservableObject {
         didSet { UserDefaults.standard.set(crossfadeEnabled, forKey: "tv.player.crossfadeEnabled") }
     }
 
-    // Reachable from a Siri/App Intent (TVAppIntents.swift), which runs
-    // outside the normal SwiftUI environment the same way a BGTask does on
-    // iOS — see LumisoundAppIntents.swift's identical reasoning there. Weak
-    // since `TVPlayerView`'s `@StateObject` (the only place this is
-    // constructed) still owns the real lifetime; this is only ever a
-    // pointer to whichever instance is currently on screen, `nil` whenever
-    // Now Playing isn't.
-    static weak var shared: TVPlayerModel?
-
-    init() {
-        Self.shared = self
-    }
+    // A real app-wide singleton (not per-screen) — same pattern as
+    // `TVAccount.shared`/`TVBridgeClient.shared`, and constructed the same
+    // way at the app root (see `TVContentView`'s `@StateObject private var
+    // player = TVPlayerModel.shared`). This used to be a plain
+    // `@StateObject` owned by `TVPlayerView` itself, torn down (`stop()`
+    // on `.onDisappear`) the moment the user navigated away from Now
+    // Playing — which meant a Siri/App Intent (TVAppIntents.swift, which
+    // runs outside the normal SwiftUI environment the same way a BGTask
+    // does on iOS) had nothing reachable to START playback with, only to
+    // control an already-open Now Playing screen. Promoting it here is
+    // what actually lets Siri start playback from cold, and as a side
+    // effect also means playback now keeps going while browsing elsewhere
+    // in the app instead of stopping the instant Now Playing closes —
+    // matching how the iOS app's `AudioPlayerManager` already behaves.
+    static let shared = TVPlayerModel()
 
     // MARK: Dual-player crossfade
     //
@@ -92,8 +95,19 @@ final class TVPlayerModel: ObservableObject {
 
     var current: TVPlayable? { queue.indices.contains(currentIndex) ? queue[currentIndex] : nil }
 
+    /// The queue/start-point `start(context:)` most recently actually
+    /// adopted — lets repeat calls with the SAME context (e.g. navigating
+    /// back to Now Playing without picking a new track, now that this is a
+    /// persistent singleton instead of a fresh-per-screen instance) resume
+    /// in place rather than restarting, while a genuinely different
+    /// context still replaces the queue as before.
+    private var currentContext: TVPlayContext?
+
     func start(context: TVPlayContext) {
-        guard queue.isEmpty else { return }  // start once
+        guard currentContext != context else { return }
+        currentContext = context
+        cancelCrossfade()
+        isShuffled = false
         queue = context.queue
         originalQueue = context.queue
         currentIndex = queue.firstIndex(where: { $0.id == context.startID }) ?? 0
@@ -103,6 +117,17 @@ final class TVPlayerModel: ObservableObject {
         setupAudioSessionObservers()
         configureRemoteCommands()
         loadCurrent()
+    }
+
+    /// Seeks within the current track, clamped to `[0, duration]` — used by
+    /// the "skip forward/back N seconds" Siri intents (TVAppIntents.swift).
+    /// `position` is updated immediately rather than waiting for the next
+    /// periodic time-observer tick, so a seek doesn't visibly lag.
+    func seek(to newPosition: Double) {
+        guard duration > 0 else { return }
+        let target = max(0, min(newPosition, duration))
+        position = target
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600))
     }
 
     private func setupObservers() {
@@ -538,7 +563,14 @@ struct TVPlayerView: View {
     let context: TVPlayContext
     @ObservedObject var client: TVBridgeClient
     let token: String
-    @StateObject private var model = TVPlayerModel()
+    // `@StateObject` still (not `@ObservedObject`) even though the instance
+    // now comes from `.shared` rather than being constructed here — SwiftUI
+    // needs `@StateObject` semantics (never re-created across this view's
+    // own re-renders) for its lifecycle management, and `init(_:)` taking
+    // an already-live instance is exactly `@StateObject`'s documented way
+    // to adopt an externally-owned object, same as `TVContentView`'s own
+    // `@StateObject private var client = TVBridgeClient.shared`.
+    @StateObject private var model = TVPlayerModel.shared
     @State private var sidePanel: TVSidePanel = .none
     @State private var showSleepTimerSheet = false
     @State private var showArtworkStyleSheet = false
@@ -609,7 +641,15 @@ struct TVPlayerView: View {
             model.start(context: context)
             breathe = true
         }
-        .onDisappear { model.stop() }
+        // No `.onDisappear { model.stop() }` anymore — `model` is the app-
+        // wide `TVPlayerModel.shared` now, not a fresh instance scoped to
+        // this screen, so navigating away from Now Playing should leave
+        // playback running (matches the iOS app's `AudioPlayerManager`)
+        // rather than killing it. `stop()` is still exactly what a real
+        // user-initiated "stop" action should call — there just isn't one
+        // wired up in this UI today (browsing away only pauses/keeps
+        // playing, never force-stops), same as before this change for
+        // every OTHER way of leaving Now Playing that already existed.
     }
 
     private func togglePanel(_ panel: TVSidePanel) {

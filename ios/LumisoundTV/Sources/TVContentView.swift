@@ -5,6 +5,11 @@ import SwiftUI
 struct TVContentView: View {
     @StateObject private var account = TVAccount.shared
     @StateObject private var client = TVBridgeClient.shared
+    // Adopted here (not constructed) for the same reason `client`/`account`
+    // are — see TVPlayerModel.shared's doc comment. Not otherwise used
+    // directly in this view; holding the reference here just keeps it
+    // consistent with the rest of this file's root-level singleton pattern.
+    @StateObject private var player = TVPlayerModel.shared
     @State private var selection: TVDestination = .home
 
     var body: some View {

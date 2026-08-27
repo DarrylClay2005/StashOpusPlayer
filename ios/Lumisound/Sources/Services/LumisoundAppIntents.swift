@@ -119,6 +119,54 @@ struct ToggleShuffleIntent: AppIntent {
     }
 }
 
+/// "Siri, skip forward 30 seconds in Lumisound" / "Siri, skip forward 2
+/// minutes in Lumisound" — `Measurement<UnitDuration>` lets Siri parse
+/// either unit naturally out of the spoken phrase instead of needing a
+/// separate intent per unit.
+struct SeekForwardIntent: AppIntent {
+    static var title: LocalizedStringResource = "Skip Forward"
+    static var description = IntentDescription("Skips forward in the current track in Lumisound.")
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Duration", default: Measurement(value: 15, unit: UnitDuration.seconds))
+    var duration: Measurement<UnitDuration>
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Skip forward \(\.$duration) in Lumisound")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let player = AudioPlayerManager.shared else {
+            throw LumisoundIntentError.appNotReady
+        }
+        player.seek(to: player.position + duration.converted(to: .seconds).value)
+        return .result()
+    }
+}
+
+struct SeekBackwardIntent: AppIntent {
+    static var title: LocalizedStringResource = "Skip Backward"
+    static var description = IntentDescription("Skips backward (rewinds) in the current track in Lumisound.")
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Duration", default: Measurement(value: 15, unit: UnitDuration.seconds))
+    var duration: Measurement<UnitDuration>
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Skip backward \(\.$duration) in Lumisound")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let player = AudioPlayerManager.shared else {
+            throw LumisoundIntentError.appNotReady
+        }
+        player.seek(to: player.position - duration.converted(to: .seconds).value)
+        return .result()
+    }
+}
+
 struct CycleRepeatModeIntent: AppIntent {
     static var title: LocalizedStringResource = "Cycle Repeat Mode"
     static var description = IntentDescription("Cycles Lumisound's repeat mode between off, repeat-all, and repeat-one.")
@@ -321,6 +369,24 @@ struct LumisoundShortcuts: AppShortcutsProvider {
             phrases: ["Cycle repeat mode in \(.applicationName)"],
             shortTitle: "Repeat Mode",
             systemImageName: "repeat"
+        )
+        AppShortcut(
+            intent: SeekForwardIntent(),
+            phrases: [
+                "Skip forward \(\.$duration) in \(.applicationName)",
+                "Fast forward \(\.$duration) in \(.applicationName)",
+            ],
+            shortTitle: "Skip Forward",
+            systemImageName: "goforward"
+        )
+        AppShortcut(
+            intent: SeekBackwardIntent(),
+            phrases: [
+                "Skip backward \(\.$duration) in \(.applicationName)",
+                "Rewind \(\.$duration) in \(.applicationName)",
+            ],
+            shortTitle: "Skip Backward",
+            systemImageName: "gobackward"
         )
         AppShortcut(
             intent: StartSleepTimerIntent(),
