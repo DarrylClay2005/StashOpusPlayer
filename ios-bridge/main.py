@@ -5725,6 +5725,70 @@ async def intelligence_feedback(
     return {"ok": True}
 
 
+class AriaActionRequest(BaseModel):
+    action_type: str
+    title: str
+    artist: Optional[str] = None
+    detail: Optional[str] = None
+    before: Optional[dict] = None
+    after: Optional[dict] = None
+    confidence: Optional[str] = None
+    memory_id: Optional[int] = None
+
+
+@app.post("/user/intelligence/actions")
+async def report_aria_action(
+    body: AriaActionRequest, payload: dict = Depends(get_current_user)
+):
+    """Deep action log for Aria Lumi — unlike the best_index/confidence-only
+    ios_aria_memory row a suggestion gets, this records a real action she
+    took on an existing track (currently: auto-removing a confidently-
+    identified duplicate — see DuplicateFinderService.refineGroupsWithAria),
+    with full before/after state. The client calls this right after it
+    actually performs the local action (trashing a file, rewriting tags),
+    not before — this is a log of what happened, not another suggestion
+    endpoint. Returns the row id so the client can report a later revert
+    against it."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO ios_aria_actions "
+                "(user_id, action_type, title, artist, detail, before_json, after_json, confidence, memory_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    user_id, body.action_type, body.title, body.artist, body.detail,
+                    json.dumps(body.before) if body.before is not None else None,
+                    json.dumps(body.after) if body.after is not None else None,
+                    body.confidence, body.memory_id,
+                ),
+            )
+            (action_id,) = await cur.fetchone()
+    return {"id": action_id}
+
+
+@app.post("/user/intelligence/actions/{action_id}/revert")
+async def revert_aria_action(action_id: int, payload: dict = Depends(get_current_user)):
+    """Marks an Aria action reverted after the client has already undone it
+    locally (restored the trashed file, rewritten the tags back). This
+    endpoint only updates the audit trail — it never touches the user's
+    files itself, since the actual state she changed only exists on their
+    device. Best-effort: always returns {"ok": true} even if the row wasn't
+    found/owned, since the local revert already happened either way and
+    the client shouldn't surface an error for a logging-only failure."""
+    user_id = payload["sub"]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ios_aria_actions SET reverted_at = NOW() "
+                "WHERE id = %s AND user_id = %s AND reverted_at IS NULL",
+                (action_id, user_id),
+            )
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # AI DJ Mode (Feature: ai-dj-mode)
 # ---------------------------------------------------------------------------
