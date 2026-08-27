@@ -137,18 +137,24 @@ struct TVSkipForwardIntent: AppIntent {
     static var description = IntentDescription("Skips forward in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
+    // Named uniquely (not `seconds`, which `TVSkipBackwardIntent` below
+    // also used to declare) — see the matching comment on iOS's
+    // `SeekForwardIntent`: two sibling intents in the same file both
+    // declaring a same-named @Parameter appears to be what actually
+    // confused this toolchain's appintentsmetadataprocessor into
+    // misreporting a bogus type error, not the parameter's actual type.
     @Parameter(title: "Seconds", default: 15)
-    var seconds: Int
+    var forwardSeconds: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Skip forward \(\.$seconds) seconds in Lumisound")
+        Summary("Skip forward \(\.$forwardSeconds) seconds in Lumisound")
     }
 
     @MainActor
     func perform() async throws -> some IntentResult {
         let player = TVPlayerModel.shared
         guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
-        player.seek(to: player.position + Double(seconds))
+        player.seek(to: player.position + Double(forwardSeconds))
         return .result()
     }
 }
@@ -159,17 +165,17 @@ struct TVSkipBackwardIntent: AppIntent {
     static var openAppWhenRun: Bool = true
 
     @Parameter(title: "Seconds", default: 15)
-    var seconds: Int
+    var backwardSeconds: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Skip backward \(\.$seconds) seconds in Lumisound")
+        Summary("Skip backward \(\.$backwardSeconds) seconds in Lumisound")
     }
 
     @MainActor
     func perform() async throws -> some IntentResult {
         let player = TVPlayerModel.shared
         guard !player.queue.isEmpty else { throw TVAppIntentError.nothingPlaying }
-        player.seek(to: player.position - Double(seconds))
+        player.seek(to: player.position - Double(backwardSeconds))
         return .result()
     }
 }
@@ -224,8 +230,8 @@ struct LumisoundTVShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: TVSkipForwardIntent(),
             phrases: [
-                "Skip forward \(\.$seconds) seconds in \(.applicationName)",
-                "Fast forward \(\.$seconds) seconds in \(.applicationName)",
+                "Skip forward \(\.$forwardSeconds) seconds in \(.applicationName)",
+                "Fast forward \(\.$forwardSeconds) seconds in \(.applicationName)",
             ],
             shortTitle: "Skip Forward",
             systemImageName: "goforward"
@@ -233,8 +239,8 @@ struct LumisoundTVShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: TVSkipBackwardIntent(),
             phrases: [
-                "Skip backward \(\.$seconds) seconds in \(.applicationName)",
-                "Rewind \(\.$seconds) seconds in \(.applicationName)",
+                "Skip backward \(\.$backwardSeconds) seconds in \(.applicationName)",
+                "Rewind \(\.$backwardSeconds) seconds in \(.applicationName)",
             ],
             shortTitle: "Skip Backward",
             systemImageName: "gobackward"

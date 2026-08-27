@@ -137,11 +137,19 @@ struct SeekForwardIntent: AppIntent {
     static var description = IntentDescription("Skips forward in the current track in Lumisound.")
     static var openAppWhenRun: Bool = true
 
+    // Named uniquely (not `seconds`, which `SeekBackwardIntent` below also
+    // used to declare) — the previous "Invalid parameter type. AppEntity
+    // and AppEnum are the only allowed types" failure, which survived
+    // every actual type change tried (Measurement, then Int), turned out
+    // to track this instead: two sibling AppIntents in the same file both
+    // declaring a same-named @Parameter apparently confuses this Xcode
+    // 26.6 toolchain's appintentsmetadataprocessor into misreporting a
+    // bogus type error rather than a naming-collision one.
     @Parameter(title: "Seconds", default: 15)
-    var seconds: Int
+    var forwardSeconds: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Skip forward \(\.$seconds) seconds in Lumisound")
+        Summary("Skip forward \(\.$forwardSeconds) seconds in Lumisound")
     }
 
     @MainActor
@@ -149,7 +157,7 @@ struct SeekForwardIntent: AppIntent {
         guard let player = AudioPlayerManager.shared else {
             throw LumisoundIntentError.appNotReady
         }
-        player.seek(to: player.position + TimeInterval(seconds))
+        player.seek(to: player.position + TimeInterval(forwardSeconds))
         return .result()
     }
 }
@@ -160,10 +168,10 @@ struct SeekBackwardIntent: AppIntent {
     static var openAppWhenRun: Bool = true
 
     @Parameter(title: "Seconds", default: 15)
-    var seconds: Int
+    var backwardSeconds: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Skip backward \(\.$seconds) seconds in Lumisound")
+        Summary("Skip backward \(\.$backwardSeconds) seconds in Lumisound")
     }
 
     @MainActor
@@ -171,7 +179,7 @@ struct SeekBackwardIntent: AppIntent {
         guard let player = AudioPlayerManager.shared else {
             throw LumisoundIntentError.appNotReady
         }
-        player.seek(to: player.position - TimeInterval(seconds))
+        player.seek(to: player.position - TimeInterval(backwardSeconds))
         return .result()
     }
 }
@@ -380,8 +388,8 @@ struct LumisoundShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: SeekForwardIntent(),
             phrases: [
-                "Skip forward \(\.$seconds) seconds in \(.applicationName)",
-                "Fast forward \(\.$seconds) seconds in \(.applicationName)",
+                "Skip forward \(\.$forwardSeconds) seconds in \(.applicationName)",
+                "Fast forward \(\.$forwardSeconds) seconds in \(.applicationName)",
             ],
             shortTitle: "Skip Forward",
             systemImageName: "goforward"
@@ -389,8 +397,8 @@ struct LumisoundShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: SeekBackwardIntent(),
             phrases: [
-                "Skip backward \(\.$seconds) seconds in \(.applicationName)",
-                "Rewind \(\.$seconds) seconds in \(.applicationName)",
+                "Skip backward \(\.$backwardSeconds) seconds in \(.applicationName)",
+                "Rewind \(\.$backwardSeconds) seconds in \(.applicationName)",
             ],
             shortTitle: "Skip Backward",
             systemImageName: "gobackward"
