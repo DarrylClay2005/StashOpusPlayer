@@ -386,10 +386,20 @@ struct LumisoundShortcuts: AppShortcutsProvider {
             systemImageName: "backward.fill"
         )
         AppShortcut(
+            // No `\(\.$forwardSeconds)` interpolation — same rule
+            // `SearchAndPlayIntent`'s `query` already follows below: only
+            // AppEntity/AppEnum parameters can be embedded in a phrase.
+            // THIS, not the parameter's name or type, was the actual cause
+            // of every previous "Invalid parameter type. AppEntity and
+            // AppEnum are the only allowed types" failure — the error was
+            // real, just misleadingly attributed to the @Parameter
+            // declaration instead of this interpolation site. Siri still
+            // prompts for the value via dialog when it's not in the
+            // matched phrase, exactly like `query` below already does.
             intent: SeekForwardIntent(),
             phrases: [
-                "Skip forward \(\.$forwardSeconds) seconds in \(.applicationName)",
-                "Fast forward \(\.$forwardSeconds) seconds in \(.applicationName)",
+                "Skip forward in \(.applicationName)",
+                "Fast forward in \(.applicationName)",
             ],
             shortTitle: "Skip Forward",
             systemImageName: "goforward"
@@ -397,8 +407,8 @@ struct LumisoundShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: SeekBackwardIntent(),
             phrases: [
-                "Skip backward \(\.$backwardSeconds) seconds in \(.applicationName)",
-                "Rewind \(\.$backwardSeconds) seconds in \(.applicationName)",
+                "Skip backward in \(.applicationName)",
+                "Rewind in \(.applicationName)",
             ],
             shortTitle: "Skip Backward",
             systemImageName: "gobackward"

@@ -228,10 +228,15 @@ struct LumisoundTVShortcuts: AppShortcutsProvider {
             systemImageName: "repeat"
         )
         AppShortcut(
+            // No `\(\.$forwardSeconds)` interpolation — only AppEntity/
+            // AppEnum parameters can be embedded in a phrase. THIS, not
+            // the parameter's name or type, was the actual cause of every
+            // previous "Invalid parameter type" failure on this file —
+            // see the matching comment on iOS's SeekForwardIntent.
             intent: TVSkipForwardIntent(),
             phrases: [
-                "Skip forward \(\.$forwardSeconds) seconds in \(.applicationName)",
-                "Fast forward \(\.$forwardSeconds) seconds in \(.applicationName)",
+                "Skip forward in \(.applicationName)",
+                "Fast forward in \(.applicationName)",
             ],
             shortTitle: "Skip Forward",
             systemImageName: "goforward"
@@ -239,8 +244,8 @@ struct LumisoundTVShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: TVSkipBackwardIntent(),
             phrases: [
-                "Skip backward \(\.$backwardSeconds) seconds in \(.applicationName)",
-                "Rewind \(\.$backwardSeconds) seconds in \(.applicationName)",
+                "Skip backward in \(.applicationName)",
+                "Rewind in \(.applicationName)",
             ],
             shortTitle: "Skip Backward",
             systemImageName: "gobackward"
