@@ -1226,15 +1226,25 @@ async def _cookie_fallback_preference(user_id: str) -> str:
 
 async def _may_use_global_cookies(user_id: Optional[str]) -> bool:
     """Guardrail on the operator's own YouTube session (YTDLP_COOKIES_FILE):
-    a brand-new or throwaway account riding on it — especially one an
+    a brand-new or throwaway ACCOUNT riding on it — especially one an
     abuser spins up specifically to avoid ever configuring/burning their
     own cookies — is exactly the failure mode an age gate exists to catch.
-    *user_id* being None (no account context at all, e.g. an unauthenticated
-    call) is never eligible either, same reasoning. Once an account clears
-    the age bar, its own stored preference decides ('auto'/'global_only'
-    both allow it; 'own_only' opts back out even though it's eligible)."""
+
+    *user_id* being None is a DIFFERENT case and must stay allowed: per
+    _account_token_user_id's own doc comment, the legacy yt-dlp endpoints
+    (/api/search, /api/stream, /api/download — which is what tvOS's direct
+    streaming goes through) authenticate via the shared IOS_BRIDGE_API_KEY
+    (see check_auth), not a per-account JWT, so a legitimate, fully-gated
+    request routinely has no X-Account-Token at all. There's no account
+    here to be "too new" — treating None as ineligible broke tvOS
+    streaming outright (every such call fell through to zero cookies
+    instead of the global session, which is an outright regression, not a
+    tightened guardrail) the first time this shipped. The actual abuse
+    case this function exists for — a throwaway ACCOUNT — is still fully
+    covered below once a real user_id is present.
+    """
     if not user_id:
-        return False
+        return True
     age_days = await _account_age_days(user_id)
     if age_days is None or age_days < _MIN_ACCOUNT_AGE_DAYS_FOR_GLOBAL_COOKIES:
         return False
@@ -3099,6 +3109,19 @@ async def stream_proxy(
             status="success", error_message=None,
             duration_ms=int((time.monotonic() - proxy_resolve_start) * 1000),
         ))
+        # A googlevideo URL fetched THIS fast after being resolved gets a
+        # flat 403 from Google's CDN — confirmed by direct reproduction:
+        # fetching immediately after resolution failed 403 every time,
+        # while fetching the exact same URL a few seconds later succeeded
+        # every time, with nothing else different (same cookies, same IP,
+        # same headers). Reads as an anti-scraping heuristic on a "resolve
+        # then instantly hit the CDN" pattern no human/real player would
+        # ever produce, not a mismatch or expired-URL issue — this is what
+        # was actually behind tvOS (and any other direct-stream, as
+        # opposed to cloud-library-playback or download) failures. Only
+        # applies to a freshly-resolved URL; a cached one has already had
+        # plenty of real time pass since resolution.
+        await asyncio.sleep(3)
 
     req_headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
@@ -3239,6 +3262,10 @@ async def download_relay(
             logger.warning("download_relay: no raw URL for %s (%s) after %.2fs", cache_key, failure_reason, time.monotonic() - relay_start)
             raise HTTPException(status_code=404, detail=failure_reason or "No stream URL found")
         _STREAM_URL_CACHE[cache_key] = (raw_url, time.monotonic() + _STREAM_URL_TTL)
+        # See the identical comment in stream_proxy — a freshly-resolved
+        # googlevideo URL fetched instantly gets a flat CDN 403; a few
+        # seconds' gap reliably avoids it. Only on the fresh-resolve path.
+        await asyncio.sleep(3)
 
     req_headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
