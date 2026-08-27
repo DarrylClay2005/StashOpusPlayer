@@ -58,15 +58,15 @@ struct AudioFormatDetails: Equatable {
                 let format = file.processingFormat
                 sampleRateHz = format.sampleRate
                 channelCount = Int(format.channelCount)
-                let sourceFormatID = file.fileFormat.streamDescription?.pointee.mFormatID
+                let sourceFormatID = file.fileFormat.streamDescription.pointee.mFormatID
                 let sourceIsLossless = isLossless ||
                     sourceFormatID == kAudioFormatAppleLossless ||
                     sourceFormatID == kAudioFormatLinearPCM
                 // Prefer the container's declared bits-per-channel. The
                 // processing format is often Float32 even when the source is
                 // a 16-bit ALAC file.
-                if sourceIsLossless, let streamDescription = file.fileFormat.streamDescription {
-                    let declaredBits = Int(streamDescription.pointee.mBitsPerChannel)
+                if sourceIsLossless {
+                    let declaredBits = Int(file.fileFormat.streamDescription.pointee.mBitsPerChannel)
                     bitDepth = declaredBits > 0 ? declaredBits : nil
                 }
                 if sourceIsLossless, bitDepth == nil {

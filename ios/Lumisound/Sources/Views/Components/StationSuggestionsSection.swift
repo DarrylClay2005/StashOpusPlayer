@@ -9,6 +9,11 @@ struct StationSuggestionsSection: View {
     @EnvironmentObject private var player: AudioPlayerManager
 
     let seed: StationSeed?
+
+    init(seed: StationSeed? = nil, accent: Color = AppTheme.dynamicAccent) {
+        self.seed = seed
+        self.accent = accent
+    }
     var accent: Color = AppTheme.dynamicAccent
 
     @State private var suggestions: [StationSuggestion] = []

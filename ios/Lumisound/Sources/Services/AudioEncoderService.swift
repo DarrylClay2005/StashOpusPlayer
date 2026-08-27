@@ -272,7 +272,7 @@ final class AudioEncoderService {
         }
 
         var suppliedInput = false
-        var conversionError: Error?
+        var conversionError: NSError?
         converter.convert(to: output, error: &conversionError) { _, status in
             if suppliedInput {
                 status.pointee = .endOfStream
