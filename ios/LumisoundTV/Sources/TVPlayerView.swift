@@ -557,7 +557,7 @@ final class TVPlayerModel: ObservableObject {
 
 // MARK: - TVPlayerView
 
-private enum TVSidePanel { case none, upNext, lyrics }
+private enum TVSidePanel: Equatable { case none, upNext, lyrics }
 
 struct TVPlayerView: View {
     let context: TVPlayContext
@@ -572,6 +572,14 @@ struct TVPlayerView: View {
     // `@StateObject private var client = TVBridgeClient.shared`.
     @StateObject private var model = TVPlayerModel.shared
     @State private var sidePanel: TVSidePanel = .none
+    // tvOS never automatically moves focus into a view that appears over
+    // already-focused content — `upNextPanel` is drawn in the same ZStack
+    // as the transport controls, not a real `.sheet`, so without this the
+    // panel shows up but the Siri Remote's focus silently stays on
+    // whatever utility button opened it. Forced onto the panel's close
+    // button in `.onChange(of: sidePanel)` below the instant it opens.
+    // (TVLyricsPanel does the same thing internally for itself.)
+    @FocusState private var upNextCloseFocused: Bool
     @State private var showSleepTimerSheet = false
     @State private var showArtworkStyleSheet = false
     @AppStorage("tv.nowPlaying.artworkStyle") private var artworkStyleRaw = TVArtworkStyle.classic.rawValue
@@ -622,6 +630,7 @@ struct TVPlayerView: View {
                 .frame(maxWidth: 760, alignment: .leading)
             }
             .padding(.horizontal, 110)
+            .focusSection()
 
             if sidePanel == .upNext {
                 upNextPanel
@@ -640,6 +649,14 @@ struct TVPlayerView: View {
         .onAppear {
             model.start(context: context)
             breathe = true
+        }
+        .onChange(of: sidePanel) { newValue in
+            // Forces focus into the panel the instant it opens — see
+            // `upNextCloseFocused`'s doc comment. TVLyricsPanel does the
+            // same thing for itself internally via its own `.onAppear`,
+            // since it owns its own close button/FocusState.
+            guard newValue == .upNext else { return }
+            upNextCloseFocused = true
         }
         // No `.onDisappear { model.stop() }` anymore — `model` is the app-
         // wide `TVPlayerModel.shared` now, not a fresh instance scoped to
@@ -759,6 +776,7 @@ struct TVPlayerView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
+                    .focused($upNextCloseFocused)
                 }
                 .padding(.horizontal, 40)
                 .padding(.top, 50)
@@ -811,6 +829,7 @@ struct TVPlayerView: View {
             .background(.black.opacity(0.85))
         }
         .ignoresSafeArea()
+        .focusSection()
     }
 
     @ViewBuilder private var backdrop: some View {

@@ -13,6 +13,16 @@ struct TVLyricsPanel: View {
     let isLoading: Bool
     let onClose: () -> Void
 
+    // tvOS's focus engine never automatically moves focus into a view that
+    // appears on top of already-focused content (this panel is drawn in
+    // the same ZStack as Now Playing's transport controls, not presented
+    // as a real `.sheet`) — without this, the panel shows up but the Siri
+    // Remote's focus silently stays on whatever transport/utility button
+    // opened it, so nothing in the panel itself is reachable. Forcing
+    // focus onto the close button the moment the panel appears is what
+    // actually makes it interactive.
+    @FocusState private var closeButtonFocused: Bool
+
     private var currentLineIndex: Int? {
         var result: Int?
         for (index, line) in lines.enumerated() {
@@ -35,6 +45,7 @@ struct TVLyricsPanel: View {
                 } label: {
                     Image(systemName: "xmark")
                 }
+                .focused($closeButtonFocused)
             }
             .padding(.horizontal, 60)
             .padding(.top, 50)
@@ -53,6 +64,8 @@ struct TVLyricsPanel: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.black.opacity(0.92))
+        .focusSection()
+        .onAppear { closeButtonFocused = true }
         .ignoresSafeArea()
     }
 
