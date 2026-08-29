@@ -177,6 +177,7 @@ struct LibraryHubView: View {
         HubQuickActionsRow(
             hasLibrary: !library.allSongs.isEmpty,
             onShuffleAll: shuffleAll,
+            onSurpriseMe: surpriseMe,
             onHumToSearch: { showHumToSearch = true },
             onNameThatTune: { showNameThatTune = true }
         )
@@ -336,6 +337,30 @@ struct LibraryHubView: View {
         guard let random = library.allSongs.randomElement() else { return }
         player.shuffleEnabled = true
         player.play(song: random, in: library.allSongs)
+    }
+
+    /// "Surprise Me" — unlike Shuffle All (a flat random pick across the
+    /// WHOLE library), this is a weighted pick from the hub's own curated
+    /// pools it already computed for the carousels below: forgotten
+    /// favorites, on-repeat tracks, and recently played all get a share, so
+    /// one tap surfaces something the hub's own personalization already
+    /// decided is worth surfacing, rather than a genuinely uniform random
+    /// song. Falls back to Shuffle All's plain random pick if the reload()
+    /// pipeline hasn't populated those pools yet (e.g. first launch).
+    private func surpriseMe() {
+        var weighted: [Song] = []
+        // Forgotten favorites get the heaviest weight — the whole point of
+        // "surprise me" is resurfacing something the user liked but hasn't
+        // heard in a while, not just repeating whatever's already on repeat.
+        weighted.append(contentsOf: forgottenFavorites)
+        weighted.append(contentsOf: forgottenFavorites)
+        weighted.append(contentsOf: recentlyPlayed)
+        weighted.append(contentsOf: mostPlayed)
+
+        guard let pick = weighted.randomElement() ?? library.allSongs.randomElement() else { return }
+        player.shuffleEnabled = false
+        player.play(song: pick, in: library.allSongs)
+        ToastCenter.shared.show("Surprise: \"\(pick.displayName)\"", category: .info, icon: "sparkles")
     }
 
     /// Fetches the network-backed hub extras once — independent of
@@ -887,6 +912,7 @@ private struct HubSongCarousel: View {
 private struct HubQuickActionsRow: View {
     let hasLibrary: Bool
     let onShuffleAll: () -> Void
+    let onSurpriseMe: () -> Void
     let onHumToSearch: () -> Void
     let onNameThatTune: () -> Void
 
@@ -894,6 +920,13 @@ private struct HubQuickActionsRow: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
                 actionChip(title: "Shuffle All", icon: "shuffle", action: onShuffleAll)
+                    .disabled(!hasLibrary)
+                    .opacity(hasLibrary ? 1 : 0.4)
+                // Distinct from Shuffle All: a weighted pick from the hub's
+                // own curated pools (forgotten favorites weighted heaviest)
+                // instead of a flat random pick across the whole library —
+                // see LibraryHubView.surpriseMe's doc comment.
+                actionChip(title: "Surprise Me", icon: "sparkles", action: onSurpriseMe)
                     .disabled(!hasLibrary)
                     .opacity(hasLibrary ? 1 : 0.4)
                 actionChip(title: "Hum to Search", icon: "waveform", action: onHumToSearch)
