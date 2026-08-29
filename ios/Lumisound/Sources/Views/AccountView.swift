@@ -311,111 +311,50 @@ struct AccountView: View {
                 .listRowBackground(AppTheme.surface)
 
                 // MARK: Stats Section
+                //
+                // Structural redesign: the old screen buried every number
+                // behind a vertical stack of `LabeledContent` rows and then
+                // ten more `NavigationLink` rows underneath with no visual
+                // grouping. Numbers now read as a scannable stat strip;
+                // the destinations below read as a tappable icon grid, so
+                // the eye can parse "here are my numbers" vs. "here's where
+                // I go" at a glance instead of one undifferentiated list.
                 Section {
-                    LabeledContent("Playlists") {
-                        Text("\(library.playlists.count)")
-                            .font(AppTheme.monoFont(size: 14))
-                            .foregroundStyle(AppTheme.textSecondary)
-                    }
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                    LabeledContent("Favorites") {
-                        Text("\(library.favoriteSongIDs.count)")
-                            .font(AppTheme.monoFont(size: 14))
-                            .foregroundStyle(AppTheme.textSecondary)
-                    }
-                    .foregroundStyle(AppTheme.textPrimary)
-
-                    if let stats = account.stats {
-                        LabeledContent("Total Plays") {
-                            Text("\(stats.totalPlays)")
-                                .font(AppTheme.monoFont(size: 14))
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
-                        .foregroundStyle(AppTheme.textPrimary)
-
-                        LabeledContent("Listening Time") {
-                            Text(formattedListenTime(stats.totalListenSeconds))
-                                .font(AppTheme.monoFont(size: 14))
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
-                        .foregroundStyle(AppTheme.textPrimary)
-
-                        if let topArtist = stats.topArtists.first {
-                            LabeledContent("Top Artist") {
-                                Text(topArtist.artist)
-                                    .font(AppTheme.bodyFont(size: 13))
-                                    .foregroundStyle(AppTheme.textSecondary)
-                            }
-                            .foregroundStyle(AppTheme.textPrimary)
-                        }
-                    }
-
-                    NavigationLink(destination: RewindView()) {
-                        Label("Your Rewind", systemImage: "chart.bar.xaxis")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-
-                    NavigationLink(destination: PodcastsView()) {
-                        Label("Podcasts", systemImage: "mic.square")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-
-                    NavigationLink(destination: AchievementsView()) {
-                        Label("Achievements", systemImage: "trophy")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-
-                    NavigationLink(destination: ListeningGoalView()) {
-                        Label("Listening Goal", systemImage: "target")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-
-                    NavigationLink(destination: NeedleDropView()) {
-                        Label("Needle Drop", systemImage: "questionmark.circle")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-
-                    NavigationLink(destination: TimeCapsulesView()) {
-                        Label("Time Capsules", systemImage: "shippingbox")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-
-                    NavigationLink(destination: ConstellationView()) {
-                        Label("Constellation", systemImage: "sparkles")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-
-                    NavigationLink(destination: ListeningHeatmapView()) {
-                        Label("Listening Heatmap", systemImage: "calendar")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-
-                    NavigationLink(destination: ScrobblingView()) {
-                        Label("Scrobbling", systemImage: "waveform.path.ecg")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-
-                    NavigationLink(destination: NotificationsView()) {
-                        HStack {
-                            Label("Notifications", systemImage: "bell")
-                                .foregroundStyle(AppTheme.textPrimary)
-                            // Reads AccountService's own @Published count (not a
-                            // view-local copy) so this updates live the instant a
-                            // push arrives while this screen is open — see
-                            // AppDelegate's willPresent -> refreshUnreadNotificationCount —
-                            // not just when this section's `.task` re-fires.
-                            if account.unreadNotificationCount > 0 {
-                                Spacer()
-                                Text("\(account.unreadNotificationCount)")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 2)
-                                    .background(AppTheme.dynamicAccent, in: Capsule())
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            statTile(value: "\(library.playlists.count)", label: "Playlists", icon: "music.note.list")
+                            statTile(value: "\(library.favoriteSongIDs.count)", label: "Favorites", icon: "heart.fill")
+                            if let stats = account.stats {
+                                statTile(value: "\(stats.totalPlays)", label: "Total Plays", icon: "play.fill")
+                                statTile(value: formattedListenTime(stats.totalListenSeconds), label: "Listening Time", icon: "clock.fill")
+                                if let topArtist = stats.topArtists.first {
+                                    statTile(value: topArtist.artist, label: "Top Artist", icon: "star.fill")
+                                }
                             }
                         }
+                        .padding(.vertical, 4)
                     }
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 0))
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                        gridLink(destination: RewindView(), title: "Your Rewind", icon: "chart.bar.xaxis")
+                        gridLink(destination: PodcastsView(), title: "Podcasts", icon: "mic.square")
+                        gridLink(destination: AchievementsView(), title: "Achievements", icon: "trophy")
+                        gridLink(destination: ListeningGoalView(), title: "Listening Goal", icon: "target")
+                        gridLink(destination: NeedleDropView(), title: "Needle Drop", icon: "questionmark.circle")
+                        gridLink(destination: TimeCapsulesView(), title: "Time Capsules", icon: "shippingbox")
+                        gridLink(destination: ConstellationView(), title: "Constellation", icon: "sparkles")
+                        gridLink(destination: ListeningHeatmapView(), title: "Heatmap", icon: "calendar")
+                        gridLink(destination: ScrobblingView(), title: "Scrobbling", icon: "waveform.path.ecg")
+                        gridLink(
+                            destination: NotificationsView(),
+                            title: "Notifications",
+                            icon: "bell",
+                            badge: account.unreadNotificationCount > 0 ? "\(account.unreadNotificationCount)" : nil
+                        )
+                    }
+                    .padding(.vertical, 6)
+                    .listRowBackground(Color.clear)
                 } header: {
                     sectionHeader("Library")
                 }
@@ -732,50 +671,26 @@ struct AccountView: View {
                     .listRowBackground(AppTheme.surface)
                 }
 
-                // MARK: Connected Tools Section
+                // MARK: Integrations Section
+                //
+                // Was three separate sections (Discord Rich Presence, Discord
+                // Webhook, Streaming/YouTube), each a single- or double-row
+                // section with its own header+footer — a lot of vertical
+                // scroll for four destinations. Folded into one grid,
+                // matching the Library section's redesign above.
                 Section {
-                    NavigationLink(destination: DiscordRichPresenceView()) {
-                        Label("Discord Rich Presence", systemImage: "key.viewfinder")
-                            .foregroundStyle(AppTheme.textPrimary)
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                        gridLink(destination: DiscordRichPresenceView(), title: "Rich Presence", icon: "key.viewfinder")
+                        gridLink(destination: DiscordWebhookView(), title: "Now Playing Webhook", icon: "message")
+                        gridLink(destination: YoutubeApiKeyView(), title: "YouTube API Key", icon: "key")
+                        gridLink(destination: CookiesFileView(), title: "YouTube Cookies", icon: "doc.text")
                     }
+                    .padding(.vertical, 6)
+                    .listRowBackground(Color.clear)
                 } header: {
-                    sectionHeader("Discord Rich Presence")
+                    sectionHeader("Integrations")
                 } footer: {
-                    Text("Set up the local Discord Rich Presence daemon to show what you're playing on your Discord profile.")
-                        .font(AppTheme.bodyFont(size: 12))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .listRowBackground(AppTheme.surface)
-
-                // MARK: Discord Webhook Section
-                Section {
-                    NavigationLink(destination: DiscordWebhookView()) {
-                        Label("Now Playing Webhook", systemImage: "message")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-                } header: {
-                    sectionHeader("Discord Webhook")
-                } footer: {
-                    Text("Posts a \"Now Playing\" message to a Discord channel via an incoming webhook when you start a track.")
-                        .font(AppTheme.bodyFont(size: 12))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-                .listRowBackground(AppTheme.surface)
-
-                // MARK: YouTube Data API Key Section
-                Section {
-                    NavigationLink(destination: YoutubeApiKeyView()) {
-                        Label("YouTube API Key", systemImage: "key")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-                    NavigationLink(destination: CookiesFileView()) {
-                        Label("YouTube Cookies", systemImage: "doc.text")
-                            .foregroundStyle(AppTheme.textPrimary)
-                    }
-                } header: {
-                    sectionHeader("Streaming")
-                } footer: {
-                    Text("Add your own YouTube Data API v3 key so full playlists (beyond ~205 tracks) resolve completely when imported or played. Upload a cookies.txt export to authenticate downloads as your own YouTube session — needed for age-restricted videos and to avoid YouTube blocking anonymous requests.")
+                    Text("Discord Rich Presence shows what you're playing on your profile; the webhook posts \"Now Playing\" messages to a channel. Add your own YouTube Data API v3 key so full playlists (beyond ~205 tracks) resolve completely, and a cookies.txt export to authenticate downloads as your own session.")
                         .font(AppTheme.bodyFont(size: 12))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
@@ -857,6 +772,63 @@ struct AccountView: View {
             return "\(hours)h \(minutes)m"
         }
         return "\(minutes)m"
+    }
+
+    /// A single stat card in the horizontal strip at the top of the Library
+    /// section — replaces a `LabeledContent` row per number.
+    private func statTile(value: String, label: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AppTheme.dynamicAccent)
+            Text(value)
+                .font(AppTheme.monoFont(size: 15).weight(.semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(AppTheme.bodyFont(size: 11))
+                .foregroundStyle(AppTheme.textSecondary)
+                .lineLimit(1)
+        }
+        .padding(10)
+        .frame(width: 104, alignment: .leading)
+        .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// A single tile in the icon-grid destinations — replaces a plain
+    /// `NavigationLink` row in the old Library/Integrations sections.
+    private func gridLink<Destination: View>(
+        destination: Destination,
+        title: String,
+        icon: String,
+        badge: String? = nil
+    ) -> some View {
+        NavigationLink(destination: destination) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(AppTheme.dynamicAccent)
+                    .frame(width: 22)
+                Text(title)
+                    .font(AppTheme.bodyFont(size: 13))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Spacer(minLength: 0)
+                if let badge {
+                    Text(badge)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(AppTheme.dynamicAccent, in: Capsule())
+                }
+            }
+            .padding(10)
+            .background(AppTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func sectionHeader(_ text: String) -> some View {
