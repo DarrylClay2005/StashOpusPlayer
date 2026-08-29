@@ -6112,6 +6112,9 @@ async def aria_cloud_cleanup(user: dict = Depends(get_current_user)):
     return {"removed": removed}
 
 
+_LYRICS_JOBS: dict[str, dict] = {}
+
+
 @app.post("/user/intelligence/lyrics-transcribe")
 async def aria_transcribe_lyrics(
     request: Request,
@@ -6125,10 +6128,15 @@ async def aria_transcribe_lyrics(
     user's own tracks that have no match in any lyrics database (an
     unreleased/personal recording), and to cross-check/re-time lyrics
     already fetched from LRCLIB/lyrics.ovh or imported by the user against
-    what the audio actually contains. Returns LRC-formatted text the client
-    writes straight into its existing synced-lyrics file for the track (see
-    NowPlayingView+Helpers.swift's syncedLyricsURL) — no new client-side
-    lyrics format needed."""
+    what the audio actually contains.
+
+    Job-based, same shape as /api/download: native-audio transcription of a
+    whole track is a slow Gemini call (a multi-MB audio upload plus a full
+    line-by-line transcript generation) that routinely ran past the
+    Cloudflare Tunnel's ~100s edge timeout when this held the connection
+    open synchronously — the exact failure mode /api/download's own
+    job/poll design (see its doc comment above) exists to avoid. Returns a
+    job_id immediately; poll /user/intelligence/lyrics-transcribe/status."""
     try:
         body = await request.body()
     except ClientDisconnect:
@@ -6139,24 +6147,66 @@ async def aria_transcribe_lyrics(
         raise HTTPException(status_code=413, detail="Audio too large for transcription (max 20 MB)")
 
     mime_type = request.headers.get("content-type") or "audio/mpeg"
-    result = await transcribe_lyrics(body, mime_type, title, artist, hint_lyrics)
-    if result is None:
-        raise HTTPException(status_code=503, detail="Lyrics transcription isn't available right now")
+    job_id = uuid.uuid4().hex
+    _LYRICS_JOBS[job_id] = {"status": "pending", "created": time.monotonic()}
+    asyncio.create_task(_run_lyrics_transcription_job(job_id, body, mime_type, title, artist, hint_lyrics))
+    return JSONResponse({"job_id": job_id}, status_code=202)
 
-    lines = result.get("lines") or []
-    if result.get("instrumental") or not lines:
-        return {"lrc": "", "instrumental": bool(result.get("instrumental")), "confidence": result.get("confidence", "low")}
 
-    lrc_out: list[str] = []
-    for line in sorted(lines, key=lambda entry: entry.get("time_seconds", 0)):
-        text = str(line.get("text", "")).strip()
-        if not text:
-            continue
-        t = max(0.0, float(line.get("time_seconds", 0) or 0))
-        minutes, seconds = divmod(t, 60.0)
-        lrc_out.append(f"[{int(minutes):02d}:{seconds:05.2f}]{text}")
+async def _run_lyrics_transcription_job(
+    job_id: str, body: bytes, mime_type: str, title: str, artist: str, hint_lyrics: Optional[str]
+) -> None:
+    job = _LYRICS_JOBS.setdefault(job_id, {})
+    try:
+        result = await transcribe_lyrics(body, mime_type, title, artist, hint_lyrics)
+        if result is None:
+            job["status"] = "error"
+            job["detail"] = "Lyrics transcription isn't available right now"
+            return
 
-    return {"lrc": "\n".join(lrc_out), "instrumental": False, "confidence": result.get("confidence", "medium")}
+        lines = result.get("lines") or []
+        if result.get("instrumental") or not lines:
+            job["status"] = "done"
+            job["lrc"] = ""
+            job["instrumental"] = bool(result.get("instrumental"))
+            job["confidence"] = result.get("confidence", "low")
+            return
+
+        lrc_out: list[str] = []
+        for line in sorted(lines, key=lambda entry: entry.get("time_seconds", 0)):
+            text = str(line.get("text", "")).strip()
+            if not text:
+                continue
+            t = max(0.0, float(line.get("time_seconds", 0) or 0))
+            minutes, seconds = divmod(t, 60.0)
+            lrc_out.append(f"[{int(minutes):02d}:{seconds:05.2f}]{text}")
+
+        job["status"] = "done"
+        job["lrc"] = "\n".join(lrc_out)
+        job["instrumental"] = False
+        job["confidence"] = result.get("confidence", "medium")
+    except Exception as exc:
+        logger.exception("lyrics-transcribe job %s failed", job_id)
+        job["status"] = "error"
+        job["detail"] = str(exc)
+
+
+@app.get("/user/intelligence/lyrics-transcribe/status")
+async def aria_transcribe_lyrics_status(job_id: str = Query(...), user: dict = Depends(get_current_user)):
+    job = _LYRICS_JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Lyrics transcription job not found")
+    # Not popped on poll (a lost/retried response would otherwise strand the
+    # client on a 404 after Aria already finished) — same "small in-memory
+    # dict, no explicit sweep" tradeoff _BATCH_JOBS/_DOWNLOAD_JOBS already
+    # make elsewhere in this file.
+    return {
+        "status": job.get("status"),
+        "detail": job.get("detail"),
+        "lrc": job.get("lrc"),
+        "instrumental": job.get("instrumental"),
+        "confidence": job.get("confidence"),
+    }
 
 
 # ---------------------------------------------------------------------------

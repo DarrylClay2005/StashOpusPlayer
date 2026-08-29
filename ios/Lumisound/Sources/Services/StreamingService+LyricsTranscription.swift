@@ -66,20 +66,81 @@ extension StreamingService {
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(uploadURL.audioMIMEType, forHTTPHeaderField: "Content-Type")
-        // Transcription (a real Gemini audio-understanding call server-side)
-        // takes meaningfully longer than a plain upload's own transfer time —
-        // the default per-request timeout elsewhere in this app is too
-        // short and would abort a genuine in-progress analysis.
-        request.timeoutInterval = 120
 
-        let (data, response) = try await StreamingService.bulkTransferSession.upload(for: request, fromFile: uploadURL)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw StreamingError.httpError((response as? HTTPURLResponse)?.statusCode ?? -1)
+        // Job-based, same shape as /api/download: this used to be a single
+        // blocking upload+response held open until Gemini's native-audio
+        // transcription finished, which for anything but a short track
+        // routinely exceeded the Cloudflare Tunnel's ~100s edge timeout —
+        // Aria could genuinely be in the middle of transcribing when the
+        // connection got killed, surfacing as "doesn't complete"/a generic
+        // network error even though nothing was actually wrong with the
+        // transcription itself. Uploading now only needs to survive long
+        // enough to hand the audio off and get a job_id back.
+        request.timeoutInterval = 60
+
+        let (startData, startResponse) = try await StreamingService.bulkTransferSession.upload(for: request, fromFile: uploadURL)
+        guard let startHTTP = startResponse as? HTTPURLResponse, startHTTP.statusCode == 202 else {
+            throw StreamingError.httpError((startResponse as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+        struct StartPayload: Decodable { let job_id: String }
+        guard let start = try? JSONDecoder().decode(StartPayload.self, from: startData),
+              let statusURL = jobPollURL(from: request, path: "/user/intelligence/lyrics-transcribe/status", jobID: start.job_id) else {
+            throw StreamingError.incompleteDownload
         }
 
-        struct Response: Decodable { let lrc: String; let instrumental: Bool; let confidence: String }
-        let decoded = try JSONDecoder().decode(Response.self, from: data)
-        return LyricsTranscriptionResult(lrc: decoded.lrc, instrumental: decoded.instrumental, confidence: decoded.confidence)
+        var statusRequest = request
+        statusRequest.httpMethod = "GET"
+        statusRequest.url = statusURL
+        statusRequest.setValue(nil, forHTTPHeaderField: "Content-Type")
+        statusRequest.timeoutInterval = 20
+
+        struct StatusPayload: Decodable {
+            let status: String
+            let detail: String?
+            let lrc: String?
+            let instrumental: Bool?
+            let confidence: String?
+        }
+
+        // Poll every 3s for up to 5 minutes — matches downloadToLibrary's
+        // job-poll deadline; each poll itself is trivial and never
+        // approaches the tunnel's edge timeout regardless of how long the
+        // Gemini call actually takes server-side (bounded separately by the
+        // 240s http_options timeout on lyrics_ai.py's generate_content call).
+        let deadline = Date().addingTimeInterval(300)
+        while true {
+            if Date() > deadline {
+                appWarn("transcribeLyrics: job poll timed out for \"\(song.displayName)\"", category: "network")
+                throw StreamingError.timeout
+            }
+            let data: Data
+            let resp: URLResponse
+            do {
+                (data, resp) = try await URLSession.shared.data(for: statusRequest)
+            } catch {
+                appWarn("transcribeLyrics: network error polling status for \"\(song.displayName)\": \(error.localizedDescription) — retrying poll", category: "network")
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                continue
+            }
+            guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
+                  let status = try? JSONDecoder().decode(StatusPayload.self, from: data) else {
+                throw StreamingError.incompleteDownload
+            }
+            switch status.status {
+            case "pending":
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                continue
+            case "done":
+                return LyricsTranscriptionResult(
+                    lrc: status.lrc ?? "",
+                    instrumental: status.instrumental ?? false,
+                    confidence: status.confidence ?? "low"
+                )
+            default: // "error"
+                appWarn("transcribeLyrics: job failed for \"\(song.displayName)\": \(status.detail ?? "unknown error")", category: "network")
+                throw StreamingError.serverDetail(status.detail ?? "Aria couldn't transcribe this track.")
+            }
+        }
     }
 }
 

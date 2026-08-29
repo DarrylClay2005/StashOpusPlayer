@@ -85,6 +85,15 @@ def _run_transcription(audio_bytes: bytes, mime_type: str, title: str, artist: s
         system_instruction=intelligence.ARIA_PERSONA + "\n" + _SYSTEM_PROMPT,
         response_mime_type="application/json",
         response_schema=_LYRICS_SCHEMA,
+        # Native-audio transcription of a whole track is a much slower call
+        # than the text-only Gemini calls elsewhere in this file (audio
+        # bytes for a full 3-5 min track, not just a text prompt) and had NO
+        # explicit timeout at all before this, relying on the SDK default —
+        # a hung/slow request could run indefinitely inside the background
+        # job below with nothing to ever mark it failed. 240s comfortably
+        # covers a long track while still guaranteeing the job eventually
+        # resolves either way. (milliseconds, per google-genai's HttpOptions)
+        http_options=genai_types.HttpOptions(timeout=240_000),
     )
     response = intelligence._client.models.generate_content(
         model=intelligence.INTELLIGENCE_MODEL,
