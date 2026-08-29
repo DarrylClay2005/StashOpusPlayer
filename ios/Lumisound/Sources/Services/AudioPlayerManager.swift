@@ -357,6 +357,12 @@ final class AudioPlayerManager: ObservableObject {
     // Fires crossfadeDuration seconds before a track ends so we begin fading early.
     var crossfadeStartTimer: Timer?
 
+    /// Grace-period timer armed by `pause()` — see `teardownEngineIfIdle()`.
+    /// Lets a quick pause->resume avoid paying an engine restart, while a
+    /// pause left sitting releases the audio engine/session instead of
+    /// running forever with nothing playing ("ghost audio engine").
+    var idleTeardownTimer: Timer?
+
     /// BPM lookups resolved via `libraryManager?.bpm(for:)`, keyed by song ID.
     /// Populated ahead of time by `prewarmBPM` so `beginCrossfade` can read a
     /// tempo synchronously without blocking the fade on analysis.
@@ -468,6 +474,14 @@ final class AudioPlayerManager: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in
                 self?.savePlaybackState()
+                // Backgrounded while paused: no grace period needed (unlike
+                // `pause()`'s own timer — the user isn't about to resume
+                // mid-interaction with the app not even visible), so release
+                // the engine/session immediately rather than waiting for the
+                // grace-period timer — see `teardownEngineIfIdle()`.
+                if self?.isPlaying == false {
+                    self?.teardownEngineIfIdle()
+                }
                 // Reconcile the widget's favorite badge right before the app
                 // (and its Home Screen widgets) are the only thing visible —
                 // covers a favorite toggled from in-app UI while paused,

@@ -48,6 +48,7 @@ extension AudioPlayerManager {
             isPlaying = false
             updateNowPlaying()
             savePlaybackState()
+            armIdleTeardown()
             return
         }
         updatePositionFromPlayer()
@@ -57,10 +58,48 @@ extension AudioPlayerManager {
         stopTimer()
         updateNowPlaying()
         savePlaybackState()
+        armIdleTeardown()
         appLog("Paused at \(String(format: "%.1f", position))s — \(currentSong?.displayName ?? "?")", category: "audio")
     }
 
+    /// Arms (or re-arms) the grace-period timer that releases the audio
+    /// engine/session if playback is still paused once it fires — see
+    /// `teardownEngineIfIdle()`. Called from every `pause()` path.
+    private func armIdleTeardown() {
+        idleTeardownTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 45, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.teardownEngineIfIdle()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        idleTeardownTimer = timer
+    }
+
+    /// Releases the audio engine and deactivates the session if nothing is
+    /// currently playing — without this, `pause()` left the engine running
+    /// and the session active indefinitely (only the queue-exhausted path
+    /// through `stop()` ever tore it down), so the app sat as a "ghost"
+    /// active-audio-session app — ducking other apps, keeping the transport
+    /// UI live, draining battery — with nothing playing or even scheduled to
+    /// resume. Safe to call opportunistically (backgrounding while paused,
+    /// the grace-period timer) since it's a no-op once actually playing.
+    func teardownEngineIfIdle() {
+        idleTeardownTimer?.invalidate()
+        idleTeardownTimer = nil
+        guard !isPlaying else { return }
+        if isUsingOpusPlayer {
+            // AVPlayer has no persistent engine/session ownership the way
+            // AVAudioEngine does; only the shared session needs releasing.
+        } else if engine.isRunning {
+            engine.stop()
+        }
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
     func resume() {
+        idleTeardownTimer?.invalidate()
+        idleTeardownTimer = nil
         if isUsingOpusPlayer {
             // `.play()` always resumes at 1.0× — set `.rate` directly so the
             // user's chosen Speed setting is honored on resume too.
@@ -119,16 +158,11 @@ extension AudioPlayerManager {
         stop8DRotation()
         stopTremolo()
         stopVibrato()
-        // Fully release the audio system when stopped — without this the engine
-        // kept running and the audio session stayed active with nothing playing
-        // (the "ghost audio engine" / app stays an active audio app). The next
-        // play() restarts the engine + reactivates the session via
-        // `startEngineIfNeeded`. `.notifyOthersOnDeactivation` lets other apps
-        // (paused music, etc.) resume.
-        if engine.isRunning {
-            engine.stop()
-        }
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        // Fully release the audio system when stopped — see
+        // `teardownEngineIfIdle()`'s doc comment for why this can't be
+        // skipped. The next play() restarts the engine + reactivates the
+        // session via `startEngineIfNeeded`.
+        teardownEngineIfIdle()
         updateNowPlaying()
     }
 

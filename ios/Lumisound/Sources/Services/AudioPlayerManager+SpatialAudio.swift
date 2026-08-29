@@ -147,6 +147,11 @@ extension AudioPlayerManager {
     }
 
     func startEngineIfNeeded() {
+        // Every play/resume path funnels through here — cancel any pending
+        // idle-teardown grace-period timer (armed by `pause()`) right at the
+        // choke point rather than in each individual caller.
+        idleTeardownTimer?.invalidate()
+        idleTeardownTimer = nil
         guard !engine.isRunning else { return }
         // Activate the audio session lazily, right before the engine starts —
         // not at launch — so the app only holds the audio system while actually
