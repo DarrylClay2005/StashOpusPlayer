@@ -34,6 +34,7 @@ final class AudioVisualizerService: ObservableObject {
         case autoEQ
         case smartCrossfade
         case musicHaptics
+        case galleryReactiveBackground
     }
     private var activeReasons: Set<AnalysisReason> = []
 

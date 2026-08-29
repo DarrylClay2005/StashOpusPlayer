@@ -38,6 +38,10 @@ struct BackgroundSettingsView: View {
                     Text("Sonic Wallpaper is generated automatically from your own most-played and favorited tracks' artwork — nothing to add or configure. The photo settings below are ignored while it's selected.")
                         .font(.caption)
                         .foregroundStyle(AppTheme.textSecondary)
+                } else if backgroundSource == GalleryBackgroundSource.reactive.rawValue {
+                    Text("Reactive Aura pulses live with whatever's playing — colored from the current track's artwork, driven directly by its bass/mid/treble energy in real time. Nothing to add or configure, and the photo settings below are ignored while it's selected.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
                 }
             }
 

@@ -9,9 +9,12 @@ struct GalleryBackgroundView: View {
     @AppStorage(GalleryBackgroundSource.storageKey) private var backgroundSource = GalleryBackgroundSource.photos.rawValue
 
     var body: some View {
-        if backgroundSource == GalleryBackgroundSource.sonic.rawValue {
+        switch backgroundSource {
+        case GalleryBackgroundSource.sonic.rawValue:
             SonicWallpaperView()
-        } else {
+        case GalleryBackgroundSource.reactive.rawValue:
+            ReactiveAuraBackgroundView()
+        default:
             photoBackground
         }
     }

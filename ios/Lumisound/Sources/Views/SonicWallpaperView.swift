@@ -8,6 +8,7 @@ import SwiftUI
 enum GalleryBackgroundSource: String, CaseIterable, Identifiable {
     case photos
     case sonic
+    case reactive
 
     static let storageKey = "galleryBackground_source"
 
@@ -17,6 +18,7 @@ enum GalleryBackgroundSource: String, CaseIterable, Identifiable {
         switch self {
         case .photos: return "Photos"
         case .sonic: return "Sonic Wallpaper"
+        case .reactive: return "Reactive Aura"
         }
     }
 }
