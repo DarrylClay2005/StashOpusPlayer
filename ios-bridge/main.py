@@ -1122,6 +1122,47 @@ def _account_token_user_id(request: Request) -> Optional[str]:
 # — yt-dlp's --cookies flag requires a real filesystem path.
 YTDLP_USER_COOKIES_DIR = pathlib.Path(os.getenv("YTDLP_USER_COOKIES_DIR", "/app/.cache/yt-dlp/user-cookies"))
 
+# yt-dlp's --cookies flag doesn't just READ the given file — after a run it
+# writes the (possibly rotated) cookie jar back to the same path. The
+# operator's global YTDLP_COOKIES_FILE is bind-mounted read-only (it's the
+# same cookies.txt the Discord music bots read/refresh independently, and
+# ios-bridge writing to it directly would race their own refresh cycle), so
+# every global-cookie yt-dlp call was hard-crashing with
+# `OSError: [Errno 30] Read-only file system` on that write-back — silently
+# turning into a misleading "sign in to confirm you're not a bot" 404 for
+# every caller with no per-account cookies configured (exactly the tvOS/
+# API-key auth path _may_use_global_cookies was just fixed to allow in the
+# first place). Mirrors _user_cookies_file's own pattern: hand yt-dlp a
+# writable COPY in the RW cache dir instead of the read-only source, synced
+# whenever the source is newer.
+_GLOBAL_COOKIES_CACHE_PATH = pathlib.Path(YTDLP_CACHE_DIR) / "global-cookies.txt"
+
+
+def _writable_global_cookies_path() -> Optional[str]:
+    """Returns a writable copy of YTDLP_COOKIES_FILE yt-dlp can safely
+    rewrite, refreshing it from the read-only source whenever the source is
+    newer (picks up the scheduled cookie-refresh job's updates) or the copy
+    doesn't exist yet. Returns None if the source itself is missing/empty."""
+    try:
+        source_stat = os.stat(YTDLP_COOKIES_FILE)
+    except OSError:
+        return None
+    if source_stat.st_size == 0:
+        return None
+    try:
+        copy_stat = _GLOBAL_COOKIES_CACHE_PATH.stat()
+        stale = copy_stat.st_mtime < source_stat.st_mtime
+    except FileNotFoundError:
+        stale = True
+    if stale:
+        try:
+            _GLOBAL_COOKIES_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(YTDLP_COOKIES_FILE, _GLOBAL_COOKIES_CACHE_PATH)
+        except OSError:
+            logger.exception("failed to refresh writable global cookies copy")
+            return YTDLP_COOKIES_FILE if _GLOBAL_COOKIES_CACHE_PATH.exists() else None
+    return str(_GLOBAL_COOKIES_CACHE_PATH)
+
 
 # Short-TTL in-memory cache for _user_cookies_text — same shape/rationale
 # as _youtube_api_key_cache above. This runs on EVERY yt-dlp invocation
@@ -1282,16 +1323,16 @@ async def _ytdlp_cookie_args(user_id: Optional[str] = None, force_global: bool =
 
     cookie_path: Optional[str] = None
     if force_global and eligible_for_global:
-        cookie_path = YTDLP_COOKIES_FILE
+        cookie_path = _writable_global_cookies_path()
     else:
         own_path = await _user_cookies_file(user_id)
         preference = await _cookie_fallback_preference(user_id) if (user_id and eligible_for_global) else "auto"
         if eligible_for_global and preference == "global_only":
-            cookie_path = YTDLP_COOKIES_FILE
+            cookie_path = _writable_global_cookies_path()
         elif own_path:
             cookie_path = own_path
         elif eligible_for_global:
-            cookie_path = YTDLP_COOKIES_FILE
+            cookie_path = _writable_global_cookies_path()
 
     if cookie_path:
         args += ["--cookies", cookie_path]
