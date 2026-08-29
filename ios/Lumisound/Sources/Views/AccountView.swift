@@ -808,6 +808,9 @@ struct AccountView: View {
             }
             .scrollContentBackground(.hidden)
         }
+        .safeAreaInset(edge: .bottom) {
+            MiniPlayerBar()
+        }
         .navigationTitle("Account")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: account.isLoggedIn) { loggedIn in

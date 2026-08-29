@@ -411,6 +411,9 @@ struct BackgroundSettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Color.clear.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom) {
+            MiniPlayerBar()
+        }
         .navigationTitle("Gallery Background")
         .navigationBarTitleDisplayMode(.inline)
     }
