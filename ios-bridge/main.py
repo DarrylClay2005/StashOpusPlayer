@@ -32,7 +32,7 @@ from typing import Optional
 from urllib.parse import urlencode, urlsplit
 import urllib.error
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
@@ -8132,6 +8132,13 @@ async def sync_push(
                 ),
             )
 
+    # Tell any of this user's OTHER active sessions (a second device, or the
+    # same device on a different screen) that fresh data is available,
+    # instead of them only finding out on their own next 8-minute timer
+    # tick or app-foreground pull — see the live-update hub above and
+    # AccountService+Sync.swift's own comment about the pull-on-every-
+    # launch/foreground freeze this is meant to reduce the need for.
+    asyncio.create_task(_push_live_event(user_id, {"type": "sync_changed"}))
     return {"status": "synced"}
 
 
@@ -12444,6 +12451,15 @@ async def _create_notification(
         (notif_id, user_id, type_, title, body, json.dumps(data or {})),
     )
     asyncio.create_task(_send_push_best_effort(user_id, type_, title, body, data, content_available))
+    # In addition to the APNs/FCM push above (which is for when the app is
+    # backgrounded/closed), fire the SAME event over the live WebSocket
+    # channel if this user has the app open right now — instant badge/list
+    # update instead of waiting on the next poll or app foreground. See
+    # `_push_live_event`/`/ws/live`.
+    asyncio.create_task(_push_live_event(user_id, {
+        "type": "notification", "notification_id": notif_id,
+        "notification_type": type_, "title": title, "body": body,
+    }))
     return notif_id
 
 
@@ -17269,6 +17285,106 @@ async def friend_suggestions(limit: int = Query(10, ge=1, le=30), payload: dict 
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Live update WebSocket hub
+#
+# The app previously relied almost entirely on timer-driven polling for
+# "did anything change" (friends' online status every 30s, a full
+# account/library sync every 8 min, etc.) — the account sync pull in
+# particular was the documented cause of a real UI freeze on every
+# launch/foreground and every 8-minute tick (see AccountService+Sync.swift's
+# own comment). This hub gives the bridge a way to push a small, specific
+# "X changed" event to a connected client the instant it happens, so the
+# client can do a targeted, incremental refetch of just that one thing
+# instead of a blind interval-based full resync. Deliberately per-process,
+# in-memory (not Redis/pub-sub) — this bridge already runs as a single
+# process (see the rest of this file's in-memory job-tracking dicts, e.g.
+# _BATCH_JOBS/_DOWNLOAD_JOBS/_LYRICS_JOBS), so a per-connection registry is
+# consistent with the existing architecture and needs no new infra.
+_LIVE_CONNECTIONS: dict[str, set[WebSocket]] = {}
+
+
+async def _push_live_event(user_id: str, event: dict) -> None:
+    """Best-effort: sends `event` (a small JSON dict, always including a
+    "type" key) to every currently-connected socket for `user_id`. A no-op
+    if that user has no open connection right now (they'll pick up the
+    change on their next natural interaction/poll fallback instead) — this
+    is a live-update CHANNEL, not a durable delivery guarantee, so callers
+    should always fire it via `asyncio.create_task` and never let it block
+    or fail the request that triggered it."""
+    sockets = _LIVE_CONNECTIONS.get(user_id)
+    if not sockets:
+        return
+    dead: list[WebSocket] = []
+    for ws in list(sockets):
+        try:
+            await ws.send_json(event)
+        except Exception:
+            dead.append(ws)
+    if dead:
+        for ws in dead:
+            sockets.discard(ws)
+        if not sockets:
+            _LIVE_CONNECTIONS.pop(user_id, None)
+
+
+async def _push_live_event_to_friends(user_id: str, event: dict) -> None:
+    """Same as `_push_live_event`, but fanned out to every one of `user_id`'s
+    friends — used for presence changes, where the people who care are the
+    ones with `user_id` in their friends list, not `user_id` themselves."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT friend_id FROM ios_social_friends WHERE user_id = %s", (user_id,))
+                friend_ids = [r[0] for r in await cur.fetchall()]
+    except Exception as exc:
+        logger.debug("_push_live_event_to_friends: friend lookup failed for %s: %s", user_id, exc)
+        return
+    for friend_id in friend_ids:
+        if friend_id in _LIVE_CONNECTIONS:
+            asyncio.create_task(_push_live_event(friend_id, event))
+
+
+@app.websocket("/ws/live")
+async def live_updates_ws(websocket: WebSocket, token: str = Query(...)):
+    """Long-lived push channel — one connection per active app session.
+    Auth via `?token=` (a WebSocket handshake has no easy way to attach a
+    custom Authorization header from every client, so this mirrors the
+    common `?token=` convention rather than reusing `get_current_user`'s
+    header-based Depends directly). The client sends nothing meaningful;
+    this only ever pushes. See `_push_live_event`/`_push_live_event_to_friends`
+    for what gets sent and when (presence changes, new notifications, and
+    other event types as they're added)."""
+    payload = decode_token(token)
+    if not payload:
+        await websocket.close(code=4401)
+        return
+    user_id = payload.get("sub")
+    if not user_id:
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
+    _LIVE_CONNECTIONS.setdefault(user_id, set()).add(websocket)
+    try:
+        while True:
+            # Client sends periodic pings/keepalive text; content is ignored.
+            # This is what keeps the coroutine (and thus the connection)
+            # alive to actually receive server->client pushes.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.debug("live_updates_ws: connection for %s ended: %s", user_id, exc)
+    finally:
+        conns = _LIVE_CONNECTIONS.get(user_id)
+        if conns:
+            conns.discard(websocket)
+            if not conns:
+                _LIVE_CONNECTIONS.pop(user_id, None)
+
+
 @app.post("/api/social/presence")
 async def update_presence(body: PresenceUpdate, payload: dict = Depends(get_current_user)):
     """Heartbeat the client calls every 30-60s while foregrounded (plus a
@@ -17297,6 +17413,18 @@ async def update_presence(body: PresenceUpdate, payload: dict = Depends(get_curr
                     body.now_playing_title, body.now_playing_artist, body.now_playing_artwork_url,
                 ),
             )
+    # Push the change to any of this user's friends who have the app open
+    # right now, instead of making them wait for their own next presence
+    # poll — see the live-update hub above.
+    asyncio.create_task(_push_live_event_to_friends(user_id, {
+        "type": "presence",
+        "user_id": user_id,
+        "online": not body.going_offline,
+        "is_playing": bool(body.is_playing) and not body.going_offline,
+        "now_playing_title": body.now_playing_title,
+        "now_playing_artist": body.now_playing_artist,
+        "now_playing_artwork_url": body.now_playing_artwork_url,
+    }))
     return {"ok": True}
 
 

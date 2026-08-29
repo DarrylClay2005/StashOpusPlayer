@@ -27,7 +27,7 @@ struct PublicProfileView: View {
     @EnvironmentObject private var social: SocialService
     @EnvironmentObject private var account: AccountService
     @EnvironmentObject private var player: AudioPlayerManager
-    @StateObject private var presenceService = PresenceService()
+    @StateObject private var presenceService = PresenceService.shared
 
     @State private var profile: PublicSocialProfile? = nil
     @State private var presence: SocialPresence? = nil

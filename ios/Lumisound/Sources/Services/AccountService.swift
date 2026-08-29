@@ -99,6 +99,10 @@ final class AccountService: ObservableObject {
     // MARK: Auto-push timer
 
     var autoPushTimer: Timer?
+    /// Set by `pushSync` on success — see `handleLiveSyncChanged`'s doc
+    /// comment for why this exists (echo suppression for the live
+    /// "sync_changed" event this same push triggers).
+    var lastPushCompletedAt: Date?
     // ASWebAuthenticationSession must be retained until its completion
     // handler runs. Keeping it here also gives cancellation/deallocation a
     // deterministic owner instead of relying on the local variable in the
@@ -107,18 +111,59 @@ final class AccountService: ObservableObject {
 
     func startAutoPushTimer(library: LibraryManager) {
         stopAutoPushTimer()
-        autoPushTimer = Timer.scheduledTimer(withTimeInterval: 8 * 60, repeats: true) { [weak self] _ in
+        // Widened from 8 to 20 min now that it's a safety net rather than
+        // the primary mechanism — LiveUpdateService's "sync_changed" push
+        // (see below) tells this device the moment there's actually
+        // something new to pull, instead of this timer blindly re-uploading
+        // the whole library on a fixed schedule regardless of whether
+        // anything changed. This timer still exists purely to catch up
+        // after a dropped/reconnecting socket.
+        autoPushTimer = Timer.scheduledTimer(withTimeInterval: 20 * 60, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.isLoggedIn else { return }
                 await self.pushSync(library: library)
                 await self.syncLibraryInventory(library: library)
             }
         }
+
+        guard let token else { return }
+        let live = LiveUpdateService.shared
+        live.onSyncChangedEvent = { [weak self, weak library] in
+            guard let self, let library else { return }
+            self.handleLiveSyncChanged(library: library)
+        }
+        live.onNotificationEvent = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in _ = await self.refreshUnreadNotificationCount() }
+        }
+        live.onPresenceEvent = { presence in
+            PresenceService.shared.applyLivePresence(presence)
+        }
+        live.start(bridgeURL: bridgeURL, token: token)
     }
 
     func stopAutoPushTimer() {
         autoPushTimer?.invalidate()
         autoPushTimer = nil
+        LiveUpdateService.shared.stop()
+    }
+
+    /// Handles a live "sync_changed" push — see `LiveUpdateService`'s file
+    /// header and `lastPushCompletedAt`'s doc comment for why this exists
+    /// and why it's debounced. `library` comes from whichever call site is
+    /// still holding the `LibraryManager` it started the timer with.
+    private func handleLiveSyncChanged(library: LibraryManager) {
+        guard isLoggedIn else { return }
+        // Suppress the echo of this device's own just-completed push —
+        // anything within a generous window is assumed to be that, not a
+        // genuinely different change from elsewhere.
+        if let lastPushCompletedAt, Date().timeIntervalSince(lastPushCompletedAt) < 10 {
+            return
+        }
+        Task { @MainActor [weak self, weak library] in
+            guard let self, let library else { return }
+            await self.pullSync(library: library)
+        }
     }
 
     /// Schedules a push sync that fires 2 seconds after the last call.

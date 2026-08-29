@@ -24,7 +24,7 @@ import SwiftUI
 struct FriendsListView: View {
     @EnvironmentObject private var social: SocialService
     @EnvironmentObject private var account: AccountService
-    @StateObject private var presenceService = PresenceService()
+    @StateObject private var presenceService = PresenceService.shared
 
     private enum Segment: String, CaseIterable, Identifiable {
         case friends = "Friends"

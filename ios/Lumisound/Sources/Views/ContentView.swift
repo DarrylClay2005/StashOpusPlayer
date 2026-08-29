@@ -125,9 +125,14 @@ struct ContentView: View {
     /// mounted for the app's entire foreground lifetime, so it's the natural
     /// place to start/stop it on login/logout and to fire a best-effort
     /// "going offline" beacon on backgrounding (see the notification
-    /// subscriptions at the bottom of `body`). No other view reads this
-    /// instance's state, so it isn't injected via `.environmentObject`.
-    @StateObject private var presenceService = PresenceService()
+    /// subscriptions at the bottom of `body`). Wraps the shared singleton
+    /// (see `PresenceService.shared`'s doc comment) rather than a private
+    /// instance — `LiveUpdateService`'s presence-event callback (wired from
+    /// `AccountService`) delivers to `.shared`, and `FriendsListView`/
+    /// `PublicProfileView` need to see those same live-pushed updates, so
+    /// all three must share one instance instead of each polling
+    /// independently.
+    @StateObject private var presenceService = PresenceService.shared
 
     init() {
         // The native UITabBar itself is hidden (see `.toolbar(.hidden, for:

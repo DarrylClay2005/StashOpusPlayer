@@ -186,6 +186,13 @@ extension AccountService {
         do {
             _ = try await makeRequest("/user/sync", method: "POST", body: payload)
             lastSyncDate = Date()
+            // The server broadcasts a "sync_changed" live event to every one
+            // of this account's active connections after a successful push —
+            // including this same device's own /ws/live socket. Without this
+            // timestamp, that echo would trigger an immediate, redundant
+            // pullSync of the data this device just uploaded. See
+            // `handleLiveSyncChanged`.
+            lastPushCompletedAt = Date()
             appLog("Push sync complete", category: "account")
         } catch let err as AccountError {
             appError("Push sync failed [\(err.statusCode)]: \(err.message)", category: "account")

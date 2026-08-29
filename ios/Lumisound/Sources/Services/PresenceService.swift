@@ -24,12 +24,26 @@ import UIKit
 @MainActor
 final class PresenceService: ObservableObject {
 
+    /// A singleton (rather than only a ContentView-owned `@StateObject`) so
+    /// `LiveUpdateService`'s presence-event callback — wired up from
+    /// `AccountService`, which has no reference to whatever `@StateObject`
+    /// instance a given view hierarchy created — has a stable place to
+    /// deliver live pushes to. `ContentView` wraps this same instance in
+    /// its `@StateObject` (see its declaration) rather than constructing a
+    /// second, disconnected one.
+    static let shared = PresenceService()
+
     @Published private(set) var friendsPresence: [SocialPresence] = []
 
     /// How often this device reports its own state while foregrounded.
     static let heartbeatInterval: TimeInterval = 45
-    /// How often a visible friends/presence screen refreshes the batch.
-    static let friendsPollInterval: TimeInterval = 30
+    /// Safety-net poll interval for a visible friends/presence screen —
+    /// `LiveUpdateService` now delivers presence changes the instant they
+    /// happen (see `applyLivePresence`), so this only needs to catch up
+    /// after a dropped/reconnecting socket, not carry the whole feature on
+    /// its own. Widened from 30s now that it's a fallback, not the primary
+    /// mechanism.
+    static let friendsPollInterval: TimeInterval = 120
 
     private var heartbeatTimer: Timer?
     private var friendsPollTimer: Timer?
@@ -141,6 +155,20 @@ final class PresenceService: ObservableObject {
             friendsPresence = try JSONDecoder().decode(SocialFriendsPresenceResponse.self, from: data).presence
         } catch {
             appWarn("PresenceService: friends presence fetch failed: \(error.localizedDescription)", category: "social")
+        }
+    }
+
+    /// Applies a presence update pushed live over `LiveUpdateService`'s
+    /// WebSocket channel — replaces the matching entry (or inserts one) in
+    /// `friendsPresence` in place, no network round trip. This is why
+    /// `friendsPollTimer` no longer needs to run every 30s: a friend's
+    /// state now updates the instant their own heartbeat lands server-side,
+    /// and the poll timer only exists as a safety net for a dropped socket.
+    func applyLivePresence(_ presence: SocialPresence) {
+        if let index = friendsPresence.firstIndex(where: { $0.userId == presence.userId }) {
+            friendsPresence[index] = presence
+        } else {
+            friendsPresence.append(presence)
         }
     }
 
