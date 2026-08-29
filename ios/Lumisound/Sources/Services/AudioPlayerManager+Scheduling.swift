@@ -115,6 +115,23 @@ extension AudioPlayerManager {
             return
         }
 
+        // `ipod-library://` URLs (a track downloaded via the Apple Music app
+        // for offline playback, found by the media-library scan — see
+        // Song.init(mediaItem:)) can be DRM-protected and are never a real
+        // filesystem path either way: `AVAudioFile(forReading:)` below
+        // cannot open them at all and — per field reports — an unsupported
+        // URL scheme handed to the underlying ExtAudioFile call can surface
+        // as an uncaught exception rather than the catchable Swift error the
+        // `do/catch` around that call expects, terminating the process
+        // instead of falling back. AVPlayer natively handles ipod-library://
+        // playback, protected or not, via the system's own rights
+        // management, so route there directly — same pattern as the
+        // HTTP(S) and opus/webm/ogg branches below.
+        if scheme == "ipod-library" {
+            scheduleWithOpusPlayer(url: url, startTime: startTime)
+            return
+        }
+
         // Opus/WebM/OGG containers may not be natively supported by AVAudioFile.
         // Route through AudioEncoderService which tries native open first, then exports to M4A.
         // `effectiveExtension` (not raw `pathExtension`) so this still routes correctly
