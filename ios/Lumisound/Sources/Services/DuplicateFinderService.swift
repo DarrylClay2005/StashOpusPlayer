@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 // MARK: - DuplicateFinderService
 
@@ -9,6 +10,46 @@ final class DuplicateFinderService: ObservableObject {
 
     static let shared = DuplicateFinderService()
     private init() {}
+
+    // MARK: - Periodic Auto-Scan
+    //
+    // Aria Lumi Primary: same cadence/lifecycle contract as
+    // CorruptFileFinderService.startPeriodicScanning — call once on app
+    // launch, runs immediately then every 15 minutes for the life of the
+    // process (skipped while backgrounded). Same-title/same-duration text
+    // matching alone was never reliable enough on its own (see the ask this
+    // exists to satisfy), so this scan's actual duplicate decisions are made
+    // acoustically by AudioFingerprintService/refineGroupsWithAria's Aria
+    // call, not by the timer — the timer just keeps her listening
+    // continuously instead of only when the user happens to open Duplicate
+    // Finder.
+    private var periodicTimer: Timer?
+
+    func startPeriodicScanning() {
+        guard periodicTimer == nil else { return }
+
+        runPeriodicScan()
+
+        let interval: TimeInterval = 15 * 60
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard UIApplication.shared.applicationState == .active else { return }
+                self?.runPeriodicScan()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        periodicTimer = timer
+    }
+
+    func stopPeriodicScanning() {
+        periodicTimer?.invalidate()
+        periodicTimer = nil
+    }
+
+    private func runPeriodicScan() {
+        guard let library = LibraryManager.shared else { return }
+        Task { await runScan(songs: library.allSongs) }
+    }
 
     // MARK: Published State
 

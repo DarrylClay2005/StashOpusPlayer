@@ -206,9 +206,14 @@ struct LumisoundApp: App {
                         }
                     }
 
-                    // Auto-scan for corrupt files immediately, then every 5 minutes
-                    // for the rest of the session (non-blocking, all users).
+                    // Auto-scan for corrupt files immediately, then every 15 minutes
+                    // for the rest of the session (non-blocking, all users). Both this
+                    // and the duplicate scan below are Aria Lumi Primary: the timer
+                    // just keeps her checking continuously, but the actual
+                    // corrupt/duplicate calls (auto-delete, acoustic match + auto-remove)
+                    // are Aria's decisions, not raw heuristics acting alone.
                     CorruptFileFinderService.shared.startPeriodicScanning()
+                    DuplicateFinderService.shared.startPeriodicScanning()
 
                     // Aria's cloud-library housekeeping counterpart to the
                     // local corrupt-file scan above — once a day, at most.
