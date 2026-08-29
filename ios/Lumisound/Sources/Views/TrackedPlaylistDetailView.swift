@@ -32,10 +32,12 @@ struct TrackedPlaylistDetailView: View {
     @AppStorage("autoCloudBackup") private var autoCloudBackup = false
 
     private var newCount: Int { tracks.filter { !localCopyIDs.contains($0.id) }.count }
+    private var downloadedCount: Int { tracks.count - newCount }
+    private var progressFraction: Double { tracks.isEmpty ? 0 : Double(downloadedCount) / Double(tracks.count) }
 
     var body: some View {
         List {
-            headerSection
+            heroSection
 
             if isResolving && tracks.isEmpty {
                 HStack { Spacer(); ProgressView(); Spacer() }
@@ -47,17 +49,30 @@ struct TrackedPlaylistDetailView: View {
                 EmptyStateView(icon: "music.note.list", title: "No tracks", message: "This playlist returned no tracks.")
                     .listRowBackground(Color.clear)
             } else {
-                Section {
-                    ForEach(tracks) { track in
-                        trackRow(track)
+                let newTracks = tracks.filter { !localCopyIDs.contains($0.id) }
+                let downloaded = tracks.filter { localCopyIDs.contains($0.id) }
+
+                if !newTracks.isEmpty {
+                    Section {
+                        ForEach(newTracks) { track in
+                            trackRow(track)
+                        }
+                    } header: {
+                        groupHeader("NOT DOWNLOADED", count: newTracks.count)
                     }
-                } header: {
-                    Text("\(tracks.count) TRACKS · \(newCount) NOT DOWNLOADED")
-                        .font(AppTheme.bodyFont(size: 11))
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .kerning(0.8)
+                    .listRowBackground(AppTheme.surface.opacity(0.5))
                 }
-                .listRowBackground(AppTheme.surface.opacity(0.5))
+
+                if !downloaded.isEmpty {
+                    Section {
+                        ForEach(downloaded) { track in
+                            trackRow(track)
+                        }
+                    } header: {
+                        groupHeader("IN YOUR LIBRARY", count: downloaded.count)
+                    }
+                    .listRowBackground(AppTheme.surface.opacity(0.5))
+                }
             }
         }
         // `.plain`, not `.insetGrouped` — see FavoritesView's identical fix;
@@ -66,60 +81,142 @@ struct TrackedPlaylistDetailView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(GalleryBackgroundView().ignoresSafeArea())
+        .safeAreaInset(edge: .bottom) {
+            MiniPlayerBar()
+        }
         .navigationTitle(playlist.name)
         .navigationBarTitleDisplayMode(.inline)
         .task { await resolve() }
         .refreshable { await resolve() }
     }
 
-    // MARK: Header
+    // MARK: Group header
 
-    private var headerSection: some View {
+    private func groupHeader(_ title: String, count: Int) -> some View {
+        Text("\(title) · \(count)")
+            .font(AppTheme.bodyFont(size: 11))
+            .foregroundStyle(AppTheme.textSecondary)
+            .kerning(0.8)
+    }
+
+    // MARK: Hero
+
+    /// Structural/visual redesign: a single hero card replaces the old flat
+    /// list of controls — playlist art, a ring showing download completion at
+    /// a glance, and the primary/secondary actions grouped underneath it,
+    /// rather than everything reading as one undifferentiated settings list.
+    private var heroSection: some View {
         Section {
-            Button {
-                Task { await downloadAllNew() }
-            } label: {
-                HStack {
-                    if isDownloadingAll {
-                        ProgressView()
-                        Text("Downloading \(downloadAllDone)/\(downloadAllTotal)…")
-                    } else {
-                        Image(systemName: "arrow.down.circle.fill")
-                        Text(newCount > 0 ? "Download \(newCount) New Track\(newCount == 1 ? "" : "s")" : "All Tracks Downloaded")
+            VStack(spacing: 18) {
+                HStack(alignment: .center, spacing: 16) {
+                    heroArtwork
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(playlist.name)
+                            .font(AppTheme.headlineFont(size: 18))
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .lineLimit(2)
+                        Text(tracks.isEmpty ? "Resolving…" : "\(tracks.count) track\(tracks.count == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
                     }
+
                     Spacer()
+
+                    downloadProgressRing
                 }
-                .foregroundStyle(newCount > 0 && !isDownloadingAll ? AppTheme.dynamicAccent : AppTheme.textSecondary)
-            }
-            .disabled(isDownloadingAll || newCount == 0)
 
-            if isDownloadingAll && downloadAllTotal > 0 {
-                ProgressView(value: Double(downloadAllDone), total: Double(downloadAllTotal))
-                    .tint(AppTheme.dynamicAccent)
-            }
+                Button {
+                    Task { await downloadAllNew() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isDownloadingAll {
+                            ProgressView().tint(.white)
+                            Text("Downloading \(downloadAllDone)/\(downloadAllTotal)…")
+                        } else {
+                            Image(systemName: "arrow.down.circle.fill")
+                            Text(newCount > 0 ? "Download \(newCount) New Track\(newCount == 1 ? "" : "s")" : "All Tracks Downloaded")
+                        }
+                        Spacer()
+                    }
+                    .font(AppTheme.bodyFont(size: 15).weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(newCount > 0 && !isDownloadingAll ? AppTheme.dynamicAccent : AppTheme.textSecondary.opacity(0.4))
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isDownloadingAll || newCount == 0)
 
-            Toggle(isOn: Binding(
-                get: { trackedStore.playlists.first { $0.id == playlist.id }?.isAutoDownload ?? false },
-                set: { trackedStore.setAutoDownload(id: playlist.id, $0) }
-            )) {
-                Label("Auto-download new tracks", systemImage: "arrow.triangle.2.circlepath.circle")
-                    .foregroundStyle(AppTheme.textPrimary)
-            }
-            .tint(AppTheme.dynamicAccent)
+                if isDownloadingAll && downloadAllTotal > 0 {
+                    ProgressView(value: Double(downloadAllDone), total: Double(downloadAllTotal))
+                        .tint(AppTheme.dynamicAccent)
+                }
 
-            HStack {
-                Label("Save to", systemImage: "folder")
-                    .foregroundStyle(AppTheme.textPrimary)
-                Spacer()
-                DownloadFolderPicker(folderName: Binding(
-                    get: { trackedStore.playlists.first { $0.id == playlist.id }?.destinationFolder ?? "" },
-                    set: { trackedStore.setDestinationFolder(id: playlist.id, $0) }
-                ))
+                Divider().overlay(AppTheme.textSecondary.opacity(0.15))
+
+                Toggle(isOn: Binding(
+                    get: { trackedStore.playlists.first { $0.id == playlist.id }?.isAutoDownload ?? false },
+                    set: { trackedStore.setAutoDownload(id: playlist.id, $0) }
+                )) {
+                    Label("Auto-download new tracks", systemImage: "arrow.triangle.2.circlepath.circle")
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .tint(AppTheme.dynamicAccent)
+
+                HStack {
+                    Label("Save to", systemImage: "folder")
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    DownloadFolderPicker(folderName: Binding(
+                        get: { trackedStore.playlists.first { $0.id == playlist.id }?.destinationFolder ?? "" },
+                        set: { trackedStore.setDestinationFolder(id: playlist.id, $0) }
+                    ))
+                }
             }
+            .padding(.vertical, 6)
         } footer: {
             Text("Tracks already in your library are skipped automatically — Lumisound rescans the local Imported Music folder (and its subfolders) before each download so nothing is fetched twice. With auto-download on, new tracks added to this playlist are fetched automatically when you open the app. \"Save to\" overrides the global Download Folder setting just for this playlist.")
         }
         .listRowBackground(AppTheme.surface)
+    }
+
+    private var heroArtwork: some View {
+        Group {
+            if let first = tracks.first, let url = URL(string: first.thumbnailURL), !first.thumbnailURL.isEmpty {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
+                    default: placeholderThumb
+                    }
+                }
+            } else {
+                placeholderThumb
+            }
+        }
+        .frame(width: 64, height: 64)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
+    }
+
+    private var downloadProgressRing: some View {
+        ZStack {
+            Circle()
+                .stroke(AppTheme.textSecondary.opacity(0.2), lineWidth: 5)
+            Circle()
+                .trim(from: 0, to: progressFraction)
+                .stroke(AppTheme.dynamicAccent, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeInOut(duration: 0.4), value: progressFraction)
+            Text(tracks.isEmpty ? "–" : "\(Int(progressFraction * 100))%")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppTheme.textPrimary)
+        }
+        .frame(width: 44, height: 44)
+        .accessibilityLabel("\(downloadedCount) of \(tracks.count) tracks downloaded")
     }
 
     /// This playlist's own destination-folder override, if set (nil falls
