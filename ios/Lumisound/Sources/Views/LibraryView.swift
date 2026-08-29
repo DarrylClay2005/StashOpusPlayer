@@ -200,6 +200,19 @@ struct LibraryView: View {
             .background(GalleryBackgroundView().ignoresSafeArea())
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.large)
+            // Lives on the NavigationStack root — not on SongsTab, which is
+            // mounted/torn down on every internal tab switch and previously
+            // owned this modifier, occasionally leaving the search
+            // controller's presentation stuck and swallowing all touches
+            // (the "Songs tab locks out every other tab" bug). Only shown
+            // while Songs is active; `displayMode` alone (not the modifier's
+            // presence) controls that, so the underlying UISearchController
+            // is created once and simply hidden/shown, never remounted.
+            .searchable(
+                text: $searchText,
+                placement: .navigationBarDrawer(displayMode: selectedTab == .songs ? .always : .never),
+                prompt: "Search songs, artists, albums…"
+            )
             .toolbar { toolbarItems }
             .safeAreaInset(edge: .bottom) {
                 if isSelecting {

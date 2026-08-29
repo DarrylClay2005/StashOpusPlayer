@@ -484,24 +484,20 @@ struct SongsTab: View {
             // Re-trigger prefetch when the song list grows (e.g. after a scan).
             ArtworkService.shared.prefetch(songs: Array(sortedSongs.prefix(30)), pixelSize: prefetchPixelSize)
         }
-        // Native search field — replaces a custom inline bar toggled from the
-        // toolbar. That approach competed for space with 6 other trailing nav-bar
-        // buttons (3 from LibraryView + 3 layout toggles here), and the search
-        // icon — last in line — ended up clipped/unreachable on most screens,
-        // which is why "library search" appeared broken: users could never
-        // actually open the search field. `.searchable` integrates with the
-        // large-title nav bar instead of competing for toolbar space, matching
-        // the proven pattern already used in PlaylistDetailView/StreamSearchView.
-        //
-        // `displayMode: .always` pins the field below the nav bar so it stays
-        // visible while scrolling — the default `.automatic` placement collapses
-        // the bar into the title on scroll-down, which is exactly the "search
-        // bar randomly disappears" report (it only reappeared on scroll-to-top).
-        .searchable(
-            text: $searchText,
-            placement: .navigationBarDrawer(displayMode: .always),
-            prompt: "Search songs, artists, albums…"
-        )
+        // NOTE: `.searchable` used to live here, but this view is
+        // mounted/torn down every time the user switches the Library's
+        // internal Songs/Albums/Artists/Genres/Folders tab, while the
+        // `UISearchController` SwiftUI creates for `.searchable` is owned by
+        // the enclosing `NavigationStack`, not by this view's lifecycle.
+        // Tearing SongsTab down mid-presentation could leave that search
+        // controller's full-screen dimming/obscuring view stuck in the
+        // window hierarchy, silently swallowing every subsequent touch —
+        // including taps on the app-level `CustomTabBar` — which is exactly
+        // the "select Songs, then every tab is unresponsive" bug. Moved to
+        // LibraryView's `NavigationStack` root (a stable view that's never
+        // torn down) so the search controller is created once and just
+        // toggles visibility per sub-tab instead of remounting. See
+        // LibraryView.swift's `.searchable` call.
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 // Layout toggles
