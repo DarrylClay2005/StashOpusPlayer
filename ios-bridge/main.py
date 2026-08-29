@@ -4901,7 +4901,24 @@ async def _build_download_archive(music_dir: pathlib.Path) -> pathlib.Path:
 
     Archive line format matches yt-dlp's own: "<extractor> <id>", e.g.
     "youtube dQw4w9WgXcQ". Per-file probes are cached by (path, mtime, size), so
-    repeat builds over a large library are cheap."""
+    repeat builds over a large library are cheap.
+
+    NOTE: a Lumisound-locked `*.lms` file's bytes are XOR-masked (see
+    `_locked_inner_ext`/LUMISOUND_LOCK_EXT above) — the server never holds
+    the key, so ffprobe genuinely cannot read a locked file's embedded
+    LUMISOUND_ID here, and it's excluded from `SUPPORTED_AUDIO_EXTS` for
+    exactly that reason. This is NOT the same dedup path the iOS app
+    actually uses for tracked-playlist / "download new tracks" downloads
+    (those go through `/api/download`'s client-reported
+    `ios_user_library_inventory` check, which never touches file bytes and
+    already includes locked tracks — see `hasLocalCopy`/`localSourceIDs` in
+    LibraryManager+DuplicateDetection.swift, which fall back to the
+    LumisoundTrackVault xattr tag precisely so a locked file is still
+    recognized). This archive only backs `/api/download/batch`, which has
+    no locked-file-aware dedup story and would re-download a locked track
+    on every run — a real gap if that endpoint is ever wired up client-side,
+    but not the mechanism behind a "re-downloads existing locked tracks"
+    report from the app today."""
     archive_path = music_dir / ".lumisound_download_archive.txt"
     lines: set[str] = set()
     try:
@@ -4973,7 +4990,7 @@ async def _run_batch_download(job_id: str, links_path: pathlib.Path, music_dir: 
                               archive_path: Optional[pathlib.Path] = None) -> None:
     job = _BATCH_JOBS.get(job_id, {})
     extra_args, _ = _download_format_args(format)
-    before = _count_audio_files(music_dir)
+    before = _audio_file_set(music_dir)
     # Download every URL listed in links.txt with the standard flags. -i keeps
     # going past individual failures; -N gives modest per-item parallelism.
     # --download-archive makes yt-dlp skip any track already in the user's
@@ -5014,21 +5031,49 @@ async def _run_batch_download(job_id: str, links_path: pathlib.Path, music_dir: 
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.communicate()
-        after = _count_audio_files(music_dir)
-        job["completed"] = max(0, after - before)
+        after = _audio_file_set(music_dir)
+        new_files = after - before
+
+        # Integrity check each newly-downloaded file before it's counted as
+        # "done" — --ignore-errors keeps the batch going past a per-item
+        # yt-dlp failure, but says nothing about whether a file that DID get
+        # written is actually a complete, playable audio file (interrupted
+        # remux, dropped connection mid-fragment, etc.). Without this, a
+        # corrupt file from a batch/playlist download landed straight in the
+        # user's permanent library with zero validation — unlike the
+        # single-track /api/download path, which already ffprobe-verifies
+        # (see _verify_downloaded_audio) before accepting a download. Any
+        # file that fails is deleted immediately rather than left for the
+        # iOS CorruptFileFinderService to discover and clean up later.
+        verified = 0
+        rejected = 0
+        for path in new_files:
+            if await _verify_downloaded_audio(path):
+                verified += 1
+            else:
+                rejected += 1
+                logger.warning("batch_download %s: rejecting corrupt/truncated file %s", job_id, path)
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+        job["completed"] = verified
+        if rejected:
+            job["rejected"] = rejected
         job["status"] = "done"
-        logger.info("batch_download %s: done (%d new files)", job_id, job["completed"])
+        logger.info("batch_download %s: done (%d new files, %d rejected as corrupt)", job_id, verified, rejected)
     except Exception as exc:
         logger.exception("batch_download %s failed", job_id)
         job["status"] = "error"
         job["detail"] = str(exc)
 
 
-def _count_audio_files(directory: pathlib.Path) -> int:
+def _audio_file_set(directory: pathlib.Path) -> set[pathlib.Path]:
     try:
-        return sum(1 for p in directory.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_AUDIO_EXTS)
+        return {p for p in directory.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_AUDIO_EXTS}
     except OSError:
-        return 0
+        return set()
 
 
 @app.get("/api/download/batch/status")
@@ -5040,6 +5085,7 @@ async def batch_download_status(job_id: str = Query(...), user: dict = Depends(g
         "status": job.get("status"),
         "total": job.get("total", 0),
         "completed": job.get("completed", 0),
+        "rejected": job.get("rejected", 0),
         "detail": job.get("detail"),
     }
 
