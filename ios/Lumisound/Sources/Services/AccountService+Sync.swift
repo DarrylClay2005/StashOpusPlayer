@@ -257,6 +257,30 @@ extension AccountService {
         ("ytdlp_throttle_seconds", .int),
         ("ytdlp_concurrent_fragments", .int),
         ("autoCloudBackup", .bool),
+        // Custom navbar layout (Settings → Appearance → Navbar) — a user who
+        // hid tabs, switched selection style, or turned off tab labels lost
+        // all of it on a fresh install; only the artwork/seeker style
+        // preferences (dedicated SyncData columns) survived before this.
+        ("navbarDisplayMode", .string),
+        ("navbarShowTabLabels", .bool),
+        ("navbarSelectionStyle", .string),
+        ("navbarHiddenTabs", .string),
+        // Gallery Background source + Ken Burns — the source picker
+        // (Photos/Sonic Wallpaper/Reactive Aura) and motion toggle were
+        // never backed up; only the photo-specific animation/opacity/blur
+        // settings (dedicated SyncData columns) were.
+        (GalleryBackgroundSource.storageKey, .string),
+        ("bgService.kenBurnsEnabled", .bool),
+        // Home hub customization (reorder/hide sections, custom greeting,
+        // accent) — entirely unbacked-up before this; a reinstall silently
+        // reset a customized Home tab back to its default layout.
+        (HomeHubLayoutStore.orderKey, .string),
+        (HomeHubLayoutStore.hiddenKey, .string),
+        ("home_hub_custom_greeting", .string),
+        ("home_hub_accent_hex", .string),
+        // Wi-Fi-only downloads — a real user preference (avoids burning
+        // cellular data on auto-downloads), previously device-local only.
+        ("wifiOnlyDownloads.enabled", .bool),
     ]
 
     enum ExtraSettingKind { case bool, double, string, int }
