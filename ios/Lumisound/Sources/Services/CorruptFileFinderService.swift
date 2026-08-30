@@ -252,7 +252,26 @@ final class CorruptFileFinderService: ObservableObject {
         }
         guard buffer.frameLength > 0 else { return .unreadable("tail read produced no audio frames") }
 
-        if let expectedDuration, expectedDuration > 0 {
+        // Opus/WebM/OGG containers skip the duration-mismatch check —
+        // `AVAudioFile.duration`/`.length` is not trustworthy for these on
+        // iOS: it's exactly why AudioEncoderService exists at all ("many
+        // formats open directly on iOS 16+" is its own doc comment's
+        // hedge — opening successfully doesn't mean the reported length is
+        // correct). Confirmed in the field: EVERY single file this
+        // truncation check had ever flagged as corrupt (1,697 of them, one
+        // real user's library) was a `.opus.lms` track, spanning dozens of
+        // unrelated source videos with wildly different "percent
+        // truncated" — a pattern consistent with an unreliable duration
+        // read for this format family, not systematically bad downloads.
+        // Aria was auto-deleting fully playable tracks. The tail-read
+        // above still runs for every format (catches a genuinely
+        // zero-length/unreadable file), just not this specific
+        // expected-vs-actual-duration comparison for formats where the
+        // "actual" side of that comparison can't be trusted.
+        let effectiveExt = LumisoundExclusiveExtensionService.effectiveExtension(for: url)
+        let durationCheckApplies = !["opus", "webm", "ogg"].contains(effectiveExt)
+
+        if durationCheckApplies, let expectedDuration, expectedDuration > 0 {
             let tolerance = max(10.0, expectedDuration * 0.15)
             if file.duration < expectedDuration - tolerance {
                 return .truncated(actual: file.duration, expected: expectedDuration)
