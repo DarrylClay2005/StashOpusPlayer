@@ -111,12 +111,13 @@ actor AudioFingerprintService {
     private init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        // v5: segment count changed (12 -> 18) and the per-bin log-then-
-        // average computation changed — a v4 cache entry has both the wrong
-        // vector count AND values computed under the old (less
-        // discriminative) formula, so it needs to be invalidated the same
-        // way the v3 -> v4 bump was.
-        cacheURL = caches.appendingPathComponent("audio_fingerprint_cache_v5.json")
+        // v6: opus/webm/ogg files are now decoded via a forced real
+        // transcode (AudioEncoderService.convertLosslessly) instead of
+        // handing raw bytes to AVAssetReader directly — a v5 cache entry
+        // for one of those files was computed from a potentially
+        // unreliable decode and needs to be recomputed from the corrected
+        // one, same reasoning as every prior version bump here.
+        cacheURL = caches.appendingPathComponent("audio_fingerprint_cache_v6.json")
         if let data = try? Data(contentsOf: cacheURL),
            let decoded = try? JSONDecoder().decode([String: [[Float]]].self, from: data) {
             cache = decoded
@@ -343,7 +344,60 @@ actor AudioFingerprintService {
         // by AVURLAsset until unlocked -- without this, duplicate detection
         // silently fell back to weaker title/artist text matching for every
         // locked track instead of acoustic fingerprinting.
-        let asset = AVURLAsset(url: LumisoundExclusiveExtensionService.playableURL(for: url))
+        let unlockedURL = LumisoundExclusiveExtensionService.playableURL(for: url)
+
+        // Declared at function scope (not inside the `if` below) so the
+        // `defer` actually fires when THIS function returns, not the
+        // instant the `if` block's own scope exits — a `defer` nested
+        // inside that block would delete the transcoded file before
+        // AVAssetReader ever got to read it further down.
+        var tempTranscodeToCleanUp: URL?
+        defer {
+            if let tempTranscodeToCleanUp {
+                try? FileManager.default.removeItem(at: tempTranscodeToCleanUp)
+            }
+        }
+
+        // Opus/WebM/OGG specifically route through a FORCED real transcode
+        // (AudioEncoderService.convertLosslessly — hand-decoded Ogg-Opus
+        // demuxing, entirely independent of AVFoundation's own opus
+        // handling) before decoding, instead of handing the raw bytes
+        // straight to AVAssetReader. This is the exact same class of bug
+        // already found and fixed in CorruptFileFinderService: AVFoundation's
+        // native opus/ogg/webm decoding is unreliable on iOS. Deliberately
+        // NOT `transcodeForPlayback` here — that has a "tier 1: native open"
+        // shortcut that hands back the SAME raw, potentially-unreliable file
+        // whenever `AVAudioFile(forReading:)` merely doesn't throw, which
+        // says nothing about whether a *different* API (AVAssetReader, used
+        // below) decodes it correctly. AVAssetReader silently reading
+        // incomplete/incorrect sample data — no thrown error, just wrong
+        // PCM — would make the fingerprint computed from audio that doesn't
+        // match what the user actually hears, and no amount of tuning the
+        // comparison thresholds downstream could ever fix that. Confirmed
+        // in the field: two genuinely different tracks kept matching as
+        // "sounds identical" even after raising every threshold and
+        // improving the spectral computation itself — the remaining common
+        // factor was that both were opus files decoded this way.
+        let effectiveExt = LumisoundExclusiveExtensionService.effectiveExtension(for: url)
+        let decodeURL: URL
+        if ["opus", "webm", "ogg"].contains(effectiveExt) {
+            let transcodedURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("lumisound_fingerprint_transcode")
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("m4a")
+            try? FileManager.default.createDirectory(
+                at: transcodedURL.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            tempTranscodeToCleanUp = transcodedURL
+            guard await AudioEncoderService.shared.convertLosslessly(unlockedURL, to: transcodedURL) else {
+                return nil
+            }
+            decodeURL = transcodedURL
+        } else {
+            decodeURL = unlockedURL
+        }
+
+        let asset = AVURLAsset(url: decodeURL)
         guard let tracks = try? await asset.loadTracks(withMediaType: .audio),
               let track = tracks.first,
               let reader = try? AVAssetReader(asset: asset)
