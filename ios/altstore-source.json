@@ -9,7 +9,7 @@
       "developerName": "HeavenlyXenusVR",
       "subtitle": "Spatial music player with 8D audio, EQ, and personal cloud library",
       "localizedDescription": "Lumisound is a full-featured iOS music player with 10-band EQ, 8D spatial audio, crossfade, gapless playback, AB repeat, sleep timer, lyrics, personal cloud library, and SoundCloud/YouTube streaming.",
-      "iconURL": "https://raw.githubusercontent.com/HeavenlyXenusVR/Lumisound/main/app/src/main/ic_launcher.png",
+      "iconURL": "https://raw.githubusercontent.com/HeavenlyXenusVR/Lumisound/main/ios/Lumisound/Resources/Assets.xcassets/AppIcon.appiconset/Icon-1024.png",
       "tintColor": "EC4079",
       "screenshotURLs": [],
       "versions": [
