@@ -34,10 +34,12 @@ See the [top-level README](../README.md) for the full feature list. Short versio
 
 ## Installation (iOS — no Jailbreak required)
 
-### Option A — AltStore (recommended for auto-updates)
+### Option A — SideStore or AltStore (recommended for auto-updates)
 
-1. Install [AltStore](https://altstore.io/) on your iPhone.
-2. In AltStore → **Sources**, add:
+Either app can add the same source and will keep Lumisound updated automatically. [SideStore](https://sidestore.io/) is the easier pick if you don't want to keep a computer running AltServer in the background — it refreshes itself on-device.
+
+1. Install [SideStore](https://sidestore.io/) or [AltStore](https://altstore.io/) on your iPhone.
+2. In the app → **Sources**, add:
    ```
    https://raw.githubusercontent.com/HeavenlyXenusVR/Lumisound/main/ios/altstore-source.json
    ```
