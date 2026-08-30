@@ -5076,6 +5076,124 @@ def _audio_file_set(directory: pathlib.Path) -> set[pathlib.Path]:
         return set()
 
 
+# ---------------------------------------------------------------------------
+# Motion Artwork — real "True Motion" animated artwork (Feature request:
+# "Full True Animated Artwork Like Apple Music Does"). Apple Music's version
+# is a real short muted video loop of the actual release, not a generated
+# visual effect layered on the static cover (Lumisound already has 24 of
+# those — see NowPlayingArtworkStyle.swift). For a track sourced from
+# YouTube, the closest genuine equivalent this app can offer is the same
+# video's own opening seconds, muted and looped, square-cropped — the real
+# motion content behind the track, not a synthesized effect.
+# ---------------------------------------------------------------------------
+
+_MOTION_ARTWORK_DIR = pathlib.Path(YTDLP_CACHE_DIR) / "motion-artwork"
+_MOTION_ARTWORK_LOCKS: dict[str, asyncio.Lock] = {}
+_MOTION_ARTWORK_SEMAPHORE = asyncio.Semaphore(2)  # bounds concurrent yt-dlp+ffmpeg extraction jobs
+_MOTION_ARTWORK_CLIP_SECONDS = 6
+
+
+@app.get("/api/motion-artwork")
+async def motion_artwork(video_id: str = Query(..., min_length=5, max_length=32), user: dict = Depends(get_current_user)):
+    """Returns a short (6s), muted, square-cropped H.264 mp4 clip of YouTube
+    video `video_id`'s own opening seconds — cached on disk after the first
+    request so a track's motion artwork is only ever extracted once across
+    every user who plays it, same "server-side shared cache, not per-user"
+    shape as `/api/download`'s LUMISOUND_ID dedup. Returns 503 (not an
+    error the client should retry loudly) if extraction fails for any
+    reason — an age-restricted/region-locked/removed source video, or one
+    yt-dlp simply can't get video-only streams for — so the client's Now
+    Playing view can fall back to the static artwork it always had, per the
+    "real feature or graceful fallback, never a placeholder" rule."""
+    if not re.fullmatch(r"[\w-]{5,32}", video_id):
+        raise HTTPException(status_code=400, detail="Invalid video id")
+
+    dest = _MOTION_ARTWORK_DIR / f"{video_id}.mp4"
+    if dest.exists():
+        return FileResponse(dest, media_type="video/mp4")
+
+    # Per-video-id lock: two users opening the same track's Now Playing at
+    # once shouldn't kick off two redundant yt-dlp+ffmpeg extractions.
+    lock = _MOTION_ARTWORK_LOCKS.setdefault(video_id, asyncio.Lock())
+    async with lock:
+        if dest.exists():  # someone else finished it while we waited on the lock
+            return FileResponse(dest, media_type="video/mp4")
+        async with _MOTION_ARTWORK_SEMAPHORE:
+            ok = await _extract_motion_clip(video_id, dest)
+    _MOTION_ARTWORK_LOCKS.pop(video_id, None)
+
+    if not ok or not dest.exists():
+        raise HTTPException(status_code=503, detail="Motion artwork isn't available for this track")
+    return FileResponse(dest, media_type="video/mp4")
+
+
+async def _extract_motion_clip(video_id: str, dest: pathlib.Path) -> bool:
+    """Downloads a small (<=480p) video-only stream and trims/crops it with
+    ffmpeg into `dest`. Returns False (never raises) on any failure — the
+    caller treats that as "not available", not a hard error."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    raw_path = dest.with_suffix(".raw.mp4")
+    raw_path.unlink(missing_ok=True)
+
+    cmd = [
+        "yt-dlp", *_YTDLP_NETWORK_ARGS,
+        "--cache-dir", YTDLP_CACHE_DIR,
+        "-f", "bestvideo[height<=480][ext=mp4]/bestvideo[height<=480]/worst[height<=480]/worst",
+        "--no-playlist",
+        "-o", str(raw_path),
+        f"https://www.youtube.com/watch?v={video_id}",
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            await asyncio.wait_for(proc.communicate(), timeout=90.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            return False
+        if proc.returncode != 0 or not raw_path.exists():
+            return False
+
+        # Trim to the opening MOTION_ARTWORK_CLIP_SECONDS, strip audio
+        # entirely (this is decorative background motion, never a second
+        # audio source competing with actual playback), and square-crop —
+        # Now Playing's artwork slot is always square regardless of the
+        # source video's real aspect ratio.
+        tmp_dest = dest.with_suffix(".tmp.mp4")
+        tmp_dest.unlink(missing_ok=True)
+        ffmpeg_cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(raw_path),
+            "-t", str(_MOTION_ARTWORK_CLIP_SECONDS),
+            "-an",
+            "-vf", "scale=480:480:force_original_aspect_ratio=increase,crop=480:480",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+            "-movflags", "+faststart",
+            str(tmp_dest),
+        ]
+        ff_proc = await asyncio.create_subprocess_exec(
+            *ffmpeg_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            await asyncio.wait_for(ff_proc.communicate(), timeout=60.0)
+        except asyncio.TimeoutError:
+            ff_proc.kill()
+            await ff_proc.communicate()
+            return False
+        if ff_proc.returncode != 0 or not tmp_dest.exists():
+            return False
+
+        tmp_dest.replace(dest)
+        return True
+    except Exception as exc:
+        logger.warning("motion_artwork: extraction failed for %s: %s", video_id, exc)
+        return False
+    finally:
+        raw_path.unlink(missing_ok=True)
+
+
 @app.get("/api/download/batch/status")
 async def batch_download_status(job_id: str = Query(...), user: dict = Depends(get_current_user)):
     job = _BATCH_JOBS.get(job_id)

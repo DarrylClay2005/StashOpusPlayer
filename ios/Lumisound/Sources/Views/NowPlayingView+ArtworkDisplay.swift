@@ -120,6 +120,11 @@ extension NowPlayingView {
         case .vhsScanGlitch:
             VHSScanGlitchArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
                 .environmentObject(library)
+
+        case .trueMotion:
+            TrueMotionArtworkView(song: player.currentSong, isPlaying: player.isPlaying)
+                .environmentObject(library)
+                .environmentObject(account)
         }
     }
 }

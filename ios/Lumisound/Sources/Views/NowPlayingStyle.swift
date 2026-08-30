@@ -63,6 +63,12 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
     case rippleReflection
     case neonSignFlicker
     case vhsScanGlitch
+    // "Full True Animated Artwork Like Apple Music Does" — unlike the 24
+    // styles above (all generated visual effects layered on the static
+    // cover), this is REAL motion: a short muted loop of the actual source
+    // video's own opening seconds, for YouTube-sourced tracks the server
+    // could extract one for. See TrueMotionArtworkView/MotionArtworkService.
+    case trueMotion
 
     var id: String { rawValue }
 
@@ -93,6 +99,7 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .rippleReflection:       return "Ripple Reflection"
         case .neonSignFlicker:        return "Neon Sign Flicker"
         case .vhsScanGlitch:          return "VHS Scan Glitch"
+        case .trueMotion:             return "True Motion"
         }
     }
 
@@ -123,6 +130,7 @@ enum NowPlayingArtworkStyle: String, CaseIterable, Identifiable {
         case .rippleReflection:       return "target"
         case .neonSignFlicker:        return "lightbulb.fill"
         case .vhsScanGlitch:          return "tv.fill"
+        case .trueMotion:             return "play.rectangle.fill"
         }
     }
 }
