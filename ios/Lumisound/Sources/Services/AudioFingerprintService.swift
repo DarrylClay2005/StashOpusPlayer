@@ -62,13 +62,12 @@ actor AudioFingerprintService {
 
     /// Fraction of segments that must individually clear
     /// `segmentMatchThreshold` for two tracks to be considered the same
-    /// recording (with `segmentCount = 12`, this now requires 11 of 12,
+    /// recording (with `segmentCount = 18`, this requires 16 of 18,
     /// evaluated over whatever segment range two tracks actually overlap on
     /// after alignment — see `sequenceSimilarity`). A single divergent
     /// segment — the moment two otherwise-similar-sounding but genuinely
     /// different songs actually differ — is enough to reject a match, which
-    /// a single blended average could never catch. Raised from 0.8 (10/12)
-    /// alongside the two thresholds above.
+    /// a single blended average could never catch.
     static let minMatchingSegmentFraction: Float = 0.88
 
     /// Maximum segment-index shift tried when aligning two tracks' segment
@@ -77,11 +76,11 @@ actor AudioFingerprintService {
     /// silence trimming, a slightly different encoder lead-in, a re-upload
     /// with a few extra intro frames — which used to make a same-index
     /// segment compare see the whole excerpt as dissimilar even though the
-    /// underlying audio matches once aligned. At ~3s/segment (37s excerpt /
-    /// 12 segments), a shift of 3 searches roughly ±9s of offset —
+    /// underlying audio matches once aligned. At ~2s/segment (37s excerpt /
+    /// 18 segments), a shift of 4 searches roughly ±8s of offset —
     /// comfortably past any trimming difference actually seen between
     /// re-encodes/re-uploads of the same track.
-    static let maxAlignmentShift = 3
+    static let maxAlignmentShift = 4
 
     private var cache: [String: [[Float]]]
     private let cacheURL: URL
@@ -102,19 +101,22 @@ actor AudioFingerprintService {
     /// chunks" split specifically so `maxAlignmentShift` above has enough
     /// resolution to actually express a sub-segment-sized timing offset
     /// between two tracks, rather than only being able to shift by a whole
-    /// multi-second chunk at a time.
-    private let segmentCount = 12
+    /// multi-second chunk at a time. Raised from 12 to 18 (~2s/segment over
+    /// the 37s excerpt) alongside the log-then-average fix above — coarser
+    /// segments give two different tracks' melodic/temporal differences
+    /// more room to get averaged away inside a single segment before the
+    /// comparison ever sees them.
+    private let segmentCount = 18
 
     private init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        // v4: band count changed (32 -> 48) — a v3 cache entry has the wrong
-        // vector dimensionality for `cosineSimilarity`'s zip, so comparing
-        // an old cached fingerprint against a freshly-computed one would
-        // either crash the zip or silently compare garbage. A new filename
-        // forces every track to be re-fingerprinted once under the new
-        // scheme instead of comparing incompatible dimensionality.
-        cacheURL = caches.appendingPathComponent("audio_fingerprint_cache_v4.json")
+        // v5: segment count changed (12 -> 18) and the per-bin log-then-
+        // average computation changed — a v4 cache entry has both the wrong
+        // vector count AND values computed under the old (less
+        // discriminative) formula, so it needs to be invalidated the same
+        // way the v3 -> v4 bump was.
+        cacheURL = caches.appendingPathComponent("audio_fingerprint_cache_v5.json")
         if let data = try? Data(contentsOf: cacheURL),
            let decoded = try? JSONDecoder().decode([String: [[Float]]].self, from: data) {
             cache = decoded
@@ -289,9 +291,25 @@ actor AudioFingerprintService {
                         let lowBin = max(1, Int(lowFrac * Double(halfSize)))
                         let highBin = max(lowBin + 1, min(halfSize, Int(highFrac * Double(halfSize))))
                         guard lowBin < highBin else { continue }
+                        // Log EACH bin first, then average the logs — not
+                        // the other way around. Averaging raw (linear)
+                        // magnitude-squared values before taking one log of
+                        // the result lets a single dominant bin swamp the
+                        // whole band average, so the resulting per-band
+                        // value mostly tracks "how loud is the loudest bin
+                        // here" rather than the band's actual spectral
+                        // shape — exactly the kind of thing that converges
+                        // for two DIFFERENT tracks sharing similar overall
+                        // mastering/loudness (confirmed in the field:
+                        // unrelated same-genre game/anime soundtrack pieces
+                        // were clearing even a 0.99 similarity threshold on
+                        // this signal). Mean-of-logs weighs every bin in
+                        // the band equally, which is far more sensitive to
+                        // genuine shape differences between two different
+                        // pieces of music.
                         let slice = magnitudes[lowBin..<highBin]
-                        let avg = slice.reduce(0, +) / Float(slice.count)
-                        accumulated[segment][band] += log10(avg + 1)
+                        let meanLogMagnitude = slice.reduce(Float(0)) { $0 + log10($1 + 1) } / Float(slice.count)
+                        accumulated[segment][band] += meanLogMagnitude
                     }
                 }
             }
