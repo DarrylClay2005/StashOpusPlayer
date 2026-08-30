@@ -548,11 +548,31 @@ final class DuplicateFinderService: ObservableObject {
             // fingerprinting entirely) — same normalized title+artist
             // check as before, scoped to this duration cluster.
             let leftover = cluster.filter { !clusterConsumed.contains($0.id) }
+            // Keyed on (normalized title, feat. name) rather than just the
+            // normalized title — `normalize` strips any "(feat. X)" clause
+            // entirely (see its doc comment: catches the same track tagged
+            // inconsistently with/without a feature credit), which used to
+            // silently collapse "Song (feat. A)" and "Song (feat. B)" into
+            // ONE dictionary bucket the moment they were inserted, before
+            // any near-match/union logic even ran — two genuinely different
+            // songs (different featured artist) with a shared base title
+            // were flattened into "the same track" purely because the
+            // differentiating part of the title was thrown away. Keeping
+            // the feat. name alongside the base title (nil when absent)
+            // preserves the original "same track, tagged inconsistently"
+            // coverage for the common case (no feat. tag vs. some feat.
+            // tag) while `unionBaseKeys` below still refuses to merge two
+            // buckets that both HAVE a feat. name and it's different.
             var byTitleArtist: [String: [Song]] = [:]
+            var featNameByKey: [String: String?] = [:]
             for song in leftover {
-                let key = normalize(song.title) + "|" + normalizeArtist(song.artist)
-                guard !key.isEmpty, key != "|" else { continue }
+                let baseTitle = normalize(song.title)
+                let artist = normalizeArtist(song.artist)
+                guard !baseTitle.isEmpty, !artist.isEmpty else { continue }
+                let featName = extractFeatureName(from: song.title)
+                let key = baseTitle + "|" + artist + "|" + (featName ?? "")
                 byTitleArtist[key, default: []].append(song)
+                featNameByKey[key] = featName
             }
 
             // Near-match merge: an exact normalized-key match already caught
@@ -577,12 +597,36 @@ final class DuplicateFinderService: ObservableObject {
                 let ra = find(a), rb = find(b)
                 if ra != rb { parent[ra] = rb }
             }
+            /// True unless both sides have a real, DIFFERENT feat. name —
+            /// the guard described above, shared by both the exact-base-title
+            /// union pass and the near-match pass below.
+            func compatibleFeatNames(_ keyA: String, _ keyB: String) -> Bool {
+                guard let featA = featNameByKey[keyA] ?? nil, let featB = featNameByKey[keyB] ?? nil else { return true }
+                return featA == featB || isNearMatch(featA, featB)
+            }
+            // Two keys sharing the exact same base title (differing only by
+            // feat. name, e.g. "" vs "madame m") represent the SAME
+            // underlying track tagged inconsistently — union them (subject
+            // to the feat.-name guard) so the "no feat. tag" upload and the
+            // "with feat. tag" upload still land in one group like before
+            // this fix, without also merging two DIFFERENT feat. names.
             for i in 0..<keys.count {
-                let partsI = keys[i].split(separator: "|", maxSplits: 1)
-                guard partsI.count == 2 else { continue }
+                let partsI = keys[i].split(separator: "|", maxSplits: 2)
+                guard partsI.count >= 2 else { continue }
                 for j in (i + 1)..<keys.count {
-                    let partsJ = keys[j].split(separator: "|", maxSplits: 1)
-                    guard partsJ.count == 2, partsI[1] == partsJ[1] else { continue }
+                    let partsJ = keys[j].split(separator: "|", maxSplits: 2)
+                    guard partsJ.count >= 2, partsI[0] == partsJ[0], partsI[1] == partsJ[1] else { continue }
+                    guard compatibleFeatNames(keys[i], keys[j]) else { continue }
+                    union(keys[i], keys[j])
+                }
+            }
+            for i in 0..<keys.count {
+                let partsI = keys[i].split(separator: "|", maxSplits: 2)
+                guard partsI.count >= 2 else { continue }
+                for j in (i + 1)..<keys.count {
+                    let partsJ = keys[j].split(separator: "|", maxSplits: 2)
+                    guard partsJ.count >= 2, partsI[1] == partsJ[1] else { continue }
+                    guard compatibleFeatNames(keys[i], keys[j]) else { continue }
                     if isNearMatch(String(partsI[0]), String(partsJ[0])) {
                         union(keys[i], keys[j])
                     }
@@ -681,8 +725,27 @@ final class DuplicateFinderService: ObservableObject {
     /// titles and artists since the same track is tagged inconsistently
     /// with/without a feature credit across different uploads/sources.
     private static let featureClauseRegex = try? NSRegularExpression(
-        pattern: #"(?i)[\(\[]?\s*(feat\.?|ft\.?|featuring)\s+[^()\[\],]+[\)\]]?"#
+        pattern: #"(?i)[\(\[]?\s*(feat\.?|ft\.?|featuring)\s+([^()\[\],]+)[\)\]]?"#
     )
+
+    /// Extracts and normalizes just the featured-artist name from a title's
+    /// `feat./ft./featuring` clause, e.g. "Song (feat. Madame M)" -> "madame
+    /// m", or `nil` if the title has no such clause at all. Used to make
+    /// sure two titles that both HAVE a feat. clause, but name a different
+    /// artist, are never treated as the same underlying track just because
+    /// `normalize`/`featureClauseRegex` strip that clause out entirely for
+    /// the base-title comparison — see the duplicate-grouping code's own
+    /// comment for the false-positive this fixes ("gomotion (feat. A)" vs
+    /// "gomotion (feat. B)" being merged as if identical).
+    nonisolated static func extractFeatureName(from text: String) -> String? {
+        guard let featureClauseRegex,
+              let match = featureClauseRegex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              match.numberOfRanges > 2,
+              let nameRange = Range(match.range(at: 2), in: text)
+        else { return nil }
+        let normalized = normalize(String(text[nameRange]))
+        return normalized.isEmpty ? nil : normalized
+    }
 
     /// Lowercases, strips diacritics/punctuation, drops noise tags and feature
     /// credits, and collapses whitespace so e.g. "Daft Punk - One More Time
@@ -774,6 +837,19 @@ final class DuplicateFinderService: ObservableObject {
     nonisolated private static func isNearMatch(_ a: String, _ b: String) -> Bool {
         guard a != b else { return true }
         guard !a.isEmpty, !b.isEmpty else { return false }
+        // A different TRAILING NUMBER is never a typo — it's almost always a
+        // sequel/episode/part/volume indicator ("Guild Hall 1" vs "Guild
+        // Hall 3", "Ending 5", "Title 1" vs "Title 2"). Levenshtein distance
+        // alone treats a single changed digit exactly like a single changed
+        // letter, which is why a fuzzy-typo check was merging genuinely
+        // different, sequentially-numbered tracks into one "duplicate"
+        // group. Reject outright whenever both titles end in a digit run
+        // and those digit runs differ, before ever computing edit distance.
+        let aTrailingDigits = trailingDigitRun(a)
+        let bTrailingDigits = trailingDigitRun(b)
+        if let aTrailingDigits, let bTrailingDigits, aTrailingDigits != bTrailingDigits {
+            return false
+        }
         // Cheap reject before paying for the O(n*m) distance computation:
         // titles whose lengths differ by more than the max tolerance we'd
         // ever allow can't possibly pass.
@@ -786,6 +862,19 @@ final class DuplicateFinderService: ObservableObject {
         // to share most characters don't get merged).
         let threshold = min(3, max(1, Int(Double(maxLen) * 0.15)))
         return distance <= threshold
+    }
+
+    /// Returns the run of ASCII digits at the very end of `text` (e.g. "guild
+    /// hall 3" -> "3", "ending 15" -> "15"), or `nil` if `text` doesn't end
+    /// in a digit at all. Used by `isNearMatch` to distinguish a real typo
+    /// from a different sequel/episode/part number.
+    nonisolated private static func trailingDigitRun(_ text: String) -> String? {
+        var digits = ""
+        for char in text.reversed() {
+            guard char.isASCII, char.isNumber else { break }
+            digits.append(char)
+        }
+        return digits.isEmpty ? nil : String(digits.reversed())
     }
 
     nonisolated private static func levenshteinDistance(_ a: String, _ b: String) -> Int {

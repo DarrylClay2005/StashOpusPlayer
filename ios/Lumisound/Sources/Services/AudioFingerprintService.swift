@@ -38,26 +38,38 @@ actor AudioFingerprintService {
 
     /// Mean cosine similarity across all segments at/above this — combined
     /// with `segmentMatchThreshold`/`minMatchingSegmentFraction` below — is
-    /// treated as "the same recording". Raised slightly from the old
-    /// single-vector threshold (0.975) since segment-level matching is a
-    /// stricter, more discriminating signal on its own; this mean bar mostly
-    /// guards against a track passing the per-segment fraction check while
-    /// still trending weak overall.
-    static let matchThreshold: Float = 0.98
+    /// treated as "the same recording".
+    ///
+    /// Raised from 0.98 after field reports of unrelated tracks that merely
+    /// share a genre/instrumentation style (game/anime soundtrack pieces —
+    /// different franchises, different composers, different actual content)
+    /// being flagged as "sounds identical". A coarse per-segment spectral
+    /// SHAPE average (see the file-header comment) is a weaker
+    /// discriminator than it looks on paper: two different tracks with
+    /// similar mastering/instrumentation can legitimately land in the
+    /// high-0.9x range on shape alone even though the actual audio differs
+    /// throughout. 0.99 (with `bandCount` also increased for finer
+    /// frequency resolution — see below) trades a bit of recall (a real
+    /// duplicate with heavier processing differences might not match) for
+    /// precision, which is the right tradeoff for a feature whose "Delete
+    /// All Duplicates" action can permanently remove a file.
+    static let matchThreshold: Float = 0.99
 
     /// Cosine similarity an individual segment must clear to count as
-    /// "matching" for the `minMatchingSegmentFraction` check.
-    static let segmentMatchThreshold: Float = 0.97
+    /// "matching" for the `minMatchingSegmentFraction` check. Raised
+    /// alongside `matchThreshold` for the same reason.
+    static let segmentMatchThreshold: Float = 0.985
 
     /// Fraction of segments that must individually clear
     /// `segmentMatchThreshold` for two tracks to be considered the same
-    /// recording (with `segmentCount = 12`, this requires 10 of 12,
+    /// recording (with `segmentCount = 12`, this now requires 11 of 12,
     /// evaluated over whatever segment range two tracks actually overlap on
     /// after alignment — see `sequenceSimilarity`). A single divergent
     /// segment — the moment two otherwise-similar-sounding but genuinely
     /// different songs actually differ — is enough to reject a match, which
-    /// a single blended average could never catch.
-    static let minMatchingSegmentFraction: Float = 0.8
+    /// a single blended average could never catch. Raised from 0.8 (10/12)
+    /// alongside the two thresholds above.
+    static let minMatchingSegmentFraction: Float = 0.88
 
     /// Maximum segment-index shift tried when aligning two tracks' segment
     /// sequences (see `sequenceSimilarity`). Two files of the "same"
@@ -75,7 +87,14 @@ actor AudioFingerprintService {
     private let cacheURL: URL
     private let fftSize = 2048
     private let log2n: vDSP_Length = 11 // 2^11 == 2048
-    private let bandCount = 32
+    /// Raised from 32 alongside the threshold changes above — finer
+    /// frequency-bucket resolution gives two DIFFERENT tracks that merely
+    /// share an overall spectral envelope (same genre/instrumentation) more
+    /// room to actually diverge in the comparison, instead of both
+    /// collapsing toward the same coarse shape once averaged into only 32
+    /// buckets. A real duplicate's shape is essentially unaffected by the
+    /// extra resolution, since it's the same underlying audio either way.
+    private let bandCount = 48
     private let sampleRate = 11025.0
     /// Number of equal time segments each excerpt is split into before
     /// fingerprinting — see the file-header comment for why segments beat a
@@ -89,14 +108,13 @@ actor AudioFingerprintService {
     private init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        // v3: segment granularity changed (6 -> 12 segments per excerpt) —
-        // a v2 cache entry's segments cover a different time span each than
-        // v3 expects, so comparing an old cached fingerprint against a
-        // freshly-computed one would silently misalign even before
-        // `sequenceSimilarity`'s own shift search gets a chance to help. A
-        // new filename forces every track to be re-fingerprinted once under
-        // the new scheme instead of comparing incompatible granularities.
-        cacheURL = caches.appendingPathComponent("audio_fingerprint_cache_v3.json")
+        // v4: band count changed (32 -> 48) — a v3 cache entry has the wrong
+        // vector dimensionality for `cosineSimilarity`'s zip, so comparing
+        // an old cached fingerprint against a freshly-computed one would
+        // either crash the zip or silently compare garbage. A new filename
+        // forces every track to be re-fingerprinted once under the new
+        // scheme instead of comparing incompatible dimensionality.
+        cacheURL = caches.appendingPathComponent("audio_fingerprint_cache_v4.json")
         if let data = try? Data(contentsOf: cacheURL),
            let decoded = try? JSONDecoder().decode([String: [[Float]]].self, from: data) {
             cache = decoded

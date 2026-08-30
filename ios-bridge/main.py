@@ -7030,7 +7030,16 @@ async def _scan_acoustic_duplicates_core(user_id: str) -> Optional[dict]:
         if fp:
             prints.append((p, dur, fp))
 
-    threshold = 0.85
+    # Raised from 0.85 (and duration tolerance tightened from 15s to 5s)
+    # after field reports of completely unrelated tracks — different
+    # franchises, different artists, only coincidentally similar length —
+    # being grouped as "sounds identical". 0.85 raw-Chromaprint-bit-Hamming
+    # similarity is not a strict bar in practice: unrelated tracks routinely
+    # land in the 0.7-0.85 range on shared mastering/instrumentation alone,
+    # while genuine re-encodes of the same recording typically clear 0.95+.
+    # This trades a bit of recall for precision, which is the right
+    # tradeoff for a feature whose result can be used to delete a file.
+    threshold = 0.95
     used: set[int] = set()
     groups: list[list[dict]] = []
     for i in range(len(prints)):
@@ -7040,7 +7049,7 @@ async def _scan_acoustic_duplicates_core(user_id: str) -> Optional[dict]:
         for j in range(i + 1, len(prints)):
             if j in used:
                 continue
-            if abs(prints[i][1] - prints[j][1]) > 15:
+            if abs(prints[i][1] - prints[j][1]) > 5:
                 continue
             if _fp_similarity(prints[i][2], prints[j][2]) >= threshold:
                 members.append(j)
@@ -7072,7 +7081,7 @@ async def acoustic_duplicates(
     user: dict = Depends(get_current_user),
 ):
     """Groups files in the user's cloud library that are acoustically the same
-    recording (fingerprint match ≥ 0.85, within 15s duration), regardless of
+    recording (fingerprint match ≥ 0.95, within 5s duration), regardless of
     metadata — the audio-level complement to the on-device title/artist finder.
     Serves the cached result from the periodic background scan (Feature:
     proactive duplicate scanning) when available, since computing this live
