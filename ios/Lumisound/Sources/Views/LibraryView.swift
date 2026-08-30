@@ -156,15 +156,6 @@ struct LibraryView: View {
 
     // MARK: Body
 
-    /// Extracted out of the `.searchable` modifier call itself — an inline
-    /// ternary there pushed this view's already-large modifier chain past
-    /// the type checker's complexity budget ("unable to type-check this
-    /// expression in reasonable time"), which only surfaced as a build
-    /// failure on an unrelated line elsewhere in `body`.
-    private var searchDisplayMode: SearchFieldPlacement.NavigationBarDrawerDisplayMode {
-        selectedTab == .songs ? .always : .never
-    }
-
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -213,13 +204,18 @@ struct LibraryView: View {
             // mounted/torn down on every internal tab switch and previously
             // owned this modifier, occasionally leaving the search
             // controller's presentation stuck and swallowing all touches
-            // (the "Songs tab locks out every other tab" bug). Only shown
-            // while Songs is active; `displayMode` alone (not the modifier's
-            // presence) controls that, so the underlying UISearchController
-            // is created once and simply hidden/shown, never remounted.
+            // (the "Songs tab locks out every other tab" bug). Always
+            // present regardless of which internal tab is selected —
+            // `SearchFieldPlacement.NavigationBarDrawerDisplayMode` has no
+            // `.never` case to hide it conditionally, so unlike the old
+            // per-screen `.searchable` this is visible on every Library
+            // sub-tab, not just Songs. A harmless UX difference (the field
+            // just does nothing on Albums/Artists/etc., same as before it
+            // had a value typed in) in exchange for eliminating the mount/
+            // unmount churn that caused the lockup.
             .searchable(
                 text: $searchText,
-                placement: .navigationBarDrawer(displayMode: searchDisplayMode),
+                placement: .navigationBarDrawer(displayMode: .always),
                 prompt: "Search songs, artists, albums…"
             )
             .toolbar { toolbarItems }
