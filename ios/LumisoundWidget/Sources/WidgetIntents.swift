@@ -12,11 +12,8 @@ enum WidgetNotificationNames {
 }
 
 /// App Group shared with the host app — matches `WidgetDataService`'s
-/// `appGroupID` and `LumisoundWidgetProvider`'s `appGroupID`. Duplicated here
-/// (rather than imported from a shared file) because none of the widget's
-/// UserDefaults keys currently live in a file shared with the app target —
-/// same tradeoff `LumisoundWidgetProvider` already accepts.
-private let widgetAppGroupID = "group.com.lumisound.ios"
+/// `appGroupID` and `LumisoundWidgetProvider`'s `appGroupID`.
+private let widgetAppGroupID = AppGroup.id
 
 // MARK: - Toggle Playback
 

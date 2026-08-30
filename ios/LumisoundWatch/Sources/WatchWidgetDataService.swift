@@ -18,7 +18,7 @@ import WidgetKit
 // grant (see project.yml notes in the task report — not added here, since
 // this target intentionally doesn't touch project.yml/entitlements).
 enum WatchWidgetDataService {
-    private static let appGroupID = "group.com.lumisound.ios"
+    private static let appGroupID = AppGroup.id
     private static var defaults: UserDefaults? { UserDefaults(suiteName: appGroupID) }
 
     static func update(title: String, artist: String, isPlaying: Bool) {

@@ -61,6 +61,8 @@ targets:
       # Shared with LumisoundWidget so both targets agree on the Live
       # Activity's data shape without needing a framework target.
       - path: Shared/LiveActivity/LumisoundActivityAttributes.swift
+      # Shared with every target below that touches the App Group container.
+      - path: Shared/AppGroup.swift
     # Resources listed EXPLICITLY so XcodeGen creates proper build phases:
     #  - .xcassets  → "Compile Asset Catalogs" (actool) — produces Assets.car + icon PNGs
     #  - .strings   → "Copy Bundle Resources"
@@ -121,6 +123,7 @@ targets:
     sources:
       - path: LumisoundWidget/Sources
       - path: Shared/LiveActivity/LumisoundActivityAttributes.swift
+      - path: Shared/AppGroup.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lumisound.ios.widget
@@ -140,6 +143,7 @@ targets:
     deploymentTarget: "9.0"
     sources:
       - path: LumisoundWatch/Sources
+      - path: Shared/AppGroup.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lumisound.ios.watchkitapp
@@ -169,6 +173,7 @@ targets:
     deploymentTarget: "9.0"
     sources:
       - path: LumisoundWatch/WatchWidget/Sources
+      - path: Shared/AppGroup.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lumisound.ios.watchkitapp.widget

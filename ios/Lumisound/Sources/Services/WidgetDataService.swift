@@ -8,7 +8,7 @@ import WidgetKit
 final class WidgetDataService {
     static let shared = WidgetDataService()
 
-    private let appGroupID = "group.com.lumisound.ios"
+    private let appGroupID = AppGroup.id
     private var defaults: UserDefaults? { UserDefaults(suiteName: appGroupID) }
 
     /// Tracks the last time `reloadAllTimelines()` was fired.
@@ -34,9 +34,10 @@ final class WidgetDataService {
     /// reliably returns `nil` when the App Group isn't actually provisioned
     /// for this build. If this is `false`, the widget extension's process is
     /// in the same boat — neither UserDefaults nor artwork files are actually
-    /// shared, so widgets stay on their placeholder. This is most often seen
-    /// on sideloaded builds whose resigning certificate/provisioning profile
-    /// doesn't include the `group.com.lumisound.ios` App Group.
+    /// shared, so widgets stay on their placeholder. `appGroupID` already
+    /// self-corrects for the common case (a sideloaded build whose resigning
+    /// certificate suffixed the App Group ID — see `AppGroup`), so by the
+    /// time this is `false` the App Group is genuinely absent from signing.
     var isAppGroupAvailable: Bool {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) != nil
     }

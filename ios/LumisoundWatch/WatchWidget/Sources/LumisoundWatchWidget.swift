@@ -40,7 +40,7 @@ struct LumisoundWatchEntry: TimelineEntry {
 // MARK: - Timeline Provider
 
 struct LumisoundWatchProvider: TimelineProvider {
-    private let appGroupID = "group.com.lumisound.ios"
+    private let appGroupID = AppGroup.id
 
     func placeholder(in context: Context) -> LumisoundWatchEntry {
         LumisoundWatchEntry(date: Date(), title: "Track Title", artist: "Artist", isPlaying: false)

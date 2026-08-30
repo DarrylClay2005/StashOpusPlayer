@@ -12,7 +12,7 @@ private func liveActivityFormatTime(_ seconds: TimeInterval) -> String {
 
 @available(iOS 16.1, *)
 private func liveActivityArtwork() -> UIImage? {
-    let appGroupID = "group.com.lumisound.ios"
+    let appGroupID = AppGroup.id
     guard let ud = UserDefaults(suiteName: appGroupID),
           let relPath = ud.string(forKey: "widget_artwork_path"),
           let container = FileManager.default.containerURL(
