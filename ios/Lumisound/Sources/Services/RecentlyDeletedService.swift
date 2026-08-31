@@ -115,6 +115,17 @@ final class RecentlyDeletedService: ObservableObject {
         return restoredSong
     }
 
+    /// Restores every trashed entry — bulk counterpart to `restore(entryID:)`,
+    /// for recovering from a mass-deletion (e.g. an autonomous scanner
+    /// mis-flagging an entire class of files as corrupt) without tapping
+    /// "Restore" on each entry individually. `for entry in entries` snapshots
+    /// the array at loop start, so mutating `self.entries` via `restore`
+    /// inside the loop is safe. Skips (and leaves in the trash) any entry
+    /// whose file is already gone, exactly like the single-entry path.
+    func restoreAll() -> [Song] {
+        entries.compactMap { restore(entryID: $0.id) }
+    }
+
     /// Permanently deletes a trashed entry's file — user-initiated "Delete
     /// Forever", or an automatic purge of anything past the retention window.
     func purge(entryID: String) {

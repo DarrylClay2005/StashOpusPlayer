@@ -2,14 +2,17 @@ import SwiftUI
 
 /// Lists songs removed via `LibraryManager.removeImportedSong(s)` that are
 /// still within their 30-day recovery window (see `RecentlyDeletedService`),
-/// with per-track restore and a bulk "Delete All" for permanently clearing
-/// the trash early.
+/// with per-track restore, a bulk "Restore All" (recovering from a mass
+/// false-positive delete — e.g. an autonomous scanner mis-flagging an entire
+/// class of files — without tapping Restore hundreds of times), and a bulk
+/// "Delete All" for permanently clearing the trash early.
 struct RecentlyDeletedView: View {
 
     @EnvironmentObject private var library: LibraryManager
     @EnvironmentObject private var trash: RecentlyDeletedService
 
     @State private var showEmptyTrashConfirm = false
+    @State private var showRestoreAllConfirm = false
 
     private var sortedEntries: [RecentlyDeletedService.Entry] {
         trash.entries.sorted { $0.deletedAt > $1.deletedAt }
@@ -50,12 +53,48 @@ struct RecentlyDeletedView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if !sortedEntries.isEmpty {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Restore All") {
+                        showRestoreAllConfirm = true
+                    }
+                    .tint(AppTheme.dynamicAccent)
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Delete All", role: .destructive) {
                         showEmptyTrashConfirm = true
                     }
                 }
             }
+        }
+        // This view is pushed from Settings → Downloads, which sits behind
+        // ContentView's own floating CustomTabBar (its .safeAreaInset lives
+        // on ContentView's outer Group, so it persists across every pushed
+        // screen in that branch) — without reserving space for it here, the
+        // last rows of a long list (this list can genuinely run into the
+        // thousands after a mass false-positive delete) scroll in UNDER the
+        // bar, hiding their swipe-to-delete-forever action behind it. Same
+        // fix every other list screen in the app already uses (Favorites,
+        // Folder Detail, etc.) — MiniPlayerBar reserves exactly
+        // CustomTabBar.totalHeight of extra bottom clearance for free.
+        .safeAreaInset(edge: .bottom) {
+            MiniPlayerBar()
+        }
+        .confirmationDialog(
+            "Restore All \(sortedEntries.count) Track\(sortedEntries.count == 1 ? "" : "s")?",
+            isPresented: $showRestoreAllConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Restore All") {
+                let restored = trash.restoreAll()
+                for song in restored {
+                    library.readdRestoredSong(song)
+                }
+                let word = restored.count == 1 ? "track" : "tracks"
+                ToastCenter.shared.show("Restored \(restored.count) \(word)", category: .success, icon: "arrow.uturn.backward")
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Moves every track here back into your library.")
         }
         .confirmationDialog(
             "Permanently Delete All?",
