@@ -43,6 +43,19 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      # See release-ios.yml's identical step for why this is required —
+      # TVBridgeClient.officialBridgeAPIKey reads the same build-time-injected
+      # key and without it every check_auth-gated bridge route 401s.
+      - name: Write bridge API key config
+        env:
+          LUMISOUND_BRIDGE_API_KEY: ${{ secrets.LUMISOUND_BRIDGE_API_KEY }}
+        run: |
+          mkdir -p ios/Config
+          echo "LUMISOUND_BRIDGE_API_KEY = ${LUMISOUND_BRIDGE_API_KEY}" > ios/Config/Secrets.xcconfig
+          if [ -z "$LUMISOUND_BRIDGE_API_KEY" ]; then
+            echo "::warning::LUMISOUND_BRIDGE_API_KEY secret is not set — this build will ship with no bridge API key and every check_auth-gated route (search/stream/etc.) will fail against the official bridge."
+          fi
+
       - name: Generate Xcode project
         working-directory: ios
         run: xcodegen generate

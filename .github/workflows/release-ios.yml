@@ -48,6 +48,26 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      # Without this, Config/Secrets.xcconfig doesn't exist in a CI checkout
+      # (it's gitignored — see Config/Secrets.xcconfig.example), so
+      # Base.xcconfig's `#include? "Secrets.xcconfig"` silently no-ops and
+      # LUMISOUND_BRIDGE_API_KEY builds empty. StreamingService.apiKey then
+      # sends no Authorization header at all against the official bridge,
+      # which as of the 2026-08-30 check_auth() enforcement change rejects
+      # every legacy yt-dlp-backed route (search/stream/download/etc.) with
+      # 401 — this is what silently broke downloads in every release from
+      # 1.9.0.10 onward. Set the LUMISOUND_BRIDGE_API_KEY repo secret to the
+      # same value as ios-bridge's IOS_BRIDGE_API_KEY (see its .env) to fix.
+      - name: Write bridge API key config
+        env:
+          LUMISOUND_BRIDGE_API_KEY: ${{ secrets.LUMISOUND_BRIDGE_API_KEY }}
+        run: |
+          mkdir -p ios/Config
+          echo "LUMISOUND_BRIDGE_API_KEY = ${LUMISOUND_BRIDGE_API_KEY}" > ios/Config/Secrets.xcconfig
+          if [ -z "$LUMISOUND_BRIDGE_API_KEY" ]; then
+            echo "::warning::LUMISOUND_BRIDGE_API_KEY secret is not set — this build will ship with no bridge API key and every check_auth-gated route (search/stream/download/etc.) will fail against the official bridge."
+          fi
+
       - name: Generate Xcode project
         working-directory: ios
         run: xcodegen generate

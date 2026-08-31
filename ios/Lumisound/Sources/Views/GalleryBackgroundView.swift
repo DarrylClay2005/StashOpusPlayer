@@ -48,6 +48,15 @@ struct GalleryBackgroundView: View {
                                 .modifier(KenBurnsModifier(isActive: bg.kenBurnsEnabled && !reduceMotion))
                                 .blur(radius: bg.blurRadius, opaque: true)
                                 .opacity(bg.opacity)
+                                // Flattens the Ken Burns transform + blur + opacity
+                                // into a single Metal-backed texture per frame
+                                // instead of Core Animation compositing them as
+                                // separate CPU layers — this view is mounted once
+                                // per tab and TabView keeps every tab alive
+                                // simultaneously (see KenBurnsModifier's comment),
+                                // so up to 6 live instances can be paying this cost
+                                // at once when Ken Burns/blur are on.
+                                .drawingGroup()
                                 // Reduce Motion drops every transition to a plain
                                 // cross-fade — the simplest, least motion-heavy
                                 // option — regardless of the chosen animation.

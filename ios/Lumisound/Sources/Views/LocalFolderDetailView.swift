@@ -69,32 +69,40 @@ struct LocalFolderDetailView: View {
         }
     }
 
-    /// `songs`, ordered per the user's chosen `sortOrder`. Cheap to compute
-    /// per render — unlike `computeSongs()`'s library-wide filter, this only
-    /// ever sorts a single folder's already-filtered (typically small) list.
-    private var sortedSongs: [Song] {
+    /// `songs`, ordered per the user's chosen `sortOrder` — recomputed only
+    /// when `songs` or `sortOrder` actually changes (see `refreshSortedSongs()`),
+    /// not a plain computed property. This view's body references it up to
+    /// half a dozen times (Play/Shuffle buttons, the row ForEach, the
+    /// duplicates/export sheets); a computed property would have re-sorted
+    /// the whole list from scratch on every single one of those reads, on
+    /// every body re-evaluation — a real, easily-avoidable CPU cost that
+    /// scales with folder size (noticeable once a folder holds hundreds of
+    /// tracks).
+    @State private var sortedSongs: [Song] = []
+
+    private func refreshSortedSongs() {
         switch sortOrder {
         case .trackOrder:
-            return songs.sorted {
+            sortedSongs = songs.sorted {
                 if $0.trackNumber != $1.trackNumber && ($0.trackNumber > 0 || $1.trackNumber > 0) {
                     return $0.trackNumber < $1.trackNumber
                 }
                 return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
             }
         case .title:
-            return songs.sorted {
+            sortedSongs = songs.sorted {
                 $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
             }
         case .artist:
-            return songs.sorted {
+            sortedSongs = songs.sorted {
                 let cmp = $0.artistName.localizedCaseInsensitiveCompare($1.artistName)
                 if cmp != .orderedSame { return cmp == .orderedAscending }
                 return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
             }
         case .duration:
-            return songs.sorted { $0.duration > $1.duration }
+            sortedSongs = songs.sorted { $0.duration > $1.duration }
         case .dateAdded:
-            return songs.sorted {
+            sortedSongs = songs.sorted {
                 switch ($0.dateAdded, $1.dateAdded) {
                 case let (a?, b?):
                     return a > b
@@ -361,10 +369,14 @@ struct LocalFolderDetailView: View {
         }
         .task(id: library.allSongs.count) {
             songs = computeSongs()
+            refreshSortedSongs()
             recomputeTotalSize()
         }
         .onAppear {
             customCover = FolderCoverArtService.shared.cover(for: folderURL)
+        }
+        .onChange(of: sortOrderRaw) { _ in
+            refreshSortedSongs()
         }
         .onChange(of: columns) { newValue in
             // Multi-select only applies to the single-column List layout —

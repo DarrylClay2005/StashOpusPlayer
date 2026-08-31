@@ -53,6 +53,7 @@ struct LumisoundApp: App {
         // for what this actually does (and doesn't) guarantee.
         BackgroundRefreshService.register()
         LumisoundTrackVaultService.register()
+        PerformanceMonitorService.start()
     }
 
     var body: some Scene {
