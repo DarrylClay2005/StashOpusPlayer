@@ -97,6 +97,15 @@ services:
       # container restart until the client reconciles it. Bind-mounted below
       # (unlike the plain-temp-path fallback) so it survives rebuilds/redeploys.
       - PENDING_DOWNLOADS_DIR=${PENDING_DOWNLOADS_DIR:-/app/.cache/pending-downloads}
+    # Passes the host's AMD iGPU render node through so ffmpeg can hardware-
+    # encode via VAAPI (h264_vaapi) instead of software libx264 — currently
+    # only used by /api/motion-artwork's clip extraction (main.py's
+    # _extract_motion_clip), which falls back to libx264 automatically if
+    # this device is missing/unusable. Requires /dev/dri/renderD128 to exist
+    # on the host (world-writable by default on most distros; if not, add
+    # the container user to the host's `render` group's GID).
+    devices:
+      - /dev/dri:/dev/dri
     volumes:
       - ./cache/yt-dlp:/app/.cache/yt-dlp
       - ./cache/pending-downloads:/app/.cache/pending-downloads

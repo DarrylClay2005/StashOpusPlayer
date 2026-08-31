@@ -6,8 +6,12 @@ FROM python:3.12-slim
 # segmented downloads — substantially faster than the built-in downloader.
 # libchromaprint-tools provides `fpcalc` for acoustic fingerprinting (used by
 # the /user/library/acoustic-duplicates endpoint to catch true duplicates whose
-# metadata differs).
-RUN apt-get update && apt-get install -y ffmpeg curl unzip atomicparsley aria2 libchromaprint-tools && rm -rf /var/lib/apt/lists/*
+# metadata differs). mesa-va-drivers provides the actual VAAPI hardware driver
+# backend (radeonsi, for the host's AMD iGPU) — ffmpeg's Debian package links
+# against libva already, but without this driver package `-vaapi_device` has
+# nothing to load and every hardware-encode attempt fails (safe: main.py's
+# motion-artwork extraction falls back to software libx264 automatically).
+RUN apt-get update && apt-get install -y ffmpeg curl unzip atomicparsley aria2 libchromaprint-tools mesa-va-drivers && rm -rf /var/lib/apt/lists/*
 
 # yt-dlp now needs a JS runtime to solve YouTube's player/signature challenge
 # (EJS) — without one, extraction fails for most videos with "This video is

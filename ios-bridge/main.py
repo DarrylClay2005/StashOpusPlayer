@@ -5127,6 +5127,23 @@ async def motion_artwork(video_id: str = Query(..., min_length=5, max_length=32)
     return FileResponse(dest, media_type="video/mp4")
 
 
+async def _run_ffmpeg(cmd: list[str], timeout: float = 60.0) -> bool:
+    """Runs an ffmpeg command to completion, returning True only on a clean
+    (0) exit within `timeout`. Shared by the VAAPI/software fallback pair in
+    `_extract_motion_clip` so both attempts get identical timeout/kill
+    handling."""
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        return False
+    return proc.returncode == 0
+
+
 async def _extract_motion_clip(video_id: str, dest: pathlib.Path) -> bool:
     """Downloads a small (<=480p) video-only stream and trims/crops it with
     ffmpeg into `dest`. Returns False (never raises) on any failure — the
@@ -5163,7 +5180,28 @@ async def _extract_motion_clip(video_id: str, dest: pathlib.Path) -> bool:
         # source video's real aspect ratio.
         tmp_dest = dest.with_suffix(".tmp.mp4")
         tmp_dest.unlink(missing_ok=True)
-        ffmpeg_cmd = [
+
+        # Decode + scale/crop stay on the CPU (cheap for a 6s/480p clip);
+        # only the H.264 encode itself — the actual expensive part — is
+        # offloaded to the host's AMD iGPU via VAAPI (/dev/dri/renderD128,
+        # passed through in docker-compose.yml). Falls back to software
+        # libx264 if VAAPI init fails for any reason (driver hiccup, device
+        # busy) — this clip generation already treats every failure as
+        # "not available, client falls back to static artwork" rather than
+        # a hard error, so silently degrading to the slower software path
+        # here is consistent with that, not a special case.
+        vaapi_cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-vaapi_device", "/dev/dri/renderD128",
+            "-i", str(raw_path),
+            "-t", str(_MOTION_ARTWORK_CLIP_SECONDS),
+            "-an",
+            "-vf", "scale=480:480:force_original_aspect_ratio=increase,crop=480:480,format=nv12,hwupload",
+            "-c:v", "h264_vaapi", "-qp", "26",
+            "-movflags", "+faststart",
+            str(tmp_dest),
+        ]
+        software_cmd = [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-i", str(raw_path),
             "-t", str(_MOTION_ARTWORK_CLIP_SECONDS),
@@ -5173,16 +5211,12 @@ async def _extract_motion_clip(video_id: str, dest: pathlib.Path) -> bool:
             "-movflags", "+faststart",
             str(tmp_dest),
         ]
-        ff_proc = await asyncio.create_subprocess_exec(
-            *ffmpeg_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            await asyncio.wait_for(ff_proc.communicate(), timeout=60.0)
-        except asyncio.TimeoutError:
-            ff_proc.kill()
-            await ff_proc.communicate()
-            return False
-        if ff_proc.returncode != 0 or not tmp_dest.exists():
+
+        if not await _run_ffmpeg(vaapi_cmd):
+            tmp_dest.unlink(missing_ok=True)
+            if not await _run_ffmpeg(software_cmd):
+                return False
+        if not tmp_dest.exists():
             return False
 
         tmp_dest.replace(dest)
