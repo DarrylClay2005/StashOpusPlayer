@@ -33,7 +33,7 @@ struct AppleMusicTab: View {
         Array(repeating: GridItem(.flexible(), spacing: 12), count: columns)
     }
 
-    private var authorizationStatus: MPMediaLibrary.AuthorizationStatus {
+    private var authorizationStatus: MPMediaLibraryAuthorizationStatus {
         MPMediaLibrary.authorizationStatus()
     }
 

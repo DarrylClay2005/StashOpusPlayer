@@ -123,10 +123,10 @@ private final class MetricSubscriber: NSObject, MXMetricManagerSubscriber {
                 "periodStart": Self.iso(payload.timeStampBegin),
                 "periodEnd": Self.iso(payload.timeStampEnd),
             ]
-            if let cpu = payload.cpuMetric?.cumulativeCPUTime {
+            if let cpu = payload.cpuMetrics?.cumulativeCPUTime {
                 extra["cumulativeCPUTimeSeconds"] = String(format: "%.1f", cpu.converted(to: .seconds).value)
             }
-            if let gpu = payload.gpuMetric?.cumulativeGPUTime {
+            if let gpu = payload.gpuMetrics?.cumulativeGPUTime {
                 extra["cumulativeGPUTimeSeconds"] = String(format: "%.1f", gpu.converted(to: .seconds).value)
             }
             appLog("MetricKit daily CPU/GPU report", category: "performance", extra: extra)
