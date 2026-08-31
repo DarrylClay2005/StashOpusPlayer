@@ -5,6 +5,14 @@ struct AddMusicView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var library: LibraryManager
 
+    /// Called right after the "iPhone Music Library" row kicks off a scan —
+    /// lets the presenting screen (LibraryView) jump straight to the new
+    /// Apple Music tab so the user actually sees where the import lands,
+    /// instead of dismissing back to whatever tab they started from with no
+    /// visible sign anything happened. `nil` for any future presentation
+    /// context that doesn't have an Apple Music tab to jump to.
+    var onImportAppleMusic: (() -> Void)? = nil
+
     @State private var showFilePicker = false
     @State private var importSuccess: String? = nil
 
@@ -20,6 +28,7 @@ struct AddMusicView: View {
                     Button {
                         library.requestAccessAndScan()
                         importSuccess = "Scanning iPhone music library…"
+                        onImportAppleMusic?()
                         dismiss()
                     } label: {
                         HStack(spacing: 14) {

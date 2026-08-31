@@ -11,6 +11,14 @@ enum LibraryTab: String, CaseIterable {
     // every tab that existed before this redesign is still here, unchanged.
     case hub       = "Home"
     case songs     = "Songs"
+    // Songs already merges mediaSongs (Apple Music/iTunes) + importedSongs
+    // (manual imports/watched folders/Documents) into one flat list — this
+    // tab exists alongside it specifically to surface just the Apple Music
+    // subset (`LibraryManager.mediaSongs`) on its own, since that source has
+    // its own permission/scan lifecycle (MPMediaLibrary authorization,
+    // "songs found but not downloaded to this device", the scan crash-loop
+    // guard) that's otherwise invisible once AddMusicView's sheet closes.
+    case appleMusic = "Apple Music"
     case artists   = "Artists"
     case albums    = "Albums"
     case folders   = "Folders"
@@ -21,15 +29,16 @@ enum LibraryTab: String, CaseIterable {
 
     var icon: String {
         switch self {
-        case .hub:       return "square.grid.2x2.fill"
-        case .songs:     return "music.note"
-        case .artists:   return "music.mic"
-        case .albums:    return "square.stack"
-        case .folders:   return "folder"
-        case .genres:    return "guitars"
-        case .playlists: return "music.note.list"
-        case .favorites: return "heart"
-        case .moods:     return "theatermasks"
+        case .hub:        return "square.grid.2x2.fill"
+        case .songs:      return "music.note"
+        case .appleMusic: return "music.note.house.fill"
+        case .artists:    return "music.mic"
+        case .albums:     return "square.stack"
+        case .folders:    return "folder"
+        case .genres:     return "guitars"
+        case .playlists:  return "music.note.list"
+        case .favorites:  return "heart"
+        case .moods:      return "theatermasks"
         }
     }
 }
@@ -244,7 +253,7 @@ struct LibraryView: View {
                 }
             }
             .sheet(isPresented: $showAddMusic) {
-                AddMusicView()
+                AddMusicView(onImportAppleMusic: { selectedTab = .appleMusic })
                     .environmentObject(library)
                     .environmentObject(folderService)
             }
@@ -331,6 +340,8 @@ struct LibraryView: View {
                 isSelecting: $isSelecting,
                 selectedSongIDs: $selectedSongIDs
             )
+        case .appleMusic:
+            AppleMusicTab()
         case .artists:
             ArtistsTab()
         case .albums:
