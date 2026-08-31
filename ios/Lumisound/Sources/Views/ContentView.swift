@@ -702,20 +702,34 @@ struct CustomTabBar: View {
     private var tabListContent: some View {
         GeometryReader { outerGeo in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2) {
-                    ForEach(specs, id: \.tag) { spec in
-                        tabButton(spec)
-                            .frame(maxWidth: .infinity)
+                // `GlassEffectContainer` is what actually makes the Glass
+                // Pill selection indicator a *true* Liquid Glass morph (the
+                // same fluid, refractive blob-glide system tab bars use)
+                // instead of a plain resize/cross-fade. `iconView`'s pill
+                // gives every instance the SAME `.glassEffectID("selectedTabPill",
+                // in:)` — as long as all of those instances render inside one
+                // shared container, the system interpolates ONE continuous
+                // glass shape gliding/reshaping between tab positions rather
+                // than rendering two independent glass layers and letting
+                // `matchedGeometryEffect` merely animate their frames (which
+                // is what this looked like before: a resizing circle, not
+                // glass actually flowing between positions).
+                GlassEffectContainer(spacing: 8) {
+                    HStack(spacing: 2) {
+                        ForEach(specs, id: \.tag) { spec in
+                            tabButton(spec)
+                                .frame(maxWidth: .infinity)
+                        }
                     }
+                    // Forces the row to spread evenly across the bar's real
+                    // available width when everything fits (a plain HStack in a
+                    // ScrollView would otherwise hug the leading edge instead of
+                    // filling the bar like a normal tab bar), while still
+                    // letting it grow past that width — and scroll — if the
+                    // content needs more room than the screen has.
+                    .frame(minWidth: max(outerGeo.size.width - 12, 0))
+                    .padding(.horizontal, 6)
                 }
-                // Forces the row to spread evenly across the bar's real
-                // available width when everything fits (a plain HStack in a
-                // ScrollView would otherwise hug the leading edge instead of
-                // filling the bar like a normal tab bar), while still
-                // letting it grow past that width — and scroll — if the
-                // content needs more room than the screen has.
-                .frame(minWidth: max(outerGeo.size.width - 12, 0))
-                .padding(.horizontal, 6)
             }
         }
     }
@@ -931,13 +945,25 @@ struct CustomTabBar: View {
             if isSelected, selectionStyle == .glassPill {
                 Color.clear
                     .adaptiveGlass(tint: AppTheme.dynamicAccent.opacity(0.5), in: Circle(), fallback: AppTheme.dynamicAccent.opacity(0.18))
-                    .matchedGeometryEffect(id: "selectedTabPill", in: selectionNamespace)
+                    // `glassEffectID` (not `matchedGeometryEffect`) is what
+                    // makes this a true Liquid Glass morph — every selected
+                    // tab's pill shares this same id within `tabListContent`'s
+                    // `GlassEffectContainer`, so the system renders ONE
+                    // continuous glass shape fluidly gliding/reshaping
+                    // between tab positions (real refraction/specular
+                    // behavior, like the system tab bar) instead of two
+                    // independently-glass-rendered circles whose FRAME
+                    // `matchedGeometryEffect` merely cross-fades/resizes
+                    // between.
+                    .glassEffectID("selectedTabPill", in: selectionNamespace)
                     // Explicit animation tied directly to the same state
                     // this pill's presence depends on — a defensive backstop
                     // in case the transaction from `withAnimation` in the
                     // button's action doesn't carry through cleanly (e.g. if
                     // `selectedTab` changes from somewhere else, like
-                    // MiniPlayerBar jumping to the Playing tab).
+                    // MiniPlayerBar jumping to the Playing tab). Still needed
+                    // with `glassEffectID` — the morph only animates inside an
+                    // active animation transaction, same as before.
                     .animation(.spring(response: 0.32, dampingFraction: 0.78), value: selectedTab)
             }
         }

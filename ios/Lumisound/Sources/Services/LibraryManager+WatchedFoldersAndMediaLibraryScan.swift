@@ -240,19 +240,31 @@ extension LibraryManager {
             defaults.set(0, forKey: Self.scanAttemptCounterKey)
             appBreadcrumb("Media library scan completed: \(scanned.count) song(s)")
 
-            // `Song.init(mediaItem:)` returns nil for items with no `assetURL` —
-            // i.e. Apple Music catalog tracks that are in the library but not
-            // downloaded to this device (cloud-only). Without this message the
-            // "Apple Music Transfer" felt completely broken for anyone whose
-            // library is mostly cloud-streamed: the scan would "complete" having
-            // imported nothing, with no indication why.
+            // `Song.init(mediaItem:)` returns nil for items with no `assetURL`.
+            // That's genuinely ambiguous between two different causes, and the
+            // message below used to only account for one of them:
+            //   1. A cloud-only track never downloaded to this device.
+            //   2. A track downloaded and fully playable offline in Music, but
+            //      still DRM-protected (FairPlay) — active Apple Music
+            //      subscription streams, as opposed to purchased tracks or
+            //      files synced via Finder/iTunes. iOS deliberately withholds
+            //      `assetURL` for these from EVERY third-party app, precisely
+            //      to prevent exactly this kind of extraction — there is no
+            //      "download it properly" fix for case 2, and no public API
+            //      distinguishes which of the two applies to a given skipped
+            //      item, so the message can't claim more certainty than that.
+            // The original copy only described (1) and told users to
+            // "download them in the Music app, then scan again" — actively
+            // misleading for anyone hitting (2), who may have already
+            // downloaded hundreds of subscription tracks and will rescan
+            // forever with no change, since no app-side fix exists for that.
             let skipped = items.count - scanned.count
             if skipped > 0 {
                 let songWord = skipped == 1 ? "song" : "songs"
                 if scanned.isEmpty {
-                    self.errorMessage = "Found \(skipped) \(songWord) in your Apple Music library, but none are downloaded to this device. Open the Music app, download the songs you want (tap ⋯ → Download), then scan again."
+                    self.errorMessage = "Found \(skipped) \(songWord) in your Apple Music library, but none could be imported. Usually this means Apple Music subscription tracks — iOS blocks every third-party app from reading those files, even ones fully downloaded for offline playback in Music. Only purchased tracks or files synced via Finder/iTunes can be imported this way."
                 } else {
-                    self.errorMessage = "Imported \(scanned.count) song(s). \(skipped) \(songWord) in your Apple Music library aren't downloaded to this device and were skipped — download them in the Music app, then scan again to add them."
+                    self.errorMessage = "Imported \(scanned.count) song(s). \(skipped) \(songWord) couldn't be imported — usually Apple Music subscription tracks, which iOS blocks every third-party app from reading even when fully downloaded. Only purchased tracks or files synced via Finder/iTunes can be imported this way."
                 }
             }
         }

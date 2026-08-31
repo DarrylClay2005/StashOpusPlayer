@@ -288,7 +288,7 @@ struct AppleMusicTab: View {
                     title: "No Apple Music songs found",
                     message: library.scanCrashGuardActive
                         ? "The scan has been crashing repeatedly. Imported/local files still work — tap Retry to try again."
-                        : "Songs in your Apple Music library need to be downloaded to this device first — open the Music app, tap ⋯ → Download on the songs you want, then tap Rescan below."
+                        : "No importable songs found. If your library is Apple Music subscription tracks (not purchases or Finder-synced files), iOS blocks every third-party app from reading them — even ones fully downloaded for offline playback in Music. See the banner above for what was skipped and why."
                 )
                 Button {
                     if library.scanCrashGuardActive {
