@@ -52,6 +52,7 @@ struct CometOrbitArtworkView: View {
                     .shadow(color: cometColor.opacity(0.4), radius: 22)
             }
             .frame(width: 300, height: 300)
+            .drawingGroup()
         }
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.6))
         .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }

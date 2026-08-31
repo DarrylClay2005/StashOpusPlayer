@@ -55,6 +55,7 @@ struct VinylGrooveSpiralArtworkView: View {
                     .animation(.easeInOut(duration: 0.6), value: isPlaying)
             }
             .frame(width: 300, height: 300)
+            .drawingGroup()
         }
     }
 

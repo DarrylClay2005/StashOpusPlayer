@@ -86,6 +86,7 @@ struct SynthwaveHorizonArtworkView: View {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .stroke(.white.opacity(0.12), lineWidth: 1)
             )
+            .drawingGroup()
         }
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.2))
     }

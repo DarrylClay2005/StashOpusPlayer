@@ -32,6 +32,7 @@ struct OrigamiFoldRevealArtworkView: View {
                     .stroke(.white.opacity(0.2), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.5), radius: 22, y: 14)
+            .drawingGroup()
         }
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.4))
     }

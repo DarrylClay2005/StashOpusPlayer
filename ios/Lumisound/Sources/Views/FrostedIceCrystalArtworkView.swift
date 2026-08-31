@@ -64,6 +64,7 @@ struct FrostedIceCrystalArtworkView: View {
             .clipShape(shape)
             .shadow(color: .black.opacity(0.4), radius: 18, y: 10)
             .shadow(color: Color(red: 0.6, green: 0.85, blue: 1.0).opacity(0.35), radius: 24)
+            .drawingGroup()
         }
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 3.6))
     }

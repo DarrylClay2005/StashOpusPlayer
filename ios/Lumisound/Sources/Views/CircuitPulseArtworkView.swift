@@ -67,6 +67,7 @@ struct CircuitPulseArtworkView: View {
                     .shadow(color: pulseColor.opacity(0.4), radius: 20)
             }
             .frame(width: 300, height: 300)
+            .drawingGroup()
         }
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 3.8))
         .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }

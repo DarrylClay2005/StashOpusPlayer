@@ -44,6 +44,7 @@ struct VinylCrateStackArtworkView: View {
             }
             .frame(width: 300, height: 300)
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .drawingGroup()
         }
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 3.8))
         .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }

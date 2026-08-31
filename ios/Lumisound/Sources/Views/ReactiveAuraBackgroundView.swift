@@ -54,6 +54,7 @@ struct ReactiveAuraBackgroundView: View {
                         in: geo.size
                     )
                 }
+                .drawingGroup()
             }
         }
         .ignoresSafeArea()

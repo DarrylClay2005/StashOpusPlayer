@@ -45,6 +45,7 @@ struct CassetteReelSpinArtworkView: View {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .stroke(.white.opacity(0.12), lineWidth: 1)
             )
+            .drawingGroup()
         }
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 3.6))
         .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }

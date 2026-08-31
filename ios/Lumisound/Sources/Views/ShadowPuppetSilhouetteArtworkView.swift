@@ -39,6 +39,7 @@ struct ShadowPuppetSilhouetteArtworkView: View {
             }
             .frame(width: 300, height: 300)
             .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .drawingGroup()
         }
     }
 }

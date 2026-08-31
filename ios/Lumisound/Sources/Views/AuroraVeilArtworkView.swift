@@ -41,6 +41,7 @@ struct AuroraVeilArtworkView: View {
             }
             .frame(width: 300, height: 300)
             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .drawingGroup()
         }
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 4.0))
     }

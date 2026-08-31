@@ -58,6 +58,7 @@ struct EqualizerCutoutArtworkView: View {
                 .shadow(color: c1.opacity(0.35), radius: 22)
                 .frame(width: 300, height: 300)
                 .animation(.easeOut(duration: 0.4), value: isPlaying)
+                .drawingGroup()
         }
         .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }
         .animation(.easeInOut(duration: 1.0), value: palette)

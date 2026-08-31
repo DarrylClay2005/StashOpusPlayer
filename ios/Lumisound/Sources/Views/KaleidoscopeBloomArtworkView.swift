@@ -57,6 +57,7 @@ struct KaleidoscopeBloomArtworkView: View {
                     .shadow(color: c1.opacity(0.5), radius: 26)
             }
             .frame(width: 300, height: 300)
+            .drawingGroup()
         }
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 5, speed: 3.4))
         .task(id: song?.id) { palette = await ArtworkPaletteLoader.palette(for: song) }

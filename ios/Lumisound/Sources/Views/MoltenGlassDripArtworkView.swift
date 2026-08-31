@@ -51,6 +51,7 @@ struct MoltenGlassDripArtworkView: View {
             }
             .frame(width: 300, height: 300)
             .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .drawingGroup()
         }
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 4.0))
     }

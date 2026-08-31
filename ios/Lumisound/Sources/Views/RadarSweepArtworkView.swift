@@ -70,6 +70,7 @@ struct RadarSweepArtworkView: View {
             .frame(width: 300, height: 300)
             .clipShape(Circle())
             .overlay(Circle().stroke(.green.opacity(0.3), lineWidth: 1))
+            .drawingGroup()
         }
         .modifier(FloatModifier(isPlaying: isPlaying, amount: 4, speed: 4.0))
     }

@@ -33,6 +33,7 @@ struct AmbientArtworkBackground: View {
                         .scaleEffect(2 - pulse)
                 }
             }
+            .drawingGroup()
             .opacity(0.55)
             .allowsHitTesting(false)
             .animation(.easeInOut(duration: 1.2), value: palette)
