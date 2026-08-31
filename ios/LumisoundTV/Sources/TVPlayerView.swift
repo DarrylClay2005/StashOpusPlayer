@@ -198,19 +198,25 @@ final class TVPlayerModel: ObservableObject {
     }
 
     private func asset(for item: TVPlayable) -> AVURLAsset {
-        if let token = item.authToken {
-            // Two different bridge endpoints share this field: /user/music/stream
-            // checks "Authorization: Bearer <token>", /api/stream/proxy checks the
-            // raw "X-Account-Token" header. Send both — each endpoint ignores the
-            // header it doesn't recognize.
-            return AVURLAsset(url: item.streamURL, options: [
-                "AVURLAssetHTTPHeaderFieldsKey": [
-                    "Authorization": "Bearer \(token)",
-                    "X-Account-Token": token,
-                ]
-            ])
-        }
-        return AVURLAsset(url: item.streamURL)
+        // /api/stream/proxy is check_auth()-gated (needs "Authorization: Bearer
+        // <IOS_BRIDGE_API_KEY>") and separately reads the user's personal
+        // YouTube key off the raw "X-Account-Token" header; it never reads
+        // Authorization for its own business logic, so putting the API key
+        // there doesn't collide with anything. /user/music/stream instead
+        // checks "Authorization: Bearer <user token>" and ignores
+        // X-Account-Token. Both headers are always sent — each endpoint
+        // ignores the one it doesn't recognize — except Authorization itself,
+        // which has to pick the right value for whichever endpoint this
+        // particular item's streamURL actually targets.
+        let isStreamProxy = item.streamURL.path == "/api/stream/proxy"
+        let authorization = isStreamProxy
+            ? "Bearer \(TVBridgeClient.officialBridgeAPIKey)"
+            : item.authToken.map { "Bearer \($0)" }
+        var headers: [String: String] = [:]
+        if let authorization { headers["Authorization"] = authorization }
+        if let token = item.authToken { headers["X-Account-Token"] = token }
+        guard !headers.isEmpty else { return AVURLAsset(url: item.streamURL) }
+        return AVURLAsset(url: item.streamURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
     }
 
     /// Locked-aware version of `asset(for:)` — a non-locked item resolves

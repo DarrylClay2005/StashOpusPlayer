@@ -25,6 +25,12 @@
     <key>UILaunchScreen</key>
     <dict/>
 
+    <!-- Bearer key for the official bridge's check_auth()-gated legacy routes
+         — build-time-injected, see ../../Config/Base.xcconfig. Read via
+         Bundle.main in TVBridge.swift. -->
+    <key>LumisoundBridgeAPIKey</key>
+    <string>$(LUMISOUND_BRIDGE_API_KEY)</string>
+
     <!-- Background audio — REQUIRED for music player to continue when the
          app isn't in the foreground (e.g. user returns to the Home screen). -->
     <key>UIBackgroundModes</key>

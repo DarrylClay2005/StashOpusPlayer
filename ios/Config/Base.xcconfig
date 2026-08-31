@@ -1,0 +1,20 @@
+// Shared build settings applied project-wide (see project.yml's top-level
+// `configFiles:`). Currently just the one build-time-injected secret below,
+// but this is the place for any future project-wide xcconfig value.
+
+// Bearer key the official bridge's check_auth() requires on its legacy
+// yt-dlp-backed routes (search/stream/download/track/resolve/spotify/
+// playlist/lyrics/radio — see ios-bridge/main.py). Read into the app via
+// each target's Info.plist ($(LUMISOUND_BRIDGE_API_KEY) -> LumisoundBridgeAPIKey)
+// and from there via Bundle.main in StreamingService.swift / TVBridge.swift.
+//
+// Defaults to empty here (an app built with no override just sends no key,
+// same as pointing at a self-hosted bridge with none configured). The real
+// value is injected locally by including Secrets.xcconfig below, which is
+// gitignored and never committed — see Secrets.xcconfig.example for setup.
+// This keeps the actual secret out of source/git history entirely while
+// still letting a real build embed it, since it has to ship in the compiled
+// app either way.
+LUMISOUND_BRIDGE_API_KEY =
+
+#include? "Secrets.xcconfig"

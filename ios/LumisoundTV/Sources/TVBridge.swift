@@ -414,6 +414,18 @@ final class TVBridgeClient: ObservableObject {
     /// The same public bridge the iOS app uses by default.
     let baseURL = "https://lumisound-bridge.xenusanimations.studio"
 
+    /// Shared Bearer key for the bridge's check_auth()-gated legacy routes
+    /// (/api/search, /api/stream/proxy, etc. — see ios-bridge/main.py's
+    /// check_auth()). tvOS has no self-hosted-bridge override (baseURL is
+    /// always the official bridge here), so this is read unconditionally.
+    /// Injected at build time via Info.plist's LumisoundBridgeAPIKey ->
+    /// $(LUMISOUND_BRIDGE_API_KEY) (see ../../Config/Base.xcconfig) rather
+    /// than hardcoded — mirrors StreamingService.officialBridgeAPIKey in the
+    /// main iOS app, added 2026-08-30 when server-side enforcement of this
+    /// key was turned on. Empty if the build didn't inject a value.
+    static let officialBridgeAPIKey: String =
+        (Bundle.main.object(forInfoDictionaryKey: "LumisoundBridgeAPIKey") as? String) ?? ""
+
     // Search
     @Published var results: [TVTrack] = []
     @Published var isSearching = false
@@ -511,6 +523,7 @@ final class TVBridgeClient: ObservableObject {
         do {
             var req = URLRequest(url: url)
             req.timeoutInterval = 60  // YouTube extraction routinely takes 20-35s
+            req.setValue("Bearer \(Self.officialBridgeAPIKey)", forHTTPHeaderField: "Authorization")
             // Lets the bridge search with this account's YouTube Data API key
             // (near-instant) instead of the slow yt-dlp scrape.
             if let accountToken = TVAccount.shared.token {

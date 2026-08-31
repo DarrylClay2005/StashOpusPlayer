@@ -34,6 +34,9 @@ ios-bridge/cookies.txt
 .cookies-refresh.*
 .env
 ios-bridge/.env
+# Build-time-injected client secrets (bridge API key) — see
+# ios/Config/Secrets.xcconfig.example for setup.
+ios/Config/Secrets.xcconfig
 # yt-dlp runtime cache, incl. per-user session cookies — never source, never committed
 ios-bridge/cache/
 

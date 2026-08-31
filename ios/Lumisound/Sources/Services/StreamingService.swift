@@ -211,6 +211,21 @@ final class StreamingService: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: Self.bridgeURLKey) }
     }
 
+    /// Shared Bearer key for the official bridge's check_auth()-gated legacy
+    /// routes (search/stream/download/track/resolve/spotify/playlist/lyrics/
+    /// radio — see ios-bridge/main.py's check_auth()). Injected at build time
+    /// via Info.plist's LumisoundBridgeAPIKey -> $(LUMISOUND_BRIDGE_API_KEY)
+    /// (see ../../Config/Base.xcconfig) rather than hardcoded, so the actual
+    /// secret never sits in source/git history — added 2026-08-30 when
+    /// server-side enforcement of this key was turned on. Like any
+    /// client-embedded secret it's still extractable from the compiled app
+    /// binary; it stops casual abuse of the shared public bridge, not a
+    /// determined attacker, so treat it as a defense layer alongside
+    /// server-side rate limiting rather than a strong secret. Empty if the
+    /// build didn't inject a value (see Config/Secrets.xcconfig.example).
+    private static let officialBridgeAPIKey: String =
+        (Bundle.main.object(forInfoDictionaryKey: "LumisoundBridgeAPIKey") as? String) ?? ""
+
     /// Security hardening — a self-hosted-bridge Bearer credential, sent
     /// identically to the main account token (see
     /// StreamSearchView+ServerLibraryActions.swift), so it gets the exact
@@ -224,7 +239,14 @@ final class StreamingService: ObservableObject {
                 UserDefaults.standard.removeObject(forKey: Self.apiKeyKey)
                 return migrated
             }
-            return KeychainTokenStore.get(account: "bridge_api_key") ?? ""
+            if let stored = KeychainTokenStore.get(account: "bridge_api_key"), !stored.isEmpty {
+                return stored
+            }
+            // No self-hosted override configured — use the baked-in key only
+            // when still pointed at the official bridge. A self-hosted
+            // operator who hasn't set their own key should get "" (open, or
+            // rejected by their own server), never our official secret.
+            return bridgeURL == Self.defaultBridgeURL ? Self.officialBridgeAPIKey : ""
         }
         set {
             if newValue.isEmpty {

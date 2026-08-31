@@ -188,6 +188,12 @@
     <key>UILaunchScreen</key>
     <dict/>
 
+    <!-- Bearer key for the official bridge's check_auth()-gated legacy routes
+         — build-time-injected, see ../../Config/Base.xcconfig. Read via
+         Bundle.main in StreamingService.swift. -->
+    <key>LumisoundBridgeAPIKey</key>
+    <string>$(LUMISOUND_BRIDGE_API_KEY)</string>
+
     <!-- Custom URL scheme — currently only used as the OAuth2 redirect target
          for Discord account verification (see DiscordVerificationService.swift
          / LumisoundApp.swift's .onOpenURL). The bridge's
