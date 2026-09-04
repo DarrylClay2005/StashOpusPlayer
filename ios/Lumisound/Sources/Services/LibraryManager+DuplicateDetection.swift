@@ -107,7 +107,20 @@ extension LibraryManager {
     /// identity match here directly means fewer wasted "download it again,
     /// then discover it's a duplicate" round-trips for TrackedPlaylistStore.
     func localSourceIDs() -> Set<String> {
-        var ids = Set(allSongs.compactMap { $0.sourceTrackID })
+        let presentFilenames = Set(allSongs.compactMap { song -> String? in
+            guard let url = song.url, FileManager.default.fileExists(atPath: url.path) else { return nil }
+            return url.lastPathComponent
+        })
+        var ids = Set(allSongs.compactMap { song -> String? in
+            guard let url = song.url,
+                  FileManager.default.fileExists(atPath: url.path)
+            else { return nil }
+            return song.sourceTrackID
+        })
+        // The ledger is authoritative for downloads whose container metadata
+        // did not survive conversion. Include only entries whose file is still
+        // present, so a deleted track becomes eligible again.
+        ids.formUnion(DownloadLedgerStore.shared.presentSourceIDs(presentFilenames: presentFilenames))
         for song in allSongs where song.sourceTrackID == nil || song.sourceTrackID?.isEmpty == true {
             guard let url = song.url, let tag = LumisoundTrackTagger.readTag(fileURL: url) else { continue }
             ids.insert(tag.trackID)

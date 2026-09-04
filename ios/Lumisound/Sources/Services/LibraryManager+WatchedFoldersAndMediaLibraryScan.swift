@@ -7,7 +7,21 @@ extension LibraryManager {
     /// Scans all user-selected folders tracked by `MusicFolderService` and adds
     /// any new audio files not already in the library.
     func scanWatchedFolders(using folderService: MusicFolderService) {
-        Task { await scanWatchedFoldersAsync(using: folderService) }
+        // LibraryView can reappear during a background/foreground transition,
+        // while the root launch task can request the same scan at the same
+        // time. Coalesce those requests and avoid repeating a full folder
+        // walk during a short reload burst.
+        guard watchedFolderScanTask == nil,
+              Date().timeIntervalSince(lastWatchedFolderScanDate) >= 30
+        else { return }
+
+        lastWatchedFolderScanDate = Date()
+        let task = Task { await scanWatchedFoldersAsync(using: folderService) }
+        watchedFolderScanTask = task
+        Task { @MainActor in
+            await task.value
+            watchedFolderScanTask = nil
+        }
     }
 
     /// Awaitable variant of `scanWatchedFolders(using:)` — used by callers

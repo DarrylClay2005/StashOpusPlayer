@@ -211,7 +211,14 @@ final class TrackedPlaylistStore: ObservableObject {
             // TrackedPlaylistDetailView.recomputeLocalCopies.
             let localSourceIDs = library.localSourceIDs()
             let identityIndex = library.importedIdentityIndex()
-            let toGet = tracks.filter { !library.hasLocalCopy(of: $0, localSourceIDs: localSourceIDs, identityIndex: identityIndex) }
+            var seenSourceIDs = Set<String>()
+            let toGet = tracks.filter {
+                // Resolvers can return the same video more than once (for
+                // repeated playlist entries). Never create two download jobs
+                // for one source ID in the same pass.
+                guard seenSourceIDs.insert($0.sourceTrackID).inserted else { return false }
+                return !library.hasLocalCopy(of: $0, localSourceIDs: localSourceIDs, identityIndex: identityIndex)
+            }
             let destinationDir = StreamingService.downloadDirectory(forFolderName: pl.destinationFolder)
             let existingSongsSnapshot = library.allSongs
             // `got`/`blocked` and the per-track work itself run on
@@ -242,7 +249,8 @@ final class TrackedPlaylistStore: ObservableObject {
                                 track: track,
                                 destinationDir: destinationDir,
                                 existingSongs: existingSongsSnapshot,
-                                destinationFolderName: pl.destinationFolder
+                                destinationFolderName: pl.destinationFolder,
+                                reportExistingAsSkipped: true
                             )
                             return (true, false)
                         } catch StreamingError.serverDetail {
@@ -251,6 +259,8 @@ final class TrackedPlaylistStore: ObservableObject {
                             // summary toast can explain why some tracks
                             // were skipped instead of silently dropping them.
                             return (false, true)
+                        } catch StreamingError.alreadyDownloaded {
+                            return (false, false)
                         } catch {
                             // Other failures (network, timeout, etc.) stay
                             // silent here — this is a background check, and

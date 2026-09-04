@@ -32,7 +32,8 @@ extension StreamingService {
         track: StreamTrack,
         destinationDir: URL? = nil,
         existingSongs: [Song] = [],
-        destinationFolderName: String? = nil
+        destinationFolderName: String? = nil,
+        reportExistingAsSkipped: Bool = false
     ) async throws -> URL {
         // Single chokepoint every download path in the app funnels through
         // (foreground downloads, background job reconciliation, tracked
@@ -51,12 +52,16 @@ extension StreamingService {
            let existingURL = match.url,
            FileManager.default.fileExists(atPath: existingURL.path) {
             if CorruptFileFinderService.isValidAudioFile(at: existingURL) {
-                appLog("downloadToLibrary: skipping \"\(track.title)\" — valid existing copy at \(existingURL.lastPathComponent)", category: "network")
-                DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: existingURL.lastPathComponent)
-                return existingURL
-            } else {
-                appWarn("downloadToLibrary: existing copy of \"\(track.title)\" is corrupt — redownloading to replace it", category: "network")
-            }
+               if let preparedURL = await prepareExistingLocalCopy(existingURL, track: track) {
+                   appLog("downloadToLibrary: skipping \"\(track.title)\" — valid locked copy at \(preparedURL.lastPathComponent)", category: "network")
+                   DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: preparedURL.lastPathComponent)
+                   if reportExistingAsSkipped { throw StreamingError.alreadyDownloaded }
+                   return preparedURL
+               }
+               appWarn("downloadToLibrary: existing copy of \"\(track.title)\" could not be locked — downloading a replacement", category: "network")
+           } else {
+               appWarn("downloadToLibrary: existing copy of \"\(track.title)\" is corrupt — redownloading to replace it", category: "network")
+           }
         }
 
         appLog("Download started: \"\(track.title)\" [fmt: \(preferredFormat)]", category: "network")
@@ -92,8 +97,13 @@ extension StreamingService {
         if DownloadLedgerStore.shared.filename(for: sourceTrackID) == provisionalDestURL.lastPathComponent,
            FileManager.default.fileExists(atPath: provisionalDestURL.path),
            CorruptFileFinderService.isValidAudioFile(at: provisionalDestURL) {
-            appLog("downloadToLibrary: already exists, skipping \(provisionalDestURL.lastPathComponent)", category: "network")
-            return provisionalDestURL
+            if let preparedURL = await prepareExistingLocalCopy(provisionalDestURL, track: track) {
+                appLog("downloadToLibrary: already exists and is locked, skipping \(preparedURL.lastPathComponent)", category: "network")
+                DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: preparedURL.lastPathComponent)
+                if reportExistingAsSkipped { throw StreamingError.alreadyDownloaded }
+                return preparedURL
+            }
+            appWarn("downloadToLibrary: existing provisional copy could not be locked — continuing with download", category: "network")
         }
 
         // Cross-process in-flight guard — everything above only catches a
@@ -488,7 +498,10 @@ extension StreamingService {
                     if FileManager.default.fileExists(atPath: existingURL.path),
                        CorruptFileFinderService.isValidAudioFile(at: existingURL) {
                         appLog("downloadToLibrary: \"\(track.title)\" was already imported via background reconciliation while this poll was in flight — adopting it", category: "network")
-                        return existingURL
+                        if let preparedURL = await prepareExistingLocalCopy(existingURL, track: track) {
+                            if reportExistingAsSkipped { throw StreamingError.alreadyDownloaded }
+                            return preparedURL
+                        }
                     }
                 }
                 appWarn("downloadToLibrary: HTTP 404 fetching result for \"\(track.title)\" and no reconciled copy found — will retry", category: "network")
@@ -530,7 +543,11 @@ extension StreamingService {
         if alreadyComplete {
             try? FileManager.default.removeItem(at: downloadedURL)
             appLog("downloadToLibrary: already exists, skipping \(destURL.lastPathComponent)", category: "network")
-            return destURL
+            if let preparedURL = await prepareExistingLocalCopy(destURL, track: track) {
+                if reportExistingAsSkipped { throw StreamingError.alreadyDownloaded }
+                return preparedURL
+            }
+            appWarn("downloadToLibrary: resolved existing copy could not be locked — continuing with downloaded file", category: "network")
         }
 
         do {
@@ -564,6 +581,27 @@ extension StreamingService {
         await prefetchArtworkWithFallback(for: track, cacheKey: destURL.lastPathComponent)
 
         return destURL
+    }
+
+    /// Makes every dedupe hit pass through the same vault-tag/convert/lock
+    /// pipeline as a newly downloaded file. Older `.lms` files may have the
+    /// marker extension without the real lock, so relock those off-main.
+    private func prepareExistingLocalCopy(_ url: URL, track: StreamTrack) async -> URL? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+
+        if LumisoundExclusiveExtensionService.isConverted(url) {
+            if LumisoundLockFormat.isLocked(at: url) { return url }
+            let relocked = await Task.detached(priority: .utility) {
+                LumisoundExclusiveExtensionService.relockLegacyFile(at: url)
+            }.value
+            return relocked && LumisoundLockFormat.isLocked(at: url) ? url : nil
+        }
+
+        let lockedURL = await finalizeAndLockDownload(destURL: url, track: track)
+        guard LumisoundExclusiveExtensionService.isConverted(lockedURL),
+              LumisoundLockFormat.isLocked(at: lockedURL)
+        else { return nil }
+        return lockedURL
     }
 
     // MARK: - Faster transports (tried before the job-based flow above)

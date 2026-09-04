@@ -131,16 +131,14 @@ struct LumisoundApp: App {
                 }
                 if phase == .background {
                     appLock.lock()
-                    // In-app fallback for the track-vault backfill (in
-                    // addition to the BGProcessingTask scheduled above) —
-                    // BGProcessingTask timing isn't guaranteed (see
-                    // BackgroundRefreshService's docs on the same caveat),
-                    // so this makes real progress on every backgrounding
-                    // instead of only whenever iOS decides to run the task.
-                    Task {
-                        await LumisoundTrackVaultService.runBackfill()
-                        await LumisoundTrackVaultService.runExtensionConversionPass()
-                    }
+                    // Do not start full-library tagging or audio conversion
+                    // while the app is transitioning to the background.
+                    // Those file-heavy passes compete with suspension and
+                    // caused the UI to stall whenever the app was backgrounded.
+                    // The registered BGProcessingTask and the foreground
+                    // maintenance loop handle this work without blocking the
+                    // transition.
+                    LumisoundTrackVaultService.scheduleNext()
                 } else if phase == .active {
                     // Catch-all safety net for background downloads: covers
                     // both "silent push never arrived" (Apple doesn't
@@ -234,9 +232,6 @@ struct LumisoundApp: App {
                     // batch of imported tracks so externally-updated metadata
                     // (e.g. a bridge re-tag) surfaces without a full rescan.
                     libraryManager.startPeriodicMetadataRefresh()
-
-                    // Scan previously added watched folders.
-                    libraryManager.scanWatchedFolders(using: folderService)
 
                     // Auto-download new tracks from any tracked playlists that have it
                     // enabled (throttled internally; each playlist does its own fresh

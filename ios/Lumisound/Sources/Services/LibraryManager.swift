@@ -43,6 +43,8 @@ final class LibraryManager: ObservableObject {
     /// stay in "scanning" state for the full duration of a multi-scan launch
     /// instead of flipping to "done" as soon as the first scan finishes.
     var activeScanCount: Int = 0
+    var watchedFolderScanTask: Task<Void, Never>?
+    var lastWatchedFolderScanDate = Date.distantPast
 
     func beginScan() {
         activeScanCount += 1
