@@ -11,7 +11,6 @@ extension AudioPlayerManager {
     func prepareCurrent() {
         scheduleCurrent(from: position)
         updateNowPlaying()
-        appLog("downloadAndSchedule: playback scheduled in \(String(format: "%.2f", Date().timeIntervalSince(playbackStartedAt)))s", category: "audio")
     }
 
     func playCurrent(from startTime: TimeInterval) {
@@ -456,7 +455,6 @@ extension AudioPlayerManager {
         } catch {
             errorMessage = "Playback error: \(error.localizedDescription)"
             isPlaying = false
-            appError("downloadAndSchedule: failed after \(String(format: "%.2f", Date().timeIntervalSince(playbackStartedAt)))s for \(playbackURL): \(error.localizedDescription)", category: "audio")
             appError("Transcoded-file scheduling failed for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
             // errorMessage alone has no visible home outside StreamSearchView/
             // Settings → Audio — see handleLoadFailure's matching comment.
@@ -662,6 +660,7 @@ extension AudioPlayerManager {
                 startSmartCrossfadeAnalysisIfNeeded()
             }
             updateNowPlaying()
+            appLog("downloadAndSchedule: playback scheduled in \(String(format: "%.2f", Date().timeIntervalSince(playbackStartedAt)))s", category: "audio")
 
         } catch {
             // AVAudioFile couldn't open the downloaded temp file — usually a
@@ -675,7 +674,7 @@ extension AudioPlayerManager {
             // codec pipeline and can play directly from the ORIGINAL remote
             // URL without needing the temp-file download at all, so fall
             // back to it here too instead of only ever erroring out.
-            appWarn("downloadAndSchedule: AVAudioFile open failed for \"\(currentSong?.displayName ?? "?")\" (\(error.localizedDescription)) — falling back to AVPlayer", category: "audio")
+            appWarn("downloadAndSchedule: AVAudioFile open failed after \(String(format: "%.2f", Date().timeIntervalSince(playbackStartedAt)))s for \"\(currentSong?.displayName ?? "?")\" (\(error.localizedDescription)) — falling back to AVPlayer", category: "audio")
             scheduleWithOpusPlayer(url: url, startTime: startTime)
         }
     }

@@ -327,7 +327,7 @@ struct TrackedPlaylistDetailView: View {
             return
         }
         tracks = resolved
-        recomputeLocalCopies()
+        await recomputeLocalCopies()
         TrackedPlaylistStore.shared.updateMetadata(
             id: playlist.id,
             trackCount: resolved.count,
@@ -345,7 +345,7 @@ struct TrackedPlaylistDetailView: View {
     /// O(tracks × library) main-thread hang long enough to trip the iOS
     /// watchdog — the "opening a big playlist crashes" bug. Same fix as
     /// `StreamSearchView.refreshDownloadedStatus`.
-    private func recomputeLocalCopies() {
+    private func recomputeLocalCopies() async {
         let ids = await library.localSourceIDs()
         let index = library.importedIdentityIndex()
         localCopyIDs = Set(
@@ -396,7 +396,7 @@ struct TrackedPlaylistDetailView: View {
         defer { isDownloadingAll = false }
 
         await library.scanLocalDocumentsAsync()
-        recomputeLocalCopies()
+        await recomputeLocalCopies()
 
         let toDownload = tracks.filter { !localCopyIDs.contains($0.id) }
         guard !toDownload.isEmpty else { return }
@@ -462,7 +462,7 @@ struct TrackedPlaylistDetailView: View {
         }
 
         library.scanLocalDocuments()
-        recomputeLocalCopies()
+        await recomputeLocalCopies()
 
         if failed == 0 {
             ToastCenter.shared.show("Downloaded \(toDownload.count) track\(toDownload.count == 1 ? "" : "s")", category: .download)
