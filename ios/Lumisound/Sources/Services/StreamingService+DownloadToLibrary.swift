@@ -263,7 +263,8 @@ extension StreamingService {
                     request: request,
                     safeName: safeName,
                     requestedExt: requestedExt,
-                    importDir: importDir
+                    importDir: importDir,
+                    reportExistingAsSkipped: reportExistingAsSkipped
                 )
                 if attempt != 1 {
                     appLog("downloadToLibrary: succeeded for \"\(track.title)\" on attempt \(attempt)/\(maxAttempts)", category: "network")
@@ -331,7 +332,8 @@ extension StreamingService {
         request: URLRequest,
         safeName: String,
         requestedExt: String,
-        importDir: URL
+        importDir: URL,
+        reportExistingAsSkipped: Bool
     ) async throws -> URL {
         // /api/download is async: it returns a job_id immediately (status 202)
         // instead of holding the connection open for the whole yt-dlp run. A
