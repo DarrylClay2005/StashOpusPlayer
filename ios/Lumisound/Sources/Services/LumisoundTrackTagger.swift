@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 // MARK: - LumisoundTrackTagger
 //
@@ -35,6 +36,9 @@ enum LumisoundTrackTagger {
         let path = fileURL.path
         let result = data.withUnsafeBytes { rawBuffer -> Int32 in
             setxattr(path, attributeName, rawBuffer.baseAddress, rawBuffer.count, 0, 0)
+        }
+        if result != 0 {
+            appWarn("LumisoundTrackTagger: xattr write failed for \(fileURL.lastPathComponent) (\(data.count) bytes, errno=\(errno): \(String(cString: strerror(errno)))", category: "background")
         }
         return result == 0
     }

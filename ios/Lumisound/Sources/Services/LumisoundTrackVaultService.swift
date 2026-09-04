@@ -137,16 +137,18 @@ enum LumisoundTrackVaultService {
     static func runBackfill() async {
         guard let library = LibraryManager.shared else { return }
 
-        let candidates = library.importedSongs.filter { song in
-            guard let url = song.url else { return false }
-            let expectedTrackID = expectedTrackID(for: song)
-            // needsTagging (not isTagged) — catches both untagged files AND
-            // ones carrying the wrong value from the Song.id/sourceTrackID
-            // mixup bug (see LumisoundTrackTagger.needsTagging), so those
-            // get silently repaired here instead of being skipped forever
-            // for already "having a tag."
-            return LumisoundTrackTagger.needsTagging(fileURL: url, expectedTrackID: expectedTrackID)
+        let candidatesToCheck = library.importedSongs.compactMap { song -> (String, URL, String)? in
+            guard let url = song.url else { return nil }
+            return (song.id, url, expectedTrackID(for: song))
         }
+        // xattr reads are filesystem I/O. Do not perform one for every
+        // imported track on the main actor during the five-minute pass.
+        let candidateIDs = await Task.detached(priority: .utility) {
+            Set(candidatesToCheck.compactMap { id, url, expectedID in
+                LumisoundTrackTagger.needsTagging(fileURL: url, expectedTrackID: expectedID) ? id : nil
+            })
+        }.value
+        let candidates = library.importedSongs.filter { candidateIDs.contains($0.id) }
         guard !candidates.isEmpty else { return }
 
         let allowedIDs = loadUserRuleScript().flatMap { script in
@@ -214,6 +216,7 @@ enum LumisoundTrackVaultService {
     @MainActor
     static func runExtensionConversionPass() async {
         guard let library = LibraryManager.shared else { return }
+        let passStartedAt = Date()
         let currentlyPlayingID = AudioPlayerManager.shared?.currentSong?.id
 
         // Logged unconditionally (not just on success) — this pass previously
@@ -225,29 +228,44 @@ enum LumisoundTrackVaultService {
         // "already all converted" OR "never got tagged in the first place",
         // e.g. if only one container format's downloads were actually
         // reaching tagNewDownload) — this makes that distinguishable.
+        let conversionSnapshot = library.importedSongs.compactMap { song -> (String, URL)? in
+            guard let url = song.url else { return nil }
+            return (song.id, url)
+        }
+        let conversionState = await Task.detached(priority: .utility) {
+            conversionSnapshot.map { id, url in
+                (
+                    id: id,
+                    ext: LumisoundExclusiveExtensionService.effectiveExtension(for: url),
+                    converted: LumisoundExclusiveExtensionService.isConverted(url),
+                    tagged: LumisoundTrackTagger.isTagged(fileURL: url)
+                )
+            }
+        }.value
         var extBreakdown: [String: (total: Int, tagged: Int, converted: Int)] = [:]
-        for song in library.importedSongs {
-            guard let url = song.url else { continue }
-            let ext = LumisoundExclusiveExtensionService.effectiveExtension(for: url)
-            var entry = extBreakdown[ext] ?? (0, 0, 0)
+        for state in conversionState {
+            var entry = extBreakdown[state.ext] ?? (0, 0, 0)
             entry.total += 1
-            if LumisoundExclusiveExtensionService.isConverted(url) {
+            if state.converted {
                 entry.converted += 1
-            } else if LumisoundTrackTagger.isTagged(fileURL: url) {
+            } else if state.tagged {
                 entry.tagged += 1
             }
-            extBreakdown[ext] = entry
+            extBreakdown[state.ext] = entry
         }
         let breakdownText = extBreakdown.sorted { $0.key < $1.key }
             .map { "\($0.key)=\($0.value.total)tot/\($0.value.tagged)tagged-not-converted/\($0.value.converted)converted" }
             .joined(separator: ", ")
         appLog("LumisoundTrackVaultService: conversion pass — \(library.importedSongs.count) imported [\(breakdownText)], currentlyPlaying=\(currentlyPlayingID ?? "nil")", category: "background")
 
-        let candidates = library.importedSongs.filter { song in
-            guard let url = song.url else { return false }
-            return !LumisoundExclusiveExtensionService.isConverted(url) && LumisoundTrackTagger.isTagged(fileURL: url)
+        let candidateIDs = Set(conversionState.compactMap { state in
+            state.converted || !state.tagged ? nil : state.id
+        })
+        let candidates = library.importedSongs.filter { candidateIDs.contains($0.id) }
+        guard !candidates.isEmpty else {
+            appLog("LumisoundTrackVaultService: conversion pass complete — no candidates, elapsed=\(String(format: "%.2f", Date().timeIntervalSince(passStartedAt)))s", category: "background")
+            return
         }
-        guard !candidates.isEmpty else { return }
 
         var converted = 0
         var failedSongIDs: [String] = []
@@ -262,7 +280,7 @@ enum LumisoundTrackVaultService {
                 await Task.yield()
             }
         }
-        appLog("LumisoundTrackVaultService: converted \(converted)/\(candidates.count) track(s) to the Lumisound-exclusive extension" + (failedSongIDs.isEmpty ? "" : "; sample failures: \(failedSongIDs)"), category: "background")
+        appLog("LumisoundTrackVaultService: converted \(converted)/\(candidates.count) track(s) to the Lumisound-exclusive extension" + (failedSongIDs.isEmpty ? "" : "; sample failures: \(failedSongIDs)") + ", elapsed=\(String(format: "%.2f", Date().timeIntervalSince(passStartedAt)))s", category: "background")
 
         await runLegacyRelockPass(library: library)
     }

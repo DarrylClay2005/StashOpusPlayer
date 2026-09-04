@@ -102,9 +102,13 @@ extension StreamingService {
         guard !pending.isEmpty else { return 0 }
 
         var imported = 0
-        for entry in pending {
+        for (index, entry) in pending.enumerated() {
+            if Task.isCancelled { break }
             guard await importPendingDownload(entry) else { continue }
             imported += 1
+            if (index + 1) % 10 == 0 {
+                await Task.yield()
+            }
         }
 
         appLog("reconcilePendingDownloads: imported \(imported)/\(pending.count) pending job(s)", category: "network")
@@ -185,7 +189,7 @@ extension StreamingService {
                 .prefix(100)
         )
         let sourceTrackID = entry.source_track_id ?? entry.job_id
-        var (destURL, alreadyComplete) = resolveDownloadDestination(
+        var (destURL, alreadyComplete) = await resolveDownloadDestination(
             preferred: importDir.appendingPathComponent("\(safeName).\(ext)"),
             sourceTrackID: sourceTrackID
         )

@@ -198,7 +198,7 @@ extension AccountService {
         library: LibraryManager
     ) async {
         await library.scanLocalDocumentsAsync()
-        let localSourceIDs = library.localSourceIDs()
+        let localSourceIDs = await library.localSourceIDs()
         let identityIndex = library.importedIdentityIndex()
         let toGet = tracks.filter { !library.hasLocalCopy(of: $0, localSourceIDs: localSourceIDs, identityIndex: identityIndex) }
         guard !toGet.isEmpty else { return }
@@ -218,9 +218,12 @@ extension AccountService {
                             track: track,
                             destinationDir: destinationDir,
                             existingSongs: existingSongsSnapshot,
-                            destinationFolderName: subscription.destinationFolder
+                            destinationFolderName: subscription.destinationFolder,
+                            reportExistingAsSkipped: true
                         )
                         return true
+                    } catch StreamingError.alreadyDownloaded {
+                        return false
                     } catch {
                         // Silent — this runs from a background check; the
                         // next scheduled check will simply retry it, same as

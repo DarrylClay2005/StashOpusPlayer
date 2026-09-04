@@ -108,6 +108,7 @@ enum LumisoundExclusiveExtensionService {
 
     static func playableURL(for url: URL) -> URL {
         guard isConverted(url) else { return url }
+        let startedAt = Date()
         let fileLock = lock(for: url.path)
         fileLock.lock()
         defer { fileLock.unlock() }
@@ -125,12 +126,15 @@ enum LumisoundExclusiveExtensionService {
            cacheModDate >= sourceModDate {
             return outURL
         }
+        let sourceBytes = (try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int64 ?? -1
+        appLog("LumisoundExclusiveExtensionService: cold unlock started \(url.lastPathComponent) (\(sourceBytes) bytes)", category: "audio")
         // A leftover partial file from an earlier failed attempt (e.g. disk
         // pressure mid-write) would otherwise satisfy the `fileExists` check
         // above on the NEXT call despite being garbage — clear it before
         // retrying rather than trusting its mere presence.
         try? fm.removeItem(at: outURL)
         if LumisoundLockFormat.unlock(lockedURL: url, to: outURL) {
+            appLog("LumisoundExclusiveExtensionService: cold unlock completed \(url.lastPathComponent) in \(String(format: "%.2f", Date().timeIntervalSince(startedAt)))s", category: "audio")
             return outURL
         }
         // One retry — covers a transient failure (the old leftover-file case
@@ -141,6 +145,7 @@ enum LumisoundExclusiveExtensionService {
             appWarn("LumisoundExclusiveExtensionService.playableURL: unlock failed for \(url.lastPathComponent)", category: "audio")
             return url
         }
+        appLog("LumisoundExclusiveExtensionService: cold unlock completed on retry \(url.lastPathComponent) in \(String(format: "%.2f", Date().timeIntervalSince(startedAt)))s", category: "audio")
         return outURL
     }
 
@@ -249,6 +254,7 @@ enum LumisoundExclusiveExtensionService {
         guard !isConverted(fileURL), let newURL = expectedConvertedURL(for: fileURL) else { return nil }
         let fm = FileManager.default
         guard !fm.fileExists(atPath: newURL.path) else { return nil }
+        let startedAt = Date()
 
         await convertLimiter.acquire()
         defer { Task { await convertLimiter.release() } }
@@ -274,7 +280,7 @@ enum LumisoundExclusiveExtensionService {
             appLog("LumisoundExclusiveExtensionService: locking \(fileURL.lastPathComponent) (\(beforeBytes) bytes, ext=\(fileURL.pathExtension.lowercased())) -> \(newURL.lastPathComponent)", category: "background")
 
             guard LumisoundLockFormat.lock(plainURL: fileURL, to: newURL) else {
-                appWarn("LumisoundExclusiveExtensionService: lock failed for \(fileURL.lastPathComponent)", category: "background")
+                appWarn("LumisoundExclusiveExtensionService: lock failed for \(fileURL.lastPathComponent) after \(String(format: "%.2f", Date().timeIntervalSince(startedAt)))s", category: "background")
                 return nil
             }
             let lockedBytes = (try? fm.attributesOfItem(atPath: newURL.path))?[.size] as? Int64 ?? -1
@@ -291,7 +297,7 @@ enum LumisoundExclusiveExtensionService {
             defer { try? fm.removeItem(at: verifyURL) }
             guard LumisoundLockFormat.unlock(lockedURL: newURL, to: verifyURL),
                   CorruptFileFinderService.isValidAudioFile(at: verifyURL) else {
-                appWarn("LumisoundExclusiveExtensionService: locked file failed round-trip verification for \(fileURL.lastPathComponent) — removing", category: "background")
+                appWarn("LumisoundExclusiveExtensionService: locked file failed round-trip verification for \(fileURL.lastPathComponent) after \(String(format: "%.2f", Date().timeIntervalSince(startedAt)))s — removing", category: "background")
                 try? fm.removeItem(at: newURL)
                 return nil
             }
@@ -311,7 +317,7 @@ enum LumisoundExclusiveExtensionService {
                 originalRemoved = false
                 appWarn("LumisoundExclusiveExtensionService: could not remove pre-conversion file \(fileURL.lastPathComponent) after successful convert: \(error.localizedDescription)", category: "background")
             }
-            appLog("LumisoundExclusiveExtensionService: converted+locked \(newURL.lastPathComponent) — before=\(beforeBytes)B, locked=\(lockedBytes)B, verified=true, original-removed=\(originalRemoved)", category: "background")
+            appLog("LumisoundExclusiveExtensionService: converted+locked \(newURL.lastPathComponent) — before=\(beforeBytes)B, locked=\(lockedBytes)B, verified=true, original-removed=\(originalRemoved), elapsed=\(String(format: "%.2f", Date().timeIntervalSince(startedAt)))s", category: "background")
             return newURL
         }.value
     }

@@ -51,7 +51,10 @@ extension StreamingService {
         if let match = existingSongs.first(where: { $0.sourceTrackID == sourceTrackID }),
            let existingURL = match.url,
            FileManager.default.fileExists(atPath: existingURL.path) {
-            if CorruptFileFinderService.isValidAudioFile(at: existingURL) {
+            let isValid = await Task.detached(priority: .utility) {
+                CorruptFileFinderService.isValidAudioFile(at: existingURL)
+            }.value
+            if isValid {
                if let preparedURL = await prepareExistingLocalCopy(existingURL, track: track) {
                    appLog("downloadToLibrary: skipping \"\(track.title)\" — valid locked copy at \(preparedURL.lastPathComponent)", category: "network")
                    DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: preparedURL.lastPathComponent)
@@ -94,9 +97,13 @@ extension StreamingService {
         // will pick a disambiguated name instead of silently adopting or clobbering
         // whatever's already there.
         let provisionalDestURL = importDir.appendingPathComponent("\(safeName).\(requestedExt)")
+        let provisionalIsValid = FileManager.default.fileExists(atPath: provisionalDestURL.path)
+            ? await Task.detached(priority: .utility) {
+                CorruptFileFinderService.isValidAudioFile(at: provisionalDestURL)
+            }.value
+            : false
         if DownloadLedgerStore.shared.filename(for: sourceTrackID) == provisionalDestURL.lastPathComponent,
-           FileManager.default.fileExists(atPath: provisionalDestURL.path),
-           CorruptFileFinderService.isValidAudioFile(at: provisionalDestURL) {
+           provisionalIsValid {
             if let preparedURL = await prepareExistingLocalCopy(provisionalDestURL, track: track) {
                 appLog("downloadToLibrary: already exists and is locked, skipping \(preparedURL.lastPathComponent)", category: "network")
                 DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: preparedURL.lastPathComponent)
@@ -258,6 +265,7 @@ extension StreamingService {
 
         for attempt in 1...maxAttempts {
             do {
+                let attemptStartedAt = Date()
                 let destURL = try await attemptDownload(
                     track: track,
                     request: request,
@@ -269,6 +277,7 @@ extension StreamingService {
                 if attempt != 1 {
                     appLog("downloadToLibrary: succeeded for \"\(track.title)\" on attempt \(attempt)/\(maxAttempts)", category: "network")
                 }
+                appLog("downloadToLibrary: verified result for \"\(track.title)\" in \(String(format: "%.2f", Date().timeIntervalSince(attemptStartedAt)))s [attempt \(attempt)/\(maxAttempts)]", category: "network")
                 DownloadLedgerStore.shared.record(sourceTrackID: sourceTrackID, filename: destURL.lastPathComponent)
                 return await finalizeAndLockDownload(destURL: destURL, track: track)
             } catch let error as StreamingError {
@@ -303,6 +312,7 @@ extension StreamingService {
     /// safety net as before this change, just no longer the ONLY path a
     /// normal download takes to get there.
     func finalizeAndLockDownload(destURL: URL, track: StreamTrack) async -> URL {
+        let lockStartedAt = Date()
         LumisoundTrackVaultService.tagNewDownload(fileURL: destURL, trackID: track.sourceTrackID, sourceURL: track.youtubeURL)
         // `convert` itself logs the detailed before/after (sizes, verify
         // result) on success and the specific failing step on failure — this
@@ -310,16 +320,18 @@ extension StreamingService {
         // THIS track missed the synchronous hold and will only pick up the
         // real lock on the next background `runExtensionConversionPass`.
         guard let lockedURL = await LumisoundExclusiveExtensionService.convert(fileURL: destURL) else {
-            appWarn("finalizeAndLockDownload: synchronous lock failed for \"\(track.title)\" — returning plain file, will retry on next background conversion pass", category: "network")
+            appWarn("finalizeAndLockDownload: synchronous lock failed for \"\(track.title)\" after \(String(format: "%.2f", Date().timeIntervalSince(lockStartedAt)))s — returning plain file, will retry on next background conversion pass", category: "network")
             return destURL
         }
-        appLog("finalizeAndLockDownload: \"\(track.title)\" locked synchronously at download time -> \(lockedURL.lastPathComponent)", category: "network")
+        appLog("finalizeAndLockDownload: \"\(track.title)\" locked synchronously at download time -> \(lockedURL.lastPathComponent) in \(String(format: "%.2f", Date().timeIntervalSince(lockStartedAt)))s", category: "network")
         // `convert` writes a brand new inode — re-apply the xattr vault tag
         // here using the trackID/sourceURL we just tagged `destURL` with,
         // same as `LibraryManager.convertToLumisoundExclusiveExtension`
         // does for the background-pass path — otherwise every synchronously
         // -locked download would silently lose its dedup fallback tag.
-        LumisoundTrackTagger.tag(fileURL: lockedURL, trackID: track.sourceTrackID, sourceURL: track.youtubeURL)
+        await Task.detached(priority: .utility) {
+            LumisoundTrackTagger.tag(fileURL: lockedURL, trackID: track.sourceTrackID, sourceURL: track.youtubeURL)
+        }.value
         return lockedURL
     }
 
@@ -386,6 +398,7 @@ extension StreamingService {
         guard let start = try? JSONDecoder().decode(StartPayload.self, from: startData) else {
             throw StreamingError.incompleteDownload
         }
+        appLog("downloadToLibrary: yt-dlp job started job=\(start.job_id) source=\(track.source):\(track.id) title=\"\(track.title)\"", category: "network")
 
         guard let statusURL = jobPollURL(from: startRequest, path: "/api/download/status", jobID: start.job_id),
               let resultURL = jobPollURL(from: startRequest, path: "/api/download/result", jobID: start.job_id) else {
@@ -402,6 +415,7 @@ extension StreamingService {
         // approaches the tunnel's ~100s edge timeout regardless of how long
         // yt-dlp itself takes on the bridge.
         let deadline = Date().addingTimeInterval(300)
+        var lastLoggedStatus: String?
         pollLoop: while true {
             if Date() > deadline {
                 appWarn("downloadToLibrary: job poll timed out for \"\(track.title)\"", category: "network")
@@ -425,11 +439,17 @@ extension StreamingService {
             }
             switch status.status {
             case "pending":
+                if lastLoggedStatus != "pending" {
+                    appLog("downloadToLibrary: yt-dlp job=\(start.job_id) status=pending", category: "network")
+                    lastLoggedStatus = "pending"
+                }
                 try await Task.sleep(nanoseconds: 3_000_000_000)
                 continue pollLoop
             case "done":
+                appLog("downloadToLibrary: yt-dlp job=\(start.job_id) status=done after \(String(format: "%.2f", 300 - deadline.timeIntervalSinceNow))s", category: "network")
                 break pollLoop
             case "error":
+                appWarn("downloadToLibrary: yt-dlp job=\(start.job_id) status=error code=\(status.code ?? 0) detail=\(status.detail ?? "")", category: "network")
                 switch status.code {
                 case 408:
                     appWarn("downloadToLibrary: timeout for \"\(track.title)\"", category: "network")
@@ -497,8 +517,11 @@ extension StreamingService {
                 let sourceTrackID = "\(track.source):\(track.id)"
                 if let existingName = DownloadLedgerStore.shared.filename(for: sourceTrackID) {
                     let existingURL = importDir.appendingPathComponent(existingName)
-                    if FileManager.default.fileExists(atPath: existingURL.path),
-                       CorruptFileFinderService.isValidAudioFile(at: existingURL) {
+                    let existingIsValid = await Task.detached(priority: .utility) {
+                        FileManager.default.fileExists(atPath: existingURL.path) &&
+                            CorruptFileFinderService.isValidAudioFile(at: existingURL)
+                    }.value
+                    if existingIsValid {
                         appLog("downloadToLibrary: \"\(track.title)\" was already imported via background reconciliation while this poll was in flight — adopting it", category: "network")
                         if let preparedURL = await prepareExistingLocalCopy(existingURL, track: track) {
                             if reportExistingAsSkipped { throw StreamingError.alreadyDownloaded }
@@ -537,7 +560,7 @@ extension StreamingService {
             (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")
         ) ?? requestedExt
         let sourceTrackID = "\(track.source):\(track.id)"
-        let (destURL, alreadyComplete) = resolveDownloadDestination(
+        let (destURL, alreadyComplete) = await resolveDownloadDestination(
             preferred: importDir.appendingPathComponent("\(safeName).\(actualExt)"),
             sourceTrackID: sourceTrackID
         )
@@ -568,9 +591,10 @@ extension StreamingService {
         // immediately so the retry loop can re-fetch instead of leaving a dead file behind.
         // `expectedDuration` additionally catches a well-formed-but-truncated file —
         // see that parameter's doc comment on CorruptFileFinderService.isValidAudioFile.
-        guard CorruptFileFinderService.isValidAudioFile(
-            at: destURL, expectedDuration: track.duration
-        ) else {
+        let isValid = await Task.detached(priority: .utility) {
+            CorruptFileFinderService.isValidAudioFile(at: destURL, expectedDuration: track.duration)
+        }.value
+        guard isValid else {
             try? FileManager.default.removeItem(at: destURL)
             appWarn("downloadToLibrary: corrupt/unreadable/truncated file for \"\(track.title)\" — discarding", category: "network")
             throw StreamingError.corruptDownload
@@ -745,7 +769,7 @@ extension StreamingService {
             appWarn("finalizeRelayedFile: on-device tagging failed for \"\(track.title)\" — importing untagged", category: "network")
         }
 
-        let (destURL, alreadyComplete) = resolveDownloadDestination(
+        let (destURL, alreadyComplete) = await resolveDownloadDestination(
             preferred: importDir.appendingPathComponent("\(safeName).m4a"),
             sourceTrackID: sourceTrackID
         )
@@ -760,9 +784,10 @@ extension StreamingService {
             throw error
         }
 
-        guard CorruptFileFinderService.isValidAudioFile(
-            at: destURL, expectedDuration: track.duration
-        ) else {
+        let isValid = await Task.detached(priority: .utility) {
+            CorruptFileFinderService.isValidAudioFile(at: destURL, expectedDuration: track.duration)
+        }.value
+        guard isValid else {
             try? FileManager.default.removeItem(at: destURL)
             appWarn("finalizeRelayedFile: corrupt/unreadable/truncated file for \"\(track.title)\" — discarding", category: "network")
             throw StreamingError.corruptDownload
@@ -790,7 +815,7 @@ extension StreamingService {
     /// integrity check. Otherwise returns a disambiguated sibling path
     /// ("Title (2).ext", "Title (3).ext", ...) so the real download can proceed
     /// without clobbering or being silently mistaken for something else.
-    func resolveDownloadDestination(preferred: URL, sourceTrackID: String) -> (url: URL, alreadyComplete: Bool) {
+    func resolveDownloadDestination(preferred: URL, sourceTrackID: String) async -> (url: URL, alreadyComplete: Bool) {
         let fm = FileManager.default
         let dir = preferred.deletingLastPathComponent()
 
@@ -810,7 +835,11 @@ extension StreamingService {
         // actually lives post-conversion.
         if let ledgerName = DownloadLedgerStore.shared.filename(for: sourceTrackID) {
             let ledgerURL = dir.appendingPathComponent(ledgerName)
-            if fm.fileExists(atPath: ledgerURL.path), CorruptFileFinderService.isValidAudioFile(at: ledgerURL) {
+            let ledgerIsValid = await Task.detached(priority: .utility) {
+                FileManager.default.fileExists(atPath: ledgerURL.path) &&
+                    CorruptFileFinderService.isValidAudioFile(at: ledgerURL)
+            }.value
+            if ledgerIsValid {
                 return (ledgerURL, true)
             }
         }

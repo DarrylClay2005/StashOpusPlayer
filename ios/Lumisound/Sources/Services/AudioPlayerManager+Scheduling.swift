@@ -11,6 +11,7 @@ extension AudioPlayerManager {
     func prepareCurrent() {
         scheduleCurrent(from: position)
         updateNowPlaying()
+        appLog("downloadAndSchedule: playback scheduled in \(String(format: "%.2f", Date().timeIntervalSince(playbackStartedAt)))s", category: "audio")
     }
 
     func playCurrent(from startTime: TimeInterval) {
@@ -455,6 +456,7 @@ extension AudioPlayerManager {
         } catch {
             errorMessage = "Playback error: \(error.localizedDescription)"
             isPlaying = false
+            appError("downloadAndSchedule: failed after \(String(format: "%.2f", Date().timeIntervalSince(playbackStartedAt)))s for \(playbackURL): \(error.localizedDescription)", category: "audio")
             appError("Transcoded-file scheduling failed for \"\(currentSong?.displayName ?? "?")\": \(error.localizedDescription)", category: "audio")
             // errorMessage alone has no visible home outside StreamSearchView/
             // Settings → Audio — see handleLoadFailure's matching comment.
@@ -483,6 +485,8 @@ extension AudioPlayerManager {
 
     @MainActor
     func downloadAndSchedule(url: URL, startTime: TimeInterval) async {
+        let playbackStartedAt = Date()
+        let playbackURL = url.absoluteString
         tearDownOpusPlayer()
         cleanOldStreamCache()
         isSchedulingAsync = true
@@ -559,6 +563,12 @@ extension AudioPlayerManager {
                     for (field, value) in headers { req.setValue(value, forHTTPHeaderField: field) }
                 }
                 let (downloaded, response) = try await URLSession.shared.download(for: req)
+                guard let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode) else {
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    throw StreamingError.httpError(status)
+                }
+                appLog("downloadAndSchedule: stream response \(http.statusCode) for \(playbackURL) in \(String(format: "%.2f", Date().timeIntervalSince(playbackStartedAt)))s", category: "audio")
                 // Detect extension from Content-Type if URL path was inconclusive
                 if ext == "m4a", let ct = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") {
                     let refinedExt: String
@@ -601,6 +611,7 @@ extension AudioPlayerManager {
                         startSmartCrossfadeAnalysisIfNeeded()
                     }
                     updateNowPlaying()
+                    appLog("downloadAndSchedule: playback scheduled after content-type correction in \(String(format: "%.2f", Date().timeIntervalSince(playbackStartedAt)))s", category: "audio")
                     return
                 }
                 try? FileManager.default.removeItem(at: tempURL)

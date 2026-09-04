@@ -346,7 +346,7 @@ struct TrackedPlaylistDetailView: View {
     /// watchdog — the "opening a big playlist crashes" bug. Same fix as
     /// `StreamSearchView.refreshDownloadedStatus`.
     private func recomputeLocalCopies() {
-        let ids = library.localSourceIDs()
+        let ids = await library.localSourceIDs()
         let index = library.importedIdentityIndex()
         localCopyIDs = Set(
             tracks

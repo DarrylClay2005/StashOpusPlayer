@@ -39,22 +39,26 @@ extension LibraryManager {
         // Keep security-scoped access open until after makeSong reads the files.
         defer { for url in urls { url.stopAccessingSecurityScopedResource() } }
 
-        var candidates: [URL] = []
-        let fm = FileManager.default
-
-        for baseURL in urls {
-            let enumerator = fm.enumerator(
-                at: baseURL,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            )
-            while let url = enumerator?.nextObject() as? URL {
-                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
-                if DocumentImportService.supportedExtensions.contains(url.pathExtension.lowercased()) {
-                    candidates.append(url)
+        let supportedExtensions = DocumentImportService.supportedExtensions
+        let candidates = await Task.detached(priority: .utility) {
+            var candidates: [URL] = []
+            let fm = FileManager.default
+            for baseURL in urls {
+                let enumerator = fm.enumerator(
+                    at: baseURL,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                )
+                while let url = enumerator?.nextObject() as? URL {
+                    if Task.isCancelled { return candidates }
+                    guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+                    if supportedExtensions.contains(url.pathExtension.lowercased()) {
+                        candidates.append(url)
+                    }
                 }
             }
-        }
+            return candidates
+        }.value
 
         guard !candidates.isEmpty else { return }
 
@@ -90,20 +94,25 @@ extension LibraryManager {
         Task {
             defer { endScan() }
 
-            let fm = FileManager.default
-            var candidates: [URL] = []
-            let enumerator = fm.enumerator(
-                at: url,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            )
-            while let fileURL = enumerator?.nextObject() as? URL {
-                guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
-                else { continue }
-                if DocumentImportService.supportedExtensions.contains(fileURL.pathExtension.lowercased()) {
-                    candidates.append(fileURL)
+            let supportedExtensions = DocumentImportService.supportedExtensions
+            let candidates = await Task.detached(priority: .utility) {
+                var candidates: [URL] = []
+                let fm = FileManager.default
+                let enumerator = fm.enumerator(
+                    at: url,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                )
+                while let fileURL = enumerator?.nextObject() as? URL {
+                    if Task.isCancelled { return candidates }
+                    guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+                    else { continue }
+                    if supportedExtensions.contains(fileURL.pathExtension.lowercased()) {
+                        candidates.append(fileURL)
+                    }
                 }
-            }
+                return candidates
+            }.value
 
             // No audio files at all — return silently (not an error).
             guard !candidates.isEmpty else { return }

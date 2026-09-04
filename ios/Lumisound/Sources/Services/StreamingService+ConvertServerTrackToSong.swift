@@ -10,7 +10,11 @@ extension StreamingService {
     /// the server artwork URL as the cache key.
     func toSong(serverTrack: ServerTrack) -> Song {
         let artworkKey = serverArtworkURL(for: serverTrack)?.absoluteString
-        let headers: [String: String]? = apiKey.isEmpty ? nil : ["Authorization": "Bearer \(apiKey)"]
+        var headers: [String: String] = [:]
+        if !apiKey.isEmpty { headers["Authorization"] = apiKey }
+        if let token = AccountService.shared?.token, !token.isEmpty {
+            headers["X-Account-Token"] = token
+        }
         return Song(
             id: serverTrack.id,
             title: serverTrack.title,
@@ -25,7 +29,7 @@ extension StreamingService {
             genre: serverTrack.genre,
             bitrate: 0,
             sampleRate: 0,
-            httpHeaders: headers
+            httpHeaders: headers.isEmpty ? nil : headers
         )
     }
 }

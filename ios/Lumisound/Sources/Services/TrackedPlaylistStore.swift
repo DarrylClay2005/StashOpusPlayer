@@ -209,7 +209,7 @@ final class TrackedPlaylistStore: ObservableObject {
             // playlist was an O(tracks × library) main-thread hang long
             // enough to trip the watchdog. Same fix as
             // TrackedPlaylistDetailView.recomputeLocalCopies.
-            let localSourceIDs = library.localSourceIDs()
+            let localSourceIDs = await library.localSourceIDs()
             let identityIndex = library.importedIdentityIndex()
             var seenSourceIDs = Set<String>()
             let toGet = tracks.filter {

@@ -11,7 +11,7 @@ extension StreamingService {
         // the account token (lets the proxy use this user's YouTube cookies for
         // age-restricted/bot-gated videos).
         var headers: [String: String] = [:]
-        if !apiKey.isEmpty { headers["Authorization"] = "Bearer \(apiKey)" }
+        if !apiKey.isEmpty { headers["Authorization"] = apiKey }
         if let token = AccountService.shared?.token, !token.isEmpty {
             headers["X-Account-Token"] = token
         }

@@ -139,6 +139,7 @@ struct LibraryView: View {
     @State private var selectedTab: LibraryTab = .hub
     @State private var searchText: String = ""
     @State private var debouncedSearch: String = ""
+    @State private var filteredSongsState: [Song] = []
     @State private var showAddMusic = false
     @State private var showOpenSharedPlaylist = false
     @State private var backupSyncTask: Task<Void, Never>?
@@ -153,14 +154,14 @@ struct LibraryView: View {
 
     // MARK: Filtered songs for Songs tab (uses debounced search)
 
-    private var filteredSongs: [Song] {
+    private func recomputeFilteredSongs() {
         let query = debouncedSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         let base = query.isEmpty ? library.allSongs : library.allSongs.filter { song in
             song.displayName.localizedCaseInsensitiveContains(query)
                 || song.artistName.localizedCaseInsensitiveContains(query)
                 || song.albumName.localizedCaseInsensitiveContains(query)
         }
-        return sortOption.apply(to: base)
+        filteredSongsState = sortOption.apply(to: base)
     }
 
     // MARK: Body
@@ -228,6 +229,12 @@ struct LibraryView: View {
                 prompt: "Search songs, artists, albums…"
             )
             .toolbar { toolbarItems }
+            .task(id: "\(library.allSongs.count)|\(debouncedSearch)|\(sortOptionRaw)") {
+                // Keep the O(n log n) Songs-tab query out of SwiftUI body
+                // evaluation. Player progress and navigation state can
+                // invalidate this root many times without changing the data.
+                recomputeFilteredSongs()
+            }
             .safeAreaInset(edge: .bottom) {
                 if isSelecting {
                     LibrarySelectionActionBar(
@@ -283,8 +290,9 @@ struct LibraryView: View {
             }
             // Debounce search: wait 0.3 s after the user stops typing
             .onChange(of: searchText) { newValue in
-                Task {
+                Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     if searchText == newValue {
                         debouncedSearch = newValue
                     }
@@ -334,7 +342,7 @@ struct LibraryView: View {
             LibraryHubView(selectedTab: $selectedTab)
         case .songs:
             SongsTab(
-                songs: filteredSongs,
+                songs: filteredSongsState,
                 searchText: $searchText,
                 showAddMusic: $showAddMusic,
                 isSelecting: $isSelecting,
@@ -365,7 +373,7 @@ struct LibraryView: View {
     @ToolbarContentBuilder
     private var toolbarItems: some ToolbarContent {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
-            if selectedTab == .songs && !filteredSongs.isEmpty {
+            if selectedTab == .songs && !filteredSongsState.isEmpty {
                 Menu {
                     ForEach(LibrarySortOption.allCases) { option in
                         Button {

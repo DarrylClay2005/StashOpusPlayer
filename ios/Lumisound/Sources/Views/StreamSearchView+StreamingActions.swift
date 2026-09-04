@@ -213,7 +213,7 @@ extension StreamSearchView {
             // O(tracks × library) main-thread hang long enough to trip the
             // watchdog (the same "opening a big playlist crashes" bug fixed
             // in TrackedPlaylistDetailView/TrackedPlaylistStore).
-            let localSourceIDs = library.localSourceIDs()
+            let localSourceIDs = await library.localSourceIDs()
             let identityIndex = library.importedIdentityIndex()
 
             var toDownload: [StreamTrack] = []

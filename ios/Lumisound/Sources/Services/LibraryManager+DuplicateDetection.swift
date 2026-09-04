@@ -106,26 +106,34 @@ extension LibraryManager {
     /// the auto-download pre-filter (`hasLocalCopy`), so recovering an
     /// identity match here directly means fewer wasted "download it again,
     /// then discover it's a duplicate" round-trips for TrackedPlaylistStore.
-    func localSourceIDs() -> Set<String> {
-        let presentFilenames = Set(allSongs.compactMap { song -> String? in
-            guard let url = song.url, FileManager.default.fileExists(atPath: url.path) else { return nil }
-            return url.lastPathComponent
-        })
-        var ids = Set(allSongs.compactMap { song -> String? in
-            guard let url = song.url,
-                  FileManager.default.fileExists(atPath: url.path)
-            else { return nil }
-            return song.sourceTrackID
-        })
-        // The ledger is authoritative for downloads whose container metadata
-        // did not survive conversion. Include only entries whose file is still
-        // present, so a deleted track becomes eligible again.
-        ids.formUnion(DownloadLedgerStore.shared.presentSourceIDs(presentFilenames: presentFilenames))
-        for song in allSongs where song.sourceTrackID == nil || song.sourceTrackID?.isEmpty == true {
-            guard let url = song.url, let tag = LumisoundTrackTagger.readTag(fileURL: url) else { continue }
-            ids.insert(tag.trackID)
+    func localSourceIDs() async -> Set<String> {
+        let songs = allSongs.compactMap { song -> (URL, String?)? in
+            guard let url = song.url else { return nil }
+            return (url, song.sourceTrackID)
         }
-        return ids
+        let (presentFilenames, ids) = await Task.detached(priority: .utility) {
+            var presentFilenames = Set<String>()
+            var ids = Set(songs.compactMap { song -> String? in
+                guard FileManager.default.fileExists(atPath: song.0.path) else { return nil }
+                return song.1
+            })
+            let filesWithoutSourceID = songs.filter {
+                FileManager.default.fileExists(atPath: $0.0.path) &&
+                    ($0.1 == nil || $0.1?.isEmpty == true)
+            }
+            for (url, _) in songs where FileManager.default.fileExists(atPath: url.path) {
+                presentFilenames.insert(url.lastPathComponent)
+            }
+            // The ledger is authoritative for downloads whose container metadata
+            // did not survive conversion. Include only entries whose file is still
+            // present, so a deleted track becomes eligible again.
+            for (url, _) in filesWithoutSourceID {
+                guard let tag = LumisoundTrackTagger.readTag(fileURL: url) else { continue }
+                ids.insert(tag.trackID)
+            }
+            return (presentFilenames, ids)
+        }.value
+        return ids.union(DownloadLedgerStore.shared.presentSourceIDs(presentFilenames: presentFilenames))
     }
 
     /// O(1)-per-track variant of `hasLocalCopy(of:)` for checking MANY tracks
@@ -137,7 +145,7 @@ extension LibraryManager {
     /// .refreshDownloadedStatus` for the same fix already applied there).
     /// Build `localSourceIDs`/`identityIndex` ONCE before the loop:
     /// ```
-    /// let ids = library.localSourceIDs()
+    /// let ids = await library.localSourceIDs()
     /// let index = library.importedIdentityIndex()
     /// tracks.filter { !library.hasLocalCopy(of: $0, localSourceIDs: ids, identityIndex: index) }
     /// ```
