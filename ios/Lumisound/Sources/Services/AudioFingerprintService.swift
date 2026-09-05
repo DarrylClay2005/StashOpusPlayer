@@ -140,7 +140,6 @@ actor AudioFingerprintService {
     func fingerprint(for url: URL) async -> [[Float]]? {
         let key = cacheKey(for: url)
         if let cached = cache[key] {
-            appLog("AudioFingerprintService: cache hit for \(url.lastPathComponent)", category: "audio")
             return cached
         }
         appLog("AudioFingerprintService: analyzing \(url.lastPathComponent)", category: "audio")

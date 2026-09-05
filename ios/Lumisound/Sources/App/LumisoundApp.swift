@@ -205,7 +205,7 @@ struct LumisoundApp: App {
                         }
                     }
 
-                    // Auto-scan for corrupt files immediately, then every 15 minutes
+                    // Auto-scan for corrupt files immediately, then hourly
                     // for the rest of the session (non-blocking, all users). Both this
                     // and the duplicate scan below are Aria Lumi Primary: the timer
                     // just keeps her checking continuously, but the actual

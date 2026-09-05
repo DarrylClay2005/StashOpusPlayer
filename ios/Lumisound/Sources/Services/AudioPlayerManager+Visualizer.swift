@@ -14,7 +14,11 @@ extension AudioPlayerManager {
     func startVisualizerTap(handler: @escaping (AVAudioPCMBuffer) -> Void) {
         guard !visualizerTapInstalled else { return }
         visualizerTapInstalled = true
-        engine.mainMixerNode.installTap(onBus: 0, bufferSize: 2048, format: nil) { buffer, _ in
+        // The spectrum uses a 2048-point FFT, but processing every 2048-frame
+        // callback creates a main-actor update roughly 40 times per second.
+        // A 4096-frame tap preserves the FFT resolution while halving callback,
+        // allocation, and SwiftUI publication overhead.
+        engine.mainMixerNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { buffer, _ in
             handler(buffer)
         }
     }

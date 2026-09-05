@@ -15,7 +15,7 @@ final class DuplicateFinderService: ObservableObject {
     //
     // Aria Lumi Primary: same cadence/lifecycle contract as
     // CorruptFileFinderService.startPeriodicScanning — call once on app
-    // launch, runs immediately then every 15 minutes for the life of the
+    // launch, runs when stale then every six hours for the life of the
     // process (skipped while backgrounded). Same-title/same-duration text
     // matching alone was never reliable enough on its own (see the ask this
     // exists to satisfy), so this scan's actual duplicate decisions are made
@@ -24,13 +24,16 @@ final class DuplicateFinderService: ObservableObject {
     // continuously instead of only when the user happens to open Duplicate
     // Finder.
     private var periodicTimer: Timer?
+    private static let periodicScanInterval: TimeInterval = 6 * 60 * 60
 
     func startPeriodicScanning() {
         guard periodicTimer == nil else { return }
 
-        runPeriodicScan()
+        if lastScanDate.map({ Date().timeIntervalSince($0) >= Self.periodicScanInterval }) ?? true {
+            runPeriodicScan()
+        }
 
-        let interval: TimeInterval = 15 * 60
+        let interval = Self.periodicScanInterval
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard UIApplication.shared.applicationState == .active else { return }
@@ -518,18 +521,24 @@ final class DuplicateFinderService: ObservableObject {
                 }
                 for id in vectors.keys { parent[id] = id }
                 let ids = Array(vectors.keys)
+                var comparisons = 0
+                var matches = 0
                 for i in 0..<ids.count {
                     for j in (i + 1)..<ids.count {
                         guard let va = vectors[ids[i]], let vb = vectors[ids[j]] else { continue }
                         let similarity = AudioFingerprintService.sequenceSimilarity(va, vb)
+                        comparisons += 1
                         if similarity >= AudioFingerprintService.matchThreshold {
                             union(ids[i], ids[j])
+                            matches += 1
                         }
-                        appLog(
-                            "DuplicateFinderService: acoustic similarity \(String(format: "%.4f", similarity)) between \"\(cluster.first(where: { $0.id == ids[i] })?.title ?? ids[i])\" and \"\(cluster.first(where: { $0.id == ids[j] })?.title ?? ids[j])\"",
-                            category: "audio"
-                        )
                     }
+                }
+                if comparisons > 0 {
+                    appLog(
+                        "DuplicateFinderService: compared \(comparisons) acoustic pairs, \(matches) matched",
+                        category: "audio"
+                    )
                 }
                 var byRoot: [String: [Song]] = [:]
                 for song in fingerprintable where vectors[song.id] != nil {

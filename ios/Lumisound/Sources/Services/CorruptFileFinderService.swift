@@ -22,6 +22,7 @@ final class CorruptFileFinderService: ObservableObject {
     }()
 
     private var periodicTimer: Timer?
+    private static let periodicScanInterval: TimeInterval = 60 * 60
 
     // MARK: - Scan
 
@@ -40,7 +41,7 @@ final class CorruptFileFinderService: ObservableObject {
     /// A file that passed validation on a previous scan and hasn't changed
     /// since (same `ValidatedFileCache.FileStamp`) is skipped rather than
     /// re-opened/re-decoded — without this, the periodic scan
-    /// (`startPeriodicScanning`, every 15 min for the life of the app) redid
+    /// (`startPeriodicScanning`, every hour for the life of the app) redid
     /// a full `AVAudioFile` open + tail-read of EVERY audio file in
     /// Documents on every tick, forever, regardless of whether anything had
     /// actually changed. At a few thousand songs that's real, recurring
@@ -128,7 +129,7 @@ final class CorruptFileFinderService: ObservableObject {
     // MARK: - Periodic Auto-Check
 
     /// Call once on app launch. Runs an immediate scan of the app's Documents
-    /// directory, then re-scans automatically every 15 minutes while the app
+    /// directory, then re-scans automatically every hour while the app
     /// process is alive — for every user, no opt-in required. Aria Lumi
     /// Primary: every corrupt file this scan finds is handed straight to
     /// `ariaAutoDeleteCorruptFiles()` (when `autoDeleteEnabled`, on by
@@ -138,7 +139,7 @@ final class CorruptFileFinderService: ObservableObject {
 
         scanDocumentsDirectory()
 
-        let interval: TimeInterval = 15 * 60
+        let interval = Self.periodicScanInterval
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 // Skip the (file-I/O heavy) scan while the app is backgrounded —
